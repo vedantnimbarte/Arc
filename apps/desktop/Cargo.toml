@@ -1,0 +1,32 @@
+[package]
+name = "arc-desktop"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+description = "ARC — AI-native terminal & agent runtime (Tauri shell)"
+
+[build-dependencies]
+tauri-build = { workspace = true }
+
+[dependencies]
+tauri = { workspace = true }
+tokio = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+anyhow = { workspace = true }
+
+arc-pty = { workspace = true }
+arc-session-manager = { workspace = true }
+arc-agent-runtime = { workspace = true }
+arc-ai-runtime = { workspace = true }
+dashmap = { workspace = true }
+futures-util = { workspace = true }
+
+[features]
+# By default, Tauri sets up a window. Enable `custom-protocol` for release.
+default = ["custom-protocol"]
+custom-protocol = ["tauri/custom-protocol"]

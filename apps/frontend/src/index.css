@@ -1,0 +1,120 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    color-scheme: dark;
+    /* Atmospheric background gradient anchors (rgb triplets) */
+    --atm-violet: 167 139 250;
+    --atm-blue: 96 165 250;
+    --atm-peach: 245 169 127;
+  }
+
+  html,
+  body,
+  #root {
+    height: 100%;
+    margin: 0;
+  }
+
+  body {
+    overscroll-behavior: none;
+    user-select: none;
+    -webkit-user-select: none;
+    /* Geist stylistic alternates — softer 'a', single-story 'g' */
+    font-feature-settings: 'ss01', 'ss03';
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  /* Soft violet selection across the whole app */
+  ::selection {
+    background: rgba(167, 139, 250, 0.28);
+    color: #eceff5;
+  }
+
+  /* Allow text selection inside terminal + editor + chat */
+  .selectable,
+  .selectable * {
+    user-select: text;
+    -webkit-user-select: text;
+  }
+}
+
+@layer components {
+  /* Atmosphere — three barely-there radial glows that make the floating
+     panels feel like they're hovering over depth, not pasted onto a flat color */
+  .atmosphere {
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+    z-index: 0;
+    background:
+      radial-gradient(
+        70% 60% at 8% -10%,
+        rgb(var(--atm-violet) / 0.11) 0%,
+        transparent 60%
+      ),
+      radial-gradient(
+        60% 60% at 100% 105%,
+        rgb(var(--atm-blue) / 0.06) 0%,
+        transparent 65%
+      ),
+      radial-gradient(
+        40% 40% at 50% 110%,
+        rgb(var(--atm-peach) / 0.035) 0%,
+        transparent 70%
+      );
+  }
+
+  /* Glass surface — semi-transparent + backdrop blur over the atmosphere */
+  .glass {
+    background: linear-gradient(
+      180deg,
+      rgba(255, 255, 255, 0.035) 0%,
+      rgba(255, 255, 255, 0.015) 100%
+    );
+    backdrop-filter: blur(24px) saturate(140%);
+    -webkit-backdrop-filter: blur(24px) saturate(140%);
+  }
+
+  /* Subtle dot grid behind the terminal — invisible at first glance, adds
+     just enough texture to keep the void from feeling dead */
+  .dot-grid {
+    background-image: radial-gradient(
+      rgba(255, 255, 255, 0.025) 1px,
+      transparent 1px
+    );
+    background-size: 24px 24px;
+  }
+}
+
+/* Thin, soft scrollbars that fade in on hover */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.05);
+  border-radius: 999px;
+  transition: background 200ms;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(167, 139, 250, 0.25);
+}
+
+/* xterm overrides — generous padding, transparent viewport */
+.xterm {
+  height: 100%;
+  padding: 18px 22px;
+}
+.xterm .xterm-viewport {
+  background: transparent !important;
+}
+.xterm-screen {
+  outline: none !important;
+}

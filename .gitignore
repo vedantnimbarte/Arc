@@ -1,0 +1,48 @@
+# Node
+node_modules/
+.pnpm-store/
+.npm/
+.yarn/
+
+# Build outputs
+dist/
+build/
+out/
+.next/
+.turbo/
+
+# Rust
+target/
+**/*.rs.bk
+Cargo.lock
+
+# Tauri
+src-tauri/target/
+src-tauri/Cargo.lock
+
+# Env / secrets
+.env
+.env.local
+.env.*.local
+*.pem
+*.key
+
+# Editor / OS
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
+.idea/
+.DS_Store
+Thumbs.db
+*.swp
+
+# Logs / dumps
+*.log
+*.tsbuildinfo
+.eslintcache
+
+# Local SQLite
+*.db
+*.db-journal
+*.sqlite
+*.sqlite-journal

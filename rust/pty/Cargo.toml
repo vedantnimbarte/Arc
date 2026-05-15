@@ -1,0 +1,19 @@
+[package]
+name = "arc-pty"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+anyhow.workspace = true
+dashmap.workspace = true
+parking_lot.workspace = true
+portable-pty.workspace = true
+tokio = { workspace = true, features = ["sync", "rt"] }
+tracing.workspace = true
+uuid.workspace = true

@@ -1,0 +1,1 @@
+{"default":{"identifier":"default","description":"Default capabilities for the ARC main window.","local":true,"windows":["main"],"permissions":["core:default","core:event:default","core:window:default","core:webview:default","core:app:default"]}}

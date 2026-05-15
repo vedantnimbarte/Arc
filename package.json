@@ -1,0 +1,27 @@
+{
+  "name": "arc",
+  "private": true,
+  "version": "0.0.1",
+  "description": "ARC — AI-native terminal & agent runtime",
+  "packageManager": "pnpm@9.15.9",
+  "scripts": {
+    "dev": "pnpm --filter @arc/frontend dev",
+    "build": "pnpm -r build",
+    "tauri": "pnpm --filter @arc/desktop tauri",
+    "tauri:dev": "pnpm --filter @arc/desktop tauri:dev",
+    "tauri:build": "pnpm --filter @arc/desktop tauri:build",
+    "typecheck": "pnpm -r typecheck",
+    "lint": "pnpm -r lint",
+    "format": "prettier --write \"**/*.{ts,tsx,js,jsx,json,md,yml,yaml}\"",
+    "clean": "pnpm -r --parallel exec rimraf dist node_modules .turbo && rimraf node_modules"
+  },
+  "devDependencies": {
+    "@types/node": "^20.14.0",
+    "prettier": "^3.3.3",
+    "rimraf": "^5.0.10",
+    "typescript": "^5.6.2"
+  },
+  "engines": {
+    "node": ">=20.12"
+  }
+}

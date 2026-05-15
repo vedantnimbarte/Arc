@@ -1,0 +1,70 @@
+[workspace]
+resolver = "2"
+members = [
+    "apps/desktop",
+    "rust/pty",
+    "rust/session-manager",
+    "rust/agent-runtime",
+    "rust/ai-runtime",
+    "rust/filesystem",
+    "rust/git",
+]
+
+[workspace.package]
+version = "0.0.1"
+edition = "2021"
+rust-version = "1.80"
+license = "MIT"
+authors = ["ARC contributors"]
+
+[workspace.dependencies]
+# Async
+tokio = { version = "1.40", features = ["full"] }
+futures = "0.3"
+
+# Errors / logging
+anyhow = "1.0"
+thiserror = "1.0"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# Serialization
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+# Filesystem / IDs
+uuid = { version = "1.10", features = ["v4", "serde"] }
+parking_lot = "0.12"
+dashmap = "6"
+
+# Terminal
+portable-pty = "0.9"
+bytes = "1.7"
+
+# HTTP / streaming
+reqwest = { version = "0.12", default-features = false, features = ["json", "stream", "rustls-tls"] }
+futures-util = "0.3"
+async-trait = "0.1"
+eventsource-stream = "0.2"
+
+# Tauri (workspace-pinned for app crate)
+tauri = { version = "2", features = [] }
+tauri-build = { version = "2", features = [] }
+
+# Internal crates
+arc-pty = { path = "rust/pty" }
+arc-session-manager = { path = "rust/session-manager" }
+arc-agent-runtime = { path = "rust/agent-runtime" }
+arc-ai-runtime = { path = "rust/ai-runtime" }
+arc-filesystem = { path = "rust/filesystem" }
+arc-git = { path = "rust/git" }
+
+[profile.dev]
+opt-level = 0
+debug = true
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1
+strip = true
