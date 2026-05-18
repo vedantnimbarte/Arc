@@ -2,7 +2,8 @@ import { useEffect, useRef, useState } from 'react';
 import { ArrowUp, Sparkles, Trash2, Square } from 'lucide-react';
 import { useChat } from '../state/chat';
 import { useSettings, PROVIDER_LABELS } from '../state/settings';
-import { isTauri, llmStream, type LlmMessage } from '../lib/tauri';
+import { agentRun, isTauri, llmStream, type LlmMessage } from '../lib/tauri';
+import { useFiles } from '../state/files';
 import { cn } from '../lib/cn';
 
 export function ChatPanel() {
@@ -29,6 +30,14 @@ export function ChatPanel() {
   async function send() {
     const text = input.trim();
     if (!text || isStreaming) return;
+
+    // `/agent <goal>` — drop into the coding-agent runtime. Anthropic-only
+    // (the tool API we're built on); plain chat still flows through any
+    // configured provider via the path below.
+    if (text.startsWith('/agent ') || text === '/agent') {
+      await runAgent(text.replace(/^\/agent\s*/, '').trim());
+      return;
+    }
 
     if (!isTauri) {
       setInput('');
@@ -87,6 +96,71 @@ export function ChatPanel() {
         // Persist whatever the assistant actually produced (including any
         // trailing error note) so reopens show what happened.
         void finalize(assistantId);
+      },
+    );
+  }
+
+  async function runAgent(goal: string) {
+    if (!goal) {
+      append({
+        role: 'system',
+        content: 'Usage: `/agent <goal>` — e.g. `/agent find the LLM provider files and explain what they do`.',
+      });
+      return;
+    }
+    if (!isTauri) {
+      append({
+        role: 'system',
+        content: 'The agent runs in the Tauri shell only. Launch via `pnpm tauri:dev`.',
+      });
+      return;
+    }
+    const anthropic = providers.anthropic;
+    if (!anthropic.apiKey) {
+      append({
+        role: 'system',
+        content:
+          'The V0 agent uses Anthropic. Open Settings (⌘,) and add an Anthropic API key, then retry.',
+      });
+      return;
+    }
+
+    setInput('');
+    const userId = append({ role: 'user', content: `/agent ${goal}` });
+    void finalize(userId);
+    const assistantId = append({ role: 'assistant', content: '' });
+    setStreaming(true);
+
+    const root = useFiles.getState().root;
+    const runId = crypto.randomUUID();
+
+    await agentRun(
+      {
+        id: runId,
+        goal,
+        api_key: anthropic.apiKey,
+        model: anthropic.model,
+        workspace_root: root,
+        workspace_id: null,
+      },
+      (ev) => {
+        if (ev.kind === 'text') {
+          appendChunk(assistantId, ev.text);
+        } else if (ev.kind === 'tool_start') {
+          appendChunk(assistantId, `\n\n→ \`${ev.name}\`\n`);
+        } else if (ev.kind === 'tool_result') {
+          const status = ev.ok ? '✓' : '✗';
+          const snippet =
+            ev.output.length > 280 ? ev.output.slice(0, 280) + '…' : ev.output;
+          appendChunk(assistantId, `${status} ${snippet}\n\n`);
+        } else if (ev.kind === 'done') {
+          setStreaming(false);
+          void finalize(assistantId);
+        } else if (ev.kind === 'error') {
+          appendChunk(assistantId, `\n\n⚠ ${ev.message}`);
+          setStreaming(false);
+          void finalize(assistantId);
+        }
       },
     );
   }

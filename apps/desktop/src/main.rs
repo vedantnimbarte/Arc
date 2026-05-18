@@ -58,6 +58,7 @@ fn main() {
             commands::secrets::secrets_set_api_key,
             commands::secrets::secrets_get_api_key,
             commands::secrets::secrets_delete_api_key,
+            commands::agent::agent_run,
         ])
         .setup(|app| {
             // Open the SQLite store before the window appears so the first

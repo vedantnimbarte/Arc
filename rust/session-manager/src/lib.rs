@@ -16,6 +16,7 @@ use sqlx::sqlite::{
 use sqlx::SqlitePool;
 use thiserror::Error;
 
+pub mod agent;
 pub mod chat;
 pub mod commands;
 pub mod tabs;

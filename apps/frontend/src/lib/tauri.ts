@@ -137,6 +137,49 @@ export async function secretsDeleteApiKey(provider: LlmProvider): Promise<void> 
   await invoke('secrets_delete_api_key', { provider });
 }
 
+// ----- Agent runtime ----------------------------------------------------
+
+export type AgentEvent =
+  | { kind: 'text'; text: string }
+  | { kind: 'tool_start'; id: string; name: string; input: unknown }
+  | { kind: 'tool_result'; id: string; ok: boolean; output: string }
+  | { kind: 'done'; summary: string }
+  | { kind: 'error'; message: string };
+
+export interface AgentRunReq {
+  id: string;
+  goal: string;
+  api_key: string;
+  model: string;
+  workspace_root: string | null;
+  workspace_id: string | null;
+}
+
+/**
+ * Kick off a coding-agent run. Events stream via `agent://event/<id>`;
+ * the promise resolves as soon as the run is queued (not when it finishes).
+ */
+export async function agentRun(
+  req: AgentRunReq,
+  onEvent: (ev: AgentEvent) => void,
+): Promise<UnlistenFn> {
+  const unlisten = await listen<AgentEvent>(`agent://event/${req.id}`, (e) => {
+    onEvent(e.payload);
+    if (e.payload.kind === 'done' || e.payload.kind === 'error') {
+      // Tear down on terminal events. We capture the unlisten function
+      // into a self-clearing reference below to support both the
+      // immediate await and this auto-cleanup path.
+      autoCleanup?.();
+    }
+  });
+  let autoCleanup: (() => void) | null = unlisten;
+  await invoke('agent_run', { req });
+  return () => {
+    autoCleanup = null;
+    unlisten();
+  };
+}
+
 // ----- LLM streaming -----------------------------------------------------
 
 export type LlmProvider = 'openai' | 'anthropic' | 'ollama';
