@@ -6,13 +6,18 @@ import { isTauri, llmStream, type LlmMessage } from '../lib/tauri';
 import { cn } from '../lib/cn';
 
 export function ChatPanel() {
-  const { messages, isStreaming, append, appendChunk, setStreaming, clear } = useChat();
+  const { messages, isStreaming, append, appendChunk, setStreaming, clear, hydrate, finalize } =
+    useChat();
   const { activeProvider, providers, systemPrompt } = useSettings();
   const cfg = providers[activeProvider];
 
   const [input, setInput] = useState('');
   const scrollRef = useRef<HTMLDivElement>(null);
   const cancelRef = useRef<null | (() => Promise<void>)>(null);
+
+  useEffect(() => {
+    void hydrate();
+  }, [hydrate]);
 
   useEffect(() => {
     scrollRef.current?.scrollTo({
@@ -48,7 +53,8 @@ export function ChatPanel() {
     }
 
     setInput('');
-    append({ role: 'user', content: text });
+    const userId = append({ role: 'user', content: text });
+    void finalize(userId);
     const assistantId = append({ role: 'assistant', content: '' });
     setStreaming(true);
 
@@ -78,6 +84,9 @@ export function ChatPanel() {
         if (ev.error) {
           appendChunk(assistantId, `\n\n⚠ ${ev.error}`);
         }
+        // Persist whatever the assistant actually produced (including any
+        // trailing error note) so reopens show what happened.
+        void finalize(assistantId);
       },
     );
   }

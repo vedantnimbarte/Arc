@@ -24,7 +24,8 @@
  ┌──────────────────────────────────────────────────────────────┐
  │ Rust crates (rust/*)                                         │
  │  arc-pty           ✅ portable-pty wrapper                   │
- │  arc-session-mgr   ⛔ persistence (SQLite)                   │
+ │  arc-ai-runtime    ✅ streaming chat providers               │
+ │  arc-session-mgr   ✅ persistence (SQLite via sqlx, V0)      │
  │  arc-agent-runtime ⛔ planner/executor/memory                │
  │  arc-filesystem    ⛔ index + watcher (notify + tantivy)     │
  │  arc-git           ⛔ git operations                          │
@@ -109,7 +110,6 @@ The desktop crate (`arc-desktop`) is a *thin composition layer* — it owns Taur
 
 ## What this scaffold deliberately doesn't include
 
-- **No sqlite/sqlx yet.** Will land with the session manager.
 - **No notify/tantivy.** Filesystem indexing is Phase 2.
 - **No plugin runtime.** Phase 4.
 - **No CI.** Add GitHub Actions when the first agent lands.
@@ -118,8 +118,8 @@ The desktop crate (`arc-desktop`) is a *thin composition layer* — it owns Taur
 
 In priority order:
 
-1. **Persistence** (arc-session-manager): SQLite schema from the spec §11, restore tabs on launch.
+1. ~~**Persistence** (arc-session-manager): SQLite schema, restore tabs on launch.~~ ✅ Done (V0) — sqlx-backed `SessionStore`, workspaces / tabs / chat history persist, schema reserves `command_history` and `agent_runs` for later phases.
 2. ~~**Real AI providers**: OpenAI + Anthropic + Ollama.~~ ✅ Done — Rust-side in `rust/ai-runtime`, driven by `llm_*` commands.
-3. **Command blocks**: parse xterm output into structured "command + output" blocks (Warp's signature feature). Needs shell integration via OSC 133.
+3. **Command blocks**: parse xterm output into structured "command + output" blocks (Warp's signature feature). Needs shell integration via OSC 133. Will fill the `command_history` table.
 4. ~~**Editor**: CodeMirror tab kind with file open/save commands.~~ ✅ Done — `apps/frontend/src/components/Editor.tsx` + `fs_read_file` / `fs_write_file`.
-5. **Agent runtime v0**: a single coding agent that can read/write files and run shell commands, gated behind explicit user approval.
+5. **Agent runtime v0**: a single coding agent that can read/write files and run shell commands, gated behind explicit user approval. Will fill the `agent_runs` table.

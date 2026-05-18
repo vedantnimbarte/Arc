@@ -158,3 +158,129 @@ export async function llmStream(
     }
   };
 }
+
+// ----- Session / persistence --------------------------------------------
+//
+// Nested struct fields (Tab, Workspace, ChatMessage) use snake_case to match
+// the Rust DTOs serialized via serde defaults. Outer invoke arguments use
+// camelCase — Tauri converts them to snake_case Rust params automatically.
+
+export type TabKind = 'terminal' | 'editor';
+
+export interface TabInput {
+  id: string;
+  title: string;
+  kind: TabKind;
+  file_path?: string | null;
+}
+
+export interface PersistedTab extends TabInput {
+  session_id: string;
+  position: number;
+}
+
+export interface PersistedSession {
+  id: string;
+  workspace_id: string | null;
+  active_tab_id: string | null;
+  created_at: number;
+  last_active_at: number;
+}
+
+export interface SessionState {
+  session: PersistedSession;
+  tabs: PersistedTab[];
+}
+
+export interface Workspace {
+  id: string;
+  name: string;
+  root: string;
+  created_at: number;
+  last_opened_at: number;
+}
+
+export type ChatRole = 'system' | 'user' | 'assistant';
+
+export interface ChatConversation {
+  id: string;
+  workspace_id: string | null;
+  title: string | null;
+  created_at: number;
+  last_message_at: number;
+}
+
+export interface PersistedChatMessage {
+  id: string;
+  conversation_id: string;
+  role: ChatRole;
+  content: string;
+  created_at: number;
+}
+
+export interface ChatLoad {
+  conversation: ChatConversation;
+  messages: PersistedChatMessage[];
+}
+
+// Sessions / tabs
+
+export async function sessionLoad(): Promise<SessionState> {
+  return invoke<SessionState>('session_load');
+}
+
+export async function sessionSaveTabs(
+  sessionId: string,
+  tabs: TabInput[],
+  activeTabId: string | null,
+): Promise<void> {
+  await invoke('session_save_tabs', { sessionId, tabs, activeTabId });
+}
+
+export async function sessionSetWorkspace(
+  sessionId: string,
+  workspaceId: string | null,
+): Promise<void> {
+  await invoke('session_set_workspace', { sessionId, workspaceId });
+}
+
+// Workspaces
+
+export async function sessionWorkspacesList(): Promise<Workspace[]> {
+  return invoke<Workspace[]>('session_workspaces_list');
+}
+
+export async function sessionWorkspaceUpsert(
+  name: string,
+  root: string,
+): Promise<Workspace> {
+  return invoke<Workspace>('session_workspace_upsert', { name, root });
+}
+
+export async function sessionWorkspaceDelete(id: string): Promise<void> {
+  await invoke('session_workspace_delete', { id });
+}
+
+// Chat history
+
+export async function sessionChatLoad(
+  workspaceId?: string | null,
+): Promise<ChatLoad> {
+  return invoke<ChatLoad>('session_chat_load', { workspaceId: workspaceId ?? null });
+}
+
+export async function sessionChatAppend(
+  conversationId: string,
+  role: ChatRole,
+  content: string,
+): Promise<PersistedChatMessage> {
+  return invoke<PersistedChatMessage>('session_chat_append', {
+    conversationId,
+    role,
+    content,
+  });
+}
+
+export async function sessionChatClear(conversationId: string): Promise<void> {
+  await invoke('session_chat_clear', { conversationId });
+}

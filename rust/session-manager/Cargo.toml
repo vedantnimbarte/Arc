@@ -13,5 +13,13 @@ path = "src/lib.rs"
 anyhow.workspace = true
 serde.workspace = true
 serde_json.workspace = true
-tokio = { workspace = true, features = ["sync"] }
+thiserror.workspace = true
+tokio = { workspace = true, features = ["sync", "fs"] }
+tracing.workspace = true
 uuid.workspace = true
+sqlx.workspace = true
+# Pulled in transitively by sqlx, but kept here so the `bundled` feature
+# survives any future workspace dep reshuffling.
+libsqlite3-sys.workspace = true
+chrono.workspace = true
+dirs.workspace = true

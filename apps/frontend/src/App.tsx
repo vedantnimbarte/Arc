@@ -17,6 +17,7 @@ const Editor = lazy(() =>
 
 export default function App() {
   const { tabs, activeTabId, addTab } = useWorkspace();
+  const hydrate = useWorkspace((s) => s.hydrate);
   const activeTab = tabs.find((t) => t.id === activeTabId);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const sidebarCollapsed = useFiles((s) => s.collapsed);
@@ -25,6 +26,12 @@ export default function App() {
   const toggleSidebar = useFiles((s) => s.toggleCollapsed);
   const setSidebarWidth = useFiles((s) => s.setSidebarWidth);
   const setChatWidth = useFiles((s) => s.setChatWidth);
+
+  // Load persisted tabs + active tab from SQLite (or legacy localStorage)
+  // before the renderer settles. hydrate() is idempotent.
+  useEffect(() => {
+    void hydrate();
+  }, [hydrate]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {

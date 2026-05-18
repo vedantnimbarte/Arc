@@ -40,7 +40,10 @@ rust/          Cargo workspace members consumed by apps/desktop.
                    tokio::sync::mpsc.
   ai-runtime/      ✅ Streaming chat providers (OpenAI, Anthropic, Ollama)
                    behind one `Provider` trait. Driven by `llm_*` commands.
-  session-manager/ stub — workspace + tab persistence.
+  session-manager/ ✅ SQLite-backed `SessionStore` (sqlx) — workspaces, tabs,
+                   chat history. DB lives at `<data_dir>/arc/arc.db`.
+                   Driven by `session_*` commands. Schema also reserves
+                   `command_history` and `agent_runs` tables for later phases.
   agent-runtime/   stub — agent execution.
   filesystem/      stub — indexing + watch. (Lightweight `fs_*` commands
                    currently live in apps/desktop/src/commands/fs.rs as a
@@ -74,9 +77,9 @@ cargo check --workspace
 
 ## Key conventions
 
-- **Tauri command names**: `<area>_<verb>` snake_case. Today: `pty_*` (spawn/write/resize/kill), `llm_*` (stream/cancel), `fs_*` (default_root, parent, read_dir, pick_folder, read_file, write_file).
+- **Tauri command names**: `<area>_<verb>` snake_case. Today: `pty_*` (spawn/write/resize/kill), `llm_*` (stream/cancel), `fs_*` (default_root, parent, read_dir, pick_folder, read_file, write_file), `session_*` (load, save_tabs, set_workspace, workspaces_list, workspace_upsert, workspace_delete, chat_load, chat_append, chat_clear).
 - **Event topics**: `<area>://<verb>/<id>`, e.g. `pty://data/<uuid>`, `llm://chunk/<id>`, `llm://done/<id>`. The frontend's `lib/tauri.ts` exposes typed wrappers — use those, don't hand-roll `invoke`/`listen` in components.
-- **State**: Zustand stores in `apps/frontend/src/state/*` — one per concern (`workspace`, `chat`, `settings`, `files`). Components don't reach across stores. `settings` and `files` persist to localStorage via `zustand/middleware`.
+- **State**: Zustand stores in `apps/frontend/src/state/*` — one per concern (`workspace`, `chat`, `settings`, `files`). Components don't reach across stores. `workspace` and `chat` hydrate from SQLite via `session_*` and debounce-write on changes; `settings` and `files` persist to localStorage via `zustand/middleware`.
 - **Styling**: Tailwind, dark-first. Theme tokens are in `apps/frontend/tailwind.config.ts` (`bg-base`, `fg-base`, `accent`, etc.). Don't hardcode hex colors in components.
 - **Rust modules**: One feature per crate (`arc-pty`, `arc-agent-runtime`, ...). The desktop app *composes* them; it shouldn't grow business logic of its own.
 - **Errors crossing the IPC boundary**: Map to `String` at the command layer. Internal Rust code uses `anyhow::Result`.
@@ -86,12 +89,12 @@ cargo check --workspace
 | Area              | Status         | Notes                                                                  |
 | ----------------- | -------------- | ---------------------------------------------------------------------- |
 | PTY → xterm.js    | ✅ real         | Default shell (COMSPEC on Win, SHELL elsewhere), resize, kill on close |
-| Tabs / workspace  | ✅ real         | In-memory only; persistence is Phase 2                                 |
+| Tabs / workspace  | ✅ real         | Tab state hydrates from SQLite on launch, debounce-writes on change.   |
 | AI chat           | ✅ real         | OpenAI / Anthropic / Ollama streaming via `rust/ai-runtime`. API keys in Settings (⌘,). |
 | Editor            | ✅ real         | CodeMirror 6, lazy-loaded per tab. Reads/writes via `fs_read_file` / `fs_write_file`; 5 MiB cap, refuses binaries. |
 | File tree         | ✅ real         | Browse + open files, pick root via native dialog, click-to-paste paths into the active terminal. |
 | Filesystem index  | ⛔ stub        | `rust/filesystem` is a placeholder. Lightweight `fs_*` commands live in `apps/desktop/src/commands/fs.rs` until that crate exists. |
-| Session persist   | ⛔ stub        | `rust/session-manager` types only; no SQLite yet                        |
+| Session persist   | ✅ real (V0)   | sqlx + SQLite via `rust/session-manager`. Workspaces, tabs, and chat history persist. `command_history` and `agent_runs` tables exist but aren't wired yet. |
 | Agent runtime     | ⛔ stub        | Types only                                                              |
 | Git introspection | ⛔ stub        | `rust/git` placeholder                                                  |
 | Memory / search   | ⛔ stub        | SQLite + embeddings not started                                         |

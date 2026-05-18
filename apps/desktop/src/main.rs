@@ -4,15 +4,20 @@
 
 mod commands;
 
+use arc_session_manager::SessionStore;
 use commands::llm::LlmState;
 use commands::pty::PtyState;
+use tauri::Manager;
 use tracing_subscriber::EnvFilter;
 
 fn main() {
     tracing_subscriber::fmt()
         .with_env_filter(
-            EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| EnvFilter::new("arc=debug,arc_pty=debug,arc_ai_runtime=debug,info")),
+            EnvFilter::try_from_default_env().unwrap_or_else(|_| {
+                EnvFilter::new(
+                    "arc=debug,arc_pty=debug,arc_ai_runtime=debug,arc_session_manager=debug,info",
+                )
+            }),
         )
         .with_target(true)
         .init();
@@ -33,8 +38,22 @@ fn main() {
             commands::fs::fs_pick_folder,
             commands::fs::fs_read_file,
             commands::fs::fs_write_file,
+            commands::session::session_load,
+            commands::session::session_save_tabs,
+            commands::session::session_set_workspace,
+            commands::session::session_workspaces_list,
+            commands::session::session_workspace_upsert,
+            commands::session::session_workspace_delete,
+            commands::session::session_chat_load,
+            commands::session::session_chat_append,
+            commands::session::session_chat_clear,
         ])
-        .setup(|_app| {
+        .setup(|app| {
+            // Open the SQLite store before the window appears so the first
+            // `session_load` call from the frontend always has a pool ready.
+            let store = tauri::async_runtime::block_on(SessionStore::open_default())
+                .expect("opening session store");
+            app.manage(store);
             tracing::info!("arc desktop started");
             Ok(())
         })
