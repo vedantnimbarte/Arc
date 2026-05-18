@@ -25,6 +25,7 @@ arc-agent-runtime = { workspace = true }
 arc-ai-runtime = { workspace = true }
 dashmap = { workspace = true }
 futures-util = { workspace = true }
+rfd = { workspace = true }
 
 [features]
 # By default, Tauri sets up a window. Enable `custom-protocol` for release.

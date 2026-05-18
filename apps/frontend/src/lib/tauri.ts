@@ -56,6 +56,41 @@ export async function onPtyExit(
   });
 }
 
+// ----- Filesystem (file tree panel) --------------------------------------
+
+export type FsKind = 'dir' | 'file' | 'symlink';
+
+export interface FsEntry {
+  name: string;
+  path: string;
+  kind: FsKind;
+  hidden: boolean;
+}
+
+export async function fsDefaultRoot(): Promise<string> {
+  return invoke<string>('fs_default_root');
+}
+
+export async function fsParent(path: string): Promise<string | null> {
+  return invoke<string | null>('fs_parent', { path });
+}
+
+export async function fsReadDir(path: string): Promise<FsEntry[]> {
+  return invoke<FsEntry[]>('fs_read_dir', { path });
+}
+
+export async function fsPickFolder(starting?: string | null): Promise<string | null> {
+  return invoke<string | null>('fs_pick_folder', { starting: starting ?? null });
+}
+
+export async function fsReadFile(path: string): Promise<string> {
+  return invoke<string>('fs_read_file', { path });
+}
+
+export async function fsWriteFile(path: string, content: string): Promise<void> {
+  return invoke<void>('fs_write_file', { path, content });
+}
+
 // ----- LLM streaming -----------------------------------------------------
 
 export type LlmProvider = 'openai' | 'anthropic' | 'ollama';

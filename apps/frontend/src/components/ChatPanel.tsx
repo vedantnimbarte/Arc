@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Send, Sparkles, Trash2, Square } from 'lucide-react';
+import { ArrowUp, Sparkles, Trash2, Square } from 'lucide-react';
 import { useChat } from '../state/chat';
 import { useSettings, PROVIDER_LABELS } from '../state/settings';
 import { isTauri, llmStream, type LlmMessage } from '../lib/tauri';
@@ -25,8 +25,6 @@ export function ChatPanel() {
     const text = input.trim();
     if (!text || isStreaming) return;
 
-    // Outside Tauri the LLM IPC isn't available — fall back to the local stub
-    // so the UI is still testable in the browser.
     if (!isTauri) {
       setInput('');
       append({ role: 'user', content: text });
@@ -44,7 +42,7 @@ export function ChatPanel() {
     if ((activeProvider === 'openai' || activeProvider === 'anthropic') && !cfg.apiKey) {
       append({
         role: 'system',
-        content: `No API key set for ${PROVIDER_LABELS[activeProvider]}. Open settings (⚙) to add one.`,
+        content: `No API key set for ${PROVIDER_LABELS[activeProvider]}. Open settings (⌘,) to add one.`,
       });
       return;
     }
@@ -93,44 +91,59 @@ export function ChatPanel() {
   }
 
   return (
-    <div className="glass flex h-full flex-col">
-      {/* Header */}
-      <div className="flex h-12 shrink-0 items-center justify-between border-b border-border-subtle px-4">
-        <div className="flex items-center gap-2.5">
-          <div className="flex h-6 w-6 items-center justify-center rounded-md bg-accent-soft text-accent ring-1 ring-accent/20">
+    <div className="flex h-full flex-col">
+      {/* Inspector header — sits flush with the toolbar above, no extra
+          chrome. Sparkles icon in a soft-blue squircle. */}
+      <div className="flex h-11 shrink-0 items-center justify-between border-b border-border-hairline px-3.5">
+        <div className="flex items-center gap-2">
+          <div className="flex h-[22px] w-[22px] items-center justify-center rounded-md bg-accent-soft text-accent ring-1 ring-accent/25">
             <Sparkles size={11} strokeWidth={2.4} />
           </div>
-          <div className="flex items-baseline gap-2">
-            <span className="font-display text-[13px] font-semibold tracking-tight text-fg-base">
-              Chat
+          <div className="flex flex-col leading-tight">
+            <span className="font-display text-[12.5px] font-semibold tracking-tight text-fg-base">
+              Assistant
             </span>
-            <span className="font-display text-[10px] uppercase tracking-widest2 text-fg-subtle">
+            <span className="font-mono text-[10px] text-fg-subtle">
               {PROVIDER_LABELS[activeProvider]} · {cfg.model}
             </span>
           </div>
         </div>
         <button
           onClick={clear}
-          className="rounded-md p-1.5 text-fg-subtle transition-all duration-200 hover:bg-bg-hover/60 hover:text-fg-muted"
-          title="Clear chat"
-          aria-label="Clear chat"
+          className="rounded-md p-1.5 text-fg-subtle transition-all duration-150 ease-apple hover:bg-white/[0.08] hover:text-fg-base"
+          title="Clear conversation"
+          aria-label="Clear conversation"
         >
-          <Trash2 size={12} strokeWidth={2.2} />
+          <Trash2 size={12} strokeWidth={2.1} />
         </button>
       </div>
 
       {/* Messages */}
       <div
         ref={scrollRef}
-        className="selectable flex-1 space-y-3.5 overflow-y-auto px-4 py-5"
+        className="selectable flex-1 space-y-3 overflow-y-auto px-3.5 py-4"
       >
+        {messages.length === 0 && (
+          <div className="flex h-full flex-col items-center justify-center px-4 text-center">
+            <div className="mb-3 flex h-12 w-12 items-center justify-center rounded-2xl bg-accent-soft ring-1 ring-accent/25">
+              <Sparkles size={20} strokeWidth={1.8} className="text-accent" />
+            </div>
+            <p className="font-display text-[13px] font-medium tracking-tight text-fg-base">
+              How can I help?
+            </p>
+            <p className="mt-1 font-display text-[11.5px] leading-relaxed text-fg-muted">
+              Ask anything about your shell, code, or task.
+            </p>
+          </div>
+        )}
+
         {messages.map((m, i) => {
           const delay = `${Math.min(i * 28, 220)}ms`;
           if (m.role === 'system') {
             return (
               <div
                 key={m.id}
-                className="animate-fade-in px-2 text-center font-display text-[11px] italic leading-relaxed tracking-wide text-fg-subtle"
+                className="animate-fade-in px-2 text-center font-display text-[11px] italic leading-relaxed tracking-tight text-fg-subtle"
                 style={{ animationDelay: delay }}
               >
                 {m.content}
@@ -138,42 +151,41 @@ export function ChatPanel() {
             );
           }
           if (m.role === 'user') {
+            // iMessage-style — system blue bubble, white text, tighter
+            // bottom-right tail.
             return (
               <div
                 key={m.id}
                 className="flex animate-fade-in justify-end"
                 style={{ animationDelay: delay }}
               >
-                <div className="max-w-[88%] whitespace-pre-wrap rounded-2xl rounded-br-md bg-gradient-to-br from-accent-muted/85 to-accent/70 px-3.5 py-2 font-display text-[13px] leading-relaxed text-bg-base shadow-glow-sm">
+                <div className="max-w-[85%] whitespace-pre-wrap rounded-2xl rounded-br-[6px] bg-accent px-3 py-1.5 font-display text-[13px] leading-relaxed text-white shadow-[0_1px_2px_rgba(0,0,0,0.25)]">
                   {m.content}
                 </div>
               </div>
             );
           }
+          // Assistant — neutral grey bubble like the "they sent" iMessage.
           return (
             <div
               key={m.id}
               className="flex animate-fade-in justify-start"
               style={{ animationDelay: delay }}
             >
-              <div className="max-w-[88%] whitespace-pre-wrap rounded-2xl rounded-bl-md border border-border-subtle bg-bg-subtle/55 px-3.5 py-2 font-display text-[13px] leading-relaxed text-fg-base">
+              <div className="max-w-[85%] whitespace-pre-wrap rounded-2xl rounded-bl-[6px] bg-bg-subtle/85 px-3 py-1.5 font-display text-[13px] leading-relaxed text-fg-base ring-1 ring-white/[0.04]">
                 {m.content ? (
                   m.content
                 ) : isStreaming ? (
-                  <span className="inline-flex gap-0.5 text-fg-muted">
-                    <span className="animate-shimmer-cursor">·</span>
+                  <span className="inline-flex gap-1 text-fg-muted">
+                    <span className="h-1.5 w-1.5 animate-shimmer-cursor rounded-full bg-fg-muted/70" />
                     <span
-                      className="animate-shimmer-cursor"
+                      className="h-1.5 w-1.5 animate-shimmer-cursor rounded-full bg-fg-muted/70"
                       style={{ animationDelay: '0.15s' }}
-                    >
-                      ·
-                    </span>
+                    />
                     <span
-                      className="animate-shimmer-cursor"
+                      className="h-1.5 w-1.5 animate-shimmer-cursor rounded-full bg-fg-muted/70"
                       style={{ animationDelay: '0.3s' }}
-                    >
-                      ·
-                    </span>
+                    />
                   </span>
                 ) : null}
               </div>
@@ -182,13 +194,14 @@ export function ChatPanel() {
         })}
       </div>
 
-      {/* Input */}
-      <div className="shrink-0 px-3 pb-3">
+      {/* Composer — Messages.app style: rounded pill, send button as a
+          blue circle that becomes visible only when there's content. */}
+      <div className="shrink-0 px-3 pb-3 pt-1">
         <div
           className={cn(
-            'group flex items-end gap-2 rounded-2xl border border-border-subtle bg-bg-base/55 px-3 py-2',
-            'transition-all duration-200 ease-out-soft',
-            'focus-within:border-accent/40 focus-within:bg-bg-base/75 focus-within:shadow-glow-sm',
+            'group flex items-end gap-2 rounded-[20px] border border-border-subtle bg-bg-base/55 px-3 py-2 backdrop-blur-md',
+            'transition-all duration-150 ease-apple',
+            'focus-within:border-accent/45 focus-within:bg-bg-base/75 focus-within:shadow-focus',
           )}
         >
           <textarea
@@ -203,16 +216,16 @@ export function ChatPanel() {
             placeholder={
               isStreaming
                 ? `streaming from ${PROVIDER_LABELS[activeProvider]}…`
-                : 'ask anything'
+                : 'iMessage'
             }
             rows={1}
             disabled={isStreaming}
-            className="selectable max-h-32 min-h-[24px] flex-1 resize-none bg-transparent font-display text-[13px] leading-relaxed text-fg-base placeholder:text-fg-subtle focus:outline-none disabled:opacity-60"
+            className="selectable max-h-32 min-h-[22px] flex-1 resize-none bg-transparent font-display text-[13px] leading-relaxed text-fg-base placeholder:text-fg-subtle focus:outline-none disabled:opacity-60"
           />
           {isStreaming ? (
             <button
               onClick={() => void stop()}
-              className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-status-err/15 text-status-err transition-all duration-200 hover:bg-status-err hover:text-bg-base"
+              className="flex h-[26px] w-[26px] shrink-0 items-center justify-center rounded-full bg-status-err/15 text-status-err transition-all duration-150 hover:bg-status-err hover:text-white"
               aria-label="Stop"
               title="Stop streaming"
             >
@@ -223,21 +236,23 @@ export function ChatPanel() {
               onClick={() => void send()}
               disabled={!input.trim()}
               className={cn(
-                'flex h-7 w-7 shrink-0 items-center justify-center rounded-lg transition-all duration-200 ease-out-soft',
-                'enabled:bg-accent-soft enabled:text-accent',
-                'enabled:hover:bg-accent enabled:hover:text-bg-base enabled:hover:shadow-glow',
-                'disabled:text-fg-subtle disabled:opacity-50',
+                'flex h-[26px] w-[26px] shrink-0 items-center justify-center rounded-full transition-all duration-150 ease-apple',
+                'enabled:bg-accent enabled:text-white enabled:shadow-glow-sm',
+                'enabled:hover:bg-accent-muted enabled:active:scale-95',
+                'disabled:bg-white/[0.08] disabled:text-fg-subtle',
               )}
               aria-label="Send"
             >
-              <Send size={12} strokeWidth={2.4} />
+              <ArrowUp size={13} strokeWidth={2.6} />
             </button>
           )}
         </div>
-        <div className="mt-2 flex items-center justify-between px-1 font-display text-[10px] uppercase tracking-widest2 text-fg-subtle">
-          <span>⏎ send · ⇧⏎ newline</span>
+        <div className="mt-1.5 flex items-center justify-between px-1.5 font-display text-[10px] text-fg-subtle">
+          <span className="tracking-tight">
+            <kbd className="font-mono">return</kbd> to send · <kbd className="font-mono">⇧↵</kbd> for newline
+          </span>
           {isStreaming && (
-            <span className="flex items-center gap-1.5 text-accent/80">
+            <span className="flex items-center gap-1.5 text-accent">
               <span className="h-1 w-1 animate-pulse-soft rounded-full bg-accent shadow-glow-sm" />
               streaming
             </span>

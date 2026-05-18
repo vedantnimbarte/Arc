@@ -5,10 +5,11 @@
 @layer base {
   :root {
     color-scheme: dark;
-    /* Atmospheric background gradient anchors (rgb triplets) */
-    --atm-violet: 167 139 250;
-    --atm-blue: 96 165 250;
-    --atm-peach: 245 169 127;
+    /* Wallpaper tints that bleed through the translucent chrome — these are
+       what give macOS its "the desktop is alive behind the window" feel. */
+    --wash-1: 10 132 255;   /* system blue */
+    --wash-2: 191 90 242;   /* system purple */
+    --wash-3: 50 215 230;   /* system teal */
   }
 
   html,
@@ -22,95 +23,153 @@
     overscroll-behavior: none;
     user-select: none;
     -webkit-user-select: none;
-    /* Geist stylistic alternates — softer 'a', single-story 'g' */
-    font-feature-settings: 'ss01', 'ss03';
+    /* SF Pro / Inter optical sizing + tabular figures in chrome */
+    font-feature-settings: 'cv11', 'ss01', 'tnum';
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
+    letter-spacing: -0.005em;
   }
 
-  /* Soft violet selection across the whole app */
+  /* System-blue selection */
   ::selection {
-    background: rgba(167, 139, 250, 0.28);
-    color: #eceff5;
+    background: rgba(10, 132, 255, 0.32);
+    color: #f5f5f7;
   }
 
-  /* Allow text selection inside terminal + editor + chat */
   .selectable,
   .selectable * {
     user-select: text;
     -webkit-user-select: text;
   }
+
+  /* Disable native focus rings — we paint our own system-blue version. */
+  *:focus {
+    outline: none;
+  }
 }
 
 @layer components {
-  /* Atmosphere — three barely-there radial glows that make the floating
-     panels feel like they're hovering over depth, not pasted onto a flat color */
-  .atmosphere {
+  /* The "desktop wallpaper" behind the chrome. macOS draws an animated mesh
+     of color washes that the translucent windows tint into. We synthesize a
+     muted version: three radial gradients fading into the graphite base. */
+  .desktop-wash {
     position: fixed;
     inset: 0;
     pointer-events: none;
     z-index: 0;
     background:
       radial-gradient(
-        70% 60% at 8% -10%,
-        rgb(var(--atm-violet) / 0.11) 0%,
+        80% 65% at 12% -5%,
+        rgb(var(--wash-1) / 0.16) 0%,
+        transparent 55%
+      ),
+      radial-gradient(
+        70% 60% at 100% 0%,
+        rgb(var(--wash-2) / 0.10) 0%,
         transparent 60%
       ),
       radial-gradient(
-        60% 60% at 100% 105%,
-        rgb(var(--atm-blue) / 0.06) 0%,
-        transparent 65%
-      ),
-      radial-gradient(
-        40% 40% at 50% 110%,
-        rgb(var(--atm-peach) / 0.035) 0%,
+        55% 60% at 50% 115%,
+        rgb(var(--wash-3) / 0.06) 0%,
         transparent 70%
       );
   }
 
-  /* Glass surface — semi-transparent + backdrop blur over the atmosphere */
-  .glass {
+  /* "Sidebar" material — heavier blur, slight saturation bump. The signature
+     translucent panel from Finder + Settings. */
+  .material-sidebar {
     background: linear-gradient(
       180deg,
-      rgba(255, 255, 255, 0.035) 0%,
-      rgba(255, 255, 255, 0.015) 100%
+      rgba(44, 44, 46, 0.72) 0%,
+      rgba(36, 36, 38, 0.78) 100%
     );
-    backdrop-filter: blur(24px) saturate(140%);
-    -webkit-backdrop-filter: blur(24px) saturate(140%);
+    backdrop-filter: blur(40px) saturate(180%);
+    -webkit-backdrop-filter: blur(40px) saturate(180%);
   }
 
-  /* Subtle dot grid behind the terminal — invisible at first glance, adds
-     just enough texture to keep the void from feeling dead */
+  /* "Toolbar / titlebar" material — slightly lighter, used for window chrome. */
+  .material-toolbar {
+    background: linear-gradient(
+      180deg,
+      rgba(48, 48, 50, 0.78) 0%,
+      rgba(40, 40, 42, 0.72) 100%
+    );
+    backdrop-filter: blur(32px) saturate(180%);
+    -webkit-backdrop-filter: blur(32px) saturate(180%);
+    border-bottom: 1px solid rgba(0, 0, 0, 0.35);
+    box-shadow: inset 0 1px 0 0 rgba(255, 255, 255, 0.06);
+  }
+
+  /* "Content" material — the inner panes (terminal, chat). Lighter so text
+     reads cleanly without the chrome competing. */
+  .material-content {
+    background: linear-gradient(
+      180deg,
+      rgba(28, 28, 30, 0.68) 0%,
+      rgba(24, 24, 26, 0.74) 100%
+    );
+    backdrop-filter: blur(28px) saturate(160%);
+    -webkit-backdrop-filter: blur(28px) saturate(160%);
+  }
+
+  /* Sheet / dialog material — heaviest blur, what macOS uses for modals. */
+  .material-sheet {
+    background: rgba(38, 38, 40, 0.82);
+    backdrop-filter: blur(44px) saturate(200%);
+    -webkit-backdrop-filter: blur(44px) saturate(200%);
+  }
+
+  /* Subtle dot grid behind the terminal — kept very faint so the macOS
+     graphite reads as the dominant texture. */
   .dot-grid {
     background-image: radial-gradient(
-      rgba(255, 255, 255, 0.025) 1px,
+      rgba(255, 255, 255, 0.022) 1px,
       transparent 1px
     );
-    background-size: 24px 24px;
+    background-size: 22px 22px;
+  }
+
+  /* macOS-style "vibrancy" hairline that sits on top of the toolbar's
+     bottom edge. Single 0.5px line of pure black at 35% opacity. */
+  .hairline-b {
+    box-shadow: 0 0.5px 0 0 rgba(0, 0, 0, 0.35);
+  }
+
+  /* Source-list row (sidebar / settings nav style) */
+  .source-row {
+    transition:
+      background-color 140ms cubic-bezier(0.4, 0, 0.2, 1),
+      color 140ms cubic-bezier(0.4, 0, 0.2, 1);
   }
 }
 
-/* Thin, soft scrollbars that fade in on hover */
+/* macOS-style overlay scrollbars: invisible until scroll, then thin pill */
 ::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
+  width: 9px;
+  height: 9px;
 }
 ::-webkit-scrollbar-track {
   background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.05);
-  border-radius: 999px;
-  transition: background 200ms;
+  background: transparent;
+  border-radius: 9999px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+  transition: background-color 250ms ease;
+}
+*:hover::-webkit-scrollbar-thumb {
+  background-color: rgba(255, 255, 255, 0.18);
+  background-clip: padding-box;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: rgba(167, 139, 250, 0.25);
+  background-color: rgba(255, 255, 255, 0.28) !important;
 }
 
-/* xterm overrides — generous padding, transparent viewport */
+/* xterm — pulls in the macOS Terminal.app feel: generous padding, transparent */
 .xterm {
   height: 100%;
-  padding: 18px 22px;
+  padding: 16px 20px;
 }
 .xterm .xterm-viewport {
   background: transparent !important;

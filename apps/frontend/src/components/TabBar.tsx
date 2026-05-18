@@ -1,5 +1,14 @@
-import { Plus, X, Terminal as TerminalIcon, FileCode, Settings as SettingsIcon } from 'lucide-react';
+import {
+  Plus,
+  X,
+  Terminal as TerminalIcon,
+  FileCode,
+  Settings as SettingsIcon,
+  PanelLeftClose,
+  PanelLeftOpen,
+} from 'lucide-react';
 import { useWorkspace } from '../state/workspace';
+import { useFiles } from '../state/files';
 import { cn } from '../lib/cn';
 
 interface Props {
@@ -7,77 +16,108 @@ interface Props {
 }
 
 export function TabBar({ onOpenSettings }: Props) {
-  const { tabs, activeTabId, setActive, closeTab, addTab } = useWorkspace();
+  const { tabs, activeTabId, setActive, closeTab, addTab, tabDirty } = useWorkspace();
+  const activeTab = tabs.find((t) => t.id === activeTabId);
+  const sidebarCollapsed = useFiles((s) => s.collapsed);
+  const toggleSidebar = useFiles((s) => s.toggleCollapsed);
+
+  const requestClose = (id: string, title: string) => {
+    if (tabDirty[id]) {
+      const ok = window.confirm(`"${title}" has unsaved changes. Discard them?`);
+      if (!ok) return;
+    }
+    closeTab(id);
+  };
 
   return (
-    <div className="flex h-12 shrink-0 items-center gap-3 px-4 pt-1">
-      {/* Brand mark */}
-      <div className="flex select-none items-center gap-2.5 pr-1">
-        <div className="flex h-6 w-6 items-center justify-center rounded-md bg-gradient-to-br from-accent to-accent-muted font-display text-[11px] font-semibold text-bg-base shadow-glow-sm ring-1 ring-white/10">
-          A
-        </div>
-        <span className="font-display text-[10px] font-medium uppercase tracking-widest2 text-fg-muted">
+    <div className="material-toolbar relative flex h-11 shrink-0 items-center gap-3 px-3">
+      {/* Sidebar toggle — the standard macOS toolbar control. ⌘B is
+          the system-wide shortcut for the same action. */}
+      <button
+        onClick={toggleSidebar}
+        className="group flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-fg-muted transition-all duration-200 ease-apple hover:bg-white/[0.08] hover:text-fg-base active:bg-white/[0.12]"
+        aria-label={sidebarCollapsed ? 'Show sidebar' : 'Hide sidebar'}
+        aria-pressed={!sidebarCollapsed}
+        title={sidebarCollapsed ? 'Show sidebar (⌘B)' : 'Hide sidebar (⌘B)'}
+      >
+        {sidebarCollapsed ? (
+          <PanelLeftOpen size={14} strokeWidth={1.9} />
+        ) : (
+          <PanelLeftClose size={14} strokeWidth={1.9} />
+        )}
+      </button>
+
+      {/* Centered window title — a quintessential macOS chrome detail.
+          Hidden on narrow widths so the tabs always win for space. */}
+      <div className="pointer-events-none absolute left-1/2 top-1/2 hidden -translate-x-1/2 -translate-y-1/2 select-none items-center gap-1.5 md:flex">
+        <span className="font-display text-[12px] font-semibold tracking-tight text-fg-base/85">
           arc
+        </span>
+        <span className="text-fg-subtle">·</span>
+        <span className="max-w-[260px] truncate font-display text-[12px] tracking-tight text-fg-muted">
+          {activeTab?.title ?? 'shell'}
         </span>
       </div>
 
-      <div className="h-4 w-px bg-border-subtle" />
-
-      {/* Tabs */}
-      <div className="scrollbar-none flex min-w-0 flex-1 items-center gap-1 overflow-x-auto">
+      {/* Tabs — Safari/Terminal-style pill tabs aligned to the right of
+          the traffic lights, no border between active and inactive. */}
+      <div className="scrollbar-none ml-2 flex min-w-0 flex-1 items-center gap-0.5 overflow-x-auto">
         {tabs.map((tab) => {
           const isActive = tab.id === activeTabId;
           const Icon = tab.kind === 'terminal' ? TerminalIcon : FileCode;
+          const dirty = !!tabDirty[tab.id];
           return (
             <button
               key={tab.id}
               onClick={() => setActive(tab.id)}
               className={cn(
-                'group relative flex h-8 items-center gap-2 rounded-lg px-3 font-display text-[12px] font-medium tracking-tight transition-all duration-200 ease-out-soft',
+                'group relative flex h-7 items-center gap-1.5 rounded-md px-2.5 font-display text-[12px] font-medium tracking-tight transition-all duration-150 ease-apple',
                 isActive
-                  ? 'bg-bg-hover/70 text-fg-base shadow-soft'
-                  : 'text-fg-muted hover:bg-bg-subtle/50 hover:text-fg-base',
+                  ? 'bg-white/[0.08] text-fg-base shadow-control'
+                  : 'text-fg-muted hover:bg-white/[0.04] hover:text-fg-base/90',
               )}
             >
-              {isActive && (
-                <span className="absolute left-0 top-1/2 h-3.5 w-[2px] -translate-y-1/2 rounded-r-full bg-accent shadow-glow-sm" />
-              )}
               <Icon
-                size={12}
-                strokeWidth={2}
-                className={cn('shrink-0 transition-colors', isActive && 'text-accent')}
+                size={11}
+                strokeWidth={2.2}
+                className={cn('shrink-0 transition-colors', isActive ? 'text-accent' : 'text-fg-subtle')}
               />
-              <span className="max-w-[200px] truncate">{tab.title}</span>
+              <span className="max-w-[160px] truncate">{tab.title}</span>
+              {/* macOS pattern: a dirty file shows a colored dot where the
+                  close button would be; hovering swaps in the X. */}
               <span
                 role="button"
                 tabIndex={0}
-                aria-label="Close tab"
+                aria-label={dirty ? 'Close tab (unsaved changes)' : 'Close tab'}
                 onClick={(e) => {
                   e.stopPropagation();
-                  closeTab(tab.id);
+                  requestClose(tab.id, tab.title);
                 }}
-                className="ml-1 flex h-4 w-4 items-center justify-center rounded-md text-fg-subtle opacity-0 transition-all duration-200 hover:bg-bg-base hover:text-fg-base group-hover:opacity-100"
+                className={cn(
+                  'relative ml-0.5 flex h-3.5 w-3.5 items-center justify-center rounded-full',
+                  'transition-all duration-150 hover:bg-white/15 hover:text-fg-base',
+                  dirty
+                    ? 'text-accent hover:text-fg-base'
+                    : 'text-fg-subtle opacity-0 group-hover:opacity-100',
+                )}
               >
-                <X size={11} strokeWidth={2.25} />
+                {dirty ? (
+                  <>
+                    <span className="absolute inset-0 m-auto h-1.5 w-1.5 rounded-full bg-accent shadow-glow-sm transition-opacity duration-150 group-hover:opacity-0" />
+                    <X size={9} strokeWidth={2.5} className="opacity-0 transition-opacity duration-150 group-hover:opacity-100" />
+                  </>
+                ) : (
+                  <X size={9} strokeWidth={2.5} />
+                )}
               </span>
             </button>
           );
         })}
       </div>
 
-      <div className="flex items-center gap-1">
-        <button
-          onClick={onOpenSettings}
-          className="group flex h-8 w-8 items-center justify-center rounded-lg text-fg-muted transition-all duration-300 ease-out-soft hover:bg-bg-hover/70 hover:text-accent"
-          aria-label="Open settings"
-          title="Settings"
-        >
-          <SettingsIcon
-            size={13}
-            strokeWidth={2}
-            className="transition-transform duration-500 ease-out-soft group-hover:rotate-90"
-          />
-        </button>
+      {/* Right-side toolbar buttons — borderless circular hit targets,
+          the macOS Big Sur+ aesthetic. */}
+      <div className="flex items-center gap-0.5">
         <button
           onClick={() =>
             addTab({
@@ -86,14 +126,26 @@ export function TabBar({ onOpenSettings }: Props) {
               kind: 'terminal',
             })
           }
-          className="group flex h-8 w-8 items-center justify-center rounded-lg text-fg-muted transition-all duration-300 ease-out-soft hover:bg-bg-hover/70 hover:text-accent"
+          className="group flex h-7 w-7 items-center justify-center rounded-md text-fg-muted transition-all duration-200 ease-apple hover:bg-white/[0.08] hover:text-fg-base active:bg-white/[0.12]"
           aria-label="New terminal"
-          title="New terminal (Ctrl+T)"
+          title="New terminal (⌘T)"
         >
           <Plus
             size={14}
-            strokeWidth={2.25}
-            className="transition-transform duration-300 ease-out-soft group-hover:rotate-90"
+            strokeWidth={2}
+            className="transition-transform duration-200 ease-apple group-active:scale-90"
+          />
+        </button>
+        <button
+          onClick={onOpenSettings}
+          className="group flex h-7 w-7 items-center justify-center rounded-md text-fg-muted transition-all duration-200 ease-apple hover:bg-white/[0.08] hover:text-fg-base active:bg-white/[0.12]"
+          aria-label="Open settings"
+          title="Settings (⌘,)"
+        >
+          <SettingsIcon
+            size={13}
+            strokeWidth={1.9}
+            className="transition-transform duration-500 ease-apple group-hover:rotate-45"
           />
         </button>
       </div>

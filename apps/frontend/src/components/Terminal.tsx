@@ -13,42 +13,47 @@ import {
   ptyWrite,
   type PtyId,
 } from '../lib/tauri';
+import { useFiles } from '../state/files';
+import { useWorkspace } from '../state/workspace';
 
 interface Props {
   sessionKey: string;
 }
 
-// xterm theme — calibrated to read well on the dot-grid panel and to share
-// the violet accent with the rest of the chrome.
+// xterm theme — calibrated to read well on the translucent macOS-style panel
+// and to share the system-blue accent with the rest of the chrome.
 const THEME = {
-  background: '#0c0d12',
-  foreground: '#eceff5',
-  cursor: '#a78bfa',
-  cursorAccent: '#0c0d12',
-  selectionBackground: 'rgba(167, 139, 250, 0.28)',
+  background: '#1c1c1e',
+  foreground: '#f5f5f7',
+  cursor: '#0a84ff',
+  cursorAccent: '#1c1c1e',
+  selectionBackground: 'rgba(10, 132, 255, 0.32)',
 
-  black: '#191b24',
-  red: '#f47b8e',
-  green: '#86d099',
-  yellow: '#f5a97f',
-  blue: '#7aa2f7',
-  magenta: '#a78bfa',
-  cyan: '#80cfff',
-  white: '#c8cad1',
+  black: '#2c2c2e',
+  red: '#ff453a',
+  green: '#30d158',
+  yellow: '#ff9f0a',
+  blue: '#0a84ff',
+  magenta: '#bf5af2',
+  cyan: '#32d7e0',
+  white: '#d1d1d6',
 
-  brightBlack: '#5d6477',
-  brightRed: '#ff8ea1',
-  brightGreen: '#9fdfb1',
-  brightYellow: '#fcc28d',
-  brightBlue: '#a0bdfa',
-  brightMagenta: '#c5b0ff',
-  brightCyan: '#a8dffd',
-  brightWhite: '#f4f6fa',
+  brightBlack: '#636366',
+  brightRed: '#ff6b61',
+  brightGreen: '#5be384',
+  brightYellow: '#ffba48',
+  brightBlue: '#5eaaff',
+  brightMagenta: '#d18cff',
+  brightCyan: '#7be7ed',
+  brightWhite: '#f5f5f7',
 };
 
 export function Terminal({ sessionKey }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const termRef = useRef<XTerm | null>(null);
+  // Snapshot the root at mount — the PTY can only be spawned with one CWD,
+  // and we don't restart it when the user reroots the tree.
+  const initialCwd = useRef<string | null>(useFiles.getState().root);
 
   useEffect(() => {
     const container = containerRef.current;
@@ -59,7 +64,7 @@ export function Terminal({ sessionKey }: Props) {
     let disposed = false;
 
     const term = new XTerm({
-      fontFamily: "'Geist Mono', 'JetBrains Mono', 'Cascadia Code', Menlo, Consolas, monospace",
+      fontFamily: "'SF Mono', ui-monospace, 'JetBrains Mono', Menlo, Monaco, 'Cascadia Code', Consolas, monospace",
       fontSize: 13,
       fontWeight: '400',
       fontWeightBold: '600',
@@ -101,15 +106,15 @@ export function Terminal({ sessionKey }: Props) {
 
     const boot = async () => {
       if (!isTauri) {
-        term.writeln('\x1b[38;2;167;139;250m  arc \x1b[0m\x1b[2mrunning outside Tauri — PTY disabled.\x1b[0m');
-        term.writeln('\x1b[2m       Run \x1b[0m\x1b[38;2;167;139;250mpnpm tauri:dev\x1b[0m\x1b[2m to attach a real shell.\x1b[0m');
-        term.write('\r\n\x1b[38;2;167;139;250m›\x1b[0m ');
+        term.writeln('\x1b[38;2;10;132;255m  arc \x1b[0m\x1b[2mrunning outside Tauri — PTY disabled.\x1b[0m');
+        term.writeln('\x1b[2m       Run \x1b[0m\x1b[38;2;10;132;255mpnpm tauri:dev\x1b[0m\x1b[2m to attach a real shell.\x1b[0m');
+        term.write('\r\n\x1b[38;2;10;132;255m›\x1b[0m ');
         return;
       }
       try {
         ptyId = await ptySpawn({
           shell: null,
-          cwd: null,
+          cwd: initialCwd.current ?? null,
           cols: term.cols,
           rows: term.rows,
         });
@@ -125,9 +130,30 @@ export function Terminal({ sessionKey }: Props) {
         );
         unlistens.push(
           await onPtyExit(ptyId, (code) => {
-            term.writeln(`\r\n\x1b[38;2;93;100;119m[exit ${code ?? '?'}]\x1b[0m`);
+            term.writeln(`\r\n\x1b[38;2;99;99;102m[exit ${code ?? '?'}]\x1b[0m`);
           }),
         );
+
+        // Publish the PTY id on the tab so other panes (file tree, chat)
+        // can write into this terminal.
+        useWorkspace.getState().setTabPtyId(sessionKey, ptyId);
+
+        // OSC 7 — modern shells emit `\e]7;file://host/path\e\\` whenever
+        // their CWD changes. We sync the file tree root to it so the tree
+        // follows the shell. Shells that don't emit it (default cmd.exe,
+        // unmodified PowerShell) are a no-op.
+        term.parser.registerOscHandler(7, (data) => {
+          const url = data.trim();
+          if (!url.startsWith('file://')) return false;
+          let path = decodeURIComponent(url.slice('file://'.length));
+          // Drop the host portion: file://host/path → /path
+          const slash = path.indexOf('/');
+          if (slash >= 0) path = path.slice(slash);
+          // Windows: `/C:/Users/...` → `C:/Users/...`
+          if (/^\/[a-zA-Z]:/.test(path)) path = path.slice(1);
+          if (path) useFiles.getState().setRoot(path);
+          return true; // we handled the OSC
+        });
 
         term.onData((data) => {
           if (ptyId) ptyWrite(ptyId, data).catch(() => {});
@@ -137,7 +163,7 @@ export function Terminal({ sessionKey }: Props) {
           if (ptyId) ptyResize(ptyId, cols, rows).catch(() => {});
         });
       } catch (err) {
-        term.writeln(`\x1b[38;2;244;123;142m  failed to spawn pty: ${err}\x1b[0m`);
+        term.writeln(`\x1b[38;2;255;69;58m  failed to spawn pty: ${err}\x1b[0m`);
       }
     };
 
@@ -151,6 +177,7 @@ export function Terminal({ sessionKey }: Props) {
       ro.disconnect();
       unlistens.forEach((u) => u());
       if (ptyId) void ptyKill(ptyId).catch(() => {});
+      useWorkspace.getState().setTabPtyId(sessionKey, undefined);
       term.dispose();
       termRef.current = null;
     };
