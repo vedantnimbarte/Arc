@@ -11,22 +11,24 @@ A Tauri (Rust) + React (TS) desktop app that aims to combine:
 - Multi-agent orchestration with background execution
 - Local + cloud AI providers behind one interface
 
-Phase 1 (current) ships a **real PTY terminal tab + stub AI chat panel** end-to-end. Everything else in the spec is scaffolded but stubbed.
+Phase 1 (current) ships an end-to-end **PTY terminal, file tree, CodeMirror editor, and streaming AI chat** (OpenAI / Anthropic / Ollama). Agent runtime, persistence, indexing, git introspection, and MCP are still scaffolded stubs.
 
 ## Repo layout
 
 ```
 apps/
-  desktop/     Tauri shell. Rust crate that registers `pty_*` commands and
-               serves apps/frontend's build (or dev server) inside a window.
-               Depends on the /rust/* crates.
+  desktop/     Tauri shell. Rust crate that registers `pty_*`, `llm_*`, and
+               `fs_*` commands and serves apps/frontend's build (or dev server)
+               inside a window. Depends on the /rust/* crates.
   frontend/    React + Vite + TS app. Pure UI. Talks to Rust via Tauri
                `invoke` and `listen` (see src/lib/tauri.ts).
 
 packages/      Pure-TS packages, linked via pnpm workspaces.
   shared/        Cross-package types.
   provider-sdk/  Provider interface (Provider, ChatRequest, ChatChunk).
-  ai-runtime/    Provider registry + the stub provider. Real providers go here.
+  ai-runtime/    TS stub provider — legacy. Real streaming providers now live
+                 in `rust/ai-runtime`; this package is kept only for the
+                 `Provider` shape and may be removed.
   terminal/      Reserved — placeholder until we extract terminal logic out of
                  apps/frontend.
   editor/        Reserved — same idea for the editor.
@@ -36,10 +38,14 @@ packages/      Pure-TS packages, linked via pnpm workspaces.
 
 rust/          Cargo workspace members consumed by apps/desktop.
   pty/             ✅ PtyManager — spawn/write/resize/kill, streams output via
-                   tokio::sync::mpsc. The only crate doing real work today.
+                   tokio::sync::mpsc.
+  ai-runtime/      ✅ Streaming chat providers (OpenAI, Anthropic, Ollama)
+                   behind one `Provider` trait. Driven by `llm_*` commands.
   session-manager/ stub — workspace + tab persistence.
   agent-runtime/   stub — agent execution.
-  filesystem/      stub — indexing + watch.
+  filesystem/      stub — indexing + watch. (Lightweight `fs_*` commands
+                   currently live in apps/desktop/src/commands/fs.rs as a
+                   stopgap until this crate exists.)
   git/             stub — diff/blame/log.
 
 docs/          Architecture + decisions.
@@ -55,7 +61,9 @@ pnpm tauri:dev         # boots Tauri → spawns vite → opens the window
 Frontend-only (no Rust, no PTY):
 
 ```bash
-pnpm dev               # opens http://127.0.0.1:5173 with a disabled terminal
+pnpm dev               # opens http://127.0.0.1:5173 — UI only, anything that
+                       # needs `invoke`/`listen` (PTY, fs, LLM) is gated off
+                       # and chat falls back to a local echo stub
 ```
 
 Type-check / sanity:
@@ -67,25 +75,29 @@ cargo check --workspace
 
 ## Key conventions
 
-- **Tauri command names**: `<area>_<verb>` snake_case. PTY commands are `pty_spawn`, `pty_write`, `pty_resize`, `pty_kill`.
-- **Event topics**: `<area>://<verb>/<id>`, e.g. `pty://data/<uuid>`. The frontend's `lib/tauri.ts` exposes typed wrappers — use those, don't hand-roll `invoke`/`listen` in components.
-- **State**: Zustand stores in `apps/frontend/src/state/*`. One store per concern (workspace, chat). Components don't reach across stores.
+- **Tauri command names**: `<area>_<verb>` snake_case. Today: `pty_*` (spawn/write/resize/kill), `llm_*` (stream/cancel), `fs_*` (default_root, parent, read_dir, pick_folder, read_file, write_file).
+- **Event topics**: `<area>://<verb>/<id>`, e.g. `pty://data/<uuid>`, `llm://chunk/<id>`, `llm://done/<id>`. The frontend's `lib/tauri.ts` exposes typed wrappers — use those, don't hand-roll `invoke`/`listen` in components.
+- **State**: Zustand stores in `apps/frontend/src/state/*` — one per concern (`workspace`, `chat`, `settings`, `files`). Components don't reach across stores. `settings` and `files` persist to localStorage via `zustand/middleware`.
 - **Styling**: Tailwind, dark-first. Theme tokens are in `apps/frontend/tailwind.config.ts` (`bg-base`, `fg-base`, `accent`, etc.). Don't hardcode hex colors in components.
 - **Rust modules**: One feature per crate (`arc-pty`, `arc-agent-runtime`, ...). The desktop app *composes* them; it shouldn't grow business logic of its own.
 - **Errors crossing the IPC boundary**: Map to `String` at the command layer. Internal Rust code uses `anyhow::Result`.
 
 ## What's stubbed vs. real
 
-| Area              | Status     | Notes                                                                  |
-| ----------------- | ---------- | ---------------------------------------------------------------------- |
-| PTY → xterm.js    | ✅ real    | Default shell (COMSPEC on Win, SHELL elsewhere), resize, kill on close |
-| Tabs / workspace  | ✅ real    | In-memory only; persistence is Phase 2                                 |
-| AI chat           | 🟡 stub   | UI works, provider just echoes. Wire real ones in `packages/ai-runtime` |
-| Editor            | ⛔ stub   | Tab kind exists; no CodeMirror integration yet                          |
-| Agent runtime     | ⛔ stub   | Types only                                                              |
-| Memory / search   | ⛔ stub   | SQLite + embeddings not started                                         |
-| MCP, plugins      | ⛔ stub   | Placeholder packages                                                    |
-| Bundling / icons  | 🟡 placeholder | Icons are auto-generated placeholders. Replace before shipping.    |
+| Area              | Status         | Notes                                                                  |
+| ----------------- | -------------- | ---------------------------------------------------------------------- |
+| PTY → xterm.js    | ✅ real         | Default shell (COMSPEC on Win, SHELL elsewhere), resize, kill on close |
+| Tabs / workspace  | ✅ real         | In-memory only; persistence is Phase 2                                 |
+| AI chat           | ✅ real         | OpenAI / Anthropic / Ollama streaming via `rust/ai-runtime`. API keys in Settings (⌘,). |
+| Editor            | ✅ real         | CodeMirror 6, lazy-loaded per tab. Reads/writes via `fs_read_file` / `fs_write_file`; 5 MiB cap, refuses binaries. |
+| File tree         | ✅ real         | Browse + open files, pick root via native dialog, click-to-paste paths into the active terminal. |
+| Filesystem index  | ⛔ stub        | `rust/filesystem` is a placeholder. Lightweight `fs_*` commands live in `apps/desktop/src/commands/fs.rs` until that crate exists. |
+| Session persist   | ⛔ stub        | `rust/session-manager` types only; no SQLite yet                        |
+| Agent runtime     | ⛔ stub        | Types only                                                              |
+| Git introspection | ⛔ stub        | `rust/git` placeholder                                                  |
+| Memory / search   | ⛔ stub        | SQLite + embeddings not started                                         |
+| MCP, plugins      | ⛔ stub        | Placeholder packages                                                    |
+| Bundling / icons  | 🟡 placeholder | Icons are auto-generated placeholders. Replace before shipping.         |
 
 ## Working in this repo
 
@@ -99,5 +111,6 @@ cargo check --workspace
 1. This file
 2. `docs/architecture.md` — component map + IPC contract
 3. `docs/decisions.md` — why we chose Tauri/Zustand/etc., recorded as ADRs
-4. `apps/frontend/src/components/Terminal.tsx` — see how the PTY round-trip works in 90 lines
-5. `rust/pty/src/lib.rs` — the matching Rust side
+4. `apps/frontend/src/components/Terminal.tsx` + `rust/pty/src/lib.rs` — the PTY round-trip in ~90 lines per side
+5. `apps/frontend/src/components/ChatPanel.tsx` + `rust/ai-runtime/src/lib.rs` — the streaming-LLM round-trip
+6. `apps/frontend/src/components/Editor.tsx` + `apps/desktop/src/commands/fs.rs` — the editor + filesystem round-trip
