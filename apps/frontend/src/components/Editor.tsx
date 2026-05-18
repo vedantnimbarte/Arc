@@ -188,7 +188,7 @@ export function Editor({ filePath, tabId }: Props) {
             className={cn(
               'ml-1 flex h-6 items-center gap-1 rounded-md px-2 font-display text-[11px] font-medium tracking-tight transition-colors duration-150',
               dirty && status.kind !== 'saving'
-                ? 'bg-accent text-white hover:bg-accent-muted active:scale-95'
+                ? 'surface-silver active:scale-[0.97]'
                 : 'bg-white/[0.05] text-fg-subtle',
             )}
             aria-label="Save"
@@ -419,7 +419,7 @@ const macTheme: Extension = EditorView.theme(
       fontFamily: "'SF Mono', ui-monospace, 'JetBrains Mono', Menlo, Monaco, 'Cascadia Code', Consolas, monospace",
     },
     '.cm-scroller': { fontFamily: 'inherit', overflow: 'auto' },
-    '.cm-content': { caretColor: '#0a84ff', padding: '14px 0' },
+    '.cm-content': { caretColor: '#d4d6dc', padding: '14px 0' },
     '.cm-line': { padding: '0 14px' },
     '.cm-gutters': {
       backgroundColor: 'transparent',
@@ -437,15 +437,15 @@ const macTheme: Extension = EditorView.theme(
       color: MOCHA.subtext1,
     },
     '.cm-cursor, .cm-dropCursor': {
-      borderLeftColor: '#0a84ff',
+      borderLeftColor: '#d4d6dc',
       borderLeftWidth: '2px',
     },
     '&.cm-focused > .cm-scroller > .cm-selectionLayer .cm-selectionBackground, .cm-selectionBackground, ::selection':
-      { backgroundColor: 'rgba(10, 132, 255, 0.30)' },
+      { backgroundColor: 'rgba(200, 210, 225, 0.30)' },
     '.cm-focused': { outline: 'none' },
     '.cm-matchingBracket': {
-      backgroundColor: 'rgba(10, 132, 255, 0.15)',
-      outline: '1px solid rgba(10, 132, 255, 0.45)',
+      backgroundColor: 'rgba(200, 210, 225, 0.18)',
+      outline: '1px solid rgba(200, 210, 225, 0.42)',
     },
     '.cm-tooltip': {
       backgroundColor: 'rgba(38,38,40,0.92)',

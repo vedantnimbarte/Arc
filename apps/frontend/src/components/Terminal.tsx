@@ -20,32 +20,33 @@ interface Props {
   sessionKey: string;
 }
 
-// xterm theme — calibrated to read well on the translucent macOS-style panel
-// and to share the system-blue accent with the rest of the chrome.
+// xterm theme — graphite base, platinum cursor + selection. The ANSI palette
+// stays close to the macOS Terminal defaults so syntax highlighting in `ls`,
+// `git`, etc. still reads correctly; only the accent + cursor shift to silver.
 const THEME = {
-  background: '#1c1c1e',
-  foreground: '#f5f5f7',
-  cursor: '#0a84ff',
-  cursorAccent: '#1c1c1e',
-  selectionBackground: 'rgba(10, 132, 255, 0.32)',
+  background: '#161618',
+  foreground: '#eef0f3',
+  cursor: '#d4d6dc',
+  cursorAccent: '#161618',
+  selectionBackground: 'rgba(200, 210, 225, 0.32)',
 
-  black: '#2c2c2e',
-  red: '#ff453a',
-  green: '#30d158',
-  yellow: '#ff9f0a',
-  blue: '#0a84ff',
-  magenta: '#bf5af2',
-  cyan: '#32d7e0',
-  white: '#d1d1d6',
+  black: '#28282a',
+  red: '#ff5252',
+  green: '#3ad28a',
+  yellow: '#f0a958',
+  blue: '#9cb5d4',     // cool steel-blue so `ls` directories still feel "blue"
+  magenta: '#bf9ff2',
+  cyan: '#7ec8d0',
+  white: '#d4d6dc',
 
-  brightBlack: '#636366',
-  brightRed: '#ff6b61',
-  brightGreen: '#5be384',
-  brightYellow: '#ffba48',
-  brightBlue: '#5eaaff',
-  brightMagenta: '#d18cff',
-  brightCyan: '#7be7ed',
-  brightWhite: '#f5f5f7',
+  brightBlack: '#6c6c70',
+  brightRed: '#ff7a78',
+  brightGreen: '#65e0a4',
+  brightYellow: '#ffc370',
+  brightBlue: '#c1d2e6',
+  brightMagenta: '#d8b7ff',
+  brightCyan: '#a8d6dc',
+  brightWhite: '#f3f5f8',
 };
 
 export function Terminal({ sessionKey }: Props) {

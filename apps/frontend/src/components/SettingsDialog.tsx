@@ -265,11 +265,11 @@ function SidebarRow({
       className={cn(
         'source-row flex items-center gap-2 rounded-md px-2.5 py-1.5 text-left font-display text-[12.5px] font-medium tracking-tight',
         active
-          ? 'bg-accent text-white shadow-glow-sm'
+          ? 'bg-accent-soft text-fg-base ring-1 ring-border-strong'
           : 'text-fg-base/85 hover:bg-white/[0.06]',
       )}
     >
-      <Icon size={12} strokeWidth={2.1} className={active ? 'text-white' : 'text-fg-muted'} />
+      <Icon size={12} strokeWidth={2.1} className={active ? 'text-accent-bright' : 'text-fg-muted'} />
       {label}
     </button>
   );

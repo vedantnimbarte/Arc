@@ -30,44 +30,51 @@ export default {
         ],
       },
       colors: {
-        // macOS "Sonoma / Tahoe" dark palette — graphite base, translucent
-        // panels that ride on top of a system-wallpaper-style backdrop.
+        // "Brushed platinum on graphite" — refined studio-gear dark theme.
+        // Base surfaces stay graphite (so terminal text reads cleanly);
+        // accents shift to a cool platinum that picks up steel undertones.
         bg: {
-          base: '#1c1c1e',     // window background (dark mode)
-          panel: '#2c2c2e',    // raised surface
-          subtle: '#3a3a3c',   // controls / hover targets
-          hover: '#48484a',    // active hover
-          chrome: '#28282a',   // toolbar / title bar tint
+          base: '#161618',     // window background — a touch deeper to give silver more contrast
+          panel: '#28282a',    // raised surface
+          subtle: '#34343660', // controls / hover targets (slight transparency)
+          hover: '#454547',    // active hover
+          chrome: '#222224',   // toolbar / title bar tint
         },
         border: {
-          subtle: 'rgba(255, 255, 255, 0.08)',
-          strong: 'rgba(255, 255, 255, 0.14)',
-          hairline: 'rgba(0, 0, 0, 0.35)', // for separators on dark
+          subtle: 'rgba(220, 224, 232, 0.07)',
+          strong: 'rgba(220, 224, 232, 0.14)',
+          hairline: 'rgba(0, 0, 0, 0.42)', // crisper hairlines against the deeper base
         },
         fg: {
-          base: '#f5f5f7',          // primary label
-          muted: 'rgba(235, 235, 245, 0.60)', // secondary label
-          subtle: 'rgba(235, 235, 245, 0.30)', // tertiary label
+          base: '#eef0f3',                       // primary label — slight cool cast pairs with silver
+          muted: 'rgba(230, 234, 242, 0.58)',    // secondary label
+          subtle: 'rgba(220, 226, 238, 0.30)',   // tertiary label
         },
-        // macOS system colors
+        // Platinum accent system. `DEFAULT` is the workhorse fill; `bright`
+        // hovers; `muted` is the pressed state; `soft` and `glow` are tints
+        // for halos and backgrounds.
         accent: {
-          DEFAULT: '#0a84ff', // system blue (dark)
-          muted: '#0071e3',
-          soft: 'rgba(10, 132, 255, 0.18)',
-          glow: 'rgba(10, 132, 255, 0.45)',
+          DEFAULT: '#c8cad0',
+          bright: '#e6e8ec',
+          muted: '#a3a5ab',
+          soft: 'rgba(200, 204, 214, 0.10)',
+          glow: 'rgba(220, 224, 232, 0.42)',
         },
+        // Status colors kept — semantic clarity beats palette purity. Tuned
+        // slightly cooler so they sit naturally next to the silver accent.
         status: {
-          ok: '#30d158',   // system green
-          warn: '#ff9f0a', // system orange
-          err: '#ff453a',  // system red
-          info: '#0a84ff',
+          ok: '#3ad28a',   // cool emerald
+          warn: '#f0a958', // tempered amber
+          err: '#ff5252',  // signal red
+          info: '#c8cad0', // matches accent — neutral info pings
         },
       },
       boxShadow: {
-        // Soft system blue focus ring (Catalina onward)
-        focus: '0 0 0 4px rgba(10, 132, 255, 0.25)',
-        glow: '0 0 28px -6px rgba(10, 132, 255, 0.55)',
-        'glow-sm': '0 0 12px -2px rgba(10, 132, 255, 0.45)',
+        // Silver focus ring + bloom — softer than the old blue, since
+        // bright silver tends to over-glow on dark.
+        focus: '0 0 0 4px rgba(200, 204, 214, 0.22)',
+        glow: '0 0 28px -6px rgba(220, 224, 232, 0.38)',
+        'glow-sm': '0 0 12px -2px rgba(220, 224, 232, 0.34)',
         // Floating window: crisp top highlight + soft ambient drop.
         panel:
           'inset 0 1px 0 0 rgba(255, 255, 255, 0.06), 0 1px 0 0 rgba(0, 0, 0, 0.4), 0 18px 40px -16px rgba(0, 0, 0, 0.55)',

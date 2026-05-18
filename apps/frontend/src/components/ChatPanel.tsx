@@ -160,15 +160,16 @@ export function ChatPanel() {
             );
           }
           if (m.role === 'user') {
-            // iMessage-style — system blue bubble, white text, tighter
-            // bottom-right tail.
+            // Polished-platinum bubble — the user's voice as a brushed
+            // metal chip on graphite. Dark text inside reads like a
+            // pressed inscription on a milled nameplate.
             return (
               <div
                 key={m.id}
                 className="flex animate-fade-in justify-end"
                 style={{ animationDelay: delay }}
               >
-                <div className="max-w-[85%] whitespace-pre-wrap rounded-2xl rounded-br-[6px] bg-accent px-3 py-1.5 font-display text-[13px] leading-relaxed text-white shadow-[0_1px_2px_rgba(0,0,0,0.25)]">
+                <div className="surface-silver max-w-[85%] whitespace-pre-wrap rounded-2xl rounded-br-[6px] px-3 py-1.5 font-display text-[13px] leading-relaxed">
                   {m.content}
                 </div>
               </div>
@@ -246,8 +247,8 @@ export function ChatPanel() {
               disabled={!input.trim()}
               className={cn(
                 'flex h-[26px] w-[26px] shrink-0 items-center justify-center rounded-full transition-all duration-150 ease-apple',
-                'enabled:bg-accent enabled:text-white enabled:shadow-glow-sm',
-                'enabled:hover:bg-accent-muted enabled:active:scale-95',
+                'enabled:surface-silver enabled:shadow-glow-sm',
+                'enabled:active:scale-[0.94]',
                 'disabled:bg-white/[0.08] disabled:text-fg-subtle',
               )}
               aria-label="Send"

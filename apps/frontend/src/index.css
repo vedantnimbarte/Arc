@@ -5,11 +5,12 @@
 @layer base {
   :root {
     color-scheme: dark;
-    /* Wallpaper tints that bleed through the translucent chrome — these are
-       what give macOS its "the desktop is alive behind the window" feel. */
-    --wash-1: 10 132 255;   /* system blue */
-    --wash-2: 191 90 242;   /* system purple */
-    --wash-3: 50 215 230;   /* system teal */
+    /* Wallpaper tints that bleed through the translucent chrome. Cool
+       platinum / steel washes — same atmospheric idea as macOS but tuned
+       to the brushed-silver palette instead of the warm system-blue. */
+    --wash-1: 198 208 222;  /* cool platinum */
+    --wash-2: 168 178 196;  /* steel */
+    --wash-3: 130 148 172;  /* deeper cool */
   }
 
   html,
@@ -30,9 +31,9 @@
     letter-spacing: -0.005em;
   }
 
-  /* System-blue selection */
+  /* Cool platinum selection — matches the accent system */
   ::selection {
-    background: rgba(10, 132, 255, 0.32);
+    background: rgba(200, 210, 225, 0.32);
     color: #f5f5f7;
   }
 
@@ -75,16 +76,53 @@
       );
   }
 
-  /* "Sidebar" material — heavier blur, slight saturation bump. The signature
-     translucent panel from Finder + Settings. */
+  /* "Sidebar" material — heavier blur, slight saturation bump. Tuned
+     slightly cooler so the silver accents float cleanly on top. */
   .material-sidebar {
     background: linear-gradient(
       180deg,
-      rgba(44, 44, 46, 0.72) 0%,
-      rgba(36, 36, 38, 0.78) 100%
+      rgba(42, 43, 47, 0.74) 0%,
+      rgba(32, 33, 37, 0.80) 100%
     );
-    backdrop-filter: blur(40px) saturate(180%);
-    -webkit-backdrop-filter: blur(40px) saturate(180%);
+    backdrop-filter: blur(40px) saturate(170%);
+    -webkit-backdrop-filter: blur(40px) saturate(170%);
+  }
+
+  /* Brushed-platinum surface — the only place we deliberately step out of
+     flat color. Used on hero accent surfaces (send button, the user-msg
+     bubble) so they read as polished metal rather than printer-toner ink.
+     A subtle top-to-bottom gradient + 1px inset highlight + 1px inset
+     bottom shadow give the brushed-aluminum feel without going chrome-y. */
+  .surface-silver {
+    background: linear-gradient(
+      180deg,
+      #dde0e6 0%,
+      #c8cad0 52%,
+      #b8babf 100%
+    );
+    box-shadow:
+      inset 0 1px 0 0 rgba(255, 255, 255, 0.45),
+      inset 0 -1px 0 0 rgba(0, 0, 0, 0.20),
+      0 1px 2px 0 rgba(0, 0, 0, 0.32);
+    color: #161618;
+  }
+  .surface-silver:hover {
+    background: linear-gradient(
+      180deg,
+      #ebedf1 0%,
+      #d4d6dc 52%,
+      #c2c4ca 100%
+    );
+  }
+  .surface-silver:active {
+    background: linear-gradient(
+      180deg,
+      #c8cad0 0%,
+      #b8babf 100%
+    );
+    box-shadow:
+      inset 0 1px 1px 0 rgba(0, 0, 0, 0.25),
+      0 0 0 0 transparent;
   }
 
   /* "Toolbar / titlebar" material — slightly lighter, used for window chrome. */
