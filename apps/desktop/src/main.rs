@@ -51,6 +51,8 @@ fn main() {
             commands::session::session_chat_load,
             commands::session::session_chat_append,
             commands::session::session_chat_clear,
+            commands::session::session_command_log,
+            commands::session::session_commands_recent,
             commands::git::git_status,
             commands::secrets::secrets_set_api_key,
             commands::secrets::secrets_get_api_key,

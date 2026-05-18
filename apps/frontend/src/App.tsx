@@ -4,6 +4,7 @@ import { TabBar } from './components/TabBar';
 import { ChatPanel } from './components/ChatPanel';
 import { StatusBar } from './components/StatusBar';
 import { SettingsDialog } from './components/SettingsDialog';
+import { CommandPalette } from './components/CommandPalette';
 import { FileTree } from './components/FileTree';
 import { ResizeHandle } from './components/ResizeHandle';
 import { useWorkspace } from './state/workspace';
@@ -22,6 +23,7 @@ export default function App() {
   const hydrateSecrets = useSettings((s) => s.hydrateSecrets);
   const activeTab = tabs.find((t) => t.id === activeTabId);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [historyOpen, setHistoryOpen] = useState(false);
   const sidebarCollapsed = useFiles((s) => s.collapsed);
   const sidebarWidth = useFiles((s) => s.sidebarWidth);
   const chatWidth = useFiles((s) => s.chatWidth);
@@ -56,6 +58,13 @@ export default function App() {
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'b' && !e.shiftKey) {
         e.preventDefault();
         toggleSidebar();
+      }
+      // ⌘R / Ctrl+R — open the command-history palette. Shadows the
+      // shell's reverse-i-search; the in-app palette searches across
+      // every terminal tab the user has ever opened.
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'r' && !e.shiftKey) {
+        e.preventDefault();
+        setHistoryOpen(true);
       }
     };
     window.addEventListener('keydown', onKey);
@@ -141,6 +150,7 @@ export default function App() {
       </div>
 
       <SettingsDialog open={settingsOpen} onClose={() => setSettingsOpen(false)} />
+      <CommandPalette open={historyOpen} onClose={() => setHistoryOpen(false)} />
     </div>
   );
 }

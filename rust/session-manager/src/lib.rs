@@ -17,10 +17,12 @@ use sqlx::SqlitePool;
 use thiserror::Error;
 
 pub mod chat;
+pub mod commands;
 pub mod tabs;
 pub mod workspaces;
 
 pub use chat::{ChatConversation, ChatMessage, ChatRole};
+pub use commands::CommandRecord;
 pub use tabs::{Session, SessionState, Tab, TabInput, TabKind};
 pub use workspaces::Workspace;
 

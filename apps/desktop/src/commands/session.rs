@@ -15,8 +15,8 @@
 //!   invoke("session_chat_clear",  { conversationId })        -> ()
 
 use arc_session_manager::{
-    chat, tabs, workspaces, ChatConversation, ChatMessage, ChatRole, SessionState, SessionStore,
-    TabInput, Workspace,
+    chat, commands as cmd_history, tabs, workspaces, ChatConversation, ChatMessage, ChatRole,
+    CommandRecord, SessionState, SessionStore, TabInput, Workspace,
 };
 use serde::{Deserialize, Serialize};
 use tauri::State;
@@ -147,6 +147,40 @@ pub async fn session_chat_clear(
     conversation_id: String,
 ) -> Result<(), String> {
     chat::clear(store.pool(), &conversation_id)
+        .await
+        .map_err(str_err)
+}
+
+// ─── command history ─────────────────────────────────────────────────────
+
+#[tauri::command]
+pub async fn session_command_log(
+    store: State<'_, SessionStore>,
+    session_id: Option<String>,
+    tab_id: Option<String>,
+    workspace_id: Option<String>,
+    cwd: Option<String>,
+    command: String,
+) -> Result<i64, String> {
+    cmd_history::append(
+        store.pool(),
+        session_id.as_deref(),
+        tab_id.as_deref(),
+        workspace_id.as_deref(),
+        cwd.as_deref(),
+        &command,
+    )
+    .await
+    .map_err(str_err)
+}
+
+#[tauri::command]
+pub async fn session_commands_recent(
+    store: State<'_, SessionStore>,
+    limit: i64,
+    query: Option<String>,
+) -> Result<Vec<CommandRecord>, String> {
+    cmd_history::recent(store.pool(), limit, query.as_deref())
         .await
         .map_err(str_err)
 }

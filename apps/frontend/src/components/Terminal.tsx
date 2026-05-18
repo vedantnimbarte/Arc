@@ -11,6 +11,7 @@ import {
   ptyResize,
   ptySpawn,
   ptyWrite,
+  sessionCommandLog,
   type PtyId,
 } from '../lib/tauri';
 import { useFiles } from '../state/files';
@@ -107,9 +108,9 @@ export function Terminal({ sessionKey }: Props) {
 
     const boot = async () => {
       if (!isTauri) {
-        term.writeln('\x1b[38;2;10;132;255m  arc \x1b[0m\x1b[2mrunning outside Tauri — PTY disabled.\x1b[0m');
-        term.writeln('\x1b[2m       Run \x1b[0m\x1b[38;2;10;132;255mpnpm tauri:dev\x1b[0m\x1b[2m to attach a real shell.\x1b[0m');
-        term.write('\r\n\x1b[38;2;10;132;255m›\x1b[0m ');
+        term.writeln('\x1b[38;2;212;214;220m  arc \x1b[0m\x1b[2mrunning outside Tauri — PTY disabled.\x1b[0m');
+        term.writeln('\x1b[2m       Run \x1b[0m\x1b[38;2;212;214;220mpnpm tauri:dev\x1b[0m\x1b[2m to attach a real shell.\x1b[0m');
+        term.write('\r\n\x1b[38;2;212;214;220m›\x1b[0m ');
         return;
       }
       try {
@@ -156,8 +157,64 @@ export function Terminal({ sessionKey }: Props) {
           return true; // we handled the OSC
         });
 
+        // Command capture (V0, pre-OSC-133):
+        //   * Append printable + tab chars to a buffer.
+        //   * Backspace pops a char.
+        //   * Enter flushes the buffer to the command_history table.
+        //   * ^C clears the buffer (user cancelled, never ran).
+        //   * Escape sequences (arrows, etc.) are skipped.
+        // This *does* capture lines typed at interactive prompts (less,
+        // vim, ssh password) — that's the price of not having OSC 133;
+        // V1 will scope this properly via shell-side hooks.
+        let cmdBuffer = '';
         term.onData((data) => {
           if (ptyId) ptyWrite(ptyId, data).catch(() => {});
+
+          // Handle each char in `data` separately so a fast paste of
+          // "ls\rgit status\r" splits into two commands.
+          for (let i = 0; i < data.length; i++) {
+            const ch = data[i]!;
+            const code = ch.charCodeAt(0);
+            if (ch === '\r' || ch === '\n') {
+              const trimmed = cmdBuffer.trim();
+              cmdBuffer = '';
+              if (trimmed.length === 0) continue;
+              const { activeTabId } = useWorkspace.getState();
+              const { sessionId } = useWorkspace.getState();
+              const cwd = useFiles.getState().root;
+              void sessionCommandLog({
+                sessionId: sessionId ?? null,
+                tabId: activeTabId,
+                workspaceId: null,
+                cwd: cwd ?? null,
+                command: trimmed,
+              }).catch(() => {});
+            } else if (code === 0x7f || code === 0x08) {
+              // DEL / BS — back over a char (or no-op if buffer empty).
+              if (cmdBuffer.length > 0) cmdBuffer = cmdBuffer.slice(0, -1);
+            } else if (code === 0x03) {
+              // ^C — abort
+              cmdBuffer = '';
+            } else if (code === 0x1b) {
+              // ESC — start of an escape sequence; skip the whole
+              // sequence by jumping to the next non-CSI/SS3 char.
+              // A correct CSI parser is overkill here; the common cases
+              // (`\x1b[A`, `\x1b[B`, etc.) are 2–3 chars total. Skip
+              // through `[` and one trailing letter.
+              const next = data[i + 1];
+              if (next === '[' || next === 'O') {
+                i += 1;
+                while (i + 1 < data.length) {
+                  const c = data[i + 1]!.charCodeAt(0);
+                  i += 1;
+                  // CSI final byte is in 0x40-0x7e range.
+                  if (c >= 0x40 && c <= 0x7e) break;
+                }
+              }
+            } else if (code >= 0x20 || ch === '\t') {
+              cmdBuffer += ch;
+            }
+          }
         });
 
         term.onResize(({ cols, rows }) => {

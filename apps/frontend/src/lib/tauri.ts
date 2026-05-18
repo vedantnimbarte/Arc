@@ -319,6 +319,44 @@ export async function sessionChatClear(conversationId: string): Promise<void> {
   await invoke('session_chat_clear', { conversationId });
 }
 
+// Command history
+
+export interface CommandRecord {
+  id: number;
+  session_id: string | null;
+  tab_id: string | null;
+  workspace_id: string | null;
+  cwd: string | null;
+  command: string;
+  started_at: number;
+  finished_at: number | null;
+  exit_code: number | null;
+}
+
+export interface CommandLogReq {
+  sessionId: string | null;
+  tabId: string | null;
+  workspaceId: string | null;
+  cwd: string | null;
+  command: string;
+}
+
+export async function sessionCommandLog(req: CommandLogReq): Promise<number> {
+  // Spread into a plain object so TS sees the Record<string, unknown> shape
+  // that Tauri's invoke args require.
+  return invoke<number>('session_command_log', { ...req });
+}
+
+export async function sessionCommandsRecent(
+  limit: number,
+  query?: string | null,
+): Promise<CommandRecord[]> {
+  return invoke<CommandRecord[]>('session_commands_recent', {
+    limit,
+    query: query ?? null,
+  });
+}
+
 // ----- Git introspection ------------------------------------------------
 
 export interface GitInfo {
