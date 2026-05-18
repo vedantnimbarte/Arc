@@ -7,6 +7,7 @@ mod commands;
 use arc_session_manager::SessionStore;
 use commands::fs::WatchState;
 use commands::llm::LlmState;
+use commands::mcp::McpState;
 use commands::pty::PtyState;
 use tauri::Manager;
 use tracing_subscriber::EnvFilter;
@@ -27,6 +28,7 @@ fn main() {
         .manage(PtyState::default())
         .manage(LlmState::default())
         .manage(WatchState::default())
+        .manage(McpState::default())
         .invoke_handler(tauri::generate_handler![
             commands::pty::pty_spawn,
             commands::pty::pty_write,
@@ -59,6 +61,10 @@ fn main() {
             commands::secrets::secrets_get_api_key,
             commands::secrets::secrets_delete_api_key,
             commands::agent::agent_run,
+            commands::mcp::mcp_connect,
+            commands::mcp::mcp_list_tools,
+            commands::mcp::mcp_call_tool,
+            commands::mcp::mcp_disconnect,
         ])
         .setup(|app| {
             // Open the SQLite store before the window appears so the first

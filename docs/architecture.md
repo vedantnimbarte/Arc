@@ -27,8 +27,8 @@
  │  arc-ai-runtime    ✅ streaming chat providers               │
  │  arc-session-mgr   ✅ persistence (SQLite via sqlx, V0)      │
  │  arc-git           ✅ status (porcelain v2 shell-out, V0)    │
- │  arc-filesystem    ✅ reads + notify watcher (V0)            │
- │  arc-agent-runtime ⛔ planner/executor/memory                │
+ │  arc-filesystem    ✅ reads + notify watcher + search (V0)   │
+ │  arc-agent-runtime ✅ Anthropic tool-using agent (V0)        │
  └──────────────────────────────────────────────────────────────┘
 ```
 
@@ -120,6 +120,8 @@ In priority order:
 
 1. ~~**Persistence** (arc-session-manager): SQLite schema, restore tabs on launch.~~ ✅ Done (V0) — sqlx-backed `SessionStore`, workspaces / tabs / chat history persist, schema reserves `command_history` and `agent_runs` for later phases.
 2. ~~**Real AI providers**: OpenAI + Anthropic + Ollama.~~ ✅ Done — Rust-side in `rust/ai-runtime`, driven by `llm_*` commands.
-3. **Command blocks**: parse xterm output into structured "command + output" blocks (Warp's signature feature). Needs shell integration via OSC 133. Will fill the `command_history` table.
+3. **Command blocks**: ~~parse xterm output into structured "command + output" blocks (Warp's signature feature). Needs shell integration via OSC 133. Will fill the `command_history` table.~~ 🟡 V0 done — input-only capture via `command_history`, ⌃R history palette. Full OSC 133 with output + exit codes is V1.
 4. ~~**Editor**: CodeMirror tab kind with file open/save commands.~~ ✅ Done — `apps/frontend/src/components/Editor.tsx` + `fs_read_file` / `fs_write_file`.
-5. **Agent runtime v0**: a single coding agent that can read/write files and run shell commands, gated behind explicit user approval. Will fill the `agent_runs` table.
+5. **Agent runtime v0**: ~~a single coding agent that can read/write files and run shell commands, gated behind explicit user approval. Will fill the `agent_runs` table.~~ 🟡 V0 done — Anthropic tool-using agent with read-only tools (`fs_read_file`, `fs_search`), `/agent` chat command, runs persisted to `agent_runs`. Write/shell tools + approval gating land with V1.
+6. **MCP client v0**: 🟡 V0 done — stdio-transport JSON-RPC client via `mcp_*` commands; `/mcp` chat commands for connect/list/call/disconnect. Wiring into the agent runtime tool set comes with V1.
+7. **File search v0**: 🟡 V0 done — walk-based content search via `fs_search`, ⌘P palette. Tantivy persistent index swaps in when repo size justifies it.

@@ -2,7 +2,16 @@ import { useEffect, useRef, useState } from 'react';
 import { ArrowUp, Sparkles, Trash2, Square } from 'lucide-react';
 import { useChat } from '../state/chat';
 import { useSettings, PROVIDER_LABELS } from '../state/settings';
-import { agentRun, isTauri, llmStream, type LlmMessage } from '../lib/tauri';
+import {
+  agentRun,
+  isTauri,
+  llmStream,
+  mcpCallTool,
+  mcpConnect,
+  mcpDisconnect,
+  mcpListTools,
+  type LlmMessage,
+} from '../lib/tauri';
 import { useFiles } from '../state/files';
 import { cn } from '../lib/cn';
 
@@ -36,6 +45,14 @@ export function ChatPanel() {
     // configured provider via the path below.
     if (text.startsWith('/agent ') || text === '/agent') {
       await runAgent(text.replace(/^\/agent\s*/, '').trim());
+      return;
+    }
+
+    // `/mcp <subcommand>` — exercise the stdio MCP client. V0 is manual;
+    // configurable servers + auto-injection into the agent runtime come
+    // with V1.
+    if (text.startsWith('/mcp')) {
+      await runMcp(text);
       return;
     }
 
@@ -163,6 +180,92 @@ export function ChatPanel() {
         }
       },
     );
+  }
+
+  async function runMcp(raw: string) {
+    setInput('');
+    append({ role: 'user', content: raw });
+    if (!isTauri) {
+      append({ role: 'system', content: 'MCP runs in the Tauri shell only. Launch via `pnpm tauri:dev`.' });
+      return;
+    }
+
+    // Tokenize on whitespace, except keep the JSON arg blob intact for `call`.
+    const tokens = raw.trim().split(/\s+/);
+    const sub = tokens[1] ?? 'help';
+    try {
+      if (sub === 'connect') {
+        const id = tokens[2];
+        const command = tokens[3];
+        const args = tokens.slice(4);
+        if (!id || !command) {
+          append({
+            role: 'system',
+            content: 'Usage: `/mcp connect <id> <command> [args...]`',
+          });
+          return;
+        }
+        await mcpConnect(id, command, args);
+        append({ role: 'system', content: `connected MCP server \`${id}\` (${command})` });
+      } else if (sub === 'list') {
+        const id = tokens[2];
+        if (!id) {
+          append({ role: 'system', content: 'Usage: `/mcp list <id>`' });
+          return;
+        }
+        const tools = await mcpListTools(id);
+        if (tools.length === 0) {
+          append({ role: 'system', content: `\`${id}\` exposes no tools.` });
+        } else {
+          const rows = tools
+            .map((t) => `• \`${t.name}\` — ${t.description ?? '(no description)'}`)
+            .join('\n');
+          append({ role: 'system', content: `tools on \`${id}\`:\n${rows}` });
+        }
+      } else if (sub === 'call') {
+        const id = tokens[2];
+        const name = tokens[3];
+        if (!id || !name) {
+          append({
+            role: 'system',
+            content: 'Usage: `/mcp call <id> <tool> <json-args>` — json defaults to `{}`',
+          });
+          return;
+        }
+        // Everything after the tool name is the JSON arg blob; rejoin so
+        // we don't lose spaces inside the object.
+        const jsonBlob = raw.replace(/^\/mcp\s+call\s+\S+\s+\S+\s*/, '').trim() || '{}';
+        let args: unknown;
+        try {
+          args = JSON.parse(jsonBlob);
+        } catch (err) {
+          append({ role: 'system', content: `bad JSON: ${String(err)}` });
+          return;
+        }
+        const out = await mcpCallTool(id, name, args);
+        append({ role: 'assistant', content: out || '(empty result)' });
+      } else if (sub === 'disconnect') {
+        const id = tokens[2];
+        if (!id) {
+          append({ role: 'system', content: 'Usage: `/mcp disconnect <id>`' });
+          return;
+        }
+        await mcpDisconnect(id);
+        append({ role: 'system', content: `disconnected MCP server \`${id}\`` });
+      } else {
+        append({
+          role: 'system',
+          content:
+            'MCP commands:\n' +
+            '• `/mcp connect <id> <command> [args...]` — spawn + initialize\n' +
+            '• `/mcp list <id>` — list tools\n' +
+            '• `/mcp call <id> <tool> <json>` — invoke a tool\n' +
+            '• `/mcp disconnect <id>` — kill the server',
+        });
+      }
+    } catch (err) {
+      append({ role: 'system', content: `mcp error: ${String(err)}` });
+    }
   }
 
   async function stop() {

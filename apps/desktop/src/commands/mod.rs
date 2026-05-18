@@ -2,6 +2,7 @@ pub mod agent;
 pub mod fs;
 pub mod git;
 pub mod llm;
+pub mod mcp;
 pub mod pty;
 pub mod secrets;
 pub mod session;

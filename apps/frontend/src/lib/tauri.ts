@@ -180,6 +180,30 @@ export async function agentRun(
   };
 }
 
+// ----- MCP client -------------------------------------------------------
+
+export interface McpTool {
+  name: string;
+  description?: string | null;
+  inputSchema?: unknown;
+}
+
+export async function mcpConnect(id: string, command: string, args: string[]): Promise<void> {
+  await invoke('mcp_connect', { id, command, args });
+}
+
+export async function mcpListTools(id: string): Promise<McpTool[]> {
+  return invoke<McpTool[]>('mcp_list_tools', { id });
+}
+
+export async function mcpCallTool(id: string, name: string, args: unknown): Promise<string> {
+  return invoke<string>('mcp_call_tool', { id, name, args });
+}
+
+export async function mcpDisconnect(id: string): Promise<void> {
+  await invoke('mcp_disconnect', { id });
+}
+
 // ----- LLM streaming -----------------------------------------------------
 
 export type LlmProvider = 'openai' | 'anthropic' | 'ollama';

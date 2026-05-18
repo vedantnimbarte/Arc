@@ -41,15 +41,15 @@ rust/          Cargo workspace members consumed by apps/desktop.
   ai-runtime/      ✅ Streaming chat providers (OpenAI, Anthropic, Ollama)
                    behind one `Provider` trait. Driven by `llm_*` commands.
   session-manager/ ✅ SQLite-backed `SessionStore` (sqlx) — workspaces, tabs,
-                   chat history. DB lives at `<data_dir>/arc/arc.db`.
-                   Driven by `session_*` commands. Schema also reserves
-                   `command_history` and `agent_runs` tables for later phases.
-  agent-runtime/   stub — agent execution.
+                   chat history, command history, agent runs. DB at
+                   `<data_dir>/arc/arc.db`. Driven by `session_*` commands.
+  agent-runtime/   ✅ V0 — Anthropic tool-using coding agent with read-only
+                   tools (`fs_read_file`, `fs_search`). `Tool` trait + multi-
+                   step run loop. Write/exec tools + approval gating in V1.
   filesystem/      ✅ read_dir / read_file / write_file / pick_folder /
                    default_root / parent + a notify-backed recursive
-                   Watcher (debounced ~150 ms). Driven by `fs_*` commands;
-                   the desktop side is now a thin delegation layer.
-                   Tantivy-backed search lands with memory/search.
+                   Watcher (debounced ~150 ms) + walk-based content search.
+                   Driven by `fs_*` commands; tantivy index swaps in later.
   git/             ✅ V0 status (branch, ahead/behind, dirty + counts) by
                    shelling out to `git status --porcelain=v2 --branch`.
                    Driven by `git_status`. gix-backed diff/blame/log later.
@@ -81,7 +81,7 @@ cargo check --workspace
 
 ## Key conventions
 
-- **Tauri command names**: `<area>_<verb>` snake_case. Today: `pty_*` (spawn/write/resize/kill), `llm_*` (stream/cancel), `fs_*` (default_root, parent, read_dir, pick_folder, read_file, write_file, watch_start, watch_stop), `session_*` (load, save_tabs, set_workspace, workspaces_list, workspace_upsert, workspace_delete, chat_load, chat_append, chat_clear), `git_status`, `secrets_*` (set_api_key, get_api_key, delete_api_key).
+- **Tauri command names**: `<area>_<verb>` snake_case. Today: `pty_*` (spawn/write/resize/kill), `llm_*` (stream/cancel), `fs_*` (default_root, parent, read_dir, pick_folder, read_file, write_file, watch_start, watch_stop, search), `session_*` (load, save_tabs, set_workspace, workspaces_list, workspace_upsert, workspace_delete, chat_load, chat_append, chat_clear, command_log, commands_recent), `git_status`, `secrets_*` (set_api_key, get_api_key, delete_api_key), `agent_run`, `mcp_*` (connect, list_tools, call_tool, disconnect).
 - **Event topics**: `<area>://<verb>/<id>`, e.g. `pty://data/<uuid>`, `llm://chunk/<id>`, `llm://done/<id>`, `fs://change/<watchId>`. The frontend's `lib/tauri.ts` exposes typed wrappers — use those, don't hand-roll `invoke`/`listen` in components.
 - **State**: Zustand stores in `apps/frontend/src/state/*` — one per concern (`workspace`, `chat`, `settings`, `files`). Components don't reach across stores. `workspace` and `chat` hydrate from SQLite via `session_*` and debounce-write on changes; `settings` and `files` persist to localStorage via `zustand/middleware`.
 - **Styling**: Tailwind, dark-first. Theme tokens are in `apps/frontend/tailwind.config.ts` (`bg-base`, `fg-base`, `accent`, etc.). Don't hardcode hex colors in components.
@@ -105,6 +105,10 @@ cargo check --workspace
 | MCP, plugins      | ⛔ stub        | Placeholder packages                                                    |
 | Bundling / icons  | ✅ real         | Icons regenerated from `apps/desktop/icons/source.png` via `@tauri-apps/cli icon`. |
 | API key storage   | ✅ real         | Per-provider keys live in the OS credential vault via the `keyring` crate. `settings.ts` `partialize` strips them from localStorage; `hydrateSecrets()` migrates legacy keys on first launch. |
+| Command history   | ✅ V0           | xterm input lines captured per-tab and persisted to `command_history` (no OSC 133, so output/exit codes are V1). ⌃R opens a fuzzy palette that pastes the selected command into the active terminal. |
+| File search       | ✅ V0           | Walk-on-search across the workspace root via `fs_search`. Skips `node_modules`, `target`, `.git`, etc.; caps files at 256 KiB. ⌘P opens a results palette. Tantivy index replaces the walk later. |
+| Agent runtime     | ✅ V0           | Anthropic tool-using coding agent via `/agent <goal>` in chat. V0 ships read-only tools (`fs_read_file`, `fs_search`); writes / shell / approval gating come with V1. Runs persisted to `agent_runs`. |
+| MCP client        | ✅ V0           | Stdio-transport JSON-RPC client. `/mcp connect|list|call|disconnect` chat commands. Wiring into the agent runtime is V1. |
 
 ## Working in this repo
 
