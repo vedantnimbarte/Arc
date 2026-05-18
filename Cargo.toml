@@ -44,8 +44,9 @@ bytes = "1.7"
 # Native file dialogs
 rfd = "0.15"
 
-# Filesystem watcher
+# Filesystem watcher + walker
 notify = "6"
+walkdir = "2"
 
 # OS credential vault (Keychain / Credential Manager / Secret Service).
 # `apple-native` and `windows-native` use built-in OS APIs with no extra

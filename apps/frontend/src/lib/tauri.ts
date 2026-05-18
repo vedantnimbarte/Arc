@@ -111,6 +111,18 @@ export async function fsWatchStop(watchId: string): Promise<void> {
   await invoke('fs_watch_stop', { watchId });
 }
 
+export interface SearchHit {
+  path: string;
+  name: string;
+  line: number;
+  snippet: string;
+  score: number;
+}
+
+export async function fsSearch(root: string, query: string, limit: number): Promise<SearchHit[]> {
+  return invoke<SearchHit[]>('fs_search', { root, query, limit });
+}
+
 // ----- Secrets (OS credential vault) ------------------------------------
 
 export async function secretsSetApiKey(provider: LlmProvider, key: string): Promise<void> {

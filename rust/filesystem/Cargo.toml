@@ -18,3 +18,4 @@ tracing.workspace = true
 dirs.workspace = true
 rfd.workspace = true
 notify.workspace = true
+walkdir.workspace = true

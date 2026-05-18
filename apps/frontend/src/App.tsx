@@ -7,6 +7,7 @@ import { SettingsDialog } from './components/SettingsDialog';
 import { CommandPalette } from './components/CommandPalette';
 import { FileTree } from './components/FileTree';
 import { ResizeHandle } from './components/ResizeHandle';
+import { SearchPalette } from './components/SearchPalette';
 import { useWorkspace } from './state/workspace';
 import { useFiles } from './state/files';
 import { useSettings } from './state/settings';
@@ -24,6 +25,7 @@ export default function App() {
   const activeTab = tabs.find((t) => t.id === activeTabId);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
+  const [searchOpen, setSearchOpen] = useState(false);
   const sidebarCollapsed = useFiles((s) => s.collapsed);
   const sidebarWidth = useFiles((s) => s.sidebarWidth);
   const chatWidth = useFiles((s) => s.chatWidth);
@@ -65,6 +67,11 @@ export default function App() {
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'r' && !e.shiftKey) {
         e.preventDefault();
         setHistoryOpen(true);
+      }
+      // ⌘P / Ctrl+P — open the workspace file-search palette.
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'p' && !e.shiftKey) {
+        e.preventDefault();
+        setSearchOpen(true);
       }
     };
     window.addEventListener('keydown', onKey);
@@ -151,6 +158,7 @@ export default function App() {
 
       <SettingsDialog open={settingsOpen} onClose={() => setSettingsOpen(false)} />
       <CommandPalette open={historyOpen} onClose={() => setHistoryOpen(false)} />
+      <SearchPalette open={searchOpen} onClose={() => setSearchOpen(false)} />
     </div>
   );
 }

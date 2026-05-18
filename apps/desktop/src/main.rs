@@ -42,6 +42,7 @@ fn main() {
             commands::fs::fs_write_file,
             commands::fs::fs_watch_start,
             commands::fs::fs_watch_stop,
+            commands::fs::fs_search,
             commands::session::session_load,
             commands::session::session_save_tabs,
             commands::session::session_set_workspace,

@@ -8,12 +8,14 @@ pub mod dir;
 pub mod dialog;
 pub mod file;
 pub mod paths;
+pub mod search;
 pub mod watch;
 
 pub use dir::{read_dir, DirEntry};
 pub use dialog::pick_folder;
 pub use file::{read_file, write_file, MAX_EDITOR_BYTES};
 pub use paths::{default_root, parent};
+pub use search::{search as search_files, SearchHit};
 pub use watch::Watcher;
 
 use thiserror::Error;

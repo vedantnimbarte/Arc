@@ -17,7 +17,7 @@
 
 use std::sync::Arc;
 
-use arc_filesystem::{DirEntry, Watcher};
+use arc_filesystem::{DirEntry, SearchHit, Watcher};
 use dashmap::DashMap;
 use tauri::{AppHandle, Emitter, State};
 use uuid::Uuid;
@@ -90,4 +90,14 @@ pub async fn fs_watch_start(
 pub async fn fs_watch_stop(state: State<'_, WatchState>, watch_id: String) -> Result<(), String> {
     state.watchers.remove(&watch_id);
     Ok(())
+}
+
+#[tauri::command]
+pub async fn fs_search(root: String, query: String, limit: usize) -> Result<Vec<SearchHit>, String> {
+    // The walk is sync + blocking on file reads — run on a blocking task
+    // so it doesn't stall the tokio reactor on a large repo.
+    tokio::task::spawn_blocking(move || arc_filesystem::search_files(&root, &query, limit))
+        .await
+        .map_err(|e| format!("search task: {e}"))?
+        .map_err(|e| e.to_string())
 }
