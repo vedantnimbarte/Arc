@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ArrowUp,
   ChevronRight,
@@ -15,6 +15,8 @@ import {
   fsParent,
   fsPickFolder,
   fsReadDir,
+  fsWatchStart,
+  fsWatchStop,
   isTauri,
   ptyWrite,
   type FsEntry,
@@ -50,6 +52,13 @@ export function FileTree() {
 
   /** Map keyed by absolute path → load + expand state. */
   const [nodes, setNodes] = useState<Record<string, NodeState>>({});
+  /** Ref mirrors `nodes` so the watcher callback can read the latest set
+   *  of expanded paths without listing nodes in its dep array (which would
+   *  tear down the watcher on every load). */
+  const nodesRef = useRef(nodes);
+  useEffect(() => {
+    nodesRef.current = nodes;
+  }, [nodes]);
   /** Top-level error (e.g., resolving the default root). */
   const [rootError, setRootError] = useState<string | null>(null);
   const [editing, setEditing] = useState(false);
@@ -106,6 +115,55 @@ export function FileTree() {
   useEffect(() => {
     if (!root) return;
     void ensureLoaded(root);
+  }, [root, ensureLoaded]);
+
+  // Subscribe to filesystem changes under root. Rust debounces to ~150ms;
+  // we add a small JS-side coalesce so a burst lands as a single refresh
+  // pass over the currently-expanded folders.
+  useEffect(() => {
+    if (!isTauri || !root) return;
+    let active = true;
+    let pending: ReturnType<typeof setTimeout> | null = null;
+    let unlisten: (() => void) | null = null;
+    let watchId: string | null = null;
+
+    const refreshExpanded = () => {
+      pending = null;
+      if (!active) return;
+      const paths = Object.entries(nodesRef.current)
+        .filter(([, st]) => st.expanded && st.children)
+        .map(([p]) => p);
+      for (const p of paths) {
+        void ensureLoaded(p, true);
+      }
+    };
+
+    const onChange = () => {
+      if (pending) clearTimeout(pending);
+      pending = setTimeout(refreshExpanded, 120);
+    };
+
+    void fsWatchStart(root, onChange)
+      .then((res) => {
+        if (!active) {
+          // Effect already cleaned up; close the watcher we just opened.
+          res.unlisten();
+          void fsWatchStop(res.watchId);
+          return;
+        }
+        watchId = res.watchId;
+        unlisten = res.unlisten;
+      })
+      .catch(() => {
+        /* Watcher unavailable; tree still works via manual refresh. */
+      });
+
+    return () => {
+      active = false;
+      if (pending) clearTimeout(pending);
+      unlisten?.();
+      if (watchId) void fsWatchStop(watchId);
+    };
   }, [root, ensureLoaded]);
 
   const toggle = useCallback(

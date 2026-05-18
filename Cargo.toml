@@ -44,6 +44,9 @@ bytes = "1.7"
 # Native file dialogs
 rfd = "0.15"
 
+# Filesystem watcher
+notify = "6"
+
 # HTTP / streaming
 reqwest = { version = "0.12", default-features = false, features = ["json", "stream", "rustls-tls"] }
 futures-util = "0.3"

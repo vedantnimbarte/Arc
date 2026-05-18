@@ -91,6 +91,26 @@ export async function fsWriteFile(path: string, content: string): Promise<void> 
   return invoke<void>('fs_write_file', { path, content });
 }
 
+/**
+ * Start watching `path` recursively. Returns a `watchId` and an
+ * `UnlistenFn` for the change-event listener; debounced "something
+ * changed" events fire on `fs://change/<watchId>`. Caller is responsible
+ * for both unlistening AND invoking `fsWatchStop(id)` to release the
+ * notify watcher on the Rust side.
+ */
+export async function fsWatchStart(
+  path: string,
+  onChange: () => void,
+): Promise<{ watchId: string; unlisten: UnlistenFn }> {
+  const watchId = await invoke<string>('fs_watch_start', { path });
+  const unlisten = await listen(`fs://change/${watchId}`, () => onChange());
+  return { watchId, unlisten };
+}
+
+export async function fsWatchStop(watchId: string): Promise<void> {
+  await invoke('fs_watch_stop', { watchId });
+}
+
 // ----- LLM streaming -----------------------------------------------------
 
 export type LlmProvider = 'openai' | 'anthropic' | 'ollama';

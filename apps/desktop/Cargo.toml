@@ -23,10 +23,12 @@ arc-pty = { workspace = true }
 arc-session-manager = { workspace = true }
 arc-agent-runtime = { workspace = true }
 arc-ai-runtime = { workspace = true }
+arc-filesystem = { workspace = true }
 arc-git = { workspace = true }
 dashmap = { workspace = true }
 futures-util = { workspace = true }
 rfd = { workspace = true }
+uuid = { workspace = true }
 
 [features]
 # By default, Tauri sets up a window. Enable `custom-protocol` for release.

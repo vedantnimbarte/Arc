@@ -5,6 +5,7 @@
 mod commands;
 
 use arc_session_manager::SessionStore;
+use commands::fs::WatchState;
 use commands::llm::LlmState;
 use commands::pty::PtyState;
 use tauri::Manager;
@@ -25,6 +26,7 @@ fn main() {
     tauri::Builder::default()
         .manage(PtyState::default())
         .manage(LlmState::default())
+        .manage(WatchState::default())
         .invoke_handler(tauri::generate_handler![
             commands::pty::pty_spawn,
             commands::pty::pty_write,
@@ -38,6 +40,8 @@ fn main() {
             commands::fs::fs_pick_folder,
             commands::fs::fs_read_file,
             commands::fs::fs_write_file,
+            commands::fs::fs_watch_start,
+            commands::fs::fs_watch_stop,
             commands::session::session_load,
             commands::session::session_save_tabs,
             commands::session::session_set_workspace,

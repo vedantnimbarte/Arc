@@ -45,9 +45,11 @@ rust/          Cargo workspace members consumed by apps/desktop.
                    Driven by `session_*` commands. Schema also reserves
                    `command_history` and `agent_runs` tables for later phases.
   agent-runtime/   stub — agent execution.
-  filesystem/      stub — indexing + watch. (Lightweight `fs_*` commands
-                   currently live in apps/desktop/src/commands/fs.rs as a
-                   stopgap until this crate exists.)
+  filesystem/      ✅ read_dir / read_file / write_file / pick_folder /
+                   default_root / parent + a notify-backed recursive
+                   Watcher (debounced ~150 ms). Driven by `fs_*` commands;
+                   the desktop side is now a thin delegation layer.
+                   Tantivy-backed search lands with memory/search.
   git/             ✅ V0 status (branch, ahead/behind, dirty + counts) by
                    shelling out to `git status --porcelain=v2 --branch`.
                    Driven by `git_status`. gix-backed diff/blame/log later.
@@ -79,8 +81,8 @@ cargo check --workspace
 
 ## Key conventions
 
-- **Tauri command names**: `<area>_<verb>` snake_case. Today: `pty_*` (spawn/write/resize/kill), `llm_*` (stream/cancel), `fs_*` (default_root, parent, read_dir, pick_folder, read_file, write_file), `session_*` (load, save_tabs, set_workspace, workspaces_list, workspace_upsert, workspace_delete, chat_load, chat_append, chat_clear), `git_status`.
-- **Event topics**: `<area>://<verb>/<id>`, e.g. `pty://data/<uuid>`, `llm://chunk/<id>`, `llm://done/<id>`. The frontend's `lib/tauri.ts` exposes typed wrappers — use those, don't hand-roll `invoke`/`listen` in components.
+- **Tauri command names**: `<area>_<verb>` snake_case. Today: `pty_*` (spawn/write/resize/kill), `llm_*` (stream/cancel), `fs_*` (default_root, parent, read_dir, pick_folder, read_file, write_file, watch_start, watch_stop), `session_*` (load, save_tabs, set_workspace, workspaces_list, workspace_upsert, workspace_delete, chat_load, chat_append, chat_clear), `git_status`.
+- **Event topics**: `<area>://<verb>/<id>`, e.g. `pty://data/<uuid>`, `llm://chunk/<id>`, `llm://done/<id>`, `fs://change/<watchId>`. The frontend's `lib/tauri.ts` exposes typed wrappers — use those, don't hand-roll `invoke`/`listen` in components.
 - **State**: Zustand stores in `apps/frontend/src/state/*` — one per concern (`workspace`, `chat`, `settings`, `files`). Components don't reach across stores. `workspace` and `chat` hydrate from SQLite via `session_*` and debounce-write on changes; `settings` and `files` persist to localStorage via `zustand/middleware`.
 - **Styling**: Tailwind, dark-first. Theme tokens are in `apps/frontend/tailwind.config.ts` (`bg-base`, `fg-base`, `accent`, etc.). Don't hardcode hex colors in components.
 - **Rust modules**: One feature per crate (`arc-pty`, `arc-agent-runtime`, ...). The desktop app *composes* them; it shouldn't grow business logic of its own.
@@ -95,7 +97,7 @@ cargo check --workspace
 | AI chat           | ✅ real         | OpenAI / Anthropic / Ollama streaming via `rust/ai-runtime`. API keys in Settings (⌘,). |
 | Editor            | ✅ real         | CodeMirror 6, lazy-loaded per tab. Reads/writes via `fs_read_file` / `fs_write_file`; 5 MiB cap, refuses binaries. |
 | File tree         | ✅ real         | Browse + open files, pick root via native dialog, click-to-paste paths into the active terminal. |
-| Filesystem index  | ⛔ stub        | `rust/filesystem` is a placeholder. Lightweight `fs_*` commands live in `apps/desktop/src/commands/fs.rs` until that crate exists. |
+| Filesystem        | ✅ real (V0)   | `rust/filesystem` owns read/dir/file/dialog + a notify-backed recursive Watcher (debounced ~150 ms). FileTree subscribes for the current root and refreshes visible nodes on change. Tantivy index lands with memory/search. |
 | Session persist   | ✅ real (V0)   | sqlx + SQLite via `rust/session-manager`. Workspaces, tabs, and chat history persist. `command_history` and `agent_runs` tables exist but aren't wired yet. |
 | Agent runtime     | ⛔ stub        | Types only                                                              |
 | Git introspection | ✅ real (V0)   | `rust/git` shells out to porcelain v2 for branch + ahead/behind + dirty counts. StatusBar shows the current branch with a dirty dot. Refreshes on root change. |

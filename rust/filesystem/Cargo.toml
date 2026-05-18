@@ -12,4 +12,9 @@ path = "src/lib.rs"
 [dependencies]
 anyhow.workspace = true
 serde.workspace = true
-tokio = { workspace = true, features = ["fs"] }
+thiserror.workspace = true
+tokio = { workspace = true, features = ["fs", "sync", "rt"] }
+tracing.workspace = true
+dirs.workspace = true
+rfd.workspace = true
+notify.workspace = true
