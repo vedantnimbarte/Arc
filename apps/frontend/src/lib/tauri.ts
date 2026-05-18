@@ -111,6 +111,20 @@ export async function fsWatchStop(watchId: string): Promise<void> {
   await invoke('fs_watch_stop', { watchId });
 }
 
+// ----- Secrets (OS credential vault) ------------------------------------
+
+export async function secretsSetApiKey(provider: LlmProvider, key: string): Promise<void> {
+  await invoke('secrets_set_api_key', { provider, key });
+}
+
+export async function secretsGetApiKey(provider: LlmProvider): Promise<string | null> {
+  return invoke<string | null>('secrets_get_api_key', { provider });
+}
+
+export async function secretsDeleteApiKey(provider: LlmProvider): Promise<void> {
+  await invoke('secrets_delete_api_key', { provider });
+}
+
 // ----- LLM streaming -----------------------------------------------------
 
 export type LlmProvider = 'openai' | 'anthropic' | 'ollama';

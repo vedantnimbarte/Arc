@@ -8,6 +8,7 @@ import { FileTree } from './components/FileTree';
 import { ResizeHandle } from './components/ResizeHandle';
 import { useWorkspace } from './state/workspace';
 import { useFiles } from './state/files';
+import { useSettings } from './state/settings';
 import { cn } from './lib/cn';
 
 // CodeMirror is heavy — defer its bundle until a file is actually opened.
@@ -18,6 +19,7 @@ const Editor = lazy(() =>
 export default function App() {
   const { tabs, activeTabId, addTab } = useWorkspace();
   const hydrate = useWorkspace((s) => s.hydrate);
+  const hydrateSecrets = useSettings((s) => s.hydrateSecrets);
   const activeTab = tabs.find((t) => t.id === activeTabId);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const sidebarCollapsed = useFiles((s) => s.collapsed);
@@ -32,6 +34,12 @@ export default function App() {
   useEffect(() => {
     void hydrate();
   }, [hydrate]);
+
+  // Pull API keys out of the OS credential vault into the settings store,
+  // and migrate any legacy plaintext keys out of localStorage on the way.
+  useEffect(() => {
+    void hydrateSecrets();
+  }, [hydrateSecrets]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {

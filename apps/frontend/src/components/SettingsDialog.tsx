@@ -163,7 +163,7 @@ export function SettingsDialog({ open, onClose }: Props) {
                 {!isOllama && (
                   <Section
                     title="API Key"
-                    hint="Stored locally. Will move to the macOS Keychain via Rust before public release."
+                    hint="Stored in the OS credential vault (Keychain on macOS, Credential Manager on Windows, libsecret on Linux). Never written to localStorage."
                   >
                     <div className="group flex items-center gap-2 rounded-lg border border-border-subtle bg-bg-base/60 px-3 py-1.5 focus-within:border-accent/45 focus-within:bg-bg-base/80 focus-within:shadow-focus">
                       <Key size={11} className="text-fg-subtle" />

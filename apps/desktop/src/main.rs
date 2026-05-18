@@ -52,6 +52,9 @@ fn main() {
             commands::session::session_chat_append,
             commands::session::session_chat_clear,
             commands::git::git_status,
+            commands::secrets::secrets_set_api_key,
+            commands::secrets::secrets_get_api_key,
+            commands::secrets::secrets_delete_api_key,
         ])
         .setup(|app| {
             // Open the SQLite store before the window appears so the first

@@ -27,6 +27,7 @@ arc-filesystem = { workspace = true }
 arc-git = { workspace = true }
 dashmap = { workspace = true }
 futures-util = { workspace = true }
+keyring = { workspace = true }
 rfd = { workspace = true }
 uuid = { workspace = true }
 
