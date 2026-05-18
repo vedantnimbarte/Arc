@@ -110,7 +110,6 @@ The desktop crate (`arc-desktop`) is a *thin composition layer* — it owns Taur
 ## What this scaffold deliberately doesn't include
 
 - **No sqlite/sqlx yet.** Will land with the session manager.
-- **No reqwest in ai-runtime.** Real providers will add it; the stub doesn't need HTTP.
 - **No notify/tantivy.** Filesystem indexing is Phase 2.
 - **No plugin runtime.** Phase 4.
 - **No CI.** Add GitHub Actions when the first agent lands.
@@ -120,7 +119,7 @@ The desktop crate (`arc-desktop`) is a *thin composition layer* — it owns Taur
 In priority order:
 
 1. **Persistence** (arc-session-manager): SQLite schema from the spec §11, restore tabs on launch.
-2. **Real AI providers**: OpenAI + Anthropic + Ollama in packages/ai-runtime, with the stub kept as a fallback.
+2. ~~**Real AI providers**: OpenAI + Anthropic + Ollama.~~ ✅ Done — Rust-side in `rust/ai-runtime`, driven by `llm_*` commands.
 3. **Command blocks**: parse xterm output into structured "command + output" blocks (Warp's signature feature). Needs shell integration via OSC 133.
-4. **Editor**: CodeMirror tab kind with file open/save commands.
+4. ~~**Editor**: CodeMirror tab kind with file open/save commands.~~ ✅ Done — `apps/frontend/src/components/Editor.tsx` + `fs_read_file` / `fs_write_file`.
 5. **Agent runtime v0**: a single coding agent that can read/write files and run shell commands, gated behind explicit user approval.

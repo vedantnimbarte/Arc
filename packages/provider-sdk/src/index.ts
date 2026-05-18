@@ -1,7 +1,8 @@
 // Provider abstraction. A "provider" wraps any chat-completion endpoint:
 // OpenAI, Anthropic, Google, OpenRouter, Ollama, LM Studio, vLLM.
 //
-// Implementations live in packages/ai-runtime. This file is the contract.
+// Active implementations are Rust-side in `rust/ai-runtime`. This TS contract
+// is kept for any future in-browser fallback or shared typing.
 
 export interface ProviderInfo {
   id: string;

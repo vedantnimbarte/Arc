@@ -22,7 +22,7 @@ export const useChat = create<ChatState>((set) => ({
       id: 'welcome',
       role: 'system',
       content:
-        'ARC chat is wired to a stub provider. Hook up OpenAI / Anthropic / Ollama in packages/ai-runtime.',
+        'Pick a provider in Settings (⌘,). OpenAI and Anthropic need an API key; Ollama runs locally.',
       ts: Date.now(),
     },
   ],

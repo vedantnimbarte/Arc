@@ -28,8 +28,8 @@ cargo check --workspace
 apps/
   desktop/        Tauri shell (Rust). Depends on rust/* crates.
   frontend/       React + Vite UI. Loaded by Tauri at runtime.
-packages/         Shared TS packages (UI, terminal, editor, agents, ai-runtime, ...).
-rust/             Rust crates (pty, session-manager, agent-runtime, filesystem, git).
+packages/         Shared TS packages (UI, terminal, editor, agents, ...).
+rust/             Rust crates (pty, ai-runtime, session-manager, agent-runtime, filesystem, git).
 docs/             Architecture & decision records.
 ```
 

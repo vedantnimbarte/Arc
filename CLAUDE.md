@@ -25,10 +25,9 @@ apps/
 
 packages/      Pure-TS packages, linked via pnpm workspaces.
   shared/        Cross-package types.
-  provider-sdk/  Provider interface (Provider, ChatRequest, ChatChunk).
-  ai-runtime/    TS stub provider — legacy. Real streaming providers now live
-                 in `rust/ai-runtime`; this package is kept only for the
-                 `Provider` shape and may be removed.
+  provider-sdk/  Provider interface (Provider, ChatRequest, ChatChunk). The
+                 real streaming providers are Rust-side in `rust/ai-runtime`;
+                 this contract is kept for any future TS-side fallback.
   terminal/      Reserved — placeholder until we extract terminal logic out of
                  apps/frontend.
   editor/        Reserved — same idea for the editor.
