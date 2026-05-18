@@ -284,3 +284,23 @@ export async function sessionChatAppend(
 export async function sessionChatClear(conversationId: string): Promise<void> {
   await invoke('session_chat_clear', { conversationId });
 }
+
+// ----- Git introspection ------------------------------------------------
+
+export interface GitInfo {
+  branch: string | null;
+  head_short: string | null;
+  upstream: string | null;
+  ahead: number;
+  behind: number;
+  dirty: boolean;
+  staged: number;
+  unstaged: number;
+  untracked: number;
+  conflicted: number;
+}
+
+/** Returns null when `path` isn't inside a git repo (or git is unavailable). */
+export async function gitStatus(path: string): Promise<GitInfo | null> {
+  return invoke<GitInfo | null>('git_status', { path });
+}

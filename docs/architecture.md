@@ -26,9 +26,9 @@
  │  arc-pty           ✅ portable-pty wrapper                   │
  │  arc-ai-runtime    ✅ streaming chat providers               │
  │  arc-session-mgr   ✅ persistence (SQLite via sqlx, V0)      │
+ │  arc-git           ✅ status (porcelain v2 shell-out, V0)    │
  │  arc-agent-runtime ⛔ planner/executor/memory                │
  │  arc-filesystem    ⛔ index + watcher (notify + tantivy)     │
- │  arc-git           ⛔ git operations                          │
  └──────────────────────────────────────────────────────────────┘
 ```
 

@@ -48,7 +48,9 @@ rust/          Cargo workspace members consumed by apps/desktop.
   filesystem/      stub — indexing + watch. (Lightweight `fs_*` commands
                    currently live in apps/desktop/src/commands/fs.rs as a
                    stopgap until this crate exists.)
-  git/             stub — diff/blame/log.
+  git/             ✅ V0 status (branch, ahead/behind, dirty + counts) by
+                   shelling out to `git status --porcelain=v2 --branch`.
+                   Driven by `git_status`. gix-backed diff/blame/log later.
 
 docs/          Architecture + decisions.
 ```
@@ -77,7 +79,7 @@ cargo check --workspace
 
 ## Key conventions
 
-- **Tauri command names**: `<area>_<verb>` snake_case. Today: `pty_*` (spawn/write/resize/kill), `llm_*` (stream/cancel), `fs_*` (default_root, parent, read_dir, pick_folder, read_file, write_file), `session_*` (load, save_tabs, set_workspace, workspaces_list, workspace_upsert, workspace_delete, chat_load, chat_append, chat_clear).
+- **Tauri command names**: `<area>_<verb>` snake_case. Today: `pty_*` (spawn/write/resize/kill), `llm_*` (stream/cancel), `fs_*` (default_root, parent, read_dir, pick_folder, read_file, write_file), `session_*` (load, save_tabs, set_workspace, workspaces_list, workspace_upsert, workspace_delete, chat_load, chat_append, chat_clear), `git_status`.
 - **Event topics**: `<area>://<verb>/<id>`, e.g. `pty://data/<uuid>`, `llm://chunk/<id>`, `llm://done/<id>`. The frontend's `lib/tauri.ts` exposes typed wrappers — use those, don't hand-roll `invoke`/`listen` in components.
 - **State**: Zustand stores in `apps/frontend/src/state/*` — one per concern (`workspace`, `chat`, `settings`, `files`). Components don't reach across stores. `workspace` and `chat` hydrate from SQLite via `session_*` and debounce-write on changes; `settings` and `files` persist to localStorage via `zustand/middleware`.
 - **Styling**: Tailwind, dark-first. Theme tokens are in `apps/frontend/tailwind.config.ts` (`bg-base`, `fg-base`, `accent`, etc.). Don't hardcode hex colors in components.
@@ -96,7 +98,7 @@ cargo check --workspace
 | Filesystem index  | ⛔ stub        | `rust/filesystem` is a placeholder. Lightweight `fs_*` commands live in `apps/desktop/src/commands/fs.rs` until that crate exists. |
 | Session persist   | ✅ real (V0)   | sqlx + SQLite via `rust/session-manager`. Workspaces, tabs, and chat history persist. `command_history` and `agent_runs` tables exist but aren't wired yet. |
 | Agent runtime     | ⛔ stub        | Types only                                                              |
-| Git introspection | ⛔ stub        | `rust/git` placeholder                                                  |
+| Git introspection | ✅ real (V0)   | `rust/git` shells out to porcelain v2 for branch + ahead/behind + dirty counts. StatusBar shows the current branch with a dirty dot. Refreshes on root change. |
 | Memory / search   | ⛔ stub        | SQLite + embeddings not started                                         |
 | MCP, plugins      | ⛔ stub        | Placeholder packages                                                    |
 | Bundling / icons  | 🟡 placeholder | Icons are auto-generated placeholders. Replace before shipping.         |

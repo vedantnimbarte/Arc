@@ -12,3 +12,5 @@ path = "src/lib.rs"
 [dependencies]
 anyhow.workspace = true
 serde.workspace = true
+thiserror.workspace = true
+tokio = { workspace = true, features = ["process", "rt"] }

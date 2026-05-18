@@ -47,6 +47,7 @@ fn main() {
             commands::session::session_chat_load,
             commands::session::session_chat_append,
             commands::session::session_chat_clear,
+            commands::git::git_status,
         ])
         .setup(|app| {
             // Open the SQLite store before the window appears so the first
