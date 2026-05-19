@@ -143,6 +143,13 @@ export type AgentEvent =
   | { kind: 'text'; text: string }
   | { kind: 'tool_start'; id: string; name: string; input: unknown }
   | { kind: 'tool_result'; id: string; ok: boolean; output: string }
+  | {
+      kind: 'approval_request';
+      approval_id: string;
+      tool_use_id: string;
+      name: string;
+      input: unknown;
+    }
   | { kind: 'done'; summary: string }
   | { kind: 'error'; message: string };
 
@@ -153,6 +160,8 @@ export interface AgentRunReq {
   model: string;
   workspace_root: string | null;
   workspace_id: string | null;
+  /** Persona prompt layered on top of the runtime's default agent prompt. */
+  system_prompt?: string | null;
 }
 
 /**
@@ -178,6 +187,18 @@ export async function agentRun(
     autoCleanup = null;
     unlisten();
   };
+}
+
+/** Resolve a pending tool-approval prompt. Idempotent on the second call
+ *  for the same `approvalId` (e.g. double-click on Approve): the backend
+ *  will reject the duplicate but we swallow the error here. */
+export async function agentDecide(approvalId: string, approve: boolean): Promise<void> {
+  try {
+    await invoke('agent_decide', { approvalId, approve });
+  } catch (err) {
+    // Stale approval id is not user-actionable.
+    console.warn('[agent] decide ignored:', err);
+  }
 }
 
 // ----- MCP client -------------------------------------------------------
@@ -319,6 +340,8 @@ export interface ChatConversation {
   id: string;
   workspace_id: string | null;
   title: string | null;
+  /** UI agent persona id; NULL means the default "Chat Assistant". */
+  agent_id: string | null;
   created_at: number;
   last_message_at: number;
 }
@@ -396,6 +419,51 @@ export async function sessionChatAppend(
 
 export async function sessionChatClear(conversationId: string): Promise<void> {
   await invoke('session_chat_clear', { conversationId });
+}
+
+// Chat sessions (multi-conversation)
+
+export async function sessionChatSessionsList(
+  workspaceId?: string | null,
+): Promise<ChatConversation[]> {
+  return invoke<ChatConversation[]>('session_chat_sessions_list', {
+    workspaceId: workspaceId ?? null,
+  });
+}
+
+export async function sessionChatSessionCreate(
+  workspaceId: string | null,
+  agentId: string | null,
+  title: string | null,
+): Promise<ChatConversation> {
+  return invoke<ChatConversation>('session_chat_session_create', {
+    workspaceId,
+    agentId,
+    title,
+  });
+}
+
+export async function sessionChatSessionUpdate(
+  id: string,
+  patch: { title?: string | null; agentId?: string | null },
+): Promise<void> {
+  await invoke('session_chat_session_update', {
+    id,
+    title: patch.title ?? null,
+    agentId: patch.agentId ?? null,
+  });
+}
+
+export async function sessionChatSessionDelete(id: string): Promise<void> {
+  await invoke('session_chat_session_delete', { id });
+}
+
+export async function sessionChatMessagesLoad(
+  conversationId: string,
+): Promise<PersistedChatMessage[]> {
+  return invoke<PersistedChatMessage[]>('session_chat_messages_load', {
+    conversationId,
+  });
 }
 
 // Command history

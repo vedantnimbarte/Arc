@@ -12,6 +12,8 @@
 
 pub mod tools;
 
+use std::future::Future;
+use std::pin::Pin;
 use std::sync::Arc;
 
 use reqwest::Client;
@@ -20,7 +22,7 @@ use serde_json::{json, Value};
 use thiserror::Error;
 use tokio::sync::mpsc;
 
-pub use tools::{FsReadFileTool, FsSearchTool, Tool};
+pub use tools::{FsReadFileTool, FsSearchTool, FsWriteFileTool, ShellTool, Tool};
 
 #[derive(Debug, Error)]
 pub enum Error {
@@ -56,10 +58,51 @@ pub enum AgentEvent {
         ok: bool,
         output: String,
     },
+    /// The agent wants to run a mutating tool; the UI must call
+    /// `agent_decide(approval_id, approve)` before the runtime proceeds.
+    /// The matching `tool_use_id` is sent so the UI can pin the prompt
+    /// next to the already-rendered `ToolStart` row.
+    ApprovalRequest {
+        approval_id: String,
+        tool_use_id: String,
+        name: String,
+        input: Value,
+    },
     /// The agent has produced a final answer and the run is done.
     Done { summary: String },
     /// Terminal error.
     Error { message: String },
+}
+
+/// Trait that lets the runtime ask "may I run this tool?" without coupling
+/// to a specific transport (event bus, modal dialog, CLI prompt, etc.).
+/// The runtime owns `approval_id` (so it can emit it on the event bus) and
+/// passes it through so the implementation can key its pending map.
+/// Returns `true` to approve, `false` to deny.
+pub trait Approver: Send + Sync {
+    fn request(
+        &self,
+        approval_id: String,
+        tool_name: String,
+        tool_use_id: String,
+        input: Value,
+    ) -> Pin<Box<dyn Future<Output = bool> + Send>>;
+}
+
+/// Approver that auto-approves every request — useful for tests + the
+/// CLI/headless paths where no human is in the loop.
+pub struct AutoApprover;
+
+impl Approver for AutoApprover {
+    fn request(
+        &self,
+        _approval_id: String,
+        _tool_name: String,
+        _tool_use_id: String,
+        _input: Value,
+    ) -> Pin<Box<dyn Future<Output = bool> + Send>> {
+        Box::pin(async { true })
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -73,6 +116,9 @@ pub struct RunConfig {
     /// Workspace root — used as the cwd reference for relative paths the
     /// model emits.
     pub workspace_root: Option<String>,
+    /// Persona system prompt supplied by the UI (e.g. the active agent's
+    /// description). Empty/None falls back to [`DEFAULT_SYSTEM_PROMPT`].
+    pub system_prompt: Option<String>,
 }
 
 impl Default for RunConfig {
@@ -83,11 +129,16 @@ impl Default for RunConfig {
             max_steps: 8,
             max_tokens: 4096,
             workspace_root: None,
+            system_prompt: None,
         }
     }
 }
 
-const SYSTEM_PROMPT: &str = "\
+/// Default coding-agent system prompt. Pinned describing the *capability
+/// envelope* — the read-only tool set, the no-shell rule. The persona prompt
+/// supplied by the UI is appended so a "Review Agent" or "Task Planner"
+/// flavors how the agent talks without re-stating the tool rules.
+pub const DEFAULT_SYSTEM_PROMPT: &str = "\
 You are ARC's coding agent, embedded inside a developer's terminal.
 
 You can call tools to read source files (`fs_read_file`) and search the workspace \
@@ -100,15 +151,31 @@ calling tools and write a short final summary.\
 ";
 
 /// Run the agent against `goal`. Sends [`AgentEvent`]s through `tx` and
-/// returns when the model finishes (or `max_steps` is exhausted).
+/// returns when the model finishes (or `max_steps` is exhausted). Mutating
+/// tools (anything where `Tool::requires_approval()` is `true`) gate on
+/// `approver` before they run.
 pub async fn run(
     goal: &str,
     cfg: RunConfig,
     tools: Vec<Arc<dyn Tool>>,
     tx: mpsc::UnboundedSender<AgentEvent>,
+    approver: Arc<dyn Approver>,
 ) -> Result<()> {
     let client = Client::new();
     let tool_schemas: Vec<Value> = tools.iter().map(|t| t.schema()).collect();
+
+    // Compose the system prompt once: default capability envelope, then the
+    // optional persona overlay separated by a blank line so the model reads
+    // them as distinct sections.
+    let system_prompt = match cfg
+        .system_prompt
+        .as_ref()
+        .map(|s| s.trim())
+        .filter(|s| !s.is_empty())
+    {
+        Some(persona) => format!("{DEFAULT_SYSTEM_PROMPT}\n\n{persona}"),
+        None => DEFAULT_SYSTEM_PROMPT.to_string(),
+    };
 
     // We mirror the Anthropic messages array. Each "user" message can be
     // text OR a list of tool_result blocks; each "assistant" message can
@@ -124,7 +191,7 @@ pub async fn run(
         let req_body = json!({
             "model": cfg.model,
             "max_tokens": cfg.max_tokens,
-            "system": SYSTEM_PROMPT,
+            "system": system_prompt,
             "tools": tool_schemas,
             "messages": messages,
         });
@@ -207,10 +274,33 @@ pub async fn run(
 
             let tool = tools.iter().find(|t| t.name() == name);
             let (ok, output) = match tool {
-                Some(t) => match t.run(input, cfg.workspace_root.as_deref()).await {
-                    Ok(out) => (true, out),
-                    Err(err) => (false, format!("error: {err}")),
-                },
+                Some(t) => {
+                    // Mutating tools must be approved before they run. The
+                    // approver emits the request to the UI and parks until
+                    // the user clicks Approve/Deny.
+                    let allowed = if t.requires_approval() {
+                        let approval_id = uuid::Uuid::new_v4().to_string();
+                        let _ = tx.send(AgentEvent::ApprovalRequest {
+                            approval_id: approval_id.clone(),
+                            tool_use_id: id.clone(),
+                            name: name.clone(),
+                            input: input.clone(),
+                        });
+                        approver
+                            .request(approval_id, name.clone(), id.clone(), input.clone())
+                            .await
+                    } else {
+                        true
+                    };
+                    if !allowed {
+                        (false, "denied by user".to_string())
+                    } else {
+                        match t.run(input, cfg.workspace_root.as_deref()).await {
+                            Ok(out) => (true, out),
+                            Err(err) => (false, format!("error: {err}")),
+                        }
+                    }
+                }
                 None => (false, format!("unknown tool: {name}")),
             };
 

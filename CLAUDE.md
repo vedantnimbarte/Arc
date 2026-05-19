@@ -11,7 +11,7 @@ A Tauri (Rust) + React (TS) desktop app that aims to combine:
 - Multi-agent orchestration with background execution
 - Local + cloud AI providers behind one interface
 
-Phase 1 (current) ships an end-to-end **PTY terminal, file tree, CodeMirror editor, and streaming AI chat** (OpenAI / Anthropic / Ollama). Agent runtime, persistence, indexing, git introspection, and MCP are still scaffolded stubs.
+Phase 1 (current) ships an end-to-end **PTY terminal, file tree, CodeMirror editor, and streaming AI chat** (OpenAI / Anthropic / Ollama). Agent runtime, persistence, indexing, git introspection, and MCP are still scaffolded stubs.l
 
 ## Repo layout
 
@@ -94,20 +94,19 @@ cargo check --workspace
 | ----------------- | -------------- | ---------------------------------------------------------------------- |
 | PTY → xterm.js    | ✅ real         | Default shell (COMSPEC on Win, SHELL elsewhere), resize, kill on close |
 | Tabs / workspace  | ✅ real         | Tab state hydrates from SQLite on launch, debounce-writes on change.   |
-| AI chat           | ✅ real         | OpenAI / Anthropic / Ollama streaming via `rust/ai-runtime`. API keys in Settings (⌘,). |
+| AI chat           | ✅ real         | OpenAI / Anthropic / Ollama streaming via `rust/ai-runtime`. Multi-session + agent personas (Chat Assistant / Task Planner / Sprint Planner / Review Agent / Code Explainer / Debug Buddy + custom agents). API keys in Settings (⌘,). Floating popover (⌘J), `⌘⇧N` new chat, `⌘⇧L` history, `⌘/` agent picker. Sessions persist to SQLite (`chat_conversations` + `chat_messages`); legacy localStorage entries auto-migrate on first launch. |
 | Editor            | ✅ real         | CodeMirror 6, lazy-loaded per tab. Reads/writes via `fs_read_file` / `fs_write_file`; 5 MiB cap, refuses binaries. |
 | File tree         | ✅ real         | Browse + open files, pick root via native dialog, click-to-paste paths into the active terminal. |
 | Filesystem        | ✅ real (V0)   | `rust/filesystem` owns read/dir/file/dialog + a notify-backed recursive Watcher (debounced ~150 ms). FileTree subscribes for the current root and refreshes visible nodes on change. Tantivy index lands with memory/search. |
 | Session persist   | ✅ real (V0)   | sqlx + SQLite via `rust/session-manager`. Workspaces, tabs, and chat history persist. `command_history` and `agent_runs` tables exist but aren't wired yet. |
-| Agent runtime     | ⛔ stub        | Types only                                                              |
+| Agent runtime     | ✅ V1           | Anthropic tool-using coding agent via `/agent <goal>` in chat. Tools: `fs_read_file`, `fs_search`, `fs_write_file`, `shell` (30s default timeout, 16 KiB output cap). Mutating tools gate on an `Approver` — the runtime emits `ApprovalRequest`, the UI shows an inline Approve/Deny tray over the composer, and `agent_decide(approval_id, approve)` resolves the parked oneshot. Closing the popover auto-denies pending prompts. Persona prompt from the active UI agent is layered on top of the runtime's default prompt. Runs persisted to `agent_runs`. |
 | Git introspection | ✅ real (V0)   | `rust/git` shells out to porcelain v2 for branch + ahead/behind + dirty counts. StatusBar shows the current branch with a dirty dot. Refreshes on root change. |
 | Memory / search   | ⛔ stub        | SQLite + embeddings not started                                         |
 | MCP, plugins      | ⛔ stub        | Placeholder packages                                                    |
 | Bundling / icons  | ✅ real         | Icons regenerated from `apps/desktop/icons/source.png` via `@tauri-apps/cli icon`. |
 | API key storage   | ✅ real         | Per-provider keys live in the OS credential vault via the `keyring` crate. `settings.ts` `partialize` strips them from localStorage; `hydrateSecrets()` migrates legacy keys on first launch. |
 | Command history   | ✅ V0           | xterm input lines captured per-tab and persisted to `command_history` (no OSC 133, so output/exit codes are V1). ⌃R opens a fuzzy palette that pastes the selected command into the active terminal. |
-| File search       | ✅ V0           | Walk-on-search across the workspace root via `fs_search`. Skips `node_modules`, `target`, `.git`, etc.; caps files at 256 KiB. ⌘P opens a results palette. Tantivy index replaces the walk later. |
-| Agent runtime     | ✅ V0           | Anthropic tool-using coding agent via `/agent <goal>` in chat. V0 ships read-only tools (`fs_read_file`, `fs_search`); writes / shell / approval gating come with V1. Runs persisted to `agent_runs`. |
+| File search       | ✅ V0           | Walk-on-search across the workspace root via `fs_search`. Skips `node_modules`, `target`, `.git`, etc.; caps files at 256 KiB. ⌘P opens a results palette + a sidebar filter (Search icon in FileTree header). Tantivy index replaces the walk later. |
 | MCP client        | ✅ V0           | Stdio-transport JSON-RPC client. `/mcp connect|list|call|disconnect` chat commands. Wiring into the agent runtime is V1. |
 
 ## Working in this repo

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ArrowUp,
   ChevronRight,
@@ -7,8 +7,10 @@ import {
   FolderSearch,
   Home,
   RefreshCw,
+  Search,
   TerminalSquare,
   AlertCircle,
+  X,
 } from 'lucide-react';
 import {
   fsDefaultRoot,
@@ -61,8 +63,11 @@ export function FileTree() {
   }, [nodes]);
   /** Top-level error (e.g., resolving the default root). */
   const [rootError, setRootError] = useState<string | null>(null);
-  const [editing, setEditing] = useState(false);
-  const [pathDraft, setPathDraft] = useState('');
+  /** Inline filename filter — slides in over the top of the tree when the
+   *  search button in the header is clicked. */
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  const searchInputRef = useRef<HTMLInputElement>(null);
 
   // Resolve a starting root on first mount (or after explicit reset).
   useEffect(() => {
@@ -224,19 +229,33 @@ export function FileTree() {
     // The terminal component reads the latest root from the store on spawn.
   }, [root, addTab]);
 
-  const submitPath = useCallback(() => {
-    const next = pathDraft.trim();
-    if (next) setRoot(next);
-    setEditing(false);
-  }, [pathDraft, setRoot]);
+  const toggleSearch = useCallback(() => {
+    setSearchOpen((open) => {
+      const next = !open;
+      if (next) {
+        // Defer focus to the next paint so the input is mounted.
+        requestAnimationFrame(() => searchInputRef.current?.focus());
+      } else {
+        setSearchQuery('');
+      }
+      return next;
+    });
+  }, []);
 
-  const rootLabel = useMemo(() => (root ? basename(root) || root : '—'), [root]);
+  const closeSearch = useCallback(() => {
+    setSearchOpen(false);
+    setSearchQuery('');
+  }, []);
+
+  const query = searchQuery.trim().toLowerCase();
 
   return (
     <div className="flex h-full min-w-0 flex-col">
-      {/* Header — Finder-style. The clickable title becomes a path input
-          on click so the user can paste/type any directory. */}
-      <div className="flex h-11 shrink-0 items-center gap-1.5 border-b border-border-hairline px-3">
+      {/* Header — Finder-style toolbar. Navigation on the left, view +
+          search controls on the right. The window title used to live in
+          this row but has been moved out so the header reads as pure
+          chrome. */}
+      <div className="flex h-11 shrink-0 items-center gap-1 border-b border-border-hairline px-2.5">
         <button
           onClick={goUp}
           disabled={!root}
@@ -264,33 +283,21 @@ export function FileTree() {
           <FolderSearch size={12} strokeWidth={2.1} />
         </button>
 
-        <div className="ml-0.5 min-w-0 flex-1">
-          {editing ? (
-            <input
-              autoFocus
-              value={pathDraft}
-              onChange={(e) => setPathDraft(e.target.value)}
-              onBlur={submitPath}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') submitPath();
-                if (e.key === 'Escape') setEditing(false);
-              }}
-              className="w-full rounded-md border border-accent/40 bg-bg-base/70 px-1.5 py-0.5 font-mono text-[11px] text-fg-base outline-none shadow-focus"
-            />
-          ) : (
-            <button
-              onClick={() => {
-                setPathDraft(root ?? '');
-                setEditing(true);
-              }}
-              className="block w-full truncate rounded-md px-1.5 py-0.5 text-left font-display text-[12.5px] font-semibold tracking-tight text-fg-base hover:bg-white/[0.04]"
-              title={root ?? ''}
-            >
-              {rootLabel}
-            </button>
-          )}
-        </div>
+        {/* Flexible spacer so the right cluster anchors to the edge. */}
+        <div className="flex-1" />
 
+        <button
+          onClick={toggleSearch}
+          className={cn(
+            'flex h-6 w-6 items-center justify-center rounded-md transition-colors duration-150 hover:bg-white/[0.08] hover:text-fg-base',
+            searchOpen ? 'bg-white/[0.08] text-fg-base' : 'text-fg-muted',
+          )}
+          aria-label="Filter files"
+          aria-pressed={searchOpen}
+          title="Filter visible files"
+        >
+          <Search size={12} strokeWidth={2.1} />
+        </button>
         <button
           onClick={toggleHidden}
           className={cn(
@@ -320,6 +327,47 @@ export function FileTree() {
         </button>
       </div>
 
+      {/* Search bar — animates in via grid-rows trick (max-height transitions
+          require a hardcoded height; grid-rows 0fr → 1fr lets the inner
+          content drive the size). Auto-focused on open, Esc closes. */}
+      <div
+        className={cn(
+          'grid shrink-0 overflow-hidden border-b border-border-hairline transition-[grid-template-rows,opacity] duration-200 ease-apple',
+          searchOpen ? 'grid-rows-[1fr] opacity-100' : 'grid-rows-[0fr] opacity-0',
+        )}
+        aria-hidden={!searchOpen}
+      >
+        <div className="min-h-0">
+          <div className="flex items-center gap-1.5 px-2.5 py-2">
+            <div className="flex flex-1 items-center gap-1.5 rounded-md border border-white/[0.05] bg-black/[0.22] px-2 py-1 focus-within:border-accent/40 focus-within:shadow-focus">
+              <Search size={11} strokeWidth={2.1} className="shrink-0 text-fg-subtle" />
+              <input
+                ref={searchInputRef}
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Escape') {
+                    e.preventDefault();
+                    closeSearch();
+                  }
+                }}
+                placeholder="Filter files"
+                className="selectable min-w-0 flex-1 bg-transparent font-display text-[12px] tracking-tight text-fg-base placeholder:text-fg-subtle focus:outline-none"
+              />
+              {searchQuery && (
+                <button
+                  onClick={() => setSearchQuery('')}
+                  className="flex h-4 w-4 items-center justify-center rounded-full text-fg-subtle transition-colors hover:bg-white/[0.10] hover:text-fg-base"
+                  aria-label="Clear filter"
+                >
+                  <X size={9} strokeWidth={2.4} />
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      </div>
+
       {/* Tree */}
       <div className="selectable flex-1 overflow-auto px-1.5 py-2">
         {rootError && <ErrorRow message={rootError} />}
@@ -335,6 +383,7 @@ export function FileTree() {
             depth={0}
             nodes={nodes}
             showHidden={showHidden}
+            query={query}
             onToggle={toggle}
             onPaste={pasteIntoActiveTerminal}
             onOpenFile={openFile}
@@ -350,6 +399,7 @@ function TreeChildren({
   depth,
   nodes,
   showHidden,
+  query,
   onToggle,
   onPaste,
   onOpenFile,
@@ -358,6 +408,7 @@ function TreeChildren({
   depth: number;
   nodes: Record<string, NodeState>;
   showHidden: boolean;
+  query: string;
   onToggle: (path: string) => void;
   onPaste: (snippet: string) => void | Promise<void>;
   onOpenFile: (path: string) => string;
@@ -372,12 +423,22 @@ function TreeChildren({
   }
   if (!state?.children) return null;
 
-  const visible = state.children.filter((e) => showHidden || !e.hidden);
+  const visible = state.children.filter((e) => {
+    if (!showHidden && e.hidden) return false;
+    if (!query) return true;
+    if (e.name.toLowerCase().includes(query)) return true;
+    // Keep ancestors visible when a descendant matches, but only across the
+    // already-loaded slice of the tree — unloaded folders aren't searched.
+    if (e.kind === 'dir' && hasDescendantMatch(e.path, nodes, query, showHidden)) {
+      return true;
+    }
+    return false;
+  });
 
   if (visible.length === 0) {
     return depth === 0 ? (
       <div className="px-2 py-1.5 font-display text-[10.5px] italic leading-relaxed text-fg-subtle">
-        empty folder
+        {query ? 'no matches' : 'empty folder'}
       </div>
     ) : null;
   }
@@ -391,6 +452,7 @@ function TreeChildren({
           depth={depth}
           nodes={nodes}
           showHidden={showHidden}
+          query={query}
           onToggle={onToggle}
           onPaste={onPaste}
           onOpenFile={onOpenFile}
@@ -400,11 +462,32 @@ function TreeChildren({
   );
 }
 
+/** Does any loaded descendant of `path` match the (already lowercased)
+ *  query? Bounded by what's currently expanded in the tree. */
+function hasDescendantMatch(
+  path: string,
+  nodes: Record<string, NodeState>,
+  query: string,
+  showHidden: boolean,
+): boolean {
+  const state = nodes[path];
+  if (!state?.children) return false;
+  for (const child of state.children) {
+    if (!showHidden && child.hidden) continue;
+    if (child.name.toLowerCase().includes(query)) return true;
+    if (child.kind === 'dir' && hasDescendantMatch(child.path, nodes, query, showHidden)) {
+      return true;
+    }
+  }
+  return false;
+}
+
 function TreeNode({
   entry,
   depth,
   nodes,
   showHidden,
+  query,
   onToggle,
   onPaste,
   onOpenFile,
@@ -413,6 +496,7 @@ function TreeNode({
   depth: number;
   nodes: Record<string, NodeState>;
   showHidden: boolean;
+  query: string;
   onToggle: (path: string) => void;
   onPaste: (snippet: string) => void | Promise<void>;
   onOpenFile: (path: string) => string;
@@ -524,6 +608,7 @@ function TreeNode({
           depth={depth + 1}
           nodes={nodes}
           showHidden={showHidden}
+          query={query}
           onToggle={onToggle}
           onPaste={onPaste}
           onOpenFile={onOpenFile}

@@ -5,6 +5,7 @@
 mod commands;
 
 use arc_session_manager::SessionStore;
+use commands::agent::AgentApprovals;
 use commands::fs::WatchState;
 use commands::llm::LlmState;
 use commands::mcp::McpState;
@@ -29,6 +30,7 @@ fn main() {
         .manage(LlmState::default())
         .manage(WatchState::default())
         .manage(McpState::default())
+        .manage(AgentApprovals::new())
         .invoke_handler(tauri::generate_handler![
             commands::pty::pty_spawn,
             commands::pty::pty_write,
@@ -54,6 +56,11 @@ fn main() {
             commands::session::session_chat_load,
             commands::session::session_chat_append,
             commands::session::session_chat_clear,
+            commands::session::session_chat_sessions_list,
+            commands::session::session_chat_session_create,
+            commands::session::session_chat_session_update,
+            commands::session::session_chat_session_delete,
+            commands::session::session_chat_messages_load,
             commands::session::session_command_log,
             commands::session::session_commands_recent,
             commands::git::git_status,
@@ -61,6 +68,7 @@ fn main() {
             commands::secrets::secrets_get_api_key,
             commands::secrets::secrets_delete_api_key,
             commands::agent::agent_run,
+            commands::agent::agent_decide,
             commands::mcp::mcp_connect,
             commands::mcp::mcp_list_tools,
             commands::mcp::mcp_call_tool,

@@ -122,12 +122,20 @@ export default {
           from: { opacity: '0', transform: 'translateY(-12px) scale(0.985)' },
           to: { opacity: '1', transform: 'translateY(0) scale(1)' },
         },
+        // Slide-from-right popover entry — used by the assistant floater.
+        // Pairs a horizontal nudge with a touch of scale so the surface
+        // reads as "arriving" rather than fading flat.
+        'popover-in': {
+          from: { opacity: '0', transform: 'translateX(10px) scale(0.98)' },
+          to: { opacity: '1', transform: 'translateX(0) scale(1)' },
+        },
       },
       animation: {
         'pulse-soft': 'pulse-soft 2.4s cubic-bezier(0.4, 0, 0.6, 1) infinite',
         'fade-in': 'fade-in 0.35s cubic-bezier(0.16, 1, 0.3, 1) both',
         'shimmer-cursor': 'shimmer-cursor 1.2s ease-in-out infinite',
         'sheet-in': 'sheet-in 0.32s cubic-bezier(0.22, 1, 0.36, 1) both',
+        'popover-in': 'popover-in 0.28s cubic-bezier(0.22, 1, 0.36, 1) both',
       },
       transitionTimingFunction: {
         'out-soft': 'cubic-bezier(0.16, 1, 0.3, 1)',

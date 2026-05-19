@@ -151,6 +151,69 @@ pub async fn session_chat_clear(
         .map_err(str_err)
 }
 
+// ─── chat sessions (multi-conversation) ──────────────────────────────────
+
+#[tauri::command]
+pub async fn session_chat_sessions_list(
+    store: State<'_, SessionStore>,
+    workspace_id: Option<String>,
+) -> Result<Vec<ChatConversation>, String> {
+    chat::list_conversations(store.pool(), workspace_id.as_deref())
+        .await
+        .map_err(str_err)
+}
+
+#[tauri::command]
+pub async fn session_chat_session_create(
+    store: State<'_, SessionStore>,
+    workspace_id: Option<String>,
+    agent_id: Option<String>,
+    title: Option<String>,
+) -> Result<ChatConversation, String> {
+    chat::create(
+        store.pool(),
+        workspace_id.as_deref(),
+        agent_id.as_deref(),
+        title.as_deref(),
+    )
+    .await
+    .map_err(str_err)
+}
+
+#[tauri::command]
+pub async fn session_chat_session_update(
+    store: State<'_, SessionStore>,
+    id: String,
+    title: Option<String>,
+    agent_id: Option<String>,
+) -> Result<(), String> {
+    chat::update_meta(store.pool(), &id, title.as_deref(), agent_id.as_deref())
+        .await
+        .map_err(str_err)
+}
+
+#[tauri::command]
+pub async fn session_chat_session_delete(
+    store: State<'_, SessionStore>,
+    id: String,
+) -> Result<(), String> {
+    chat::delete_conversation(store.pool(), &id)
+        .await
+        .map_err(str_err)
+}
+
+/// Load just the messages for a specific conversation. Used after switching
+/// active session so we don't refetch every conversation's history.
+#[tauri::command]
+pub async fn session_chat_messages_load(
+    store: State<'_, SessionStore>,
+    conversation_id: String,
+) -> Result<Vec<ChatMessage>, String> {
+    chat::list(store.pool(), &conversation_id)
+        .await
+        .map_err(str_err)
+}
+
 // ─── command history ─────────────────────────────────────────────────────
 
 #[tauri::command]
