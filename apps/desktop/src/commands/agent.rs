@@ -18,10 +18,19 @@ use arc_agent_runtime::{
     ShellTool, Tool,
 };
 use arc_session_manager::{agent as agent_db, SessionStore};
+use async_trait::async_trait;
 use serde::Deserialize;
-use serde_json::Value;
+use serde_json::{json, Value};
 use tauri::{AppHandle, Emitter, State};
 use tokio::sync::{oneshot, Mutex};
+
+use crate::commands::mcp::{McpState, McpTool as McpServerTool};
+
+/// Hard cap on the total number of MCP tools we expose to the agent. Each
+/// tool eats schema tokens in every Anthropic request; keep the budget sane
+/// even if a user has multiple chatty servers connected. Servers are
+/// enumerated in DashMap-iteration order — first N tools win.
+const MCP_TOOL_BUDGET: usize = 32;
 
 /// Global registry of in-flight tool-approval prompts, keyed by the
 /// runtime-generated `approval_id`. The `agent_run` command stashes the
@@ -67,6 +76,163 @@ impl Approver for EventBusApprover {
     }
 }
 
+/// Tool implementation that proxies a single MCP server's tool through the
+/// agent runtime. The runtime stays Tauri-agnostic; this struct holds a
+/// clone of [`McpState`] (which is itself `Arc`-backed internally) so the
+/// agent can route `tools/call` over the same JSON-RPC pipeline the `/mcp`
+/// chat commands use.
+///
+/// All MCP tools require approval — a connected server is effectively
+/// arbitrary code (web fetch, DB query, file write) so we treat every
+/// invocation the same as `shell`.
+struct McpBridgeTool {
+    mcp: McpState,
+    server_id: String,
+    /// MCP-side tool name (what `tools/call` expects).
+    remote_name: String,
+    /// Anthropic-side tool name (`mcp__<server>__<tool>`, sanitized + capped
+    /// at 64 chars per the API's tool-name pattern).
+    exposed_name: String,
+    description: String,
+    input_schema: Value,
+}
+
+impl McpBridgeTool {
+    /// Build the wrapper for a single tool. Returns `None` if no portion of
+    /// the server/tool name survives sanitization (i.e. the model wouldn't
+    /// have anything callable).
+    fn new(mcp: McpState, server_id: String, tool: McpServerTool) -> Option<Self> {
+        let exposed_name = mangle_tool_name(&server_id, &tool.name)?;
+        let description = tool
+            .description
+            .clone()
+            .filter(|d| !d.is_empty())
+            .unwrap_or_else(|| format!("MCP tool `{}` from server `{}`.", tool.name, server_id));
+        let description = format!(
+            "[MCP server `{server_id}`] {description}\n\n\
+             Requires user approval. Output is whatever the server emits \
+             (text blocks concatenated, or pretty-printed JSON if non-text).",
+        );
+        // MCP servers return an arbitrary JSON Schema as inputSchema; pass
+        // it straight through. If the server didn't advertise one, fall
+        // back to an empty object schema so Anthropic still accepts the
+        // tool definition.
+        let input_schema = if tool.input_schema.is_object() {
+            tool.input_schema
+        } else {
+            json!({ "type": "object", "properties": {} })
+        };
+        Some(Self {
+            mcp,
+            server_id,
+            remote_name: tool.name,
+            exposed_name,
+            description,
+            input_schema,
+        })
+    }
+}
+
+#[async_trait]
+impl Tool for McpBridgeTool {
+    fn name(&self) -> &str {
+        &self.exposed_name
+    }
+
+    fn schema(&self) -> Value {
+        json!({
+            "name": self.exposed_name,
+            "description": self.description,
+            "input_schema": self.input_schema,
+        })
+    }
+
+    fn requires_approval(&self) -> bool {
+        true
+    }
+
+    async fn run(&self, input: &Value, _workspace_root: Option<&str>) -> Result<String, String> {
+        self.mcp
+            .call_tool(&self.server_id, &self.remote_name, input.clone())
+            .await
+    }
+}
+
+/// Build a tool name that satisfies Anthropic's `^[a-zA-Z0-9_-]{1,64}$`
+/// constraint. Invalid characters collapse to underscores; if the whole
+/// composed name exceeds 64 bytes we truncate the *tool* portion (the
+/// server prefix is the part the model needs to disambiguate). Returns
+/// `None` if no valid characters survive — that tool just gets skipped.
+fn mangle_tool_name(server_id: &str, tool_name: &str) -> Option<String> {
+    fn sanitize(s: &str) -> String {
+        s.chars()
+            .map(|c| if c.is_ascii_alphanumeric() || c == '_' || c == '-' { c } else { '_' })
+            .collect()
+    }
+    let srv = sanitize(server_id);
+    let tool = sanitize(tool_name);
+    if srv.is_empty() || tool.is_empty() {
+        return None;
+    }
+    const PREFIX: &str = "mcp__";
+    const SEP: &str = "__";
+    const MAX: usize = 64;
+    // Budget for the tool part = MAX - prefix - separator - server name.
+    let fixed = PREFIX.len() + SEP.len() + srv.len();
+    if fixed >= MAX {
+        // Server name alone already overflows; fall back to truncating it.
+        let avail = MAX.saturating_sub(PREFIX.len() + SEP.len() + 1);
+        let srv_trunc = &srv[..srv.len().min(avail)];
+        let tool_trunc = &tool[..tool.len().min(1)];
+        return Some(format!("{PREFIX}{srv_trunc}{SEP}{tool_trunc}"));
+    }
+    let tool_avail = MAX - fixed;
+    let tool_trunc = &tool[..tool.len().min(tool_avail)];
+    Some(format!("{PREFIX}{srv}{SEP}{tool_trunc}"))
+}
+
+/// Enumerate connected MCP servers, list their tools, and produce bridge
+/// tools the agent can call. Failures on a single server are logged and
+/// skipped — one broken server shouldn't kill a run.
+async fn discover_mcp_tools(mcp: &McpState) -> Vec<Arc<dyn Tool>> {
+    let mut out: Vec<Arc<dyn Tool>> = Vec::new();
+    let mut seen_names: std::collections::HashSet<String> = std::collections::HashSet::new();
+    for server_id in mcp.server_ids() {
+        if out.len() >= MCP_TOOL_BUDGET {
+            tracing::warn!(
+                budget = MCP_TOOL_BUDGET,
+                "MCP tool budget reached, skipping remaining servers"
+            );
+            break;
+        }
+        let tools = match mcp.list_tools(&server_id).await {
+            Ok(t) => t,
+            Err(err) => {
+                tracing::warn!(?err, server = %server_id, "mcp list_tools failed");
+                continue;
+            }
+        };
+        for tool in tools {
+            if out.len() >= MCP_TOOL_BUDGET {
+                break;
+            }
+            let Some(bridge) = McpBridgeTool::new(mcp.clone(), server_id.clone(), tool) else {
+                continue;
+            };
+            // Defense in depth: if two servers produce the same mangled
+            // name (e.g. both have a `search` tool and identical id
+            // prefixes after sanitization), keep the first and drop the
+            // duplicate — Anthropic rejects duplicate tool names.
+            if !seen_names.insert(bridge.exposed_name.clone()) {
+                tracing::warn!(name = %bridge.exposed_name, "duplicate MCP tool name, skipping");
+                continue;
+            }
+            out.push(Arc::new(bridge));
+        }
+    }
+    out
+}
+
 #[derive(Debug, Deserialize)]
 pub struct AgentRunReq {
     pub id: String,
@@ -85,6 +251,7 @@ pub struct AgentRunReq {
 pub async fn agent_run(
     store: State<'_, SessionStore>,
     approvals: State<'_, AgentApprovals>,
+    mcp: State<'_, McpState>,
     app: AppHandle,
     req: AgentRunReq,
 ) -> Result<(), String> {
@@ -108,12 +275,23 @@ pub async fn agent_run(
         system_prompt: req.system_prompt,
         ..Default::default()
     };
-    let tools: Vec<Arc<dyn Tool>> = vec![
+    let mut tools: Vec<Arc<dyn Tool>> = vec![
         Arc::new(FsReadFileTool),
         Arc::new(FsSearchTool),
         Arc::new(FsWriteFileTool),
         Arc::new(ShellTool),
     ];
+
+    // Discover currently-connected MCP servers and expose their tools to
+    // the agent. We do this once at run-start so the tool list is stable
+    // for the duration of the run — a server connected mid-run won't show
+    // up until the next /agent invocation.
+    let mcp_clone = mcp.inner().clone();
+    let mcp_tools = discover_mcp_tools(&mcp_clone).await;
+    if !mcp_tools.is_empty() {
+        tracing::info!(count = mcp_tools.len(), "exposed MCP tools to agent");
+        tools.extend(mcp_tools);
+    }
 
     let approver: Arc<dyn Approver> = Arc::new(EventBusApprover {
         pending: approvals.handle(),

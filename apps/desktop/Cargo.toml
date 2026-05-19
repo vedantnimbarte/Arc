@@ -25,6 +25,7 @@ arc-agent-runtime = { workspace = true }
 arc-ai-runtime = { workspace = true }
 arc-filesystem = { workspace = true }
 arc-git = { workspace = true }
+async-trait = { workspace = true }
 dashmap = { workspace = true }
 futures-util = { workspace = true }
 keyring = { workspace = true }

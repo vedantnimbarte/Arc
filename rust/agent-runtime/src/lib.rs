@@ -1,11 +1,13 @@
 //! arc-agent-runtime — a tool-using coding agent.
 //!
-//! V0 scope:
+//! Scope:
 //!   * Anthropic tool API only (well-documented wire format).
-//!   * Read-only tools: `fs_read_file`, `fs_search`. The agent reads code,
-//!     plans changes, and explains them — it does NOT mutate the filesystem
-//!     or run shell commands. Write/exec + approval gating land with V1.
-//!   * Single back-and-forth loop until the model emits a final answer.
+//!   * Built-in tools: `fs_read_file`, `fs_search` (read-only) +
+//!     `fs_write_file`, `shell` (approval-gated via [`Approver`]).
+//!   * External tools (e.g. MCP servers) are supplied by the caller via
+//!     the `tools` argument to [`run`]; the runtime is transport-agnostic.
+//!   * Single back-and-forth loop until the model emits a final answer or
+//!     `max_steps` is exhausted.
 //!
 //! The crate is event-driven: a caller subscribes to an mpsc receiver of
 //! [`AgentEvent`] and drives the run with [`run`].
@@ -134,16 +136,29 @@ impl Default for RunConfig {
     }
 }
 
-/// Default coding-agent system prompt. Pinned describing the *capability
-/// envelope* — the read-only tool set, the no-shell rule. The persona prompt
-/// supplied by the UI is appended so a "Review Agent" or "Task Planner"
-/// flavors how the agent talks without re-stating the tool rules.
+/// Default coding-agent system prompt. Describes the *capability envelope*
+/// — the built-in tools and the approval contract — but stays silent on
+/// MCP-side tools (whose names and purposes vary per connected server, and
+/// which the model discovers from the tool list at request time). The
+/// persona prompt supplied by the UI is appended so a "Review Agent" or
+/// "Task Planner" flavors how the agent talks without re-stating the rules.
 pub const DEFAULT_SYSTEM_PROMPT: &str = "\
 You are ARC's coding agent, embedded inside a developer's terminal.
 
-You can call tools to read source files (`fs_read_file`) and search the workspace \
-(`fs_search`). You CANNOT modify files or run shell commands — when the user needs \
-those, propose the exact change or command for them to run themselves.
+Built-in tools:
+  * `fs_read_file` — read a text file in the workspace.
+  * `fs_search`    — substring-search the workspace.
+  * `fs_write_file` — create or overwrite a file. Requires user approval.
+  * `shell`        — run a one-shot shell command (30s default cap). Requires \
+user approval.
+
+Any additional tools you see whose names begin with `mcp__<server>__` are \
+proxied from MCP servers the user has connected; they also require approval. \
+Read their descriptions before calling.
+
+Before any approval-gated call, say in one sentence what you're about to do \
+and why — that's the prompt the user sees when deciding. Prefer reads and \
+searches first; only write or shell out when you're confident.
 
 Style: be concise. Quote file paths and command names in backticks. Show diffs \
 or code blocks when proposing changes. When the user's goal is achieved, stop \

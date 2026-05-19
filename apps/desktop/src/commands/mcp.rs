@@ -13,8 +13,10 @@
 //!   * No notifications-back from server (we ignore them — V1 surfaces
 //!     log/progress/resource-update events).
 //!
-//! Wiring to the agent runtime is also V1; for V0 the MCP layer is a
-//! standalone capability the user exercises via `/mcp` chat commands.
+//! V1 adds agent-runtime wiring: the `McpState` exposes inherent
+//! `server_ids` / `list_tools` / `call_tool` helpers so `agent_run` can
+//! enumerate connected servers and bridge their tools into the coding
+//! agent's Anthropic tool set (see `commands/agent.rs::McpBridgeTool`).
 
 use std::sync::Arc;
 
@@ -57,6 +59,134 @@ fn err<E: std::fmt::Display>(e: E) -> String {
     e.to_string()
 }
 
+impl McpState {
+    /// IDs of currently-connected servers. Used by the agent runtime to
+    /// enumerate which tool sets to expose to the model.
+    pub fn server_ids(&self) -> Vec<String> {
+        self.servers.iter().map(|kv| kv.key().clone()).collect()
+    }
+
+    pub async fn connect(
+        &self,
+        id: String,
+        command: String,
+        args: Vec<String>,
+    ) -> Result<(), String> {
+        if self.servers.contains_key(&id) {
+            return Err(format!("server `{id}` already connected"));
+        }
+
+        let mut child = Command::new(&command)
+            .args(&args)
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::null())
+            .kill_on_drop(true)
+            .spawn()
+            .map_err(|e| format!("spawn `{command}`: {e}"))?;
+
+        let stdin = child.stdin.take().ok_or("no stdin pipe")?;
+        let stdout = child.stdout.take().ok_or("no stdout pipe")?;
+
+        let server = Arc::new(McpServer {
+            child: Mutex::new(child),
+            io: Mutex::new(McpIo {
+                stdin,
+                stdout: BufReader::new(stdout),
+            }),
+            next_id: Mutex::new(1),
+        });
+
+        let init = json!({
+            "jsonrpc": "2.0",
+            "id": next_id(&server).await,
+            "method": "initialize",
+            "params": {
+                "protocolVersion": "2024-11-05",
+                "capabilities": {},
+                "clientInfo": { "name": "arc-terminal", "version": "0.0.1" }
+            }
+        });
+        request(&server, init).await.map_err(err)?;
+
+        let init_notif = json!({
+            "jsonrpc": "2.0",
+            "method": "notifications/initialized"
+        });
+        notify(&server, init_notif).await.map_err(err)?;
+
+        self.servers.insert(id, server);
+        Ok(())
+    }
+
+    pub async fn list_tools(&self, id: &str) -> Result<Vec<McpTool>, String> {
+        let server = self
+            .servers
+            .get(id)
+            .map(|r| r.clone())
+            .ok_or_else(|| format!("server `{id}` not connected"))?;
+        let req = json!({
+            "jsonrpc": "2.0",
+            "id": next_id(&server).await,
+            "method": "tools/list",
+            "params": {}
+        });
+        let resp = request(&server, req).await.map_err(err)?;
+        let tools = resp
+            .get("result")
+            .and_then(|r| r.get("tools"))
+            .cloned()
+            .unwrap_or(json!([]));
+        serde_json::from_value::<Vec<McpTool>>(tools).map_err(|e| format!("bad tools[] shape: {e}"))
+    }
+
+    pub async fn call_tool(&self, id: &str, name: &str, args: Value) -> Result<String, String> {
+        let server = self
+            .servers
+            .get(id)
+            .map(|r| r.clone())
+            .ok_or_else(|| format!("server `{id}` not connected"))?;
+        let req = json!({
+            "jsonrpc": "2.0",
+            "id": next_id(&server).await,
+            "method": "tools/call",
+            "params": {
+                "name": name,
+                "arguments": args
+            }
+        });
+        let resp = request(&server, req).await.map_err(err)?;
+        // MCP tools return `{ content: [{ type: "text", text: "..." }, ...] }`.
+        // Concatenate the text blocks; for V0 we ignore other block types.
+        let content = resp
+            .get("result")
+            .and_then(|r| r.get("content"))
+            .and_then(|c| c.as_array())
+            .cloned()
+            .unwrap_or_default();
+        let mut out = String::new();
+        for block in content {
+            if let Some(t) = block.get("text").and_then(|t| t.as_str()) {
+                out.push_str(t);
+            }
+        }
+        if out.is_empty() {
+            if let Some(result) = resp.get("result") {
+                return Ok(serde_json::to_string_pretty(result).unwrap_or_default());
+            }
+        }
+        Ok(out)
+    }
+
+    pub async fn disconnect(&self, id: &str) -> Result<(), String> {
+        if let Some((_, server)) = self.servers.remove(id) {
+            let mut child = server.child.lock().await;
+            let _ = child.kill().await;
+        }
+        Ok(())
+    }
+}
+
 #[tauri::command]
 pub async fn mcp_connect(
     state: State<'_, McpState>,
@@ -64,75 +194,12 @@ pub async fn mcp_connect(
     command: String,
     args: Vec<String>,
 ) -> Result<(), String> {
-    if state.servers.contains_key(&id) {
-        return Err(format!("server `{id}` already connected"));
-    }
-
-    let mut child = Command::new(&command)
-        .args(&args)
-        .stdin(std::process::Stdio::piped())
-        .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::null())
-        .kill_on_drop(true)
-        .spawn()
-        .map_err(|e| format!("spawn `{command}`: {e}"))?;
-
-    let stdin = child.stdin.take().ok_or("no stdin pipe")?;
-    let stdout = child.stdout.take().ok_or("no stdout pipe")?;
-
-    let server = Arc::new(McpServer {
-        child: Mutex::new(child),
-        io: Mutex::new(McpIo {
-            stdin,
-            stdout: BufReader::new(stdout),
-        }),
-        next_id: Mutex::new(1),
-    });
-
-    // Initialize handshake.
-    let init = json!({
-        "jsonrpc": "2.0",
-        "id": next_id(&server).await,
-        "method": "initialize",
-        "params": {
-            "protocolVersion": "2024-11-05",
-            "capabilities": {},
-            "clientInfo": { "name": "arc-terminal", "version": "0.0.1" }
-        }
-    });
-    request(&server, init).await.map_err(err)?;
-
-    // `initialized` notification (no id, no response expected).
-    let init_notif = json!({
-        "jsonrpc": "2.0",
-        "method": "notifications/initialized"
-    });
-    notify(&server, init_notif).await.map_err(err)?;
-
-    state.servers.insert(id, server);
-    Ok(())
+    state.connect(id, command, args).await
 }
 
 #[tauri::command]
 pub async fn mcp_list_tools(state: State<'_, McpState>, id: String) -> Result<Vec<McpTool>, String> {
-    let server = state
-        .servers
-        .get(&id)
-        .map(|r| r.clone())
-        .ok_or_else(|| format!("server `{id}` not connected"))?;
-    let req = json!({
-        "jsonrpc": "2.0",
-        "id": next_id(&server).await,
-        "method": "tools/list",
-        "params": {}
-    });
-    let resp = request(&server, req).await.map_err(err)?;
-    let tools = resp
-        .get("result")
-        .and_then(|r| r.get("tools"))
-        .cloned()
-        .unwrap_or(json!([]));
-    serde_json::from_value::<Vec<McpTool>>(tools).map_err(|e| format!("bad tools[] shape: {e}"))
+    state.list_tools(&id).await
 }
 
 #[tauri::command]
@@ -142,52 +209,12 @@ pub async fn mcp_call_tool(
     name: String,
     args: Value,
 ) -> Result<String, String> {
-    let server = state
-        .servers
-        .get(&id)
-        .map(|r| r.clone())
-        .ok_or_else(|| format!("server `{id}` not connected"))?;
-    let req = json!({
-        "jsonrpc": "2.0",
-        "id": next_id(&server).await,
-        "method": "tools/call",
-        "params": {
-            "name": name,
-            "arguments": args
-        }
-    });
-    let resp = request(&server, req).await.map_err(err)?;
-    // MCP tools return `{ content: [{ type: "text", text: "..." }, ...] }`.
-    // Concatenate the text blocks; for V0 we ignore other block types.
-    let content = resp
-        .get("result")
-        .and_then(|r| r.get("content"))
-        .and_then(|c| c.as_array())
-        .cloned()
-        .unwrap_or_default();
-    let mut out = String::new();
-    for block in content {
-        if let Some(t) = block.get("text").and_then(|t| t.as_str()) {
-            out.push_str(t);
-        }
-    }
-    if out.is_empty() {
-        // Tools that emit only structured/binary blocks: fall back to a
-        // pretty-print of the whole result so the user sees something.
-        if let Some(result) = resp.get("result") {
-            return Ok(serde_json::to_string_pretty(result).unwrap_or_default());
-        }
-    }
-    Ok(out)
+    state.call_tool(&id, &name, args).await
 }
 
 #[tauri::command]
 pub async fn mcp_disconnect(state: State<'_, McpState>, id: String) -> Result<(), String> {
-    if let Some((_, server)) = state.servers.remove(&id) {
-        let mut child = server.child.lock().await;
-        let _ = child.kill().await;
-    }
-    Ok(())
+    state.disconnect(&id).await
 }
 
 // ─── JSON-RPC framing helpers ────────────────────────────────────────────

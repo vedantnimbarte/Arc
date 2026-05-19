@@ -368,7 +368,10 @@ export function ChatPanel({ onClose, intent, onIntentConsumed }: ChatPanelProps 
             '• `/mcp connect <id> <command> [args...]` — spawn + initialize\n' +
             '• `/mcp list <id>` — list tools\n' +
             '• `/mcp call <id> <tool> <json>` — invoke a tool\n' +
-            '• `/mcp disconnect <id>` — kill the server',
+            '• `/mcp disconnect <id>` — kill the server\n' +
+            '\n' +
+            'Connected MCP tools are exposed to `/agent` as ' +
+            '`mcp__<id>__<tool>` and require approval per call.',
         });
       }
     } catch (err) {
