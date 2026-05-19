@@ -17,6 +17,7 @@ import {
   type PtyId,
 } from '../lib/tauri';
 import { useFiles } from '../state/files';
+import { useSettings } from '../state/settings';
 import { useWorkspace } from '../state/workspace';
 
 interface Props {
@@ -87,8 +88,13 @@ export function Terminal({ sessionKey }: Props) {
         return;
       }
       try {
+        // Snapshot the picker choice at spawn time. `null` = let Rust
+        // pick the OS default (COMSPEC / $SHELL). Changing the setting
+        // only affects subsequently-opened tabs — existing PTYs keep
+        // running whatever they were started with.
+        const chosenShell = useSettings.getState().defaultShell;
         ptyId = await ptySpawn({
-          shell: null,
+          shell: chosenShell && chosenShell.length > 0 ? chosenShell : null,
           cwd: initialCwd.current ?? null,
           cols: term.cols,
           rows: term.rows,

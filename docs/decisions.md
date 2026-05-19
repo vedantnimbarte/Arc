@@ -81,6 +81,8 @@ ADR-style log. Each entry is a decision we made, the alternatives we rejected, a
 
 **Revisit when:** We add a shell-picker UI. The default for new installs should probably become `pwsh` once Microsoft Store delivery is ubiquitous.
 
+**Update (shell-picker landed):** Settings → Terminal now exposes a per-user override backed by `pty_list_shells` (probes PATH for cmd / powershell / pwsh / bash / nu / wsl on Windows, bash / zsh / fish / nu / sh elsewhere) plus a free-text custom-path field. Persisted as `defaultShell` in the Zustand settings store; `null` falls through to the original `default_shell()` logic, so the OS-default behavior above is preserved for users who never open Settings. The "switch the default to pwsh" question is now a packaging decision rather than a code one — users who prefer pwsh just pick it once.
+
 ---
 
 ## ADR-008 — Stub AI provider in MVP

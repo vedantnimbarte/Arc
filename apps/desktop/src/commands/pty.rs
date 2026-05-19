@@ -1,10 +1,11 @@
 //! Tauri command surface for [`arc_pty::PtyManager`].
 //!
 //! Frontend contract (see apps/frontend/src/lib/tauri.ts):
-//!   invoke("pty_spawn",   { opts: PtySpawnOpts })   -> id
-//!   invoke("pty_write",   { id, data })             -> ()
-//!   invoke("pty_resize",  { id, cols, rows })       -> ()
-//!   invoke("pty_kill",    { id })                   -> ()
+//!   invoke("pty_spawn",       { opts: PtySpawnOpts })   -> id
+//!   invoke("pty_write",       { id, data })             -> ()
+//!   invoke("pty_resize",      { id, cols, rows })       -> ()
+//!   invoke("pty_kill",        { id })                   -> ()
+//!   invoke("pty_list_shells", {})                       -> Vec<ShellInfo>
 //!
 //! Emitted events:
 //!   "pty://data/<id>" -> { id, bytes: number[] }
@@ -12,7 +13,7 @@
 
 use std::sync::Arc;
 
-use arc_pty::{PtyManager, SpawnOptions};
+use arc_pty::{discover_shells, PtyManager, ShellInfo, SpawnOptions};
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, State};
 
@@ -135,4 +136,13 @@ pub async fn pty_resize(
 #[tauri::command]
 pub async fn pty_kill(state: State<'_, PtyState>, id: String) -> Result<(), String> {
     state.manager.kill(&id).map_err(|e| format!("{e:#}"))
+}
+
+/// Enumerate shells the picker can offer. The OS default is flagged via
+/// `is_default`; an empty result means none of the known candidates are on
+/// PATH (e.g. a stripped container image). The UI still lets the user type
+/// a custom path in that case.
+#[tauri::command]
+pub async fn pty_list_shells() -> Result<Vec<ShellInfo>, String> {
+    Ok(discover_shells())
 }

@@ -1,11 +1,21 @@
 import { useEffect, useState } from 'react';
-import { X, Eye, EyeOff, Key, Cpu, Boxes, MessageSquare, SlidersHorizontal } from 'lucide-react';
+import {
+  X,
+  Eye,
+  EyeOff,
+  Key,
+  Cpu,
+  Boxes,
+  MessageSquare,
+  SlidersHorizontal,
+  Terminal as TerminalIcon,
+} from 'lucide-react';
 import {
   PROVIDER_LABELS,
   PROVIDER_MODELS,
   useSettings,
 } from '../state/settings';
-import type { LlmProvider } from '../lib/tauri';
+import { isTauri, ptyListShells, type LlmProvider, type ShellInfo } from '../lib/tauri';
 import { cn } from '../lib/cn';
 
 interface Props {
@@ -21,20 +31,25 @@ const PROVIDER_ICON: Record<LlmProvider, typeof Cpu> = {
   ollama: Boxes,
 };
 
-type Pane = 'providers' | 'prompt';
+type Pane = 'providers' | 'prompt' | 'terminal';
 
 export function SettingsDialog({ open, onClose }: Props) {
   const {
     activeProvider,
     providers,
     systemPrompt,
+    defaultShell,
     setActiveProvider,
     updateProvider,
     setSystemPrompt,
+    setDefaultShell,
   } = useSettings();
 
   const [showKey, setShowKey] = useState(false);
   const [pane, setPane] = useState<Pane>('providers');
+  // Shell discovery is one Tauri call — cache it for the dialog's lifetime.
+  // Reloads on next open (cheap, and picks up newly-installed shells).
+  const [shells, setShells] = useState<ShellInfo[] | null>(null);
 
   useEffect(() => {
     if (!open) return;
@@ -44,6 +59,22 @@ export function SettingsDialog({ open, onClose }: Props) {
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, [open, onClose]);
+
+  useEffect(() => {
+    if (!open || !isTauri || shells !== null) return;
+    let cancelled = false;
+    void ptyListShells()
+      .then((list) => {
+        if (!cancelled) setShells(list);
+      })
+      .catch((err) => {
+        console.warn('[settings] ptyListShells failed:', err);
+        if (!cancelled) setShells([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [open, shells]);
 
   if (!open) return null;
 
@@ -76,6 +107,12 @@ export function SettingsDialog({ open, onClose }: Props) {
               active={pane === 'prompt'}
               onClick={() => setPane('prompt')}
             />
+            <SidebarRow
+              icon={TerminalIcon}
+              label="Terminal"
+              active={pane === 'terminal'}
+              onClick={() => setPane('terminal')}
+            />
           </nav>
 
           <div className="mt-auto p-3 font-display text-[10px] tracking-tight text-fg-subtle">
@@ -87,7 +124,11 @@ export function SettingsDialog({ open, onClose }: Props) {
         <div className="flex min-w-0 flex-1 flex-col">
           <div className="flex h-11 items-center justify-between border-b border-border-hairline bg-bg-chrome/40 px-4 backdrop-blur-md">
             <span className="font-display text-[13px] font-semibold tracking-tight text-fg-base">
-              {pane === 'providers' ? 'Providers' : 'System Prompt'}
+              {pane === 'providers'
+                ? 'Providers'
+                : pane === 'prompt'
+                  ? 'System Prompt'
+                  : 'Terminal'}
             </span>
             <button
               onClick={onClose}
@@ -217,10 +258,134 @@ export function SettingsDialog({ open, onClose }: Props) {
                 />
               </Section>
             )}
+
+            {pane === 'terminal' && (
+              <ShellPicker
+                shells={shells}
+                defaultShell={defaultShell}
+                onPick={setDefaultShell}
+              />
+            )}
           </div>
         </div>
       </div>
     </div>
+  );
+}
+
+function ShellPicker({
+  shells,
+  defaultShell,
+  onPick,
+}: {
+  shells: ShellInfo[] | null;
+  defaultShell: string | null;
+  onPick: (shell: string | null) => void;
+}) {
+  // True when `defaultShell` doesn't match any discovered binary — that
+  // means the user typed a path we couldn't probe. We surface it in the
+  // "Custom" row so it's not invisible.
+  const matchesKnown =
+    defaultShell !== null &&
+    (shells ?? []).some((s) => s.path === defaultShell);
+  const showCustom = defaultShell !== null && !matchesKnown;
+  const [customPath, setCustomPath] = useState(showCustom ? defaultShell : '');
+
+  return (
+    <Section
+      title="Shell"
+      hint="Used for newly-opened terminal tabs. Existing tabs keep running whatever they were started with."
+    >
+      <div className="flex flex-col gap-1.5">
+        <ShellRow
+          active={defaultShell === null}
+          onClick={() => onPick(null)}
+          label="System default"
+          subtitle={
+            shells?.find((s) => s.is_default)?.path ??
+            'COMSPEC on Windows, $SHELL elsewhere'
+          }
+        />
+
+        {shells === null && isTauri && (
+          <p className="px-1 font-display text-[11px] text-fg-subtle">
+            Discovering shells…
+          </p>
+        )}
+
+        {(shells ?? []).map((s) => (
+          <ShellRow
+            key={s.path}
+            active={defaultShell === s.path}
+            onClick={() => onPick(s.path)}
+            label={s.label}
+            subtitle={s.path}
+          />
+        ))}
+
+        <div
+          className={cn(
+            'mt-1 rounded-lg border px-3 py-2 transition-colors',
+            showCustom
+              ? 'border-accent/45 bg-accent-soft/40'
+              : 'border-border-subtle bg-bg-base/40',
+          )}
+        >
+          <div className="mb-1 font-display text-[11px] font-medium tracking-tight text-fg-muted">
+            Custom path
+          </div>
+          <input
+            value={customPath}
+            onChange={(e) => {
+              const v = e.target.value;
+              setCustomPath(v);
+              // Only persist non-empty values; empty input means "fall
+              // back to system default" until the user types something.
+              if (v.trim().length > 0) {
+                onPick(v.trim());
+              } else if (showCustom) {
+                onPick(null);
+              }
+            }}
+            placeholder={
+              navigator.platform.toLowerCase().includes('win')
+                ? 'C:\\Program Files\\…\\shell.exe'
+                : '/usr/local/bin/fish'
+            }
+            className="w-full bg-transparent font-mono text-[12px] text-fg-base placeholder:text-fg-subtle focus:outline-none"
+            autoComplete="off"
+            spellCheck={false}
+          />
+        </div>
+      </div>
+    </Section>
+  );
+}
+
+function ShellRow({
+  active,
+  onClick,
+  label,
+  subtitle,
+}: {
+  active: boolean;
+  onClick: () => void;
+  label: string;
+  subtitle: string;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      className={cn(
+        'flex w-full items-center justify-between rounded-lg border px-3 py-2 text-left transition-all duration-150 ease-apple',
+        active
+          ? 'border-accent/50 bg-accent-soft text-fg-base shadow-glow-sm'
+          : 'border-border-subtle bg-bg-base/40 text-fg-muted hover:border-border-strong hover:text-fg-base',
+      )}
+    >
+      <span className="font-display text-[12.5px] font-medium tracking-tight">{label}</span>
+      <span className="ml-3 truncate font-mono text-[10.5px] text-fg-subtle">{subtitle}</span>
+    </button>
   );
 }
 

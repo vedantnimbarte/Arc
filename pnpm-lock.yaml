@@ -32,6 +32,9 @@ importers:
       '@arc/editor':
         specifier: workspace:*
         version: link:../../packages/editor
+      '@arc/mcp':
+        specifier: workspace:*
+        version: link:../../packages/mcp
       '@arc/terminal':
         specifier: workspace:*
         version: link:../../packages/terminal

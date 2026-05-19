@@ -1,5 +1,8 @@
 import { invoke } from '@tauri-apps/api/core';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
+import type { McpNotification, McpTool } from '@arc/mcp';
+
+export type { McpNotification, McpTool };
 
 export const isTauri = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
 
@@ -36,6 +39,23 @@ export async function ptyResize(id: PtyId, cols: number, rows: number): Promise<
 
 export async function ptyKill(id: PtyId): Promise<void> {
   await invoke('pty_kill', { id });
+}
+
+/** One shell discovered on `PATH`. `is_default` flags the OS default
+ *  (COMSPEC on Windows, `$SHELL` elsewhere). */
+export interface ShellInfo {
+  label: string;
+  path: string;
+  is_default: boolean;
+}
+
+/**
+ * Enumerate known shells available on the user's PATH. Used by the
+ * settings UI to populate the shell picker. The list may be empty on
+ * stripped environments — the picker still allows a custom path.
+ */
+export async function ptyListShells(): Promise<ShellInfo[]> {
+  return invoke<ShellInfo[]>('pty_list_shells');
 }
 
 export async function onPtyData(
@@ -216,12 +236,9 @@ export async function agentDecide(approvalId: string, approve: boolean): Promise
 }
 
 // ----- MCP client -------------------------------------------------------
-
-export interface McpTool {
-  name: string;
-  description?: string | null;
-  inputSchema?: unknown;
-}
+//
+// `McpTool` and `McpNotification` shapes are imported from `@arc/mcp` and
+// re-exported above so existing consumers keep importing from this module.
 
 export async function mcpConnect(id: string, command: string, args: string[]): Promise<void> {
   await invoke('mcp_connect', { id, command, args });
@@ -254,6 +271,19 @@ export async function mcpCallTool(id: string, name: string, args: unknown): Prom
 
 export async function mcpDisconnect(id: string): Promise<void> {
   await invoke('mcp_disconnect', { id });
+}
+
+/**
+ * Subscribe to server-initiated notifications from `id`. Fires for every
+ * notification the transport sees: log messages, progress updates,
+ * resource/tool list-changed pings, etc. Returns an unlisten function.
+ * Payload shape is `McpNotification` (see `@arc/mcp`).
+ */
+export async function onMcpNotification(
+  id: string,
+  handler: (notif: McpNotification) => void,
+): Promise<UnlistenFn> {
+  return listen<McpNotification>(`mcp://notification/${id}`, (e) => handler(e.payload));
 }
 
 // ----- LLM streaming -----------------------------------------------------

@@ -201,3 +201,87 @@ fn default_shell() -> String {
 fn home_var() -> &'static str {
     if cfg!(windows) { "USERPROFILE" } else { "HOME" }
 }
+
+/// One shell discovered on the user's `PATH`. Returned by [`discover_shells`].
+///
+/// `label` is a human-friendly name ("Windows PowerShell", "Zsh"), `path`
+/// is the absolute resolved path (suitable to hand back to [`SpawnOptions`]).
+/// `is_default` marks the entry that matches the platform default returned
+/// by [`default_shell`] (COMSPEC on Windows, $SHELL on Unix).
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct ShellInfo {
+    pub label: String,
+    pub path: String,
+    pub is_default: bool,
+}
+
+/// Probe `PATH` for known shells and return what was found. Pure read —
+/// nothing is spawned, no env is mutated. Order: most common first
+/// (cmd.exe / bash before pwsh / nu) so the picker UI presents a sensible
+/// default list.
+///
+/// Callers should treat the result as advisory: the user can always type
+/// a custom path the picker doesn't surface (PowerShell 7 installed
+/// somewhere off PATH, an exotic shell, etc).
+pub fn discover_shells() -> Vec<ShellInfo> {
+    let candidates: &[(&str, &str)] = if cfg!(windows) {
+        &[
+            ("cmd.exe", "Command Prompt"),
+            ("powershell.exe", "Windows PowerShell"),
+            ("pwsh.exe", "PowerShell 7"),
+            ("bash.exe", "Bash"),
+            ("nu.exe", "Nushell"),
+            ("wsl.exe", "WSL"),
+        ]
+    } else {
+        &[
+            ("bash", "Bash"),
+            ("zsh", "Zsh"),
+            ("fish", "Fish"),
+            ("nu", "Nushell"),
+            ("sh", "Sh"),
+        ]
+    };
+
+    let default = default_shell();
+    // `default_shell()` may return a bare command (`cmd.exe`) on Windows.
+    // Lowercase + filename-only comparison is friendlier than path-equality
+    // for the "is default?" marker.
+    let default_name = std::path::Path::new(&default)
+        .file_name()
+        .and_then(|n| n.to_str())
+        .map(|s| s.to_ascii_lowercase())
+        .unwrap_or_else(|| default.to_ascii_lowercase());
+
+    let path_var = std::env::var_os("PATH").unwrap_or_default();
+    let dirs: Vec<std::path::PathBuf> = std::env::split_paths(&path_var).collect();
+
+    let mut out = Vec::with_capacity(candidates.len());
+    for (exe, label) in candidates {
+        let Some(resolved) = which_in(exe, &dirs) else {
+            continue;
+        };
+        let resolved_str = resolved.to_string_lossy().into_owned();
+        let is_default = exe.to_ascii_lowercase() == default_name;
+        out.push(ShellInfo {
+            label: (*label).to_string(),
+            path: resolved_str,
+            is_default,
+        });
+    }
+    out
+}
+
+/// Resolve `exe` against `dirs` the same way the OS PATH search would —
+/// no spawn, no fancy globbing. On Windows, an explicit extension wins;
+/// otherwise we also try the bare candidate (already includes `.exe` in
+/// our `candidates` table).
+fn which_in(exe: &str, dirs: &[std::path::PathBuf]) -> Option<std::path::PathBuf> {
+    for dir in dirs {
+        let p = dir.join(exe);
+        if p.is_file() {
+            return Some(p);
+        }
+    }
+    None
+}

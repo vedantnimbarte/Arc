@@ -11,6 +11,7 @@
   },
   "dependencies": {
     "@arc/editor": "workspace:*",
+    "@arc/mcp": "workspace:*",
     "@arc/terminal": "workspace:*",
     "@arc/ui": "workspace:*",
     "@codemirror/commands": "^6.7.0",

@@ -17,12 +17,18 @@ export interface Settings {
   activeProvider: LlmProvider;
   providers: Record<LlmProvider, ProviderConfig>;
   systemPrompt: string;
+  /** Path to the shell binary new terminals should spawn. `null` means
+   *  "let the Rust side pick the OS default" (COMSPEC on Windows,
+   *  `$SHELL` elsewhere — same as the historical behavior). Applies to
+   *  newly-opened tabs only; in-flight PTYs aren't restarted. */
+  defaultShell: string | null;
   /** True once hydrateSecrets() has finished — useful for the chat panel
    *  to know it shouldn't prompt "no API key" while keys are still loading. */
   secretsHydrated: boolean;
   setActiveProvider: (id: LlmProvider) => void;
   updateProvider: (id: LlmProvider, patch: Partial<ProviderConfig>) => void;
   setSystemPrompt: (s: string) => void;
+  setDefaultShell: (shell: string | null) => void;
   /** Load API keys from the OS credential vault. If the store still has a
    *  non-empty apiKey from the pre-keyring days, migrate it across and then
    *  let `partialize` strip it from localStorage on the next persist. */
@@ -46,6 +52,7 @@ export const useSettings = create<Settings>()(
       },
       systemPrompt:
         'You are ARC, a helpful AI assistant embedded in a terminal. Keep answers tight, prefer code over prose, and assume the user is a developer.',
+      defaultShell: null,
       secretsHydrated: false,
       setActiveProvider: (id) => set({ activeProvider: id }),
       updateProvider: (id, patch) => {
@@ -65,6 +72,7 @@ export const useSettings = create<Settings>()(
         }
       },
       setSystemPrompt: (s) => set({ systemPrompt: s }),
+      setDefaultShell: (shell) => set({ defaultShell: shell }),
       hydrateSecrets: async () => {
         if (!isTauri) {
           set({ secretsHydrated: true });
@@ -106,7 +114,7 @@ export const useSettings = create<Settings>()(
     }),
     {
       name: 'arc-settings',
-      version: 2,
+      version: 3,
       // Strip apiKey before writing to localStorage — keyring owns it now.
       partialize: (state) =>
         ({
@@ -118,6 +126,7 @@ export const useSettings = create<Settings>()(
             ]),
           ),
           systemPrompt: state.systemPrompt,
+          defaultShell: state.defaultShell,
         }) as Partial<Settings>,
     },
   ),
