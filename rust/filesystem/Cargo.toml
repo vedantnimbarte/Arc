@@ -19,3 +19,6 @@ dirs.workspace = true
 rfd.workspace = true
 notify.workspace = true
 walkdir.workspace = true
+tantivy.workspace = true
+sha2.workspace = true
+parking_lot.workspace = true

@@ -247,3 +247,16 @@ pub async fn session_commands_recent(
         .await
         .map_err(str_err)
 }
+
+/// Finalize a command row once the shell reports it has finished (OSC 133 D).
+#[tauri::command]
+pub async fn session_command_finish(
+    store: State<'_, SessionStore>,
+    id: i64,
+    exit_code: Option<i64>,
+    output_excerpt: Option<String>,
+) -> Result<(), String> {
+    cmd_history::finish(store.pool(), id, exit_code, output_excerpt.as_deref())
+        .await
+        .map_err(str_err)
+}

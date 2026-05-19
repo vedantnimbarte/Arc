@@ -5,6 +5,7 @@ import { HighlightStyle, syntaxHighlighting } from '@codemirror/language';
 import { history, historyKeymap, redo, undo } from '@codemirror/commands';
 import { tags as t } from '@lezer/highlight';
 import { basicSetup } from 'codemirror';
+import { pathToLanguageId } from '@arc/editor';
 import {
   AlertCircle,
   FileWarning,
@@ -278,82 +279,49 @@ function basename(p: string): string {
 }
 
 /**
- * Map filename → CodeMirror language extension. Each branch dynamic-imports
- * the corresponding `@codemirror/lang-*` package so each language ships as
- * its own chunk — viewing a JSON file never loads the Markdown grammar.
+ * Map filename → CodeMirror language extension. The `pathToLanguageId`
+ * helper (in `@arc/editor`) does the pure extension→id mapping; this
+ * function lazy-imports the matching `@codemirror/lang-*` package so each
+ * language ships as its own Vite chunk.
  */
 async function loadLanguage(path: string): Promise<Extension | null> {
-  const lower = path.toLowerCase();
-  const dot = lower.lastIndexOf('.');
-  const ext = dot >= 0 ? lower.slice(dot + 1) : '';
-
-  // Filename overrides for the dotfile-y / no-extension cases.
-  if (lower.endsWith('dockerfile') || lower.endsWith('/dockerfile')) {
-    return null;
-  }
-  if (lower.endsWith('makefile') || lower.endsWith('/makefile')) {
-    return null;
-  }
-
-  switch (ext) {
-    case 'js':
-    case 'mjs':
-    case 'cjs':
+  const id = pathToLanguageId(path);
+  if (id === null || id === 'plain') return null;
+  switch (id) {
+    case 'javascript':
       return (await import('@codemirror/lang-javascript')).javascript({ jsx: false });
-    case 'jsx':
+    case 'javascript-jsx':
       return (await import('@codemirror/lang-javascript')).javascript({ jsx: true });
-    case 'ts':
+    case 'typescript':
       return (await import('@codemirror/lang-javascript')).javascript({ typescript: true });
-    case 'tsx':
+    case 'typescript-jsx':
       return (await import('@codemirror/lang-javascript')).javascript({ jsx: true, typescript: true });
     case 'json':
-    case 'jsonc':
-    case 'json5':
       return (await import('@codemirror/lang-json')).json();
     case 'html':
-    case 'htm':
       return (await import('@codemirror/lang-html')).html();
     case 'css':
-    case 'scss':
-    case 'sass':
-    case 'less':
       return (await import('@codemirror/lang-css')).css();
-    case 'md':
-    case 'mdx':
     case 'markdown':
       return (await import('@codemirror/lang-markdown')).markdown();
-    case 'py':
+    case 'python':
       return (await import('@codemirror/lang-python')).python();
-    case 'rs':
+    case 'rust':
       return (await import('@codemirror/lang-rust')).rust();
-    case 'c':
-    case 'cc':
     case 'cpp':
-    case 'cxx':
-    case 'h':
-    case 'hpp':
-    case 'hh':
       return (await import('@codemirror/lang-cpp')).cpp();
     case 'go':
       return (await import('@codemirror/lang-go')).go();
-    case 'yml':
     case 'yaml':
       return (await import('@codemirror/lang-yaml')).yaml();
     case 'sql':
       return (await import('@codemirror/lang-sql')).sql();
     case 'xml':
-    case 'svg':
       return (await import('@codemirror/lang-xml')).xml();
     case 'php':
       return (await import('@codemirror/lang-php')).php();
     case 'java':
       return (await import('@codemirror/lang-java')).java();
-    case 'toml':
-      // Toml isn't shipped as a first-class lang-* package; fall back to
-      // no syntax for it — basic punctuation + strings still read well.
-      return null;
-    default:
-      return null;
   }
 }
 

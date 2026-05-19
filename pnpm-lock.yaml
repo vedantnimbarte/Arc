@@ -29,6 +29,15 @@ importers:
 
   apps/frontend:
     dependencies:
+      '@arc/editor':
+        specifier: workspace:*
+        version: link:../../packages/editor
+      '@arc/terminal':
+        specifier: workspace:*
+        version: link:../../packages/terminal
+      '@arc/ui':
+        specifier: workspace:*
+        version: link:../../packages/ui
       '@codemirror/commands':
         specifier: ^6.7.0
         version: 6.10.3
@@ -177,6 +186,9 @@ importers:
 
   packages/terminal:
     devDependencies:
+      '@xterm/xterm':
+        specifier: ^5.5.0
+        version: 5.5.0
       typescript:
         specifier: ^5.6.2
         version: 5.9.3

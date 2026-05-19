@@ -3,6 +3,7 @@ import { Terminal as XTerm } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import { WebLinksAddon } from '@xterm/addon-web-links';
 import '@xterm/xterm/css/xterm.css';
+import { XTERM_THEME } from '@arc/terminal';
 import {
   isTauri,
   onPtyData,
@@ -11,6 +12,7 @@ import {
   ptyResize,
   ptySpawn,
   ptyWrite,
+  sessionCommandFinish,
   sessionCommandLog,
   type PtyId,
 } from '../lib/tauri';
@@ -20,35 +22,6 @@ import { useWorkspace } from '../state/workspace';
 interface Props {
   sessionKey: string;
 }
-
-// xterm theme — graphite base, platinum cursor + selection. The ANSI palette
-// stays close to the macOS Terminal defaults so syntax highlighting in `ls`,
-// `git`, etc. still reads correctly; only the accent + cursor shift to silver.
-const THEME = {
-  background: '#161618',
-  foreground: '#eef0f3',
-  cursor: '#d4d6dc',
-  cursorAccent: '#161618',
-  selectionBackground: 'rgba(200, 210, 225, 0.32)',
-
-  black: '#28282a',
-  red: '#ff5252',
-  green: '#3ad28a',
-  yellow: '#f0a958',
-  blue: '#9cb5d4',     // cool steel-blue so `ls` directories still feel "blue"
-  magenta: '#bf9ff2',
-  cyan: '#7ec8d0',
-  white: '#d4d6dc',
-
-  brightBlack: '#6c6c70',
-  brightRed: '#ff7a78',
-  brightGreen: '#65e0a4',
-  brightYellow: '#ffc370',
-  brightBlue: '#c1d2e6',
-  brightMagenta: '#d8b7ff',
-  brightCyan: '#a8d6dc',
-  brightWhite: '#f3f5f8',
-};
 
 export function Terminal({ sessionKey }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -78,7 +51,7 @@ export function Terminal({ sessionKey }: Props) {
       scrollback: 10_000,
       allowTransparency: true,
       smoothScrollDuration: 80,
-      theme: THEME,
+      theme: XTERM_THEME,
     });
     termRef.current = term;
 
@@ -125,9 +98,77 @@ export function Terminal({ sessionKey }: Props) {
           return;
         }
 
+        // OSC 133 shell-integration tracking. We sniff the raw decoded
+        // stream for `\e]133;X[;...]ST` markers so we can pair each command
+        // with its exit code + a short output excerpt. xterm doesn't
+        // render unknown OSCs, so leaving the bytes in the chunk we hand
+        // to `term.write` is harmless.
+        //
+        // Format:
+        //   A — prompt start
+        //   B — command start (right after the prompt — buffer reset)
+        //   C — pre-execution (output begins)
+        //   D[;<exit>] — command finished, optional decimal exit code
+        const OSC_133 = /\x1b\]133;([^\x07\x1b]*)(?:\x07|\x1b\\)/g;
+        const OUTPUT_CAP = 4 * 1024;
+        const osc = { capturing: false, buf: '' };
+        // Hoisted here so both the OSC chunk parser (which finalizes the
+        // row on `D`) and the keystroke loop (which sets it on `\r`)
+        // share the same reference.
+        let lastCommandId: number | null = null;
+        const handleChunkText = (text: string) => {
+          if (!text.includes('\x1b]133;')) {
+            if (osc.capturing) {
+              osc.buf += text;
+              if (osc.buf.length > OUTPUT_CAP) osc.buf = osc.buf.slice(0, OUTPUT_CAP);
+            }
+            return;
+          }
+          let lastIdx = 0;
+          OSC_133.lastIndex = 0;
+          let m: RegExpExecArray | null;
+          while ((m = OSC_133.exec(text)) !== null) {
+            const between = text.slice(lastIdx, m.index);
+            if (osc.capturing && between) {
+              osc.buf += between;
+              if (osc.buf.length > OUTPUT_CAP) osc.buf = osc.buf.slice(0, OUTPUT_CAP);
+            }
+            const fields = m[1]!.split(';');
+            const verb = fields[0] ?? '';
+            if (verb === 'C') {
+              osc.capturing = true;
+              osc.buf = '';
+            } else if (verb === 'D') {
+              osc.capturing = false;
+              const exitStr = fields[1];
+              const exit = exitStr === undefined ? null : Number.parseInt(exitStr, 10);
+              const code = Number.isFinite(exit as number) ? (exit as number) : null;
+              const id = lastCommandId;
+              const excerpt = osc.buf;
+              osc.buf = '';
+              lastCommandId = null;
+              if (id !== null) {
+                void sessionCommandFinish(id, code, excerpt.length > 0 ? excerpt : null).catch(
+                  () => {},
+                );
+              }
+            }
+            lastIdx = m.index + m[0].length;
+          }
+          if (osc.capturing) {
+            const rest = text.slice(lastIdx);
+            if (rest) {
+              osc.buf += rest;
+              if (osc.buf.length > OUTPUT_CAP) osc.buf = osc.buf.slice(0, OUTPUT_CAP);
+            }
+          }
+        };
+
         unlistens.push(
           await onPtyData(ptyId, (chunk) => {
-            term.write(decoder.decode(chunk, { stream: true }));
+            const text = decoder.decode(chunk, { stream: true });
+            handleChunkText(text);
+            term.write(text);
           }),
         );
         unlistens.push(
@@ -157,15 +198,17 @@ export function Terminal({ sessionKey }: Props) {
           return true; // we handled the OSC
         });
 
-        // Command capture (V0, pre-OSC-133):
+        // Command capture: best-effort. If the shell emits OSC 133, the
+        // `D` handler above attaches the exit code; otherwise we still
+        // log the input line.
         //   * Append printable + tab chars to a buffer.
         //   * Backspace pops a char.
         //   * Enter flushes the buffer to the command_history table.
         //   * ^C clears the buffer (user cancelled, never ran).
         //   * Escape sequences (arrows, etc.) are skipped.
-        // This *does* capture lines typed at interactive prompts (less,
-        // vim, ssh password) — that's the price of not having OSC 133;
-        // V1 will scope this properly via shell-side hooks.
+        // Note: this *does* capture lines typed at interactive prompts
+        // (less, vim, ssh password) — without OSC 133 we can't tell
+        // them apart. Shells with shell-integration installed avoid this.
         let cmdBuffer = '';
         term.onData((data) => {
           if (ptyId) ptyWrite(ptyId, data).catch(() => {});
@@ -188,7 +231,11 @@ export function Terminal({ sessionKey }: Props) {
                 workspaceId: null,
                 cwd: cwd ?? null,
                 command: trimmed,
-              }).catch(() => {});
+              })
+                .then((id) => {
+                  lastCommandId = id;
+                })
+                .catch(() => {});
             } else if (code === 0x7f || code === 0x08) {
               // DEL / BS — back over a char (or no-op if buffer empty).
               if (cmdBuffer.length > 0) cmdBuffer = cmdBuffer.slice(0, -1);

@@ -123,6 +123,20 @@ export async function fsSearch(root: string, query: string, limit: number): Prom
   return invoke<SearchHit[]>('fs_search', { root, query, limit });
 }
 
+/**
+ * Build (or rebuild) the persistent tantivy index for `root`. Returns the
+ * number of documents indexed. Subsequent `fsSearch` calls will use the
+ * index automatically — no flag to flip.
+ */
+export async function fsIndexRebuild(root: string): Promise<number> {
+  return invoke<number>('fs_index_rebuild', { root });
+}
+
+/** True when a tantivy index exists on disk for this root. */
+export async function fsIndexStatus(root: string): Promise<boolean> {
+  return invoke<boolean>('fs_index_status', { root });
+}
+
 // ----- Secrets (OS credential vault) ------------------------------------
 
 export async function secretsSetApiKey(provider: LlmProvider, key: string): Promise<void> {
@@ -211,6 +225,23 @@ export interface McpTool {
 
 export async function mcpConnect(id: string, command: string, args: string[]): Promise<void> {
   await invoke('mcp_connect', { id, command, args });
+}
+
+/**
+ * Connect over MCP's Streamable HTTP transport (2025-03-26 spec). The
+ * server URL is POSTed to with JSON-RPC; responses may come back as either
+ * plain `application/json` or an SSE stream — both are handled.
+ */
+export async function mcpConnectHttp(
+  id: string,
+  url: string,
+  headers?: Record<string, string>,
+): Promise<void> {
+  await invoke('mcp_connect_http', {
+    id,
+    url,
+    headers: headers ?? null,
+  });
 }
 
 export async function mcpListTools(id: string): Promise<McpTool[]> {
@@ -504,6 +535,24 @@ export async function sessionCommandsRecent(
   });
 }
 
+/**
+ * Mark a previously-logged command finished. Called when the terminal sees
+ * an OSC 133 `D[;<exit>]` sequence (shell integration). Output excerpt is
+ * an optional buffer of what flowed between OSC 133 `C` and `D`, capped
+ * Rust-side at 4 KiB.
+ */
+export async function sessionCommandFinish(
+  id: number,
+  exitCode: number | null,
+  outputExcerpt: string | null,
+): Promise<void> {
+  await invoke('session_command_finish', {
+    id,
+    exitCode,
+    outputExcerpt,
+  });
+}
+
 // ----- Memory subsystem (workspace-scoped notes) ------------------------
 //
 // `workspaceId` semantics on the Rust side:
@@ -594,6 +643,61 @@ export async function memorySearch(
   });
 }
 
+// ----- Memory vector search (V1) ----------------------------------------
+
+export type EmbedProvider = 'openai' | 'ollama';
+
+export interface MemoryEmbedReq {
+  id: string;
+  provider: EmbedProvider;
+  model: string;
+  apiKey?: string | null;
+  baseUrl?: string | null;
+  /** Text to embed — typically the entry's `content` (caller decides). */
+  text: string;
+}
+
+export interface MemoryVectorSearchReq {
+  workspaceId?: string | null;
+  provider: EmbedProvider;
+  model: string;
+  apiKey?: string | null;
+  baseUrl?: string | null;
+  query: string;
+  limit: number;
+}
+
+export interface VectorHit {
+  entry: MemoryEntry;
+  /** Cosine similarity in [-1, 1]; higher = more relevant. */
+  similarity: number;
+}
+
+/** Compute an embedding for `text` and attach it to an existing entry. */
+export async function memoryEmbedEntry(req: MemoryEmbedReq): Promise<void> {
+  await invoke('memory_embed_entry', {
+    id: req.id,
+    provider: req.provider,
+    model: req.model,
+    apiKey: req.apiKey ?? null,
+    baseUrl: req.baseUrl ?? null,
+    text: req.text,
+  });
+}
+
+/** Embed `query` and rank existing entries by cosine similarity. */
+export async function memoryVectorSearch(req: MemoryVectorSearchReq): Promise<VectorHit[]> {
+  return invoke<VectorHit[]>('memory_vector_search', {
+    workspaceId: req.workspaceId ?? null,
+    provider: req.provider,
+    model: req.model,
+    apiKey: req.apiKey ?? null,
+    baseUrl: req.baseUrl ?? null,
+    query: req.query,
+    limit: req.limit,
+  });
+}
+
 // ----- Git introspection ------------------------------------------------
 
 export interface GitInfo {
@@ -612,4 +716,64 @@ export interface GitInfo {
 /** Returns null when `path` isn't inside a git repo (or git is unavailable). */
 export async function gitStatus(path: string): Promise<GitInfo | null> {
   return invoke<GitInfo | null>('git_status', { path });
+}
+
+export interface GitLogEntry {
+  oid: string;
+  short: string;
+  author: string;
+  email: string;
+  /** Unix seconds (author time). */
+  time: number;
+  subject: string;
+}
+
+export async function gitLog(
+  path: string,
+  limit: number,
+  pathFilter?: string | null,
+): Promise<GitLogEntry[]> {
+  return invoke<GitLogEntry[]>('git_log', {
+    path,
+    limit,
+    pathFilter: pathFilter ?? null,
+  });
+}
+
+export type GitDiffScope = 'worktree' | 'staged' | 'head';
+
+/** Returns the unified-diff text. Empty string when nothing differs. */
+export async function gitDiff(
+  path: string,
+  scope: GitDiffScope,
+  pathFilter?: string | null,
+): Promise<string> {
+  return invoke<string>('git_diff', {
+    path,
+    scope,
+    pathFilter: pathFilter ?? null,
+  });
+}
+
+export interface GitBlameLine {
+  line_number: number;
+  oid: string;
+  short: string;
+  author: string;
+  /** Unix seconds (author time). */
+  time: number;
+  content: string;
+}
+
+export async function gitBlame(
+  path: string,
+  file: string,
+  range?: { start: number; end: number } | null,
+): Promise<GitBlameLine[]> {
+  return invoke<GitBlameLine[]>('git_blame', {
+    path,
+    file,
+    startLine: range?.start ?? null,
+    endLine: range?.end ?? null,
+  });
 }

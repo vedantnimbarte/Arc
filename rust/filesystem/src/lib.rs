@@ -7,6 +7,7 @@
 pub mod dir;
 pub mod dialog;
 pub mod file;
+pub mod index;
 pub mod paths;
 pub mod search;
 pub mod watch;
@@ -14,6 +15,8 @@ pub mod watch;
 pub use dir::{read_dir, DirEntry};
 pub use dialog::pick_folder;
 pub use file::{read_file, write_file, MAX_EDITOR_BYTES};
+pub use index::{is_built as index_is_built, rebuild as index_rebuild, search as index_search,
+    update_paths as index_update_paths, IndexHit};
 pub use paths::{default_root, parent};
 pub use search::{search as search_files, SearchHit};
 pub use watch::Watcher;
@@ -38,6 +41,8 @@ pub enum Error {
     Watch(#[from] notify::Error),
     #[error("dialog task: {0}")]
     Dialog(String),
+    #[error("index error: {0}")]
+    Index(String),
 }
 
 pub type Result<T> = std::result::Result<T, Error>;

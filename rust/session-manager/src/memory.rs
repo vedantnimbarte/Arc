@@ -1,10 +1,14 @@
 //! Memory subsystem — workspace-scoped notes the user (or the agent on
 //! their behalf) saves for later recall.
 //!
-//! V0 ships keyword search via SQLite FTS5 (`memory_fts`). The
-//! `embedding` BLOB column on `memory_entries` is reserved for vector
-//! search; once a provider is wired up we layer cosine similarity over
-//! the same table without a schema change.
+//! V0 shipped keyword search via SQLite FTS5 (`memory_fts`).
+//! V1 layers a vector-search path on top of the same rows: the
+//! `embedding` BLOB column holds a packed `f32[]`, `embedding_model`
+//! records which provider/model produced it, and [`vector_search`]
+//! computes cosine similarity in-process.
+//!
+//! The two retrieval paths are independent — entries without an embedding
+//! still surface via FTS, and vice versa.
 
 use serde::{Deserialize, Serialize};
 use sqlx::SqlitePool;
@@ -116,6 +120,188 @@ pub async fn delete(pool: &SqlitePool, id: &str) -> Result<()> {
         .execute(pool)
         .await?;
     Ok(())
+}
+
+// ─── Vector search (V1) ──────────────────────────────────────────────────
+
+/// Attach (or replace) the embedding for an existing memory entry. `vector`
+/// is serialized as little-endian `f32` bytes; `model` lets vector_search
+/// filter to comparable rows when the workspace contains embeddings from
+/// more than one source.
+pub async fn set_embedding(
+    pool: &SqlitePool,
+    id: &str,
+    model: &str,
+    vector: &[f32],
+) -> Result<()> {
+    let bytes = pack_vector(vector);
+    sqlx::query(
+        "UPDATE memory_entries \
+         SET embedding = ?, embedding_model = ?, embedding_dim = ?, updated_at = ? \
+         WHERE id = ?",
+    )
+    .bind(bytes)
+    .bind(model)
+    .bind(vector.len() as i64)
+    .bind(now_ms())
+    .bind(id)
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
+/// Cosine-similarity search over rows with a stored embedding produced by
+/// the same `model`. Returns `(entry, similarity)` sorted by descending
+/// similarity (1.0 = identical, -1.0 = opposite, 0.0 = orthogonal).
+///
+/// Heavy lifting happens in Rust — SQLite holds the candidate rows but
+/// can't do dot products natively. For workspaces with a few thousand
+/// entries this stays cheap; if it ever stops being cheap we switch to
+/// a vector extension (sqlite-vss / sqlite-vec).
+pub async fn vector_search(
+    pool: &SqlitePool,
+    workspace_id: Option<&str>,
+    model: &str,
+    query: &[f32],
+    limit: i64,
+) -> Result<Vec<(MemoryEntry, f32)>> {
+    if query.is_empty() {
+        return Ok(Vec::new());
+    }
+    let limit = limit.clamp(1, 200);
+    let q_norm = norm(query);
+    if q_norm == 0.0 {
+        return Ok(Vec::new());
+    }
+
+    let rows: Vec<EmbeddingRow> = match workspace_id {
+        Some("__all__") => {
+            sqlx::query_as(EMBED_SQL_ALL)
+                .bind(model)
+                .bind(query.len() as i64)
+                .fetch_all(pool)
+                .await?
+        }
+        Some(ws) => {
+            sqlx::query_as(EMBED_SQL_WS)
+                .bind(model)
+                .bind(query.len() as i64)
+                .bind(ws)
+                .fetch_all(pool)
+                .await?
+        }
+        None => {
+            sqlx::query_as(EMBED_SQL_GLOBAL)
+                .bind(model)
+                .bind(query.len() as i64)
+                .fetch_all(pool)
+                .await?
+        }
+    };
+
+    let mut scored: Vec<(MemoryEntry, f32)> = Vec::with_capacity(rows.len());
+    for row in rows {
+        let vec = match unpack_vector(&row.embedding) {
+            Some(v) if v.len() == query.len() => v,
+            _ => continue,
+        };
+        let sim = cosine_with_norm(&vec, query, q_norm);
+        scored.push((
+            MemoryEntry {
+                id: row.id,
+                workspace_id: row.workspace_id,
+                kind: row.kind,
+                title: row.title,
+                content: row.content,
+                tags: row.tags,
+                source: row.source,
+                created_at: row.created_at,
+                updated_at: row.updated_at,
+            },
+            sim,
+        ));
+    }
+    scored.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+    scored.truncate(limit as usize);
+    Ok(scored)
+}
+
+const EMBED_SQL_ALL: &str = "SELECT id, workspace_id, kind, title, content, tags, source, \
+                                    created_at, updated_at, embedding \
+                             FROM memory_entries \
+                             WHERE embedding IS NOT NULL \
+                               AND embedding_model = ? \
+                               AND embedding_dim = ?";
+
+const EMBED_SQL_WS: &str = "SELECT id, workspace_id, kind, title, content, tags, source, \
+                                   created_at, updated_at, embedding \
+                            FROM memory_entries \
+                            WHERE embedding IS NOT NULL \
+                              AND embedding_model = ? \
+                              AND embedding_dim = ? \
+                              AND workspace_id = ?";
+
+const EMBED_SQL_GLOBAL: &str = "SELECT id, workspace_id, kind, title, content, tags, source, \
+                                       created_at, updated_at, embedding \
+                                FROM memory_entries \
+                                WHERE embedding IS NOT NULL \
+                                  AND embedding_model = ? \
+                                  AND embedding_dim = ? \
+                                  AND workspace_id IS NULL";
+
+fn pack_vector(v: &[f32]) -> Vec<u8> {
+    let mut out = Vec::with_capacity(v.len() * 4);
+    for f in v {
+        out.extend_from_slice(&f.to_le_bytes());
+    }
+    out
+}
+
+fn unpack_vector(bytes: &[u8]) -> Option<Vec<f32>> {
+    if bytes.len() % 4 != 0 {
+        return None;
+    }
+    let mut out = Vec::with_capacity(bytes.len() / 4);
+    for chunk in bytes.chunks_exact(4) {
+        out.push(f32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]));
+    }
+    Some(out)
+}
+
+fn norm(v: &[f32]) -> f32 {
+    v.iter().map(|x| x * x).sum::<f32>().sqrt()
+}
+
+/// Cosine similarity reusing a pre-computed query norm — saves one sqrt
+/// per candidate.
+fn cosine_with_norm(a: &[f32], b: &[f32], b_norm: f32) -> f32 {
+    let mut dot = 0.0f32;
+    let mut a_sq = 0.0f32;
+    for i in 0..a.len() {
+        let av = a[i];
+        let bv = b[i];
+        dot += av * bv;
+        a_sq += av * av;
+    }
+    let a_norm = a_sq.sqrt();
+    if a_norm == 0.0 || b_norm == 0.0 {
+        return 0.0;
+    }
+    dot / (a_norm * b_norm)
+}
+
+#[derive(sqlx::FromRow)]
+struct EmbeddingRow {
+    id: String,
+    workspace_id: Option<String>,
+    kind: String,
+    title: Option<String>,
+    content: String,
+    tags: Option<String>,
+    source: Option<String>,
+    created_at: i64,
+    updated_at: i64,
+    embedding: Vec<u8>,
 }
 
 pub async fn get(pool: &SqlitePool, id: &str) -> Result<Option<MemoryEntry>> {
@@ -530,5 +716,87 @@ mod tests {
         assert_eq!(normalize_tags("foo, bar foo BAR"), "bar, foo");
         assert_eq!(normalize_tags("  "), "");
         assert_eq!(normalize_tags("Alpha"), "alpha");
+    }
+
+    #[test]
+    fn vector_roundtrip() {
+        let v = vec![1.0f32, -0.5, 0.25, 1e-6, 2.0];
+        let packed = pack_vector(&v);
+        let unpacked = unpack_vector(&packed).expect("unpack");
+        assert_eq!(unpacked, v);
+    }
+
+    #[test]
+    fn cosine_basics() {
+        let a = vec![1.0, 0.0, 0.0];
+        let b = vec![1.0, 0.0, 0.0];
+        let c = vec![0.0, 1.0, 0.0];
+        let d = vec![-1.0, 0.0, 0.0];
+        assert!((cosine_with_norm(&a, &b, norm(&b)) - 1.0).abs() < 1e-6);
+        assert!(cosine_with_norm(&a, &c, norm(&c)).abs() < 1e-6);
+        assert!((cosine_with_norm(&a, &d, norm(&d)) + 1.0).abs() < 1e-6);
+    }
+
+    #[tokio::test]
+    async fn vector_search_ranks_by_similarity() {
+        let store = fresh_store().await;
+        // Three entries — alpha is closest to the query (same direction),
+        // beta orthogonal, gamma opposite.
+        let alpha = save(store.pool(), None, None, Some("alpha"), "a", None, None)
+            .await
+            .expect("save alpha");
+        let beta = save(store.pool(), None, None, Some("beta"), "b", None, None)
+            .await
+            .expect("save beta");
+        let gamma = save(store.pool(), None, None, Some("gamma"), "c", None, None)
+            .await
+            .expect("save gamma");
+
+        set_embedding(store.pool(), &alpha.id, "test-model", &[1.0, 0.0, 0.0])
+            .await
+            .expect("set alpha embedding");
+        set_embedding(store.pool(), &beta.id, "test-model", &[0.0, 1.0, 0.0])
+            .await
+            .expect("set beta embedding");
+        set_embedding(store.pool(), &gamma.id, "test-model", &[-1.0, 0.0, 0.0])
+            .await
+            .expect("set gamma embedding");
+
+        let hits = vector_search(
+            store.pool(),
+            Some("__all__"),
+            "test-model",
+            &[1.0, 0.0, 0.0],
+            10,
+        )
+        .await
+        .expect("search");
+        assert_eq!(hits.len(), 3);
+        assert_eq!(hits[0].0.id, alpha.id, "alpha should rank first");
+        assert!((hits[0].1 - 1.0).abs() < 1e-6);
+        assert!(hits[2].0.id == gamma.id, "gamma (-1 similarity) should rank last");
+    }
+
+    #[tokio::test]
+    async fn vector_search_filters_by_model_and_dim() {
+        let store = fresh_store().await;
+        let a = save(store.pool(), None, None, None, "a", None, None)
+            .await
+            .expect("save");
+        let b = save(store.pool(), None, None, None, "b", None, None)
+            .await
+            .expect("save");
+        set_embedding(store.pool(), &a.id, "model-a", &[1.0, 0.0, 0.0])
+            .await
+            .expect("set");
+        set_embedding(store.pool(), &b.id, "model-b", &[1.0, 0.0, 0.0])
+            .await
+            .expect("set");
+
+        let only_a = vector_search(store.pool(), None, "model-a", &[1.0, 0.0, 0.0], 10)
+            .await
+            .expect("search");
+        assert_eq!(only_a.len(), 1);
+        assert_eq!(only_a[0].0.id, a.id);
     }
 }

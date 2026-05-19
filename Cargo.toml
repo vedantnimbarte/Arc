@@ -48,6 +48,10 @@ rfd = "0.15"
 notify = "6"
 walkdir = "2"
 
+# Full-text indexing — used by `arc-filesystem::index` to back fs_search.
+tantivy = { version = "0.22", default-features = false, features = ["mmap", "stopwords"] }
+sha2 = "0.10"
+
 # OS credential vault (Keychain / Credential Manager / Secret Service).
 # `apple-native` and `windows-native` use built-in OS APIs with no extra
 # system deps; on Linux `sync-secret-service` shells out to libsecret.

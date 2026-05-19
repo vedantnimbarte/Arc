@@ -309,3 +309,298 @@ fn resolve_path(raw: &str, workspace_root: Option<&str>) -> PathBuf {
         None => p,
     }
 }
+
+// ─── V2 tools (still read-only or scoped writes) ──────────────────────────
+
+pub struct FsListDirTool;
+
+#[async_trait]
+impl Tool for FsListDirTool {
+    fn name(&self) -> &str {
+        "fs_list_dir"
+    }
+
+    fn schema(&self) -> Value {
+        json!({
+            "name": "fs_list_dir",
+            "description":
+                "List entries inside a directory (one level deep). Returns name + kind \
+                 (`dir` / `file` / `symlink`). Use this to discover what's in a folder \
+                 before reading specific files.",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "path": {
+                        "type": "string",
+                        "description": "Absolute path or path relative to the workspace root."
+                    }
+                },
+                "required": ["path"]
+            }
+        })
+    }
+
+    async fn run(&self, input: &Value, workspace_root: Option<&str>) -> Result<String, String> {
+        let raw = input
+            .get("path")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| "missing `path`".to_string())?;
+        let resolved = resolve_path(raw, workspace_root);
+        let path = resolved.clone();
+        let entries = tokio::task::spawn_blocking(move || arc_filesystem::read_dir(&path))
+            .await
+            .map_err(|e| format!("task: {e}"))?
+            .map_err(|e| format!("read_dir {}: {e}", resolved.display()))?;
+        if entries.is_empty() {
+            return Ok("(empty)".to_string());
+        }
+        let mut out = String::new();
+        for e in entries {
+            out.push_str(&format!("{}\t{}\n", e.kind, e.name));
+        }
+        Ok(out)
+    }
+}
+
+/// Surgical find/replace within an existing file. Avoids round-tripping the
+/// entire file through `fs_write_file` for small changes — much cheaper in
+/// tokens and produces a smaller diff for the user to approve.
+pub struct FsEditTool;
+
+#[async_trait]
+impl Tool for FsEditTool {
+    fn name(&self) -> &str {
+        "fs_edit"
+    }
+
+    fn schema(&self) -> Value {
+        json!({
+            "name": "fs_edit",
+            "description":
+                "Replace one or more occurrences of an exact substring inside an existing \
+                 file. Use this for targeted edits instead of rewriting the whole file. \
+                 By default the match must be unique; pass `replace_all: true` to replace \
+                 every occurrence. Requires user approval.",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "path":        { "type": "string", "description": "Absolute or workspace-relative path." },
+                    "old_string":  { "type": "string", "description": "Exact substring to find." },
+                    "new_string":  { "type": "string", "description": "Replacement text." },
+                    "replace_all": { "type": "boolean", "description": "Replace every occurrence. Default false (must be unique)." }
+                },
+                "required": ["path", "old_string", "new_string"]
+            }
+        })
+    }
+
+    fn requires_approval(&self) -> bool {
+        true
+    }
+
+    async fn run(&self, input: &Value, workspace_root: Option<&str>) -> Result<String, String> {
+        let raw = input
+            .get("path")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| "missing `path`".to_string())?;
+        let old = input
+            .get("old_string")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| "missing `old_string`".to_string())?
+            .to_string();
+        let new = input
+            .get("new_string")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| "missing `new_string`".to_string())?
+            .to_string();
+        let replace_all = input
+            .get("replace_all")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+
+        let resolved = resolve_path(raw, workspace_root);
+
+        let path_for_read = resolved.clone();
+        let original = tokio::task::spawn_blocking(move || arc_filesystem::read_file(&path_for_read))
+            .await
+            .map_err(|e| format!("task: {e}"))?
+            .map_err(|e| format!("read {}: {e}", resolved.display()))?;
+
+        if old.is_empty() {
+            return Err("`old_string` must not be empty".into());
+        }
+        let occurrences = original.matches(&old).count();
+        if occurrences == 0 {
+            return Err(format!("`old_string` not found in {}", resolved.display()));
+        }
+        if occurrences > 1 && !replace_all {
+            return Err(format!(
+                "`old_string` matches {occurrences} places; pass replace_all=true or extend the match"
+            ));
+        }
+        let updated = if replace_all {
+            original.replace(&old, &new)
+        } else {
+            original.replacen(&old, &new, 1)
+        };
+        let len = updated.len();
+        let path_for_write = resolved.clone();
+        tokio::task::spawn_blocking(move || arc_filesystem::write_file(&path_for_write, &updated))
+            .await
+            .map_err(|e| format!("task: {e}"))?
+            .map_err(|e| format!("write {}: {e}", resolved.display()))?;
+        Ok(format!(
+            "replaced {occurrences} occurrence(s) in {} ({} bytes)",
+            resolved.display(),
+            len
+        ))
+    }
+}
+
+// ─── Git tools (read-only) ────────────────────────────────────────────────
+
+pub struct GitStatusTool;
+
+#[async_trait]
+impl Tool for GitStatusTool {
+    fn name(&self) -> &str {
+        "git_status"
+    }
+
+    fn schema(&self) -> Value {
+        json!({
+            "name": "git_status",
+            "description":
+                "Summarize the workspace's git status — current branch, ahead/behind \
+                 counts, and how many files are staged / unstaged / untracked / in \
+                 conflict. Returns null when the workspace isn't a git repository.",
+            "input_schema": { "type": "object", "properties": {} }
+        })
+    }
+
+    async fn run(&self, _input: &Value, workspace_root: Option<&str>) -> Result<String, String> {
+        let root = workspace_root.ok_or_else(|| "no workspace root configured".to_string())?;
+        match arc_git::status(root).await.map_err(|e| e.to_string())? {
+            None => Ok("(not a git repo)".to_string()),
+            Some(info) => Ok(format!(
+                "branch: {}\nupstream: {}\nahead: {}  behind: {}\nstaged: {}  unstaged: {}  untracked: {}  conflicted: {}\ndirty: {}",
+                info.branch.as_deref().unwrap_or("(detached)"),
+                info.upstream.as_deref().unwrap_or("(none)"),
+                info.ahead,
+                info.behind,
+                info.staged,
+                info.unstaged,
+                info.untracked,
+                info.conflicted,
+                info.dirty,
+            )),
+        }
+    }
+}
+
+pub struct GitLogTool;
+
+#[async_trait]
+impl Tool for GitLogTool {
+    fn name(&self) -> &str {
+        "git_log"
+    }
+
+    fn schema(&self) -> Value {
+        json!({
+            "name": "git_log",
+            "description":
+                "Recent commits from the workspace's git history. Returns up to `limit` \
+                 entries (default 20, max 200) with short oid, author, date, and \
+                 subject. Pass `path` to restrict to commits touching that file or \
+                 directory.",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "limit": { "type": "integer", "default": 20 },
+                    "path":  { "type": "string", "description": "Optional path filter, workspace-relative." }
+                }
+            }
+        })
+    }
+
+    async fn run(&self, input: &Value, workspace_root: Option<&str>) -> Result<String, String> {
+        let root = workspace_root.ok_or_else(|| "no workspace root configured".to_string())?;
+        let limit = input
+            .get("limit")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(20)
+            .min(200) as usize;
+        let path_filter = input.get("path").and_then(|v| v.as_str());
+        let entries = arc_git::log(root, limit, path_filter)
+            .await
+            .map_err(|e| e.to_string())?;
+        if entries.is_empty() {
+            return Ok("(no commits)".to_string());
+        }
+        let mut out = String::new();
+        for e in entries {
+            out.push_str(&format!(
+                "{}  {} <{}>  {}\n",
+                e.short, e.author, e.email, e.subject
+            ));
+        }
+        Ok(out)
+    }
+}
+
+pub struct GitDiffTool;
+
+#[async_trait]
+impl Tool for GitDiffTool {
+    fn name(&self) -> &str {
+        "git_diff"
+    }
+
+    fn schema(&self) -> Value {
+        json!({
+            "name": "git_diff",
+            "description":
+                "Unified diff of pending changes. `scope` is `worktree` (unstaged), \
+                 `staged` (index vs HEAD), or `head` (everything not yet committed). \
+                 Pass `path` to narrow to a single file. Truncated to 32 KiB.",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "scope": {
+                        "type": "string",
+                        "enum": ["worktree", "staged", "head"],
+                        "default": "worktree"
+                    },
+                    "path": { "type": "string" }
+                }
+            }
+        })
+    }
+
+    async fn run(&self, input: &Value, workspace_root: Option<&str>) -> Result<String, String> {
+        let root = workspace_root.ok_or_else(|| "no workspace root configured".to_string())?;
+        let scope = match input.get("scope").and_then(|v| v.as_str()).unwrap_or("worktree") {
+            "staged" => arc_git::DiffScope::Staged,
+            "head" => arc_git::DiffScope::Head,
+            _ => arc_git::DiffScope::Worktree,
+        };
+        let path_filter = input.get("path").and_then(|v| v.as_str());
+        let out = arc_git::diff(root, scope, path_filter)
+            .await
+            .map_err(|e| e.to_string())?;
+        if out.is_empty() {
+            return Ok("(no changes)".to_string());
+        }
+        const CAP: usize = 32 * 1024;
+        if out.len() > CAP {
+            Ok(format!(
+                "{}\n… (truncated, {} bytes total)",
+                &out[..CAP],
+                out.len()
+            ))
+        } else {
+            Ok(out)
+        }
+    }
+}

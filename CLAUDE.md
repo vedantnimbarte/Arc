@@ -28,12 +28,16 @@ packages/      Pure-TS packages, linked via pnpm workspaces.
   provider-sdk/  Provider interface (Provider, ChatRequest, ChatChunk). The
                  real streaming providers are Rust-side in `rust/ai-runtime`;
                  this contract is kept for any future TS-side fallback.
-  terminal/      Reserved — placeholder until we extract terminal logic out of
-                 apps/frontend.
-  editor/        Reserved — same idea for the editor.
+  terminal/      Exports the graphite `XTERM_THEME` consumed by
+                 `apps/frontend/src/components/Terminal.tsx`. Reserved for
+                 the React shell once we need a second consumer.
+  editor/        Exports `pathToLanguageId(path)` — the pure extension→id
+                 mapping the Editor uses for its lazy lang-* imports.
+                 Reserved for the CodeMirror wrapper itself later.
   agents/        Agent descriptors (TS side). Pairs with rust/agent-runtime.
   mcp/           Reserved — MCP client.
-  ui/            Reserved — shared UI primitives.
+  ui/            Exports the Catppuccin Mocha palette (`MOCHA`) so the
+                 editor + file tree share one colour reference.
 
 rust/          Cargo workspace members consumed by apps/desktop.
   pty/             ✅ PtyManager — spawn/write/resize/kill, streams output via
@@ -44,16 +48,20 @@ rust/          Cargo workspace members consumed by apps/desktop.
                    chat history, command history, agent runs, and memory
                    (FTS5-indexed notes). DB at `<data_dir>/arc/arc.db`.
                    Driven by `session_*` + `memory_*` commands.
-  agent-runtime/   ✅ V0 — Anthropic tool-using coding agent with read-only
-                   tools (`fs_read_file`, `fs_search`). `Tool` trait + multi-
-                   step run loop. Write/exec tools + approval gating in V1.
+  agent-runtime/   ✅ V2 — Anthropic tool-using coding agent. Built-in tools:
+                   `fs_read_file`, `fs_list_dir`, `fs_search`, `fs_write_file`,
+                   `fs_edit`, `shell`, `git_status`, `git_log`, `git_diff`,
+                   `memory_save`, `memory_search`. Mutating tools are
+                   approval-gated; MCP tools bridge in automatically.
   filesystem/      ✅ read_dir / read_file / write_file / pick_folder /
                    default_root / parent + a notify-backed recursive
-                   Watcher (debounced ~150 ms) + walk-based content search.
-                   Driven by `fs_*` commands; tantivy index swaps in later.
-  git/             ✅ V0 status (branch, ahead/behind, dirty + counts) by
-                   shelling out to `git status --porcelain=v2 --branch`.
-                   Driven by `git_status`. gix-backed diff/blame/log later.
+                   Watcher (debounced ~150 ms) + tantivy-backed `fs_search`
+                   (falls back to a walk when no index has been built).
+                   Driven by `fs_*` commands.
+  git/             ✅ V1 — `status` (porcelain v2), plus `log`, `diff` (worktree
+                   / staged / head), and `blame` (porcelain). All shell out to
+                   git. Tauri commands: `git_status`, `git_log`, `git_diff`,
+                   `git_blame`.
 
 docs/          Architecture + decisions.
 ```
@@ -82,7 +90,7 @@ cargo check --workspace
 
 ## Key conventions
 
-- **Tauri command names**: `<area>_<verb>` snake_case. Today: `pty_*` (spawn/write/resize/kill), `llm_*` (stream/cancel), `fs_*` (default_root, parent, read_dir, pick_folder, read_file, write_file, watch_start, watch_stop, search), `session_*` (load, save_tabs, set_workspace, workspaces_list, workspace_upsert, workspace_delete, chat_load, chat_append, chat_clear, command_log, commands_recent), `git_status`, `secrets_*` (set_api_key, get_api_key, delete_api_key), `agent_run`, `mcp_*` (connect, list_tools, call_tool, disconnect), `memory_*` (save, update, delete, get, list, search).
+- **Tauri command names**: `<area>_<verb>` snake_case. Today: `pty_*` (spawn/write/resize/kill), `llm_*` (stream/cancel), `fs_*` (default_root, parent, read_dir, pick_folder, read_file, write_file, watch_start, watch_stop, search, index_rebuild, index_status), `session_*` (load, save_tabs, set_workspace, workspaces_list, workspace_upsert, workspace_delete, chat_load, chat_append, chat_clear, command_log, commands_recent, command_finish), `git_*` (status, log, diff, blame), `secrets_*` (set_api_key, get_api_key, delete_api_key), `agent_run`, `mcp_*` (connect, connect_http, list_tools, call_tool, disconnect), `memory_*` (save, update, delete, get, list, search, embed_entry, vector_search).
 - **Event topics**: `<area>://<verb>/<id>`, e.g. `pty://data/<uuid>`, `llm://chunk/<id>`, `llm://done/<id>`, `fs://change/<watchId>`. The frontend's `lib/tauri.ts` exposes typed wrappers — use those, don't hand-roll `invoke`/`listen` in components.
 - **State**: Zustand stores in `apps/frontend/src/state/*` — one per concern (`workspace`, `chat`, `settings`, `files`). Components don't reach across stores. `workspace` and `chat` hydrate from SQLite via `session_*` and debounce-write on changes; `settings` and `files` persist to localStorage via `zustand/middleware`.
 - **Styling**: Tailwind, dark-first. Theme tokens are in `apps/frontend/tailwind.config.ts` (`bg-base`, `fg-base`, `accent`, etc.). Don't hardcode hex colors in components.
@@ -99,16 +107,17 @@ cargo check --workspace
 | Editor            | ✅ real         | CodeMirror 6, lazy-loaded per tab. Reads/writes via `fs_read_file` / `fs_write_file`; 5 MiB cap, refuses binaries. |
 | File tree         | ✅ real         | Browse + open files, pick root via native dialog, click-to-paste paths into the active terminal. |
 | Filesystem        | ✅ real (V0)   | `rust/filesystem` owns read/dir/file/dialog + a notify-backed recursive Watcher (debounced ~150 ms). FileTree subscribes for the current root and refreshes visible nodes on change. Tantivy index lands with memory/search. |
-| Session persist   | ✅ real (V0)   | sqlx + SQLite via `rust/session-manager`. Workspaces, tabs, and chat history persist. `command_history` and `agent_runs` tables exist but aren't wired yet. |
-| Agent runtime     | ✅ V1           | Anthropic tool-using coding agent via `/agent <goal>` in chat. Built-in tools: `fs_read_file`, `fs_search`, `fs_write_file`, `shell` (30s default timeout, 16 KiB output cap), `memory_save`, `memory_search` (FTS5 over the workspace's `memory_entries`). Plus every tool from each connected MCP server, exposed as `mcp__<server>__<tool>` (sanitized, capped at 64 chars; budget of 32 MCP tools per run). All mutating tools — including every MCP call — gate on an `Approver`: the runtime emits `ApprovalRequest`, the UI shows an inline Approve/Deny tray over the composer, and `agent_decide(approval_id, approve)` resolves the parked oneshot. Closing the popover auto-denies pending prompts. Persona prompt from the active UI agent is layered on top of the runtime's default prompt. Runs persisted to `agent_runs`. |
-| Git introspection | ✅ real (V0)   | `rust/git` shells out to porcelain v2 for branch + ahead/behind + dirty counts. StatusBar shows the current branch with a dirty dot. Refreshes on root change. |
-| Memory / search   | ✅ V0          | Workspace-scoped notes via `arc-session-manager::memory` — `memory_entries` + FTS5 (`memory_fts`) with porter-unicode61 tokenizer + bm25 scoring. Tauri `memory_*` commands and `/memory save|search|list|delete` chat slash command. `embedding` BLOB column reserved for vector search (V1+). |
-| Plugins           | ⛔ stub        | Placeholder TS packages (`packages/terminal`, `packages/editor`, `packages/ui`). MCP is its own row (✅ V1). |
+| Session persist   | ✅ V1          | sqlx + SQLite via `rust/session-manager`. Workspaces, tabs, chat history, command history (with exit codes when OSC 133 is available), and agent runs all persist. |
+| Filesystem        | ✅ V1          | `rust/filesystem` owns read/dir/file/dialog + a notify-backed recursive Watcher (debounced ~150 ms) + a tantivy-backed full-text index (`fs_index_rebuild`/`fs_index_status`) used by `fs_search`. Falls back to the V0 walk when no index has been built for the current root. |
+| Agent runtime     | ✅ V2          | Anthropic tool-using coding agent via `/agent <goal>` in chat. Built-in tools: `fs_read_file`, `fs_list_dir`, `fs_search`, `fs_write_file`, `fs_edit` (surgical find/replace), `shell` (30s default timeout, 16 KiB output cap), `git_status`, `git_log`, `git_diff`, `memory_save`, `memory_search`. Plus every tool from each connected MCP server, exposed as `mcp__<server>__<tool>` (sanitized, capped at 64 chars; budget of 32 MCP tools per run). All mutating tools — including every MCP call — gate on an `Approver`: the runtime emits `ApprovalRequest`, the UI shows an inline Approve/Deny tray over the composer, and `agent_decide(approval_id, approve)` resolves the parked oneshot. Closing the popover auto-denies pending prompts. Persona prompt from the active UI agent is layered on top of the runtime's default prompt. Runs persisted to `agent_runs`. |
+| Git introspection | ✅ V1          | `rust/git` shells out to git for `status` (porcelain v2 — branch, ahead/behind, dirty counts), `log` (custom-formatted entries), `diff` (worktree / staged / head, optional path filter), and `blame` (porcelain). StatusBar shows the current branch with a dirty dot. |
+| Memory / search   | ✅ V1          | Workspace-scoped notes via `arc-session-manager::memory`. Keyword path: `memory_entries` + FTS5 (`memory_fts`) with porter-unicode61 tokenizer + bm25 scoring. Vector path: `embedding` BLOB column + `embedding_model` (migration 0004) holds an OpenAI / Ollama embedding, and `memory_vector_search` ranks by cosine similarity. `arc_ai_runtime::embed` is the shared helper. Tauri `memory_*` commands and `/memory save\|search\|list\|delete` chat slash command. |
+| Reserved packages | ✅ partial     | `packages/ui` exports the `MOCHA` palette; `packages/terminal` exports `XTERM_THEME`; `packages/editor` exports `pathToLanguageId`. All three are imported by `apps/frontend`. The React components themselves still live in `apps/frontend` until a second consumer needs them. |
 | Bundling / icons  | ✅ real         | Icons regenerated from `apps/desktop/icons/source.png` via `@tauri-apps/cli icon`. |
 | API key storage   | ✅ real         | Per-provider keys live in the OS credential vault via the `keyring` crate. `settings.ts` `partialize` strips them from localStorage; `hydrateSecrets()` migrates legacy keys on first launch. |
-| Command history   | ✅ V0           | xterm input lines captured per-tab and persisted to `command_history` (no OSC 133, so output/exit codes are V1). ⌃R opens a fuzzy palette that pastes the selected command into the active terminal. |
-| File search       | ✅ V0           | Walk-on-search across the workspace root via `fs_search`. Skips `node_modules`, `target`, `.git`, etc.; caps files at 256 KiB. ⌘P opens a results palette + a sidebar filter (Search icon in FileTree header). Tantivy index replaces the walk later. |
-| MCP client        | ✅ V1           | Stdio-transport JSON-RPC client. `/mcp connect|list|call|disconnect` chat commands. Connected servers' tools are also bridged into `/agent` automatically (see Agent runtime row). HTTP/SSE transports and server-side notifications/log forwarding still V2. |
+| Command history   | ✅ V1          | xterm input lines captured per-tab and persisted to `command_history`. When the shell emits OSC 133 (`A`/`B`/`C`/`D[;exit]`), the matching row's `exit_code`, `finished_at`, and a 4 KiB `output_excerpt` are filled in by `session_command_finish`. ⌃R opens a fuzzy palette that pastes the selected command into the active terminal. |
+| File search       | ✅ V1          | tantivy-backed BM25 index at `<data_dir>/arc/index/<hash>/`. `fs_search` prefers the index when built; otherwise it falls back to the walker (same skip-list, 256 KiB cap). ⌘P opens a results palette + a sidebar filter (Search icon in FileTree header). |
+| MCP client        | ✅ V2          | Two transports behind one `Transport` trait: stdio (`Content-Length` framed JSON-RPC) and HTTP/SSE (Streamable HTTP, 2025-03-26). `/mcp connect\|list\|call\|disconnect` chat commands. `mcp_connect_http(id, url, headers?)` wires up remote servers. Connected servers' tools bridge into `/agent` automatically (see Agent runtime row). Server-side notifications/log forwarding still V2-pending. |
 
 ## Working in this repo
 

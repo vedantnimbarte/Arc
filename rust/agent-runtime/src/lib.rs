@@ -24,7 +24,10 @@ use serde_json::{json, Value};
 use thiserror::Error;
 use tokio::sync::mpsc;
 
-pub use tools::{FsReadFileTool, FsSearchTool, FsWriteFileTool, ShellTool, Tool};
+pub use tools::{
+    FsEditTool, FsListDirTool, FsReadFileTool, FsSearchTool, FsWriteFileTool, GitDiffTool,
+    GitLogTool, GitStatusTool, ShellTool, Tool,
+};
 
 #[derive(Debug, Error)]
 pub enum Error {
@@ -147,10 +150,16 @@ You are ARC's coding agent, embedded inside a developer's terminal.
 
 Built-in tools:
   * `fs_read_file` — read a text file in the workspace.
+  * `fs_list_dir`  — list the contents of a directory (names + kinds).
   * `fs_search`    — substring-search the workspace.
   * `fs_write_file` — create or overwrite a file. Requires user approval.
+  * `fs_edit`      — surgical find/replace inside an existing file. Prefer \
+this over `fs_write_file` for small targeted edits. Requires user approval.
   * `shell`        — run a one-shot shell command (30s default cap). Requires \
 user approval.
+  * `git_status`   — summarize the workspace's git state (branch, dirty counts).
+  * `git_log`      — recent commit history; optionally filter by path.
+  * `git_diff`     — unified diff of pending changes (worktree / staged / head).
   * `memory_search` — recall workspace-scoped notes you (or earlier runs) saved. \
 FTS5 keyword search. Try this near the start of a task to surface prior \
 context — file purposes, gotchas, design decisions.

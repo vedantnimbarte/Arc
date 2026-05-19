@@ -1,8 +1,8 @@
-//! Command history — every line the user runs at the shell. V0 captures
-//! only the input side (command text + cwd + timestamps), because we
-//! don't yet have OSC 133 shell integration for output/exit-code
-//! capture. The schema already has `finished_at`, `exit_code`, and
-//! `output_excerpt` columns reserved; those fill in with V1.
+//! Command history — every line the user runs at the shell. V0 captured
+//! only the input side (command text + cwd + timestamps). V1 also
+//! finalizes the row when the shell emits an OSC 133 `D[;<exit>]`
+//! sequence, filling in `finished_at`, `exit_code`, and an
+//! `output_excerpt` snapshot.
 
 use serde::{Deserialize, Serialize};
 use sqlx::SqlitePool;
@@ -20,6 +20,44 @@ pub struct CommandRecord {
     pub started_at: i64,
     pub finished_at: Option<i64>,
     pub exit_code: Option<i64>,
+}
+
+/// Finalize a previously-appended command: record exit code, the time it
+/// finished, and a short output excerpt. Idempotent — calling twice with
+/// the same id overwrites the prior values.
+pub async fn finish(
+    pool: &SqlitePool,
+    id: i64,
+    exit_code: Option<i64>,
+    output_excerpt: Option<&str>,
+) -> Result<()> {
+    let now = now_ms();
+    // Cap excerpt to 4 KiB so the SQLite row stays small. The full
+    // output never leaves the terminal — the excerpt is a recall aid.
+    const EXCERPT_CAP: usize = 4 * 1024;
+    let excerpt: Option<String> = output_excerpt.map(|s| {
+        if s.len() <= EXCERPT_CAP {
+            s.to_string()
+        } else {
+            let mut cut = EXCERPT_CAP;
+            while !s.is_char_boundary(cut) && cut > 0 {
+                cut -= 1;
+            }
+            format!("{}\n…", &s[..cut])
+        }
+    });
+    sqlx::query(
+        "UPDATE command_history \
+         SET finished_at = ?, exit_code = ?, output_excerpt = ? \
+         WHERE id = ?",
+    )
+    .bind(now)
+    .bind(exit_code)
+    .bind(excerpt)
+    .bind(id)
+    .execute(pool)
+    .await?;
+    Ok(())
 }
 
 /// Append a captured command. Returns the assigned row id.

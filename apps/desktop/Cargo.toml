@@ -27,8 +27,10 @@ arc-filesystem = { workspace = true }
 arc-git = { workspace = true }
 async-trait = { workspace = true }
 dashmap = { workspace = true }
+eventsource-stream = { workspace = true }
 futures-util = { workspace = true }
 keyring = { workspace = true }
+reqwest = { workspace = true }
 rfd = { workspace = true }
 uuid = { workspace = true }
 

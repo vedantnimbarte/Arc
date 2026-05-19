@@ -14,8 +14,8 @@ use std::pin::Pin;
 use std::sync::Arc;
 
 use arc_agent_runtime::{
-    run, AgentEvent, Approver, FsReadFileTool, FsSearchTool, FsWriteFileTool, RunConfig,
-    ShellTool, Tool,
+    run, AgentEvent, Approver, FsEditTool, FsListDirTool, FsReadFileTool, FsSearchTool,
+    FsWriteFileTool, GitDiffTool, GitLogTool, GitStatusTool, RunConfig, ShellTool, Tool,
 };
 use arc_session_manager::{agent as agent_db, memory as memory_db, SessionStore, SqlitePool};
 use async_trait::async_trait;
@@ -427,9 +427,14 @@ pub async fn agent_run(
     };
     let mut tools: Vec<Arc<dyn Tool>> = vec![
         Arc::new(FsReadFileTool),
+        Arc::new(FsListDirTool),
         Arc::new(FsSearchTool),
         Arc::new(FsWriteFileTool),
+        Arc::new(FsEditTool),
         Arc::new(ShellTool),
+        Arc::new(GitStatusTool),
+        Arc::new(GitLogTool),
+        Arc::new(GitDiffTool),
         Arc::new(MemorySaveTool {
             pool: store.pool().clone(),
             workspace_id: req.workspace_id.clone(),

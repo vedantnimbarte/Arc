@@ -5,7 +5,10 @@
 //!
 //! See `docs/architecture.md` for the IPC contract.
 
+pub mod embed;
 pub mod providers;
+
+pub use embed::{embed, EmbedProvider, EmbedResult};
 
 use async_trait::async_trait;
 use futures_util::stream::BoxStream;

@@ -10,6 +10,9 @@
     "typecheck": "tsc -b --noEmit"
   },
   "dependencies": {
+    "@arc/editor": "workspace:*",
+    "@arc/terminal": "workspace:*",
+    "@arc/ui": "workspace:*",
     "@codemirror/commands": "^6.7.0",
     "@codemirror/lang-cpp": "^6.0.2",
     "@codemirror/lang-css": "^6.3.0",
