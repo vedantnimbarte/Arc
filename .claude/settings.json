@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(pnpm typecheck *)",
+      "Bash(cargo check *)",
+      "Bash(cargo test *)",
+      "Bash(git add *)",
+      "Bash(git commit -m ' *)"
+    ]
+  }
+}

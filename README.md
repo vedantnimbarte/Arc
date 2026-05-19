@@ -9,7 +9,7 @@ pnpm install                 # install JS deps + link workspaces
 pnpm tauri:dev               # run the Tauri desktop app (boots Vite + Rust shell)
 ```
 
-Frontend only (browser, no PTY):
+Frontend only (browser, no PTY):d
 
 ```bash
 pnpm dev
