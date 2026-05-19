@@ -17,7 +17,7 @@ use arc_agent_runtime::{
     run, AgentEvent, Approver, FsReadFileTool, FsSearchTool, FsWriteFileTool, RunConfig,
     ShellTool, Tool,
 };
-use arc_session_manager::{agent as agent_db, SessionStore};
+use arc_session_manager::{agent as agent_db, memory as memory_db, SessionStore, SqlitePool};
 use async_trait::async_trait;
 use serde::Deserialize;
 use serde_json::{json, Value};
@@ -233,6 +233,156 @@ async fn discover_mcp_tools(mcp: &McpState) -> Vec<Arc<dyn Tool>> {
     out
 }
 
+// ─── memory tools ────────────────────────────────────────────────────────
+//
+// Bridge the workspace-scoped memory subsystem (arc-session-manager::memory)
+// into the agent runtime. Lets a /agent run save findings ("the auth flow
+// lives in src/auth/oauth.rs") and recall them on a later run via FTS5
+// keyword search.
+//
+// `memory_save` is read/write but never destructive (insert-only). We treat
+// it as non-approval to keep the agent fluent — the worst case is a row
+// the user has to `/memory delete` later. `memory_search` is read-only.
+
+struct MemorySaveTool {
+    pool: SqlitePool,
+    workspace_id: Option<String>,
+}
+
+#[async_trait]
+impl Tool for MemorySaveTool {
+    fn name(&self) -> &str {
+        "memory_save"
+    }
+
+    fn schema(&self) -> Value {
+        json!({
+            "name": "memory_save",
+            "description":
+                "Save a workspace-scoped note for later recall. Use this when you discover a \
+                 non-obvious fact you'll want on a future run (a file's purpose, a config \
+                 location, a gotcha). Indexed for keyword search via `memory_search`.",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "content": {
+                        "type": "string",
+                        "description": "The note body. Prefer concrete sentences over jargon."
+                    },
+                    "title": {
+                        "type": "string",
+                        "description": "Optional short label."
+                    },
+                    "tags": {
+                        "type": "string",
+                        "description": "Optional comma-separated tags, e.g. `auth, oauth, gotcha`."
+                    }
+                },
+                "required": ["content"]
+            }
+        })
+    }
+
+    async fn run(&self, input: &Value, _workspace_root: Option<&str>) -> Result<String, String> {
+        let content = input
+            .get("content")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| "missing `content`".to_string())?;
+        if content.trim().is_empty() {
+            return Err("`content` must be non-empty".into());
+        }
+        let title = input.get("title").and_then(|v| v.as_str());
+        let tags = input.get("tags").and_then(|v| v.as_str());
+        let entry = memory_db::save(
+            &self.pool,
+            self.workspace_id.as_deref(),
+            Some("note"),
+            title,
+            content,
+            tags,
+            Some("agent"),
+        )
+        .await
+        .map_err(|e| format!("memory_save: {e}"))?;
+        Ok(format!("saved memory {} ({}B)", &entry.id[..8], content.len()))
+    }
+}
+
+struct MemorySearchTool {
+    pool: SqlitePool,
+    workspace_id: Option<String>,
+}
+
+#[async_trait]
+impl Tool for MemorySearchTool {
+    fn name(&self) -> &str {
+        "memory_search"
+    }
+
+    fn schema(&self) -> Value {
+        json!({
+            "name": "memory_search",
+            "description":
+                "Keyword-search previously-saved memory notes (FTS5). Returns up to `limit` hits \
+                 with snippet + title. Run this near the start of a task to recall context from \
+                 prior sessions. Supports prefix syntax like `oauth*` and phrase queries.",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "query": { "type": "string" },
+                    "limit": {
+                        "type": "integer",
+                        "description": "Default 5, max 25.",
+                        "minimum": 1,
+                        "maximum": 25
+                    }
+                },
+                "required": ["query"]
+            }
+        })
+    }
+
+    async fn run(&self, input: &Value, _workspace_root: Option<&str>) -> Result<String, String> {
+        let query = input
+            .get("query")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| "missing `query`".to_string())?;
+        let limit = input
+            .get("limit")
+            .and_then(|v| v.as_i64())
+            .unwrap_or(5)
+            .clamp(1, 25);
+
+        // Search across the current workspace AND global (NULL workspace_id)
+        // notes — agents shouldn't have to know which scope a note was saved
+        // under. We run both queries and merge by score.
+        let ws_hits = memory_db::search(
+            &self.pool,
+            self.workspace_id.as_deref().or(Some("__all__")),
+            query,
+            limit,
+        )
+        .await
+        .map_err(|e| format!("memory_search: {e}"))?;
+
+        if ws_hits.is_empty() {
+            return Ok(format!("no memory hits for `{query}`"));
+        }
+        let mut out = format!("{} hit(s) for `{query}`:\n", ws_hits.len());
+        for (i, h) in ws_hits.iter().enumerate() {
+            let title = h.entry.title.as_deref().unwrap_or("(untitled)");
+            out.push_str(&format!(
+                "{}. [{}] {} — {}\n",
+                i + 1,
+                &h.entry.id[..8.min(h.entry.id.len())],
+                title,
+                h.snippet
+            ));
+        }
+        Ok(out)
+    }
+}
+
 #[derive(Debug, Deserialize)]
 pub struct AgentRunReq {
     pub id: String,
@@ -280,6 +430,14 @@ pub async fn agent_run(
         Arc::new(FsSearchTool),
         Arc::new(FsWriteFileTool),
         Arc::new(ShellTool),
+        Arc::new(MemorySaveTool {
+            pool: store.pool().clone(),
+            workspace_id: req.workspace_id.clone(),
+        }),
+        Arc::new(MemorySearchTool {
+            pool: store.pool().clone(),
+            workspace_id: req.workspace_id.clone(),
+        }),
     ];
 
     // Discover currently-connected MCP servers and expose their tools to

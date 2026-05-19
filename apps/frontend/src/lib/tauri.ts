@@ -504,6 +504,96 @@ export async function sessionCommandsRecent(
   });
 }
 
+// ----- Memory subsystem (workspace-scoped notes) ------------------------
+//
+// `workspaceId` semantics on the Rust side:
+//   undefined / null  → entries with NULL workspace_id (global / unscoped)
+//   "__all__"         → every entry, regardless of workspace
+//   any other string  → filter to that workspace
+
+export interface MemoryEntry {
+  id: string;
+  workspace_id: string | null;
+  kind: string;
+  title: string | null;
+  content: string;
+  /** Comma-separated; normalized to lowercase + sorted on save. */
+  tags: string | null;
+  source: string | null;
+  created_at: number;
+  updated_at: number;
+}
+
+export interface MemoryHit {
+  entry: MemoryEntry;
+  /** FTS5 bm25 score — lower is more relevant. */
+  score: number;
+  /** `content` excerpt with matches wrapped in `[` … `]`. */
+  snippet: string;
+}
+
+export interface MemorySaveReq {
+  workspaceId?: string | null;
+  kind?: string | null;
+  title?: string | null;
+  content: string;
+  tags?: string | null;
+  source?: string | null;
+}
+
+export async function memorySave(req: MemorySaveReq): Promise<MemoryEntry> {
+  return invoke<MemoryEntry>('memory_save', {
+    workspaceId: req.workspaceId ?? null,
+    kind: req.kind ?? null,
+    title: req.title ?? null,
+    content: req.content,
+    tags: req.tags ?? null,
+    source: req.source ?? null,
+  });
+}
+
+export async function memoryUpdate(
+  id: string,
+  patch: { title?: string | null; content?: string | null; tags?: string | null },
+): Promise<void> {
+  await invoke('memory_update', {
+    id,
+    title: patch.title ?? null,
+    content: patch.content ?? null,
+    tags: patch.tags ?? null,
+  });
+}
+
+export async function memoryDelete(id: string): Promise<void> {
+  await invoke('memory_delete', { id });
+}
+
+export async function memoryGet(id: string): Promise<MemoryEntry | null> {
+  return invoke<MemoryEntry | null>('memory_get', { id });
+}
+
+export async function memoryList(
+  workspaceId: string | null | undefined,
+  limit: number,
+): Promise<MemoryEntry[]> {
+  return invoke<MemoryEntry[]>('memory_list', {
+    workspaceId: workspaceId ?? null,
+    limit,
+  });
+}
+
+export async function memorySearch(
+  workspaceId: string | null | undefined,
+  query: string,
+  limit: number,
+): Promise<MemoryHit[]> {
+  return invoke<MemoryHit[]>('memory_search', {
+    workspaceId: workspaceId ?? null,
+    query,
+    limit,
+  });
+}
+
 // ----- Git introspection ------------------------------------------------
 
 export interface GitInfo {

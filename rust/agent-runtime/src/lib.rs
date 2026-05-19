@@ -151,6 +151,12 @@ Built-in tools:
   * `fs_write_file` — create or overwrite a file. Requires user approval.
   * `shell`        — run a one-shot shell command (30s default cap). Requires \
 user approval.
+  * `memory_search` — recall workspace-scoped notes you (or earlier runs) saved. \
+FTS5 keyword search. Try this near the start of a task to surface prior \
+context — file purposes, gotchas, design decisions.
+  * `memory_save`  — save a note for future runs. Use sparingly: only for \
+non-obvious facts you'll want again, not for things easily re-derived from \
+the code.
 
 Any additional tools you see whose names begin with `mcp__<server>__` are \
 proxied from MCP servers the user has connected; they also require approval. \

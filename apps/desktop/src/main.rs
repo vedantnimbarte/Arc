@@ -73,6 +73,12 @@ fn main() {
             commands::mcp::mcp_list_tools,
             commands::mcp::mcp_call_tool,
             commands::mcp::mcp_disconnect,
+            commands::memory::memory_save,
+            commands::memory::memory_update,
+            commands::memory::memory_delete,
+            commands::memory::memory_get,
+            commands::memory::memory_list,
+            commands::memory::memory_search,
         ])
         .setup(|app| {
             // Open the SQLite store before the window appears so the first

@@ -1,9 +1,10 @@
-//! arc-session-manager — workspace, tab, and chat-history persistence
-//! backed by SQLite via sqlx.
+//! arc-session-manager — workspace, tab, chat, command-history, agent-run,
+//! and memory persistence backed by SQLite via sqlx.
 //!
-//! V0 covers workspaces, sessions/tabs, and chat history. Schema tables for
-//! command_history and agent_runs are present in the migration but not yet
-//! wired through a repository — those land with their respective features.
+//! Each table has a sibling module that owns its repository functions:
+//! [`workspaces`], [`tabs`], [`chat`], [`commands`], [`agent`], [`memory`].
+//! `memory_entries` is paired with an FTS5 virtual table (`memory_fts`)
+//! kept in sync by triggers, so `memory::search` runs through bm25.
 //!
 //! The store is cheaply cloneable (it's just a wrapped `SqlitePool`), so it
 //! can be `.manage()`d in Tauri and handed to commands as `State<SessionStore>`.
@@ -13,17 +14,21 @@ use std::path::Path;
 use sqlx::sqlite::{
     SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions, SqliteSynchronous,
 };
-use sqlx::SqlitePool;
 use thiserror::Error;
 
 pub mod agent;
 pub mod chat;
 pub mod commands;
+pub mod memory;
 pub mod tabs;
 pub mod workspaces;
 
 pub use chat::{ChatConversation, ChatMessage, ChatRole};
 pub use commands::CommandRecord;
+pub use memory::{MemoryEntry, MemoryHit};
+// Re-export so downstream crates (e.g. apps/desktop) that hold a
+// `&SessionStore` can name the pool type without taking a direct sqlx dep.
+pub use sqlx::SqlitePool;
 pub use tabs::{Session, SessionState, Tab, TabInput, TabKind};
 pub use workspaces::Workspace;
 

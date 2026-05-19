@@ -41,8 +41,9 @@ rust/          Cargo workspace members consumed by apps/desktop.
   ai-runtime/      ✅ Streaming chat providers (OpenAI, Anthropic, Ollama)
                    behind one `Provider` trait. Driven by `llm_*` commands.
   session-manager/ ✅ SQLite-backed `SessionStore` (sqlx) — workspaces, tabs,
-                   chat history, command history, agent runs. DB at
-                   `<data_dir>/arc/arc.db`. Driven by `session_*` commands.
+                   chat history, command history, agent runs, and memory
+                   (FTS5-indexed notes). DB at `<data_dir>/arc/arc.db`.
+                   Driven by `session_*` + `memory_*` commands.
   agent-runtime/   ✅ V0 — Anthropic tool-using coding agent with read-only
                    tools (`fs_read_file`, `fs_search`). `Tool` trait + multi-
                    step run loop. Write/exec tools + approval gating in V1.
@@ -81,7 +82,7 @@ cargo check --workspace
 
 ## Key conventions
 
-- **Tauri command names**: `<area>_<verb>` snake_case. Today: `pty_*` (spawn/write/resize/kill), `llm_*` (stream/cancel), `fs_*` (default_root, parent, read_dir, pick_folder, read_file, write_file, watch_start, watch_stop, search), `session_*` (load, save_tabs, set_workspace, workspaces_list, workspace_upsert, workspace_delete, chat_load, chat_append, chat_clear, command_log, commands_recent), `git_status`, `secrets_*` (set_api_key, get_api_key, delete_api_key), `agent_run`, `mcp_*` (connect, list_tools, call_tool, disconnect).
+- **Tauri command names**: `<area>_<verb>` snake_case. Today: `pty_*` (spawn/write/resize/kill), `llm_*` (stream/cancel), `fs_*` (default_root, parent, read_dir, pick_folder, read_file, write_file, watch_start, watch_stop, search), `session_*` (load, save_tabs, set_workspace, workspaces_list, workspace_upsert, workspace_delete, chat_load, chat_append, chat_clear, command_log, commands_recent), `git_status`, `secrets_*` (set_api_key, get_api_key, delete_api_key), `agent_run`, `mcp_*` (connect, list_tools, call_tool, disconnect), `memory_*` (save, update, delete, get, list, search).
 - **Event topics**: `<area>://<verb>/<id>`, e.g. `pty://data/<uuid>`, `llm://chunk/<id>`, `llm://done/<id>`, `fs://change/<watchId>`. The frontend's `lib/tauri.ts` exposes typed wrappers — use those, don't hand-roll `invoke`/`listen` in components.
 - **State**: Zustand stores in `apps/frontend/src/state/*` — one per concern (`workspace`, `chat`, `settings`, `files`). Components don't reach across stores. `workspace` and `chat` hydrate from SQLite via `session_*` and debounce-write on changes; `settings` and `files` persist to localStorage via `zustand/middleware`.
 - **Styling**: Tailwind, dark-first. Theme tokens are in `apps/frontend/tailwind.config.ts` (`bg-base`, `fg-base`, `accent`, etc.). Don't hardcode hex colors in components.
@@ -99,10 +100,10 @@ cargo check --workspace
 | File tree         | ✅ real         | Browse + open files, pick root via native dialog, click-to-paste paths into the active terminal. |
 | Filesystem        | ✅ real (V0)   | `rust/filesystem` owns read/dir/file/dialog + a notify-backed recursive Watcher (debounced ~150 ms). FileTree subscribes for the current root and refreshes visible nodes on change. Tantivy index lands with memory/search. |
 | Session persist   | ✅ real (V0)   | sqlx + SQLite via `rust/session-manager`. Workspaces, tabs, and chat history persist. `command_history` and `agent_runs` tables exist but aren't wired yet. |
-| Agent runtime     | ✅ V1           | Anthropic tool-using coding agent via `/agent <goal>` in chat. Built-in tools: `fs_read_file`, `fs_search`, `fs_write_file`, `shell` (30s default timeout, 16 KiB output cap). Plus every tool from each connected MCP server, exposed as `mcp__<server>__<tool>` (sanitized, capped at 64 chars; budget of 32 MCP tools per run). All mutating tools — including every MCP call — gate on an `Approver`: the runtime emits `ApprovalRequest`, the UI shows an inline Approve/Deny tray over the composer, and `agent_decide(approval_id, approve)` resolves the parked oneshot. Closing the popover auto-denies pending prompts. Persona prompt from the active UI agent is layered on top of the runtime's default prompt. Runs persisted to `agent_runs`. |
+| Agent runtime     | ✅ V1           | Anthropic tool-using coding agent via `/agent <goal>` in chat. Built-in tools: `fs_read_file`, `fs_search`, `fs_write_file`, `shell` (30s default timeout, 16 KiB output cap), `memory_save`, `memory_search` (FTS5 over the workspace's `memory_entries`). Plus every tool from each connected MCP server, exposed as `mcp__<server>__<tool>` (sanitized, capped at 64 chars; budget of 32 MCP tools per run). All mutating tools — including every MCP call — gate on an `Approver`: the runtime emits `ApprovalRequest`, the UI shows an inline Approve/Deny tray over the composer, and `agent_decide(approval_id, approve)` resolves the parked oneshot. Closing the popover auto-denies pending prompts. Persona prompt from the active UI agent is layered on top of the runtime's default prompt. Runs persisted to `agent_runs`. |
 | Git introspection | ✅ real (V0)   | `rust/git` shells out to porcelain v2 for branch + ahead/behind + dirty counts. StatusBar shows the current branch with a dirty dot. Refreshes on root change. |
-| Memory / search   | ⛔ stub        | SQLite + embeddings not started                                         |
-| MCP, plugins      | ⛔ stub        | Placeholder packages                                                    |
+| Memory / search   | ✅ V0          | Workspace-scoped notes via `arc-session-manager::memory` — `memory_entries` + FTS5 (`memory_fts`) with porter-unicode61 tokenizer + bm25 scoring. Tauri `memory_*` commands and `/memory save|search|list|delete` chat slash command. `embedding` BLOB column reserved for vector search (V1+). |
+| Plugins           | ⛔ stub        | Placeholder TS packages (`packages/terminal`, `packages/editor`, `packages/ui`). MCP is its own row (✅ V1). |
 | Bundling / icons  | ✅ real         | Icons regenerated from `apps/desktop/icons/source.png` via `@tauri-apps/cli icon`. |
 | API key storage   | ✅ real         | Per-provider keys live in the OS credential vault via the `keyring` crate. `settings.ts` `partialize` strips them from localStorage; `hydrateSecrets()` migrates legacy keys on first launch. |
 | Command history   | ✅ V0           | xterm input lines captured per-tab and persisted to `command_history` (no OSC 133, so output/exit codes are V1). ⌃R opens a fuzzy palette that pastes the selected command into the active terminal. |

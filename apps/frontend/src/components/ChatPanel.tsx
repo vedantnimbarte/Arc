@@ -32,7 +32,13 @@ import {
   mcpConnect,
   mcpDisconnect,
   mcpListTools,
+  memoryDelete,
+  memoryList,
+  memorySave,
+  memorySearch,
   type LlmMessage,
+  type MemoryEntry,
+  type MemoryHit,
 } from '../lib/tauri';
 import { useFiles } from '../state/files';
 import { cn } from '../lib/cn';
@@ -148,6 +154,12 @@ export function ChatPanel({ onClose, intent, onIntentConsumed }: ChatPanelProps 
     // `/mcp <subcommand>` — exercise the stdio MCP client.
     if (text.startsWith('/mcp')) {
       await runMcp(text);
+      return;
+    }
+
+    // `/memory <subcommand>` — save / search / list / delete workspace notes.
+    if (text === '/memory' || text.startsWith('/memory ')) {
+      await runMemory(text);
       return;
     }
 
@@ -376,6 +388,91 @@ export function ChatPanel({ onClose, intent, onIntentConsumed }: ChatPanelProps 
       }
     } catch (err) {
       append({ role: 'system', content: `mcp error: ${String(err)}` });
+    }
+  }
+
+  async function runMemory(raw: string) {
+    setInput('');
+    append({ role: 'user', content: raw });
+    if (!isTauri) {
+      append({
+        role: 'system',
+        content: 'Memory runs in the Tauri shell only. Launch via `pnpm tauri:dev`.',
+      });
+      return;
+    }
+
+    const trimmed = raw.trim();
+    // First token after `/memory` is the subcommand; everything else is its arg.
+    const match = trimmed.match(/^\/memory(?:\s+(\S+)(?:\s+([\s\S]*))?)?$/);
+    const sub = (match?.[1] ?? 'help').toLowerCase();
+    const rest = match?.[2]?.trim() ?? '';
+
+    try {
+      if (sub === 'save' || sub === 'add' || sub === 'note') {
+        if (!rest) {
+          append({
+            role: 'system',
+            content:
+              'Usage: `/memory save <content>` — `#tag` tokens are extracted as tags.',
+          });
+          return;
+        }
+        const { content, tags, title } = parseMemoryDraft(rest);
+        const entry = await memorySave({
+          content,
+          tags: tags.length ? tags.join(', ') : null,
+          title: title ?? null,
+          source: 'chat',
+        });
+        append({
+          role: 'system',
+          content: `saved memory \`${entry.id.slice(0, 8)}\`${
+            entry.tags ? ` (tags: ${entry.tags})` : ''
+          }`,
+        });
+      } else if (sub === 'search' || sub === 'find' || sub === '?') {
+        if (!rest) {
+          append({ role: 'system', content: 'Usage: `/memory search <query>`' });
+          return;
+        }
+        const hits = await memorySearch('__all__', rest, 10);
+        append({ role: 'system', content: formatMemoryHits(rest, hits) });
+      } else if (sub === 'list' || sub === 'ls') {
+        const n = clampInt(rest, 10, 1, 50);
+        const entries = await memoryList('__all__', n);
+        append({ role: 'system', content: formatMemoryList(entries) });
+      } else if (sub === 'delete' || sub === 'rm' || sub === 'del') {
+        if (!rest) {
+          append({
+            role: 'system',
+            content: 'Usage: `/memory delete <id-prefix>` (first 4+ chars of the id)',
+          });
+          return;
+        }
+        const removed = await resolveAndDelete(rest);
+        if (removed) {
+          append({ role: 'system', content: `deleted memory \`${removed}\`` });
+        } else {
+          append({
+            role: 'system',
+            content: `no memory found matching \`${rest}\`. Try \`/memory list\` first.`,
+          });
+        }
+      } else {
+        append({
+          role: 'system',
+          content:
+            'Memory commands:\n' +
+            '• `/memory save <content>` — `#tag` tokens become tags\n' +
+            '• `/memory search <query>` — FTS5 keyword search (supports `foo*`, `"phrase"`)\n' +
+            '• `/memory list [N]` — N most recently updated (default 10)\n' +
+            '• `/memory delete <id-prefix>` — remove an entry\n' +
+            '\nEntries persist in SQLite at the per-user data dir.',
+        });
+      }
+    } catch (err) {
+      append({ role: 'system', content: `memory error: ${String(err)}` });
     }
   }
 
@@ -1063,4 +1160,80 @@ function ToolCard({
       )}
     </div>
   );
+}
+
+// ─── /memory helpers ──────────────────────────────────────────────────────
+
+/** Parse `/memory save` body. Pulls `#tag` tokens and `--title=foo` /
+ *  `--title "foo bar"` flags out of the free-form content. The `#tag` markers
+ *  stay in the saved content so the surrounding sentence remains readable. */
+function parseMemoryDraft(raw: string): {
+  content: string;
+  tags: string[];
+  title: string | null;
+} {
+  let working = raw;
+  let title: string | null = null;
+
+  // Title flag: --title=foo  | --title "foo bar"  | --title foo
+  const titleEq = working.match(/(^|\s)--title=("([^"]*)"|(\S+))/);
+  if (titleEq) {
+    title = (titleEq[3] ?? titleEq[4] ?? '').trim() || null;
+    working = (working.slice(0, titleEq.index!) + working.slice(titleEq.index! + titleEq[0].length)).trim();
+  } else {
+    const titleQ = working.match(/(^|\s)--title\s+("([^"]+)"|(\S+))/);
+    if (titleQ) {
+      title = (titleQ[3] ?? titleQ[4] ?? '').trim() || null;
+      working = (working.slice(0, titleQ.index!) + working.slice(titleQ.index! + titleQ[0].length)).trim();
+    }
+  }
+
+  const tags = Array.from(
+    new Set(
+      Array.from(working.matchAll(/(?:^|\s)#([A-Za-z0-9_\-]+)/g)).map((m) => m[1]!.toLowerCase()),
+    ),
+  );
+  return { content: working.trim(), tags, title };
+}
+
+function clampInt(s: string, fallback: number, lo: number, hi: number): number {
+  const n = Number.parseInt(s, 10);
+  if (!Number.isFinite(n)) return fallback;
+  return Math.max(lo, Math.min(hi, n));
+}
+
+function formatMemoryHits(query: string, hits: MemoryHit[]): string {
+  if (hits.length === 0) return `no matches for \`${query}\`.`;
+  const lines = hits.map((h, i) => {
+    const idShort = h.entry.id.slice(0, 8);
+    const title = h.entry.title ? `${h.entry.title} — ` : '';
+    return `${i + 1}. \`${idShort}\` ${title}${h.snippet}`;
+  });
+  return `${hits.length} match${hits.length === 1 ? '' : 'es'} for \`${query}\`:\n${lines.join('\n')}`;
+}
+
+function formatMemoryList(entries: MemoryEntry[]): string {
+  if (entries.length === 0) {
+    return 'no memories yet. Try `/memory save <content>`.';
+  }
+  const lines = entries.map((e, i) => {
+    const idShort = e.id.slice(0, 8);
+    const title = e.title ? `${e.title} — ` : '';
+    const preview = e.content.replace(/\s+/g, ' ').slice(0, 80);
+    const tagSuffix = e.tags ? `  [${e.tags}]` : '';
+    return `${i + 1}. \`${idShort}\` ${title}${preview}${preview.length === 80 ? '…' : ''}${tagSuffix}`;
+  });
+  return `${entries.length} memor${entries.length === 1 ? 'y' : 'ies'}:\n${lines.join('\n')}`;
+}
+
+/** Find an entry whose id starts with `prefix` and delete it. Returns the
+ *  short id on success, null when no match (ambiguous prefixes prefer the
+ *  most recently updated to keep the UX forgiving). */
+async function resolveAndDelete(prefix: string): Promise<string | null> {
+  const needle = prefix.toLowerCase();
+  const candidates = await memoryList('__all__', 200);
+  const hit = candidates.find((e) => e.id.toLowerCase().startsWith(needle));
+  if (!hit) return null;
+  await memoryDelete(hit.id);
+  return hit.id.slice(0, 8);
 }
