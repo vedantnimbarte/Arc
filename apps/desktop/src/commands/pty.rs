@@ -13,7 +13,7 @@
 
 use std::sync::Arc;
 
-use arc_pty::{discover_shells, PtyManager, ShellInfo, SpawnOptions};
+use arc_pty::{discover_ai_clis, discover_shells, AiCliInfo, PtyManager, ShellInfo, SpawnOptions};
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, State};
 
@@ -145,4 +145,13 @@ pub async fn pty_kill(state: State<'_, PtyState>, id: String) -> Result<(), Stri
 #[tauri::command]
 pub async fn pty_list_shells() -> Result<Vec<ShellInfo>, String> {
     Ok(discover_shells())
+}
+
+/// Enumerate installed AI coding-agent CLIs (Claude Code, OpenAI Codex,
+/// OpenCode). Used by the launcher UI to populate menus and by the chat
+/// panel to surface `local-cli` providers only when their binary is
+/// actually present.
+#[tauri::command]
+pub async fn pty_list_ai_clis() -> Result<Vec<AiCliInfo>, String> {
+    Ok(discover_ai_clis())
 }

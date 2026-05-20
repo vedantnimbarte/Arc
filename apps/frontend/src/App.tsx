@@ -15,6 +15,7 @@ import { useSettings } from './state/settings';
 import { useChat } from './state/chat';
 import { actionFor, type ActionId } from './state/shortcuts';
 import { cn } from './lib/cn';
+import { ptyListAiClis, type AiCliId } from './lib/tauri';
 import type { ChatIntent } from './components/ChatPanel';
 
 // CodeMirror is heavy — defer its bundle until a file is actually opened.
@@ -24,6 +25,7 @@ const Editor = lazy(() =>
 
 export default function App() {
   const { tabs, activeTabId, addTab } = useWorkspace();
+  const launchAiCli = useWorkspace((s) => s.launchAiCli);
   const hydrate = useWorkspace((s) => s.hydrate);
   const hydrateChat = useChat((s) => s.hydrate);
   const hydrateSettings = useSettings((s) => s.hydrateSettings);
@@ -104,6 +106,31 @@ export default function App() {
           setChatOpen(true);
           setChatIntent({ type: 'toggle-sessions', at: Date.now() });
           return;
+        case 'launch-claude-cli':
+          void launchCli('claude-cli');
+          return;
+        case 'launch-codex-cli':
+          void launchCli('codex-cli');
+          return;
+        case 'launch-opencode-cli':
+          void launchCli('opencode-cli');
+          return;
+      }
+    };
+
+    /** Resolve a CLI by id and open it as a new terminal tab. No-op (with
+     *  a warning) if the binary isn't on PATH. */
+    const launchCli = async (id: AiCliId) => {
+      try {
+        const installed = await ptyListAiClis();
+        const cli = installed.find((c) => c.id === id);
+        if (!cli) {
+          console.warn(`[shortcut] ${id} not detected on PATH`);
+          return;
+        }
+        launchAiCli(cli);
+      } catch (err) {
+        console.error(`[shortcut] launch ${id} failed:`, err);
       }
     };
 
@@ -124,7 +151,7 @@ export default function App() {
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [addTab, toggleSidebar, chatOpen]);
+  }, [addTab, toggleSidebar, chatOpen, launchAiCli]);
 
   return (
     <div className="relative flex h-full w-full flex-col overflow-hidden bg-bg-base text-fg-base">

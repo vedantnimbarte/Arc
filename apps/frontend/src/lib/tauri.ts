@@ -58,6 +58,25 @@ export async function ptyListShells(): Promise<ShellInfo[]> {
   return invoke<ShellInfo[]>('pty_list_shells');
 }
 
+/** Stable id assigned to each AI CLI by the Rust detector. */
+export type AiCliId = 'claude-cli' | 'codex-cli' | 'opencode-cli';
+
+/** One installed AI coding-agent CLI discovered on PATH. */
+export interface AiCliInfo {
+  id: AiCliId;
+  label: string;
+  path: string;
+}
+
+/**
+ * Enumerate AI coding-agent CLIs installed on the user's PATH (Claude Code,
+ * OpenAI Codex, OpenCode). Used by the launcher UI in TabBar / new-tab popover
+ * and by the chat panel to gate `local-cli` providers behind "is it installed".
+ */
+export async function ptyListAiClis(): Promise<AiCliInfo[]> {
+  return invoke<AiCliInfo[]>('pty_list_ai_clis');
+}
+
 export async function onPtyData(
   id: PtyId,
   handler: (chunk: Uint8Array) => void,

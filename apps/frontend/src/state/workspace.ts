@@ -1,5 +1,11 @@
 import { create } from 'zustand';
-import { isTauri, sessionLoad, sessionSaveTabs, type TabInput } from '../lib/tauri';
+import {
+  isTauri,
+  sessionLoad,
+  sessionSaveTabs,
+  type AiCliInfo,
+  type TabInput,
+} from '../lib/tauri';
 
 export interface Tab {
   id: string;
@@ -9,6 +15,10 @@ export interface Tab {
   ptyId?: string;
   /** Absolute path for editor tabs (read on mount). */
   filePath?: string;
+  /** Override the default shell binary for a terminal tab — used by the
+   *  AI CLI launchers (Claude Code / Codex / OpenCode). Transient: not
+   *  persisted across restarts (the tab would come back as a regular shell). */
+  shellOverride?: string;
 }
 
 interface WorkspaceState {
@@ -32,6 +42,9 @@ interface WorkspaceState {
   setTabDirty: (id: string, dirty: boolean) => void;
   /** Find an existing editor tab for `path`, or create one and focus it. */
   openFile: (path: string, title?: string) => string;
+  /** Spawn a new terminal tab that runs an AI CLI (Claude Code / Codex /
+   *  OpenCode) directly instead of the default shell. */
+  launchAiCli: (cli: AiCliInfo) => string;
   /** One-time load from SQLite at app startup. Idempotent. */
   hydrate: () => Promise<void>;
 }
@@ -97,6 +110,17 @@ export const useWorkspace = create<WorkspaceState>()((set, get) => ({
       title: title ?? basename(path),
       kind: 'editor',
       filePath: path,
+    };
+    set((s) => ({ tabs: [...s.tabs, tab], activeTabId: id }));
+    return id;
+  },
+  launchAiCli: (cli) => {
+    const id = `${cli.id}-${Date.now()}`;
+    const tab: Tab = {
+      id,
+      title: cli.label,
+      kind: 'terminal',
+      shellOverride: cli.path,
     };
     set((s) => ({ tabs: [...s.tabs, tab], activeTabId: id }));
     return id;

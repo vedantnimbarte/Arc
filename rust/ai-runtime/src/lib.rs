@@ -14,7 +14,10 @@ use async_trait::async_trait;
 use futures_util::stream::BoxStream;
 use serde::{Deserialize, Serialize};
 
-pub use providers::{anthropic::AnthropicProvider, ollama::OllamaProvider, openai::OpenAiProvider};
+pub use providers::{
+    anthropic::AnthropicProvider, local_cli::LocalCliProvider, ollama::OllamaProvider,
+    openai::OpenAiProvider,
+};
 
 /// Standardised role across providers. Map provider-specific role names at
 /// the boundary.
@@ -94,6 +97,11 @@ pub fn provider(
             base_url,
         ))),
         "ollama" => Ok(Box::new(OllamaProvider::new(base_url))),
+        // `base_url` doubles as the optional explicit binary path for local
+        // CLI providers — the settings UI surfaces it as "Custom binary path".
+        "claude-cli" | "codex-cli" | "opencode-cli" => {
+            Ok(Box::new(LocalCliProvider::new(id, base_url)?))
+        }
         other => Err(ProviderError::Other(format!("unknown provider: {other}"))),
     }
 }

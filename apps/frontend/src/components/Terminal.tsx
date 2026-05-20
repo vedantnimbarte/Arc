@@ -104,7 +104,10 @@ export function Terminal({ sessionKey }: Props) {
         // pick the OS default (COMSPEC / $SHELL). Changing the setting
         // only affects subsequently-opened tabs — existing PTYs keep
         // running whatever they were started with.
-        const chosenShell = useSettings.getState().defaultShell;
+        // A per-tab `shellOverride` (used by AI CLI launchers) wins over
+        // the global default shell.
+        const tab = useWorkspace.getState().tabs.find((t) => t.id === sessionKey);
+        const chosenShell = tab?.shellOverride ?? useSettings.getState().defaultShell;
         ptyId = await ptySpawn({
           shell: chosenShell && chosenShell.length > 0 ? chosenShell : null,
           cwd: initialCwd.current ?? null,

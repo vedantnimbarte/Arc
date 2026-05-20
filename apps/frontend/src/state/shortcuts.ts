@@ -14,9 +14,12 @@ export type ActionId =
   | 'new-chat'
   | 'toggle-agent-picker'
   | 'open-chat-sessions'
-  | 'open-shortcuts';
+  | 'open-shortcuts'
+  | 'launch-claude-cli'
+  | 'launch-codex-cli'
+  | 'launch-opencode-cli';
 
-export type ActionCategory = 'Workspace' | 'Terminal' | 'Assistant' | 'Help';
+export type ActionCategory = 'Workspace' | 'Terminal' | 'Assistant' | 'AI CLIs' | 'Help';
 
 export interface ActionMeta {
   id: ActionId;
@@ -96,6 +99,24 @@ export const ACTION_META: Record<ActionId, ActionMeta> = {
     description: 'Browse past chat sessions.',
     category: 'Assistant',
   },
+  'launch-claude-cli': {
+    id: 'launch-claude-cli',
+    label: 'Launch Claude Code',
+    description: 'Open a new terminal tab running the Claude Code CLI.',
+    category: 'AI CLIs',
+  },
+  'launch-codex-cli': {
+    id: 'launch-codex-cli',
+    label: 'Launch OpenAI Codex',
+    description: 'Open a new terminal tab running the OpenAI Codex CLI.',
+    category: 'AI CLIs',
+  },
+  'launch-opencode-cli': {
+    id: 'launch-opencode-cli',
+    label: 'Launch OpenCode',
+    description: 'Open a new terminal tab running the OpenCode CLI.',
+    category: 'AI CLIs',
+  },
 };
 
 export const ACTION_ORDER: ActionId[] = [
@@ -109,6 +130,9 @@ export const ACTION_ORDER: ActionId[] = [
   'toggle-agent-picker',
   'open-chat-sessions',
   'open-shortcuts',
+  'launch-claude-cli',
+  'launch-codex-cli',
+  'launch-opencode-cli',
 ];
 
 const mod = (extra: Partial<KeyBinding> = {}): Pick<KeyBinding, 'ctrl' | 'meta'> => ({
@@ -117,7 +141,7 @@ const mod = (extra: Partial<KeyBinding> = {}): Pick<KeyBinding, 'ctrl' | 'meta'>
   ...extra,
 });
 
-export const DEFAULT_BINDINGS: Record<ActionId, KeyBinding> = {
+export const DEFAULT_BINDINGS: Record<ActionId, KeyBinding | null> = {
   'new-terminal': { code: 'KeyT', shift: false, alt: false, ...mod() },
   'open-settings': { code: 'Comma', shift: false, alt: false, ...mod() },
   'toggle-sidebar': { code: 'KeyB', shift: false, alt: false, ...mod() },
@@ -128,6 +152,12 @@ export const DEFAULT_BINDINGS: Record<ActionId, KeyBinding> = {
   'new-chat': { code: 'KeyN', shift: true, alt: false, ...mod() },
   'toggle-agent-picker': { code: 'Slash', shift: false, alt: false, ...mod() },
   'open-chat-sessions': { code: 'KeyL', shift: true, alt: false, ...mod() },
+  // AI CLI launchers ship unbound by default — users can assign keys via the
+  // shortcuts dialog, and they're discoverable through the TabBar dropdown
+  // and the new-tab popover regardless.
+  'launch-claude-cli': null,
+  'launch-codex-cli': null,
+  'launch-opencode-cli': null,
 };
 
 interface ShortcutsState {

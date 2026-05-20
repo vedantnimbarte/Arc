@@ -37,6 +37,7 @@ fn main() {
             commands::pty::pty_resize,
             commands::pty::pty_kill,
             commands::pty::pty_list_shells,
+            commands::pty::pty_list_ai_clis,
             commands::llm::llm_stream,
             commands::llm::llm_cancel,
             commands::fs::fs_default_root,

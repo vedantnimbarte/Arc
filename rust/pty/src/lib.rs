@@ -306,3 +306,66 @@ fn which_in(exe: &str, dirs: &[std::path::PathBuf]) -> Option<std::path::PathBuf
     }
     None
 }
+
+/// One AI coding-agent CLI discovered on `PATH`. Mirrors [`ShellInfo`] but
+/// with a stable `id` field so the frontend can map "claude" → the Claude
+/// Code provider regardless of where the binary lives.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct AiCliInfo {
+    /// Stable id used in settings + provider routing
+    /// (`"claude-cli"`, `"codex-cli"`, `"opencode-cli"`).
+    pub id: String,
+    pub label: String,
+    pub path: String,
+}
+
+/// Probe `PATH` for known AI coding-agent CLIs (Claude Code, OpenAI Codex,
+/// OpenCode). Pure read — nothing is spawned, no env is mutated. Each tool
+/// may ship multiple binary names across platforms (e.g. `claude.cmd` vs
+/// `claude.exe` on Windows); the first match wins.
+pub fn discover_ai_clis() -> Vec<AiCliInfo> {
+    // (stable id, label, [candidate binaries in preference order])
+    let candidates: &[(&str, &str, &[&str])] = if cfg!(windows) {
+        &[
+            (
+                "claude-cli",
+                "Claude Code",
+                &["claude.cmd", "claude.exe", "claude.bat", "claude"],
+            ),
+            (
+                "codex-cli",
+                "OpenAI Codex",
+                &["codex.cmd", "codex.exe", "codex.bat", "codex"],
+            ),
+            (
+                "opencode-cli",
+                "OpenCode",
+                &["opencode.cmd", "opencode.exe", "opencode.bat", "opencode"],
+            ),
+        ]
+    } else {
+        &[
+            ("claude-cli", "Claude Code", &["claude"]),
+            ("codex-cli", "OpenAI Codex", &["codex"]),
+            ("opencode-cli", "OpenCode", &["opencode"]),
+        ]
+    };
+
+    let path_var = std::env::var_os("PATH").unwrap_or_default();
+    let dirs: Vec<std::path::PathBuf> = std::env::split_paths(&path_var).collect();
+
+    let mut out = Vec::new();
+    for (id, label, exes) in candidates {
+        for exe in *exes {
+            if let Some(resolved) = which_in(exe, &dirs) {
+                out.push(AiCliInfo {
+                    id: (*id).to_string(),
+                    label: (*label).to_string(),
+                    path: resolved.to_string_lossy().into_owned(),
+                });
+                break;
+            }
+        }
+    }
+    out
+}
