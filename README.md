@@ -1,5 +1,9 @@
 # ARC — AI-Native Terminal & Agent Runtime
 
+<div align="center">
+  <img src="apps/desktop/icons/icon.png" alt="ARC Logo" width="128" height="128" />
+</div>
+
 [![License](https://img.shields.io/badge/license-TBD-blue)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Linux-lightgrey)](https://github.com/anthropics/arc)
 
