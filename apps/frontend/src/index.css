@@ -179,6 +179,123 @@
       background-color 140ms cubic-bezier(0.4, 0, 0.2, 1),
       color 140ms cubic-bezier(0.4, 0, 0.2, 1);
   }
+
+  /* Markdown preview — WYSIWYG surface used by the Editor when the active
+     file is .md / .markdown and the user toggles into Preview mode. The
+     surface is contentEditable, so styles favour comfortable reading +
+     editing rather than print-style prose. */
+  .md-preview {
+    color: #eef0f3;
+    font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Inter', system-ui, sans-serif;
+    font-size: 14px;
+    line-height: 1.7;
+    letter-spacing: -0.005em;
+    padding: 28px 40px;
+    max-width: 860px;
+    margin: 0 auto;
+  }
+  .md-preview > *:first-child { margin-top: 0; }
+  .md-preview > *:last-child { margin-bottom: 0; }
+  .md-preview h1,
+  .md-preview h2,
+  .md-preview h3,
+  .md-preview h4,
+  .md-preview h5,
+  .md-preview h6 {
+    color: #ffffff;
+    font-weight: 600;
+    letter-spacing: -0.015em;
+    line-height: 1.25;
+    margin: 1.6em 0 0.6em;
+  }
+  .md-preview h1 { font-size: 28px; }
+  .md-preview h2 { font-size: 22px; padding-bottom: 6px; border-bottom: 1px solid rgba(220, 224, 232, 0.07); }
+  .md-preview h3 { font-size: 18px; }
+  .md-preview h4 { font-size: 15px; color: rgba(230, 234, 242, 0.85); }
+  .md-preview h5,
+  .md-preview h6 { font-size: 13px; color: rgba(230, 234, 242, 0.7); }
+  .md-preview p { margin: 0.8em 0; }
+  .md-preview a {
+    color: #74c7ec;
+    text-decoration: none;
+    border-bottom: 1px solid rgba(116, 199, 236, 0.32);
+  }
+  .md-preview a:hover { border-bottom-color: #74c7ec; }
+  .md-preview strong { color: #ffffff; font-weight: 600; }
+  .md-preview em { font-style: italic; }
+  .md-preview del { color: rgba(230, 234, 242, 0.45); }
+  .md-preview ul,
+  .md-preview ol {
+    margin: 0.6em 0;
+    padding-left: 1.6em;
+  }
+  .md-preview ul { list-style: disc; }
+  .md-preview ol { list-style: decimal; }
+  .md-preview li { margin: 0.25em 0; }
+  .md-preview li > ul,
+  .md-preview li > ol { margin: 0.25em 0; }
+  .md-preview input[type='checkbox'] {
+    margin-right: 0.5em;
+    accent-color: #c8cad0;
+  }
+  .md-preview blockquote {
+    border-left: 3px solid rgba(220, 224, 232, 0.18);
+    padding: 0.15em 0 0.15em 1em;
+    margin: 0.8em 0;
+    color: rgba(230, 234, 242, 0.7);
+    font-style: italic;
+  }
+  .md-preview code {
+    font-family: 'SF Mono', ui-monospace, 'JetBrains Mono', Menlo, Monaco, 'Cascadia Code', Consolas, monospace;
+    font-size: 0.88em;
+    background: rgba(255, 255, 255, 0.06);
+    color: #fab387;
+    padding: 1px 6px;
+    border-radius: 4px;
+  }
+  .md-preview pre {
+    background: rgba(0, 0, 0, 0.32);
+    border: 1px solid rgba(220, 224, 232, 0.07);
+    border-radius: 8px;
+    padding: 14px 16px;
+    margin: 1em 0;
+    overflow-x: auto;
+  }
+  .md-preview pre code {
+    background: transparent;
+    color: #eef0f3;
+    padding: 0;
+    border-radius: 0;
+    font-size: 12.5px;
+    line-height: 1.6;
+  }
+  .md-preview hr {
+    border: 0;
+    border-top: 1px solid rgba(220, 224, 232, 0.10);
+    margin: 1.6em 0;
+  }
+  .md-preview table {
+    border-collapse: collapse;
+    margin: 1em 0;
+    font-size: 13px;
+    width: 100%;
+  }
+  .md-preview th,
+  .md-preview td {
+    border: 1px solid rgba(220, 224, 232, 0.10);
+    padding: 6px 10px;
+    text-align: left;
+  }
+  .md-preview th {
+    background: rgba(255, 255, 255, 0.04);
+    color: #ffffff;
+    font-weight: 600;
+  }
+  .md-preview img {
+    max-width: 100%;
+    border-radius: 6px;
+  }
+  .md-preview:focus { outline: none; }
 }
 
 /* macOS-style overlay scrollbars: invisible until scroll, then thin pill */

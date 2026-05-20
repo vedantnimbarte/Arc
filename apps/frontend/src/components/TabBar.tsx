@@ -1,8 +1,11 @@
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import {
   Plus,
   X,
   Terminal as TerminalIcon,
   FileCode,
+  FolderOpen,
   Settings as SettingsIcon,
   PanelLeftClose,
   PanelLeftOpen,
@@ -14,6 +17,7 @@ import { useWorkspace } from '../state/workspace';
 import { useFiles } from '../state/files';
 import { cn } from '../lib/cn';
 import { formatBinding, getBinding } from '../state/shortcuts';
+import { fsPickFolder, fsWriteFile } from '../lib/tauri';
 
 interface Props {
   onOpenSettings: () => void;
@@ -30,11 +34,72 @@ export function TabBar({
   onToggleChat,
   chatOpen,
 }: Props) {
-  const { tabs, activeTabId, setActive, closeTab, addTab, tabDirty } = useWorkspace();
+  const { tabs, activeTabId, setActive, closeTab, addTab, openFile, tabDirty } = useWorkspace();
   const sidebarCollapsed = useFiles((s) => s.collapsed);
   const toggleSidebar = useFiles((s) => s.toggleCollapsed);
+  const root = useFiles((s) => s.root);
+
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [menuPos, setMenuPos] = useState<{ top: number; left: number } | null>(null);
+  const [newFileOpen, setNewFileOpen] = useState(false);
+  const plusRef = useRef<HTMLButtonElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+
+  // Anchor the (portaled) menu to the plus button using viewport coords.
+  // The tab strip clips overflow, and the toolbar uses backdrop-filter which
+  // would otherwise re-parent any fixed-positioned descendant — portaling
+  // to document.body keeps the menu free of both constraints.
+  useLayoutEffect(() => {
+    if (!menuOpen) {
+      setMenuPos(null);
+      return;
+    }
+    const update = () => {
+      const r = plusRef.current?.getBoundingClientRect();
+      if (!r) return;
+      setMenuPos({ top: r.bottom + 4, left: r.left });
+    };
+    update();
+    window.addEventListener('resize', update);
+    return () => window.removeEventListener('resize', update);
+  }, [menuOpen]);
+
+  // Close the popover on outside click / Escape.
+  useEffect(() => {
+    if (!menuOpen) return;
+    const onDown = (e: MouseEvent) => {
+      const t = e.target as Node | null;
+      if (!t) return;
+      if (menuRef.current?.contains(t)) return;
+      if (plusRef.current?.contains(t)) return;
+      setMenuOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setMenuOpen(false);
+    };
+    window.addEventListener('mousedown', onDown);
+    window.addEventListener('keydown', onKey);
+    return () => {
+      window.removeEventListener('mousedown', onDown);
+      window.removeEventListener('keydown', onKey);
+    };
+  }, [menuOpen]);
+
+  const newTerminal = () => {
+    addTab({ id: `term-${Date.now()}`, title: 'shell', kind: 'terminal' });
+    setMenuOpen(false);
+  };
+
+  const newEditor = () => {
+    setMenuOpen(false);
+    setNewFileOpen(true);
+  };
 
   const requestClose = (id: string, title: string) => {
+    // Workspace invariant: at least one tab is always open. The store also
+    // guards this, but we no-op early so the dirty-confirm prompt doesn't
+    // fire pointlessly.
+    if (tabs.length <= 1) return;
     if (tabDirty[id]) {
       const ok = window.confirm(`"${title}" has unsaved changes. Discard them?`);
       if (!ok) return;
@@ -43,6 +108,7 @@ export function TabBar({
   };
 
   return (
+    <>
     <div className="material-toolbar relative flex h-11 shrink-0 items-center gap-2 px-3">
       {/* Sidebar toggle — left rail, mirrors macOS toolbar control */}
       <button
@@ -69,6 +135,7 @@ export function TabBar({
           const isActive = tab.id === activeTabId;
           const Icon = tab.kind === 'terminal' ? TerminalIcon : FileCode;
           const dirty = !!tabDirty[tab.id];
+          const closable = tabs.length > 1;
           return (
             <button
               key={tab.id}
@@ -89,47 +156,59 @@ export function TabBar({
                 )}
               />
               <span className="max-w-[150px] truncate">{tab.title}</span>
-              <span
-                role="button"
-                tabIndex={0}
-                aria-label={dirty ? 'Close tab (unsaved changes)' : 'Close tab'}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  requestClose(tab.id, tab.title);
-                }}
-                className={cn(
-                  'relative ml-0.5 flex h-3.5 w-3.5 items-center justify-center rounded-full',
-                  'transition-all duration-150 hover:bg-white/15 hover:text-fg-base',
-                  dirty
-                    ? 'text-accent hover:text-fg-base'
-                    : 'text-fg-subtle opacity-0 group-hover:opacity-100',
-                )}
-              >
-                {dirty ? (
-                  <>
-                    <span className="absolute inset-0 m-auto h-1.5 w-1.5 rounded-full bg-accent shadow-glow-sm transition-opacity duration-150 group-hover:opacity-0" />
-                    <X size={9} strokeWidth={2.5} className="opacity-0 transition-opacity duration-150 group-hover:opacity-100" />
-                  </>
-                ) : (
-                  <X size={9} strokeWidth={2.5} />
-                )}
-              </span>
+              {closable ? (
+                <span
+                  role="button"
+                  tabIndex={0}
+                  aria-label={dirty ? 'Close tab (unsaved changes)' : 'Close tab'}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    requestClose(tab.id, tab.title);
+                  }}
+                  className={cn(
+                    'relative ml-0.5 flex h-3.5 w-3.5 items-center justify-center rounded-full',
+                    'transition-all duration-150 hover:bg-white/15 hover:text-fg-base',
+                    dirty
+                      ? 'text-accent hover:text-fg-base'
+                      : 'text-fg-subtle opacity-0 group-hover:opacity-100',
+                  )}
+                >
+                  {dirty ? (
+                    <>
+                      <span className="absolute inset-0 m-auto h-1.5 w-1.5 rounded-full bg-accent shadow-glow-sm transition-opacity duration-150 group-hover:opacity-0" />
+                      <X size={9} strokeWidth={2.5} className="opacity-0 transition-opacity duration-150 group-hover:opacity-100" />
+                    </>
+                  ) : (
+                    <X size={9} strokeWidth={2.5} />
+                  )}
+                </span>
+              ) : dirty ? (
+                // Last remaining tab can't be closed, but if it has unsaved
+                // changes we still show the accent dot so the user sees
+                // the dirty state.
+                <span
+                  aria-label="Unsaved changes"
+                  title="Unsaved changes"
+                  className="relative ml-0.5 flex h-3.5 w-3.5 items-center justify-center"
+                >
+                  <span className="h-1.5 w-1.5 rounded-full bg-accent shadow-glow-sm" />
+                </span>
+              ) : null}
             </button>
           );
         })}
 
-        {/* New-tab "+" sits inline with the tab strip, like a browser. */}
+        {/* New-tab "+" sits inline with the tab strip, like a browser. Opens
+            a popover so the user can pick between a terminal and a new editor
+            file. The popover itself is portaled — see below. */}
         <button
-          onClick={() =>
-            addTab({
-              id: `term-${Date.now()}`,
-              title: 'shell',
-              kind: 'terminal',
-            })
-          }
+          ref={plusRef}
+          onClick={() => setMenuOpen((o) => !o)}
           className="group ml-0.5 flex h-[26px] w-[26px] shrink-0 items-center justify-center rounded-[7px] text-fg-subtle transition-all duration-200 ease-apple hover:bg-white/[0.06] hover:text-fg-base active:bg-white/[0.10]"
-          aria-label="New terminal"
-          title="New terminal (⌘T)"
+          aria-label="New tab"
+          aria-expanded={menuOpen}
+          aria-haspopup="menu"
+          title="New tab"
         >
           <Plus
             size={13}
@@ -211,6 +290,205 @@ export function TabBar({
             className="transition-transform duration-500 ease-apple group-hover:rotate-45"
           />
         </button>
+      </div>
+    </div>
+    {menuOpen && menuPos && typeof document !== 'undefined' &&
+      createPortal(
+        <div
+          ref={menuRef}
+          role="menu"
+          style={{ position: 'fixed', top: menuPos.top, left: menuPos.left }}
+          className="material-sheet z-50 w-44 animate-popover-in overflow-hidden rounded-md shadow-sheet ring-1 ring-white/10"
+        >
+          <button
+            role="menuitem"
+            onClick={newTerminal}
+            className="flex w-full items-center gap-2 px-3 py-2 text-left font-display text-[12px] text-fg-base/90 transition-colors hover:bg-white/[0.06]"
+          >
+            <TerminalIcon size={12} strokeWidth={2} className="text-fg-subtle" />
+            <span className="flex-1">Terminal</span>
+            <kbd className="font-mono text-[9.5px] text-fg-subtle">⌘T</kbd>
+          </button>
+          <button
+            role="menuitem"
+            onClick={newEditor}
+            className="flex w-full items-center gap-2 px-3 py-2 text-left font-display text-[12px] text-fg-base/90 transition-colors hover:bg-white/[0.06]"
+          >
+            <FileCode size={12} strokeWidth={2} className="text-fg-subtle" />
+            <span className="flex-1">Editor (new file)</span>
+          </button>
+        </div>,
+        document.body,
+      )}
+    <NewFileDialog
+      open={newFileOpen}
+      initialDirectory={root}
+      onClose={() => setNewFileOpen(false)}
+      onCreated={(path) => {
+        setNewFileOpen(false);
+        openFile(path);
+      }}
+    />
+    </>
+  );
+}
+
+interface NewFileDialogProps {
+  open: boolean;
+  initialDirectory: string | null;
+  onClose: () => void;
+  onCreated: (path: string) => void;
+}
+
+function NewFileDialog({ open, initialDirectory, onClose, onCreated }: NewFileDialogProps) {
+  const [directory, setDirectory] = useState(initialDirectory ?? '');
+  const [filename, setFilename] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const filenameRef = useRef<HTMLInputElement>(null);
+
+  // Reset state whenever the dialog re-opens — we don't want a stale filename
+  // from a previous attempt sitting in the field.
+  useEffect(() => {
+    if (!open) return;
+    setDirectory(initialDirectory ?? '');
+    setFilename('');
+    setError(null);
+    setBusy(false);
+    // Focus the filename input first; directory is usually pre-filled with
+    // the workspace root.
+    const t = setTimeout(() => filenameRef.current?.focus(), 0);
+    return () => clearTimeout(t);
+  }, [open, initialDirectory]);
+
+  if (!open) return null;
+
+  const pickDir = async () => {
+    try {
+      const next = await fsPickFolder(directory || null);
+      if (next) setDirectory(next);
+    } catch (err) {
+      setError(String(err));
+    }
+  };
+
+  const submit = async () => {
+    setError(null);
+    const dir = directory.trim().replace(/[\\/]+$/, '');
+    const name = filename.trim();
+    if (!dir) {
+      setError('Pick a directory first.');
+      return;
+    }
+    if (!name) {
+      setError('Filename is required.');
+      return;
+    }
+    if (/[\\/:*?"<>|]/.test(name)) {
+      setError('Filename cannot contain \\ / : * ? " < > |');
+      return;
+    }
+    const sep = dir.includes('\\') ? '\\' : '/';
+    const fullPath = `${dir}${sep}${name}`;
+    setBusy(true);
+    try {
+      await fsWriteFile(fullPath, '');
+      onCreated(fullPath);
+    } catch (err) {
+      setError(String(err));
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-start justify-center bg-black/40 backdrop-blur-sm"
+      onClick={onClose}
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        onKeyDown={(e) => {
+          if (e.key === 'Escape') onClose();
+        }}
+        className="material-sheet mt-[18vh] flex w-[520px] max-w-[92vw] animate-sheet-in flex-col overflow-hidden rounded-window shadow-sheet ring-1 ring-white/10"
+      >
+        <div className="flex items-center gap-2 border-b border-border-hairline px-4 py-3">
+          <FileCode size={13} strokeWidth={2} className="text-fg-subtle" />
+          <span className="font-display text-[12.5px] font-medium tracking-tight text-fg-base">
+            New file
+          </span>
+        </div>
+
+        <div className="flex flex-col gap-3 px-4 py-4">
+          <label className="flex flex-col gap-1">
+            <span className="font-display text-[10.5px] uppercase tracking-wider text-fg-subtle">
+              Directory
+            </span>
+            <div className="flex gap-1.5">
+              <input
+                value={directory}
+                onChange={(e) => setDirectory(e.target.value)}
+                placeholder="C:\\path\\to\\folder"
+                spellCheck={false}
+                className="min-w-0 flex-1 rounded-md border border-white/[0.06] bg-black/[0.25] px-2.5 py-1.5 font-mono text-[12px] text-fg-base placeholder:text-fg-subtle focus:border-accent/40 focus:bg-black/[0.32] focus:shadow-focus focus:outline-none"
+              />
+              <button
+                type="button"
+                onClick={pickDir}
+                className="flex shrink-0 items-center gap-1.5 rounded-md border border-white/[0.06] bg-white/[0.03] px-2.5 py-1.5 font-display text-[11.5px] text-fg-muted transition-colors hover:bg-white/[0.08] hover:text-fg-base"
+                title="Pick a folder"
+              >
+                <FolderOpen size={11} strokeWidth={2} />
+                Browse
+              </button>
+            </div>
+          </label>
+
+          <label className="flex flex-col gap-1">
+            <span className="font-display text-[10.5px] uppercase tracking-wider text-fg-subtle">
+              Filename
+            </span>
+            <input
+              ref={filenameRef}
+              value={filename}
+              onChange={(e) => setFilename(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  e.preventDefault();
+                  void submit();
+                }
+              }}
+              placeholder="notes.md"
+              spellCheck={false}
+              autoComplete="off"
+              className="rounded-md border border-white/[0.06] bg-black/[0.25] px-2.5 py-1.5 font-mono text-[12px] text-fg-base placeholder:text-fg-subtle focus:border-accent/40 focus:bg-black/[0.32] focus:shadow-focus focus:outline-none"
+            />
+          </label>
+
+          {error && (
+            <div className="rounded-md border border-red-500/30 bg-red-500/[0.08] px-2.5 py-1.5 font-display text-[11.5px] text-red-300">
+              {error}
+            </div>
+          )}
+        </div>
+
+        <div className="flex items-center justify-end gap-2 border-t border-border-hairline bg-black/[0.15] px-4 py-2.5">
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-md px-3 py-1.5 font-display text-[11.5px] text-fg-muted transition-colors hover:bg-white/[0.06] hover:text-fg-base"
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            onClick={() => void submit()}
+            disabled={busy}
+            className="rounded-md bg-accent/90 px-3 py-1.5 font-display text-[11.5px] font-medium text-bg-base transition-colors hover:bg-accent disabled:opacity-50"
+          >
+            {busy ? 'Creating…' : 'Create & open'}
+          </button>
+        </div>
       </div>
     </div>
   );

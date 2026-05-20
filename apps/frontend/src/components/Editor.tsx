@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Compartment, EditorState, type Extension } from '@codemirror/state';
 import { EditorView, keymap } from '@codemirror/view';
 import { HighlightStyle, syntaxHighlighting } from '@codemirror/language';
@@ -6,6 +6,8 @@ import { history, historyKeymap, redo, undo } from '@codemirror/commands';
 import { tags as t } from '@lezer/highlight';
 import { basicSetup } from 'codemirror';
 import { pathToLanguageId } from '@arc/editor';
+import { marked } from 'marked';
+import DOMPurify from 'dompurify';
 import {
   AlertCircle,
   FileWarning,
@@ -13,6 +15,9 @@ import {
   Undo2,
   Redo2,
   CheckCircle2,
+  Code2,
+  Eye,
+  Columns2,
 } from 'lucide-react';
 import { fileIcon, MOCHA } from '../lib/fileIcons';
 import { fsReadFile, fsWriteFile, isTauri } from '../lib/tauri';
@@ -32,27 +37,74 @@ type Status =
   | { kind: 'error'; message: string }
   | { kind: 'saved'; at: number };
 
+type Mode = 'code' | 'preview' | 'split';
+
 export function Editor({ filePath, tabId }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
+  const previewRef = useRef<HTMLDivElement>(null);
   const viewRef = useRef<EditorView | null>(null);
   const langCompartment = useRef(new Compartment());
   const lastSavedRef = useRef<string>('');
+  /** Live mirror of the file's text. The CodeMirror update listener writes
+   *  to it on every doc change; saves and preview renders both read from
+   *  it. The preview pane is read-only, so this only flows one direction. */
+  const currentSourceRef = useRef<string>('');
+  /** Mirrors `mode` for the CodeMirror update listener, whose closure is
+   *  captured at mount time. Lets the listener re-render the preview pane
+   *  on doc changes when we're in preview or split mode without recreating
+   *  the editor. */
+  const modeRef = useRef<Mode>('code');
+  /** Coalesces preview re-renders across bursts of CM keystrokes. */
+  const previewFrameRef = useRef<number | null>(null);
   const setTabDirty = useWorkspace((s) => s.setTabDirty);
 
   const [status, setStatus] = useState<Status>({ kind: 'loading' });
   const [dirty, setDirty] = useState(false);
+  const [mode, setModeState] = useState<Mode>('code');
+
+  const isMarkdown = useMemo(() => /\.(md|markdown|mdx)$/i.test(filePath), [filePath]);
+
+  /** Render `currentSourceRef` into the preview pane (no-op if the pane
+   *  isn't mounted). Safe to call every keystroke — synchronous marked +
+   *  DOMPurify takes well under a frame for typical .md files. */
+  const renderPreview = useCallback(() => {
+    if (!previewRef.current) return;
+    previewRef.current.innerHTML = markdownToSafeHtml(currentSourceRef.current);
+  }, []);
+
+  /** rAF-throttled preview render — used by the CodeMirror update
+   *  listener so a burst of keystrokes only re-renders once per frame. */
+  const schedulePreviewRender = useCallback(() => {
+    if (previewFrameRef.current !== null) return;
+    previewFrameRef.current = requestAnimationFrame(() => {
+      previewFrameRef.current = null;
+      renderPreview();
+    });
+  }, [renderPreview]);
+
+  /** Mode setter that handles the side effect of seeding the preview pane
+   *  when we enter a mode that shows it. */
+  const setMode = useCallback(
+    (next: Mode) => {
+      modeRef.current = next;
+      setModeState(next);
+      if (next === 'preview' || next === 'split') {
+        // Render synchronously on enter so the pane doesn't flash empty.
+        renderPreview();
+      }
+    },
+    [renderPreview],
+  );
 
   /** Stable ref so the keymap closure always sees the latest save fn. */
   const saveRef = useRef<() => Promise<void>>(async () => {});
 
   saveRef.current = useCallback(async () => {
-    const view = viewRef.current;
-    if (!view) return;
     if (!isTauri) {
       setStatus({ kind: 'error', message: 'saving requires the Tauri backend' });
       return;
     }
-    const content = view.state.doc.toString();
+    const content = currentSourceRef.current;
     setStatus({ kind: 'saving' });
     try {
       await fsWriteFile(filePath, content);
@@ -70,6 +122,8 @@ export function Editor({ filePath, tabId }: Props) {
     let disposed = false;
     setStatus({ kind: 'loading' });
     setDirty(false);
+    modeRef.current = 'code';
+    setModeState('code');
     setTabDirty(tabId, false);
 
     const boot = async () => {
@@ -83,6 +137,7 @@ export function Editor({ filePath, tabId }: Props) {
 
         viewRef.current?.destroy();
         lastSavedRef.current = content;
+        currentSourceRef.current = content;
 
         const saveKeymap = keymap.of([
           {
@@ -111,9 +166,12 @@ export function Editor({ filePath, tabId }: Props) {
               EditorView.updateListener.of((u) => {
                 if (!u.docChanged) return;
                 const current = u.state.doc.toString();
+                currentSourceRef.current = current;
                 const isDirty = current !== lastSavedRef.current;
                 setDirty(isDirty);
                 setTabDirty(tabId, isDirty);
+                // Keep the preview pane live in preview / split modes.
+                if (modeRef.current !== 'code') schedulePreviewRender();
               }),
             ],
           }),
@@ -143,7 +201,56 @@ export function Editor({ filePath, tabId }: Props) {
     };
   }, [filePath, tabId, setTabDirty]);
 
+  useEffect(() => {
+    return () => {
+      if (previewFrameRef.current !== null) {
+        cancelAnimationFrame(previewFrameRef.current);
+        previewFrameRef.current = null;
+      }
+    };
+  }, []);
+
+  /** Bidirectional, ratio-based scroll sync between the code and preview
+   *  panes while in split mode. We don't try to map markdown lines to
+   *  rendered blocks (that's a lot more code for a marginal accuracy win
+   *  on most docs) — instead each side scrolls to the same fractional
+   *  position within its own scroll range. */
+  useEffect(() => {
+    if (mode !== 'split') return;
+    const cm = viewRef.current;
+    const codeEl = cm?.scrollDOM ?? null;
+    const previewEl = previewRef.current;
+    if (!codeEl || !previewEl) return;
+
+    let syncing = false;
+    const syncFrom = (src: HTMLElement, dst: HTMLElement) => {
+      if (syncing) return;
+      const srcRange = src.scrollHeight - src.clientHeight;
+      const dstRange = dst.scrollHeight - dst.clientHeight;
+      if (srcRange <= 0 || dstRange <= 0) return;
+      const ratio = src.scrollTop / srcRange;
+      syncing = true;
+      dst.scrollTop = ratio * dstRange;
+      // The flag is cleared on the next frame — long enough for the
+      // browser to fire the resulting scroll event without bouncing back.
+      requestAnimationFrame(() => {
+        syncing = false;
+      });
+    };
+
+    const onCodeScroll = () => syncFrom(codeEl, previewEl);
+    const onPreviewScroll = () => syncFrom(previewEl, codeEl);
+    codeEl.addEventListener('scroll', onCodeScroll, { passive: true });
+    previewEl.addEventListener('scroll', onPreviewScroll, { passive: true });
+    return () => {
+      codeEl.removeEventListener('scroll', onCodeScroll);
+      previewEl.removeEventListener('scroll', onPreviewScroll);
+    };
+  }, [mode, status.kind]);
+
   const { Icon, color } = fileIcon(basename(filePath));
+  const showCode = mode === 'code' || mode === 'split';
+  const showPreview = mode === 'preview' || mode === 'split';
 
   return (
     <div className="flex h-full flex-col">
@@ -164,19 +271,53 @@ export function Editor({ filePath, tabId }: Props) {
         </span>
 
         <div className="ml-auto flex items-center gap-1">
+          {isMarkdown && (
+            <div
+              role="tablist"
+              aria-label="Markdown view"
+              className="mr-1 flex items-center gap-0.5 rounded-md bg-white/[0.05] p-0.5"
+            >
+              {(
+                [
+                  { id: 'code', label: 'code', Icon: Code2, title: 'Edit markdown source' },
+                  { id: 'split', label: 'split', Icon: Columns2, title: 'Source + rendered side-by-side' },
+                  { id: 'preview', label: 'preview', Icon: Eye, title: 'Rendered preview (read-only)' },
+                ] as const
+              ).map(({ id, label, Icon: TabIcon, title }) => (
+                <button
+                  key={id}
+                  role="tab"
+                  aria-selected={mode === id}
+                  onClick={() => mode !== id && setMode(id)}
+                  className={cn(
+                    'flex h-5 items-center gap-1 rounded px-1.5 font-display text-[10.5px] font-medium tracking-tight transition-colors duration-150',
+                    mode === id
+                      ? 'bg-white/[0.10] text-fg-base'
+                      : 'text-fg-muted hover:text-fg-base',
+                  )}
+                  title={title}
+                >
+                  <TabIcon size={10} strokeWidth={2.1} />
+                  {label}
+                </button>
+              ))}
+            </div>
+          )}
           <button
             onClick={() => viewRef.current && undo(viewRef.current)}
             className="flex h-6 w-6 items-center justify-center rounded-md text-fg-muted transition-colors duration-150 hover:bg-white/[0.08] hover:text-fg-base disabled:opacity-40"
             aria-label="Undo"
             title="Undo (⌘Z)"
+            disabled={mode === 'preview'}
           >
             <Undo2 size={12} strokeWidth={2} />
           </button>
           <button
             onClick={() => viewRef.current && redo(viewRef.current)}
-            className="flex h-6 w-6 items-center justify-center rounded-md text-fg-muted transition-colors duration-150 hover:bg-white/[0.08] hover:text-fg-base"
+            className="flex h-6 w-6 items-center justify-center rounded-md text-fg-muted transition-colors duration-150 hover:bg-white/[0.08] hover:text-fg-base disabled:opacity-40"
             aria-label="Redo"
             title="Redo (⇧⌘Z)"
+            disabled={mode === 'preview'}
           >
             <Redo2 size={12} strokeWidth={2} />
           </button>
@@ -204,13 +345,49 @@ export function Editor({ filePath, tabId }: Props) {
       {status.kind === 'error' && !viewRef.current ? (
         <ErrorBlock filePath={filePath} message={status.message} />
       ) : (
-        <div
-          ref={containerRef}
-          className="selectable min-h-0 flex-1 overflow-hidden"
-        />
+        <div className="flex min-h-0 flex-1 overflow-hidden">
+          {/* Code pane — always mounted so the CodeMirror view, scroll,
+              cursor, and history survive mode switches. We just toggle
+              width (hidden when in preview-only mode). */}
+          <div
+            ref={containerRef}
+            className={cn(
+              'selectable min-h-0 overflow-hidden',
+              showCode ? 'flex-1 basis-0' : 'hidden',
+            )}
+          />
+          {isMarkdown && mode === 'split' && (
+            <div className="w-px shrink-0 bg-border-hairline" aria-hidden />
+          )}
+          {isMarkdown && (
+            <div
+              ref={previewRef}
+              className={cn(
+                'md-preview selectable min-h-0 overflow-auto',
+                showPreview ? 'flex-1 basis-0' : 'hidden',
+              )}
+              aria-readonly="true"
+              aria-label="Markdown preview"
+            />
+          )}
+        </div>
       )}
     </div>
   );
+}
+
+/**
+ * Render markdown to HTML, then sanitize. We force a sync `marked.parse`
+ * call (it returns string with default options) and DOMPurify keeps the
+ * surface safe even though the source is local-disk content — a malicious
+ * .md could still embed e.g. `<script>` and we don't want that running.
+ */
+function markdownToSafeHtml(md: string): string {
+  const rawHtml = marked.parse(md, { async: false, breaks: false, gfm: true }) as string;
+  return DOMPurify.sanitize(rawHtml, {
+    USE_PROFILES: { html: true },
+    ADD_ATTR: ['target', 'rel'],
+  });
 }
 
 function StatusLabel({ status, dirty }: { status: Status; dirty: boolean }) {

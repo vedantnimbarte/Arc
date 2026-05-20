@@ -55,6 +55,10 @@ export const useWorkspace = create<WorkspaceState>()((set, get) => ({
     })),
   closeTab: (id) =>
     set((s) => {
+      // Always leave at least one tab open — the workspace has no
+      // "no-tab" empty state, and callers (X button, future keymap)
+      // shouldn't have to enforce this themselves.
+      if (s.tabs.length <= 1) return s;
       const remaining = s.tabs.filter((t) => t.id !== id);
       const wasActive = s.activeTabId === id;
       const { [id]: _omit, ...nextDirty } = s.tabDirty;
