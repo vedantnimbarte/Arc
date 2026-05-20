@@ -4,7 +4,7 @@
   <img src="apps/desktop/icons/icon.png" alt="ARC Logo" width="128" height="128" />
 </div>
 
-[![License](https://img.shields.io/badge/license-TBD-blue)](LICENSE)
+[![License](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Linux-lightgrey)](https://github.com/anthropics/arc)
 
 **ARC** is a desktop terminal and AI agent runtime built with Tauri (Rust) and React (TypeScript). It combines a real PTY-backed terminal, an embedded code editor, multi-agent orchestration, and local + cloud AI providers behind one unified interface.
@@ -132,7 +132,14 @@ pnpm dev                     # Open http://127.0.0.1:5173
 
 ## Contributing
 
-We welcome contributions! Start with [DEVELOPMENT.md](DEVELOPMENT.md) to learn our code conventions and how to add features. Before submitting a PR:
+We welcome contributions from the community! Please read [CONTRIBUTING.md](CONTRIBUTING.md) for detailed guidelines on:
+- Setting up your development environment
+- Code conventions and style
+- Commit message format
+- Pull request process
+- Areas where we need help
+
+Quick checklist before submitting a PR:
 
 ```bash
 pnpm typecheck               # Type-check all TypeScript
@@ -144,7 +151,12 @@ See [docs/decisions.md](docs/decisions.md) for the architectural principles behi
 
 ## License
 
-TBD — see [LICENSE](LICENSE) (placeholder).
+ARC is licensed under the [MIT License](LICENSE), which permits:
+- ✅ Commercial use
+- ✅ Modification and distribution
+- ✅ Private use
+
+See [LICENSE](LICENSE) for full details.
 
 ## Questions?
 
