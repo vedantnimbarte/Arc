@@ -21,22 +21,12 @@ import { useSettings } from '../state/settings';
 import { useWorkspace } from '../state/workspace';
 
 interface Props {
-  /** Stable id for the pane that owns this terminal. Also serves as the
-   *  React-effect key — recreating the component spawns a new PTY. */
+  /** Stable id for the terminal (tab id). Also serves as the React-effect
+   *  key — recreating the component spawns a new PTY. */
   sessionKey: string;
-  /** Pane → PTY registration target. When a tab has multiple panes the
-   *  pane id is *not* the tab id; we route through `setPanePtyId` instead
-   *  of the legacy `setTabPtyId` so each pane owns its own PTY entry. */
-  paneId?: string;
-  /** Owning tab id — used to flip the tab's active-pane mirror when this
-   *  pane gains focus. */
-  tabId?: string;
-  /** Called when the user clicks anywhere in this pane (so the parent can
-   *  mark it as the active pane of its tab). */
-  onFocus?: () => void;
 }
 
-export function Terminal({ sessionKey, paneId, tabId, onFocus }: Props) {
+export function Terminal({ sessionKey }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const termRef = useRef<XTerm | null>(null);
   // Snapshot the root at mount — the PTY can only be spawned with one CWD,
@@ -72,6 +62,10 @@ export function Terminal({ sessionKey, paneId, tabId, onFocus }: Props) {
     const links = new WebLinksAddon();
     term.loadAddon(fit);
     term.loadAddon(links);
+    // Remove orphaned DOM from a previous xterm instance. In React Strict Mode
+    // effects run twice (mount→cleanup→remount); dispose() doesn't always
+    // remove every child, so the second open() finds a dirty container.
+    while (container.firstChild) container.removeChild(container.firstChild);
     term.open(container);
 
     const safeFit = () => {
@@ -82,6 +76,12 @@ export function Terminal({ sessionKey, paneId, tabId, onFocus }: Props) {
       }
     };
     safeFit();
+
+    // Deferred fit: on the next frame the flex layout is guaranteed to have
+    // resolved, which matters when this pane is freshly created by a split.
+    const rafId = requestAnimationFrame(() => {
+      if (!disposed) safeFit();
+    });
 
     // Re-fit once webfonts (Geist Mono) finish loading — prevents column drift
     if (typeof document !== 'undefined' && document.fonts?.ready) {
@@ -215,15 +215,9 @@ export function Terminal({ sessionKey, paneId, tabId, onFocus }: Props) {
           }),
         );
 
-        // Publish the PTY id so other panes (file tree, chat) can write
-        // into this terminal. When the owning component knows its pane id
-        // we use the per-pane map (mirrored onto Tab.ptyId for the active
-        // pane); legacy callers without a paneId fall back to the tab map.
-        if (paneId) {
-          useWorkspace.getState().setPanePtyId(paneId, ptyId);
-        } else {
-          useWorkspace.getState().setTabPtyId(sessionKey, ptyId);
-        }
+        // Publish the PTY id so other components (file tree, chat) can write
+        // into this terminal.
+        useWorkspace.getState().setTabPtyId(sessionKey, ptyId);
 
         // OSC 7 — modern shells emit `\e]7;file://host/path\e\\` whenever
         // their CWD changes. We sync the file tree root to it so the tree
@@ -323,23 +317,19 @@ export function Terminal({ sessionKey, paneId, tabId, onFocus }: Props) {
 
     return () => {
       disposed = true;
+      cancelAnimationFrame(rafId);
       ro.disconnect();
       unlistens.forEach((u) => u());
       if (ptyId) void ptyKill(ptyId).catch(() => {});
-      if (paneId) {
-        useWorkspace.getState().setPanePtyId(paneId, undefined);
-      } else {
-        useWorkspace.getState().setTabPtyId(sessionKey, undefined);
-      }
+      useWorkspace.getState().setTabPtyId(sessionKey, undefined);
       term.dispose();
       termRef.current = null;
     };
-  }, [sessionKey, paneId, tabId]);
+  }, [sessionKey]);
 
   return (
     <div
       ref={containerRef}
-      onMouseDown={onFocus}
       className="selectable h-full w-full"
       data-session={sessionKey}
     />

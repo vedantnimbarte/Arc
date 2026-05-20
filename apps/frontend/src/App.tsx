@@ -1,5 +1,5 @@
 import { lazy, Suspense, useEffect, useState } from 'react';
-import { TerminalPanes } from './components/TerminalPanes';
+import { Terminal } from './components/Terminal';
 import { TabBar } from './components/TabBar';
 import { ChatPanel } from './components/ChatPanel';
 import { StatusBar } from './components/StatusBar';
@@ -24,9 +24,6 @@ const Editor = lazy(() =>
 
 export default function App() {
   const { tabs, activeTabId, addTab } = useWorkspace();
-  const splitActivePane = useWorkspace((s) => s.splitActivePane);
-  const closeActivePane = useWorkspace((s) => s.closeActivePane);
-  const cyclePane = useWorkspace((s) => s.cyclePane);
   const hydrate = useWorkspace((s) => s.hydrate);
   const hydrateChat = useChat((s) => s.hydrate);
   const hydrateSecrets = useSettings((s) => s.hydrateSecrets);
@@ -102,32 +99,6 @@ export default function App() {
           setChatOpen(true);
           setChatIntent({ type: 'toggle-sessions', at: Date.now() });
           return;
-        case 'split-horizontal':
-        case 'split-vertical': {
-          const tab = useWorkspace.getState().tabs.find(
-            (t) => t.id === useWorkspace.getState().activeTabId,
-          );
-          if (tab?.kind !== 'terminal') return;
-          splitActivePane(tab.id, action === 'split-horizontal' ? 'horizontal' : 'vertical');
-          return;
-        }
-        case 'close-pane': {
-          const tab = useWorkspace.getState().tabs.find(
-            (t) => t.id === useWorkspace.getState().activeTabId,
-          );
-          if (tab?.kind !== 'terminal') return;
-          closeActivePane(tab.id);
-          return;
-        }
-        case 'focus-next-pane':
-        case 'focus-prev-pane': {
-          const tab = useWorkspace.getState().tabs.find(
-            (t) => t.id === useWorkspace.getState().activeTabId,
-          );
-          if (tab?.kind !== 'terminal') return;
-          cyclePane(tab.id, action === 'focus-next-pane' ? 1 : -1);
-          return;
-        }
       }
     };
 
@@ -148,7 +119,7 @@ export default function App() {
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [addTab, toggleSidebar, chatOpen, splitActivePane, closeActivePane, cyclePane]);
+  }, [addTab, toggleSidebar, chatOpen]);
 
   return (
     <div className="relative flex h-full w-full flex-col overflow-hidden bg-bg-base text-fg-base">
@@ -190,14 +161,19 @@ export default function App() {
             )}
 
             <main className="dot-grid relative min-w-0 flex-1 overflow-hidden">
-              {tabs.map((tab) => (
+              {tabs.map((tab) => {
+                const isActive = tab.id === activeTab?.id;
+                return (
                 <div
                   key={tab.id}
-                  className={cn('h-full w-full')}
-                  style={{ display: tab.id === activeTab?.id ? 'block' : 'none' }}
+                  className="absolute inset-0"
+                  style={{
+                    visibility: isActive ? 'visible' : 'hidden',
+                    pointerEvents: isActive ? 'auto' : 'none',
+                  }}
                 >
                   {tab.kind === 'terminal' ? (
-                    <TerminalPanes tab={tab} />
+                    <Terminal sessionKey={tab.id} />
                   ) : tab.filePath ? (
                     <Suspense fallback={<EditorFallback />}>
                       <Editor filePath={tab.filePath} tabId={tab.id} />
@@ -210,7 +186,8 @@ export default function App() {
                     </div>
                   )}
                 </div>
-              ))}
+                );
+              })}
             </main>
           </div>
 

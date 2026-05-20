@@ -14,12 +14,7 @@ export type ActionId =
   | 'new-chat'
   | 'toggle-agent-picker'
   | 'open-chat-sessions'
-  | 'open-shortcuts'
-  | 'split-horizontal'
-  | 'split-vertical'
-  | 'close-pane'
-  | 'focus-next-pane'
-  | 'focus-prev-pane';
+  | 'open-shortcuts';
 
 export type ActionCategory = 'Workspace' | 'Terminal' | 'Assistant' | 'Help';
 
@@ -101,36 +96,6 @@ export const ACTION_META: Record<ActionId, ActionMeta> = {
     description: 'Browse past chat sessions.',
     category: 'Assistant',
   },
-  'split-horizontal': {
-    id: 'split-horizontal',
-    label: 'Split Horizontally',
-    description: 'Split the active terminal pane into two stacked panes.',
-    category: 'Terminal',
-  },
-  'split-vertical': {
-    id: 'split-vertical',
-    label: 'Split Vertically',
-    description: 'Split the active terminal pane into two side-by-side panes.',
-    category: 'Terminal',
-  },
-  'close-pane': {
-    id: 'close-pane',
-    label: 'Close Pane',
-    description: 'Close the active terminal pane (closes the tab if it is the last pane).',
-    category: 'Terminal',
-  },
-  'focus-next-pane': {
-    id: 'focus-next-pane',
-    label: 'Focus Next Pane',
-    description: 'Move focus to the next terminal pane in the active tab.',
-    category: 'Terminal',
-  },
-  'focus-prev-pane': {
-    id: 'focus-prev-pane',
-    label: 'Focus Previous Pane',
-    description: 'Move focus to the previous terminal pane in the active tab.',
-    category: 'Terminal',
-  },
 };
 
 export const ACTION_ORDER: ActionId[] = [
@@ -139,11 +104,6 @@ export const ACTION_ORDER: ActionId[] = [
   'toggle-sidebar',
   'open-command-history',
   'open-search',
-  'split-horizontal',
-  'split-vertical',
-  'close-pane',
-  'focus-next-pane',
-  'focus-prev-pane',
   'toggle-chat',
   'new-chat',
   'toggle-agent-picker',
@@ -168,12 +128,6 @@ export const DEFAULT_BINDINGS: Record<ActionId, KeyBinding> = {
   'new-chat': { code: 'KeyN', shift: true, alt: false, ...mod() },
   'toggle-agent-picker': { code: 'Slash', shift: false, alt: false, ...mod() },
   'open-chat-sessions': { code: 'KeyL', shift: true, alt: false, ...mod() },
-  // tmux-style splits: ⌘D vertical (alongside), ⌘⇧D horizontal (stacked)
-  'split-vertical': { code: 'KeyD', shift: false, alt: false, ...mod() },
-  'split-horizontal': { code: 'KeyD', shift: true, alt: false, ...mod() },
-  'close-pane': { code: 'KeyW', shift: true, alt: false, ...mod() },
-  'focus-next-pane': { code: 'BracketRight', shift: false, alt: true, ctrl: true, meta: true },
-  'focus-prev-pane': { code: 'BracketLeft', shift: false, alt: true, ctrl: true, meta: true },
 };
 
 interface ShortcutsState {
