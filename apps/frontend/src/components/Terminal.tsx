@@ -21,10 +21,22 @@ import { useSettings } from '../state/settings';
 import { useWorkspace } from '../state/workspace';
 
 interface Props {
+  /** Stable id for the pane that owns this terminal. Also serves as the
+   *  React-effect key — recreating the component spawns a new PTY. */
   sessionKey: string;
+  /** Pane → PTY registration target. When a tab has multiple panes the
+   *  pane id is *not* the tab id; we route through `setPanePtyId` instead
+   *  of the legacy `setTabPtyId` so each pane owns its own PTY entry. */
+  paneId?: string;
+  /** Owning tab id — used to flip the tab's active-pane mirror when this
+   *  pane gains focus. */
+  tabId?: string;
+  /** Called when the user clicks anywhere in this pane (so the parent can
+   *  mark it as the active pane of its tab). */
+  onFocus?: () => void;
 }
 
-export function Terminal({ sessionKey }: Props) {
+export function Terminal({ sessionKey, paneId, tabId, onFocus }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const termRef = useRef<XTerm | null>(null);
   // Snapshot the root at mount — the PTY can only be spawned with one CWD,
@@ -170,8 +182,14 @@ export function Terminal({ sessionKey }: Props) {
           }
         };
 
+        // Track whether we ever saw output from the shell. If the PTY
+        // exits with no output at all, the user is left staring at an
+        // empty pane and has no idea what went wrong — surface a clear
+        // diagnostic in that case instead.
+        let sawAnyData = false;
         unlistens.push(
           await onPtyData(ptyId, (chunk) => {
+            sawAnyData = true;
             const text = decoder.decode(chunk, { stream: true });
             handleChunkText(text);
             term.write(text);
@@ -179,13 +197,33 @@ export function Terminal({ sessionKey }: Props) {
         );
         unlistens.push(
           await onPtyExit(ptyId, (code) => {
-            term.writeln(`\r\n\x1b[38;2;99;99;102m[exit ${code ?? '?'}]\x1b[0m`);
+            if (!sawAnyData) {
+              const cwd = initialCwd.current ?? '(default)';
+              term.writeln(
+                `\x1b[38;2;255;82;82m  shell exited immediately with code ${code ?? '?'}.\x1b[0m`,
+              );
+              term.writeln(`\x1b[2m  cwd:   ${cwd}\x1b[0m`);
+              term.writeln(
+                `\x1b[2m  shell: ${useSettings.getState().defaultShell ?? '(system default)'}\x1b[0m`,
+              );
+              term.writeln(
+                `\x1b[2m  Press ⌘T for a fresh tab, or open Settings → Terminal to pick a different shell.\x1b[0m`,
+              );
+            } else {
+              term.writeln(`\r\n\x1b[38;2;99;99;102m[exit ${code ?? '?'}]\x1b[0m`);
+            }
           }),
         );
 
-        // Publish the PTY id on the tab so other panes (file tree, chat)
-        // can write into this terminal.
-        useWorkspace.getState().setTabPtyId(sessionKey, ptyId);
+        // Publish the PTY id so other panes (file tree, chat) can write
+        // into this terminal. When the owning component knows its pane id
+        // we use the per-pane map (mirrored onto Tab.ptyId for the active
+        // pane); legacy callers without a paneId fall back to the tab map.
+        if (paneId) {
+          useWorkspace.getState().setPanePtyId(paneId, ptyId);
+        } else {
+          useWorkspace.getState().setTabPtyId(sessionKey, ptyId);
+        }
 
         // OSC 7 — modern shells emit `\e]7;file://host/path\e\\` whenever
         // their CWD changes. We sync the file tree root to it so the tree
@@ -288,15 +326,20 @@ export function Terminal({ sessionKey }: Props) {
       ro.disconnect();
       unlistens.forEach((u) => u());
       if (ptyId) void ptyKill(ptyId).catch(() => {});
-      useWorkspace.getState().setTabPtyId(sessionKey, undefined);
+      if (paneId) {
+        useWorkspace.getState().setPanePtyId(paneId, undefined);
+      } else {
+        useWorkspace.getState().setTabPtyId(sessionKey, undefined);
+      }
       term.dispose();
       termRef.current = null;
     };
-  }, [sessionKey]);
+  }, [sessionKey, paneId, tabId]);
 
   return (
     <div
       ref={containerRef}
+      onMouseDown={onFocus}
       className="selectable h-full w-full"
       data-session={sessionKey}
     />

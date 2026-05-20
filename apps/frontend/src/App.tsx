@@ -1,5 +1,5 @@
 import { lazy, Suspense, useEffect, useState } from 'react';
-import { Terminal } from './components/Terminal';
+import { TerminalPanes } from './components/TerminalPanes';
 import { TabBar } from './components/TabBar';
 import { ChatPanel } from './components/ChatPanel';
 import { StatusBar } from './components/StatusBar';
@@ -8,10 +8,12 @@ import { CommandPalette } from './components/CommandPalette';
 import { FileTree } from './components/FileTree';
 import { ResizeHandle } from './components/ResizeHandle';
 import { SearchPalette } from './components/SearchPalette';
+import { ShortcutsDialog } from './components/ShortcutsDialog';
 import { useWorkspace } from './state/workspace';
 import { useFiles } from './state/files';
 import { useSettings } from './state/settings';
 import { useChat } from './state/chat';
+import { actionFor, type ActionId } from './state/shortcuts';
 import { cn } from './lib/cn';
 import type { ChatIntent } from './components/ChatPanel';
 
@@ -22,6 +24,9 @@ const Editor = lazy(() =>
 
 export default function App() {
   const { tabs, activeTabId, addTab } = useWorkspace();
+  const splitActivePane = useWorkspace((s) => s.splitActivePane);
+  const closeActivePane = useWorkspace((s) => s.closeActivePane);
+  const cyclePane = useWorkspace((s) => s.cyclePane);
   const hydrate = useWorkspace((s) => s.hydrate);
   const hydrateChat = useChat((s) => s.hydrate);
   const hydrateSecrets = useSettings((s) => s.hydrateSecrets);
@@ -29,6 +34,7 @@ export default function App() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
+  const [shortcutsOpen, setShortcutsOpen] = useState(false);
   // Chat panel is now a floating popover instead of a docked sidebar.
   // Default open so it's discoverable on first launch; user can dismiss.
   const [chatOpen, setChatOpen] = useState(true);
@@ -59,68 +65,90 @@ export default function App() {
   }, [hydrateSecrets]);
 
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 't' && !e.shiftKey) {
-        e.preventDefault();
-        const id = `term-${Date.now()}`;
-        addTab({ id, title: 'shell', kind: 'terminal' });
-      }
-      if ((e.ctrlKey || e.metaKey) && e.key === ',') {
-        e.preventDefault();
-        setSettingsOpen(true);
-      }
-      // ⌘B / Ctrl+B — toggle the file-tree sidebar (macOS convention)
-      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'b' && !e.shiftKey) {
-        e.preventDefault();
-        toggleSidebar();
-      }
-      // ⌘R / Ctrl+R — open the command-history palette.
-      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'r' && !e.shiftKey) {
-        e.preventDefault();
-        setHistoryOpen(true);
-      }
-      // ⌘P / Ctrl+P — open the workspace file-search palette.
-      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'p' && !e.shiftKey) {
-        e.preventDefault();
-        setSearchOpen(true);
-      }
-      // ⌘J / Ctrl+J — toggle the assistant popover (Arc/Cursor convention).
-      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'j' && !e.shiftKey) {
-        e.preventDefault();
-        setChatOpen((o) => !o);
-      }
-      // ⌘⇧N / Ctrl+⇧N — new chat session (also opens the popover).
-      if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key.toLowerCase() === 'n') {
-        e.preventDefault();
-        setChatOpen(true);
-        setChatIntent({ type: 'new-session', at: Date.now() });
-      }
-      // ⌘/ / Ctrl+/ — toggle the agent picker (open popover if closed).
-      if ((e.ctrlKey || e.metaKey) && e.key === '/' && !e.shiftKey) {
-        e.preventDefault();
-        setChatOpen(true);
-        setChatIntent({ type: 'toggle-agents', at: Date.now() });
-      }
-      // ⌘⇧L / Ctrl+⇧L — open the conversation list.
-      if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key.toLowerCase() === 'l') {
-        e.preventDefault();
-        setChatOpen(true);
-        setChatIntent({ type: 'toggle-sessions', at: Date.now() });
-      }
-      // Esc closes the chat popover when it has focus / is visible
-      if (e.key === 'Escape' && chatOpen) {
-        const target = e.target as HTMLElement | null;
-        // Only swallow Esc when the user isn't typing inside an input
-        // somewhere else (settings dialog, palette etc).
-        const tag = target?.tagName?.toLowerCase();
-        if (tag !== 'input' && tag !== 'textarea') {
-          setChatOpen(false);
+    const dispatch = (action: ActionId) => {
+      switch (action) {
+        case 'new-terminal': {
+          const id = `term-${Date.now()}`;
+          addTab({ id, title: 'shell', kind: 'terminal' });
+          return;
+        }
+        case 'open-settings':
+          setSettingsOpen(true);
+          return;
+        case 'toggle-sidebar':
+          toggleSidebar();
+          return;
+        case 'open-command-history':
+          setHistoryOpen(true);
+          return;
+        case 'open-search':
+          setSearchOpen(true);
+          return;
+        case 'open-shortcuts':
+          setShortcutsOpen(true);
+          return;
+        case 'toggle-chat':
+          setChatOpen((o) => !o);
+          return;
+        case 'new-chat':
+          setChatOpen(true);
+          setChatIntent({ type: 'new-session', at: Date.now() });
+          return;
+        case 'toggle-agent-picker':
+          setChatOpen(true);
+          setChatIntent({ type: 'toggle-agents', at: Date.now() });
+          return;
+        case 'open-chat-sessions':
+          setChatOpen(true);
+          setChatIntent({ type: 'toggle-sessions', at: Date.now() });
+          return;
+        case 'split-horizontal':
+        case 'split-vertical': {
+          const tab = useWorkspace.getState().tabs.find(
+            (t) => t.id === useWorkspace.getState().activeTabId,
+          );
+          if (tab?.kind !== 'terminal') return;
+          splitActivePane(tab.id, action === 'split-horizontal' ? 'horizontal' : 'vertical');
+          return;
+        }
+        case 'close-pane': {
+          const tab = useWorkspace.getState().tabs.find(
+            (t) => t.id === useWorkspace.getState().activeTabId,
+          );
+          if (tab?.kind !== 'terminal') return;
+          closeActivePane(tab.id);
+          return;
+        }
+        case 'focus-next-pane':
+        case 'focus-prev-pane': {
+          const tab = useWorkspace.getState().tabs.find(
+            (t) => t.id === useWorkspace.getState().activeTabId,
+          );
+          if (tab?.kind !== 'terminal') return;
+          cyclePane(tab.id, action === 'focus-next-pane' ? 1 : -1);
+          return;
         }
       }
     };
+
+    const onKey = (e: KeyboardEvent) => {
+      // Esc closes the chat popover when it has focus / is visible
+      if (e.key === 'Escape' && chatOpen) {
+        const target = e.target as HTMLElement | null;
+        const tag = target?.tagName?.toLowerCase();
+        if (tag !== 'input' && tag !== 'textarea') {
+          setChatOpen(false);
+          return;
+        }
+      }
+      const action = actionFor(e);
+      if (!action) return;
+      e.preventDefault();
+      dispatch(action);
+    };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [addTab, toggleSidebar, chatOpen]);
+  }, [addTab, toggleSidebar, chatOpen, splitActivePane, closeActivePane, cyclePane]);
 
   return (
     <div className="relative flex h-full w-full flex-col overflow-hidden bg-bg-base text-fg-base">
@@ -130,6 +158,7 @@ export default function App() {
         <TabBar
           onOpenSettings={() => setSettingsOpen(true)}
           onOpenSearch={() => setSearchOpen(true)}
+          onOpenShortcuts={() => setShortcutsOpen(true)}
           onToggleChat={() => setChatOpen((o) => !o)}
           chatOpen={chatOpen}
         />
@@ -168,7 +197,7 @@ export default function App() {
                   style={{ display: tab.id === activeTab?.id ? 'block' : 'none' }}
                 >
                   {tab.kind === 'terminal' ? (
-                    <Terminal sessionKey={tab.id} />
+                    <TerminalPanes tab={tab} />
                   ) : tab.filePath ? (
                     <Suspense fallback={<EditorFallback />}>
                       <Editor filePath={tab.filePath} tabId={tab.id} />
@@ -220,6 +249,7 @@ export default function App() {
       <SettingsDialog open={settingsOpen} onClose={() => setSettingsOpen(false)} />
       <CommandPalette open={historyOpen} onClose={() => setHistoryOpen(false)} />
       <SearchPalette open={searchOpen} onClose={() => setSearchOpen(false)} />
+      <ShortcutsDialog open={shortcutsOpen} onClose={() => setShortcutsOpen(false)} />
     </div>
   );
 }

@@ -173,16 +173,31 @@ export function FileTree() {
 
   const toggle = useCallback(
     (path: string) => {
+      // Read current state via nodesRef (always up-to-date after commit)
+      // to decide whether to kick off a load. We don't read from a closure-
+      // captured `nodes` (which would require adding it to the dep array and
+      // recreating toggle on every state change) and we don't set a side-effect
+      // variable inside the setNodes updater (React 18 doesn't guarantee the
+      // updater runs synchronously before the if-check in concurrent/transition
+      // mode, which would leave the loading indicator stuck forever).
+      const cur = nodesRef.current[path];
+      const willExpand = !(cur?.expanded ?? false);
       setNodes((prev) => {
-        const cur = prev[path];
-        const expanded = !(cur?.expanded ?? false);
-        return { ...prev, [path]: { ...(cur ?? { loading: false }), expanded } };
+        const prevCur = prev[path];
+        const expanded = !(prevCur?.expanded ?? false);
+        return {
+          ...prev,
+          [path]: {
+            ...(prevCur ?? {}),
+            expanded,
+            loading: expanded && !prevCur?.children ? true : (prevCur?.loading ?? false),
+            error: undefined,
+          },
+        };
       });
-      // Lazy-load on first expand.
-      const cur = nodes[path];
-      if (!cur?.children) void ensureLoaded(path);
+      if (willExpand && !cur?.children) void ensureLoaded(path);
     },
-    [nodes, ensureLoaded],
+    [ensureLoaded],
   );
 
   const goUp = useCallback(async () => {
@@ -415,13 +430,22 @@ function TreeChildren({
 }) {
   const state = nodes[parentPath];
 
+  // Loading affordance — render at every depth so an expanded subfolder
+  // doesn't visually "vanish" during the fsReadDir gap on slow disks /
+  // AV-scanned trees. (Previously only depth 0 showed a row, which made
+  // nested loads look like the folder was empty.)
   if (state?.loading && !state.children) {
-    return depth === 0 ? <LoadingRow /> : null;
+    return <LoadingRow indent={depth} />;
   }
   if (state?.error) {
     return <ErrorRow message={state.error} indent={depth} />;
   }
-  if (!state?.children) return null;
+  if (!state?.children) {
+    // State exists (we set expanded=true) but the load hasn't started
+    // yet — surface a faint placeholder so something is always visible.
+    if (state?.expanded) return <LoadingRow indent={depth} />;
+    return null;
+  }
 
   const visible = state.children.filter((e) => {
     if (!showHidden && e.hidden) return false;
@@ -618,9 +642,12 @@ function TreeNode({
   );
 }
 
-function LoadingRow() {
+function LoadingRow({ indent = 0 }: { indent?: number }) {
   return (
-    <div className="flex items-center gap-2 px-3 py-2 font-display text-[11px] text-fg-subtle">
+    <div
+      className="flex items-center gap-2 py-1.5 pr-3 font-display text-[11px] text-fg-subtle"
+      style={{ paddingLeft: indent * 14 + 14 }}
+    >
       <span className="h-1 w-1 animate-pulse-soft rounded-full bg-accent" />
       <span className="h-1 w-1 animate-pulse-soft rounded-full bg-accent" style={{ animationDelay: '0.2s' }} />
       <span className="h-1 w-1 animate-pulse-soft rounded-full bg-accent" style={{ animationDelay: '0.4s' }} />

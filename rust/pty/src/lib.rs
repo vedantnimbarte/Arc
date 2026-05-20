@@ -67,10 +67,31 @@ impl PtyManager {
 
         let shell = opts.shell.unwrap_or_else(default_shell);
         let mut cmd = CommandBuilder::new(&shell);
-        if let Some(cwd) = opts.cwd.as_deref() {
+        // Pick the most plausible cwd, validating each candidate so we
+        // never hand the spawn a non-existent directory. On Windows that
+        // would cause `CreateProcessW` to exit the shell with code 1
+        // almost immediately, leaving the user staring at a blank xterm.
+        // Order: explicit cwd → $HOME / %USERPROFILE% → current_dir().
+        let chosen_cwd = opts
+            .cwd
+            .as_deref()
+            .filter(|p| std::path::Path::new(p).is_dir())
+            .map(|p| p.to_string())
+            .or_else(|| {
+                std::env::var(home_var())
+                    .ok()
+                    .filter(|p| std::path::Path::new(p).is_dir())
+            })
+            .or_else(|| {
+                std::env::current_dir()
+                    .ok()
+                    .map(|p| p.to_string_lossy().into_owned())
+            });
+        if let Some(ref cwd) = chosen_cwd {
             cmd.cwd(cwd);
-        } else if let Ok(home) = std::env::var(home_var()) {
-            cmd.cwd(home);
+            tracing::debug!(cwd = %cwd, "pty cwd");
+        } else {
+            tracing::warn!("pty spawning without an explicit cwd");
         }
         // Inherit env so PATH/PROMPT/etc work as expected.
         for (k, v) in std::env::vars() {

@@ -8,19 +8,28 @@ import {
   PanelLeftOpen,
   Search,
   Sparkles,
+  Keyboard,
 } from 'lucide-react';
 import { useWorkspace } from '../state/workspace';
 import { useFiles } from '../state/files';
 import { cn } from '../lib/cn';
+import { formatBinding, getBinding } from '../state/shortcuts';
 
 interface Props {
   onOpenSettings: () => void;
   onOpenSearch: () => void;
+  onOpenShortcuts: () => void;
   onToggleChat: () => void;
   chatOpen: boolean;
 }
 
-export function TabBar({ onOpenSettings, onOpenSearch, onToggleChat, chatOpen }: Props) {
+export function TabBar({
+  onOpenSettings,
+  onOpenSearch,
+  onOpenShortcuts,
+  onToggleChat,
+  chatOpen,
+}: Props) {
   const { tabs, activeTabId, setActive, closeTab, addTab, tabDirty } = useWorkspace();
   const sidebarCollapsed = useFiles((s) => s.collapsed);
   const toggleSidebar = useFiles((s) => s.toggleCollapsed);
@@ -155,6 +164,14 @@ export function TabBar({ onOpenSettings, onOpenSearch, onToggleChat, chatOpen }:
       </button>
 
       <div className="ml-0.5 flex items-center gap-0.5">
+        <button
+          onClick={onOpenShortcuts}
+          className="group flex h-7 w-7 items-center justify-center rounded-md text-fg-muted transition-all duration-200 ease-apple hover:bg-white/[0.08] hover:text-fg-base active:bg-white/[0.12]"
+          aria-label="Keyboard shortcuts"
+          title={`Keyboard shortcuts (${formatBinding(getBinding('open-shortcuts'))})`}
+        >
+          <Keyboard size={13} strokeWidth={1.9} />
+        </button>
         <button
           onClick={onToggleChat}
           className={cn(
