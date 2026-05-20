@@ -20,6 +20,21 @@
     margin: 0;
   }
 
+  /* Frameless window: make the entire title bar draggable but keep all
+     interactive children (buttons, inputs, links) clickable. */
+  [data-tauri-drag-region] {
+    -webkit-app-region: drag;
+    app-region: drag;
+  }
+  [data-tauri-drag-region] button,
+  [data-tauri-drag-region] a,
+  [data-tauri-drag-region] input,
+  [data-tauri-drag-region] [role="button"],
+  [data-tauri-drag-region] [role="menuitem"] {
+    -webkit-app-region: no-drag;
+    app-region: no-drag;
+  }
+
   body {
     overscroll-behavior: none;
     user-select: none;

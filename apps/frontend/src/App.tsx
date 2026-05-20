@@ -33,8 +33,7 @@ export default function App() {
   const [searchOpen, setSearchOpen] = useState(false);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
   // Chat panel is now a floating popover instead of a docked sidebar.
-  // Default open so it's discoverable on first launch; user can dismiss.
-  const [chatOpen, setChatOpen] = useState(true);
+  const [chatOpen, setChatOpen] = useState(false);
   // One-shot action requested from a global keyboard shortcut. The
   // timestamp lets ChatPanel re-fire on consecutive identical intents.
   const [chatIntent, setChatIntent] = useState<ChatIntent | null>(null);

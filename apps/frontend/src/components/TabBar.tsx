@@ -13,11 +13,14 @@ import {
   Sparkles,
   Keyboard,
 } from 'lucide-react';
+import { getCurrentWindow } from '@tauri-apps/api/window';
 import { useWorkspace } from '../state/workspace';
 import { useFiles } from '../state/files';
 import { cn } from '../lib/cn';
 import { formatBinding, getBinding } from '../state/shortcuts';
 import { fsPickFolder, fsWriteFile } from '../lib/tauri';
+
+const isTauri = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
 
 interface Props {
   onOpenSettings: () => void;
@@ -109,7 +112,10 @@ export function TabBar({
 
   return (
     <>
-    <div className="material-toolbar relative flex h-11 shrink-0 items-center gap-2 px-3">
+    <div
+      data-tauri-drag-region
+      className="material-toolbar relative flex h-11 shrink-0 items-center gap-2 pl-3"
+    >
       {/* Sidebar toggle — left rail, mirrors macOS toolbar control */}
       <button
         onClick={toggleSidebar}
@@ -242,7 +248,7 @@ export function TabBar({
         </kbd>
       </button>
 
-      <div className="ml-0.5 flex items-center gap-0.5">
+      <div className="ml-0.5 flex items-center gap-0.5 pr-2">
         <button
           onClick={onOpenShortcuts}
           className="group flex h-7 w-7 items-center justify-center rounded-md text-fg-muted transition-all duration-200 ease-apple hover:bg-white/[0.08] hover:text-fg-base active:bg-white/[0.12]"
@@ -291,6 +297,8 @@ export function TabBar({
           />
         </button>
       </div>
+
+      {isTauri && <WindowControls />}
     </div>
     {menuOpen && menuPos && typeof document !== 'undefined' &&
       createPortal(
@@ -330,6 +338,105 @@ export function TabBar({
       }}
     />
     </>
+  );
+}
+
+function WindowControls() {
+  const [isMaximized, setIsMaximized] = useState(false);
+
+  useEffect(() => {
+    const win = getCurrentWindow();
+    win.isMaximized().then(setIsMaximized).catch(() => {});
+    let unlistenFn: (() => void) | null = null;
+    win.onResized(() => {
+      win.isMaximized().then(setIsMaximized).catch(() => {});
+    }).then((fn) => { unlistenFn = fn; }).catch(() => {});
+    return () => { unlistenFn?.(); };
+  }, []);
+
+  const win = getCurrentWindow();
+
+  return (
+    <div className="ml-1.5 flex h-full items-center gap-px border-l border-white/[0.05] px-1.5">
+      {/* --- Minimize --- */}
+      <button
+        onClick={() => void win.minimize()}
+        className={cn(
+          'group relative flex h-[28px] w-10 items-center justify-center rounded-md',
+          'text-fg-subtle/50',
+          'transition-all duration-200 ease-out',
+          'hover:bg-amber-400/[0.13] hover:text-amber-300/90',
+          'active:scale-95 active:bg-amber-400/[0.20]',
+        )}
+        aria-label="Minimize window"
+        title="Minimize"
+      >
+        <span className="pointer-events-none transition-transform duration-200 ease-out group-hover:translate-y-[1.5px]">
+          <svg width="11" height="11" viewBox="0 0 11 11" fill="none" aria-hidden>
+            <line x1="2" y1="5.5" x2="9" y2="5.5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round"/>
+          </svg>
+        </span>
+      </button>
+
+      {/* --- Maximize / Restore --- */}
+      <button
+        onClick={() => void win.toggleMaximize()}
+        className={cn(
+          'group relative flex h-[28px] w-10 items-center justify-center rounded-md',
+          'text-fg-subtle/50',
+          'transition-all duration-200 ease-out',
+          'hover:bg-white/[0.08] hover:text-fg-base/80',
+          'active:scale-95 active:bg-white/[0.13]',
+        )}
+        aria-label={isMaximized ? 'Restore window' : 'Maximize window'}
+        title={isMaximized ? 'Restore' : 'Maximize'}
+      >
+        <span className="pointer-events-none transition-transform duration-200 ease-out group-hover:scale-[1.18]">
+          {isMaximized ? (
+            /* Restore: two overlapping squares */
+            <svg width="11" height="11" viewBox="0 0 11 11" fill="none" aria-hidden>
+              <path
+                d="M4 1.5H9.5V7H7.5"
+                stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"
+              />
+              <rect x="1.5" y="4" width="6" height="6" rx="0.9" stroke="currentColor" strokeWidth="1.4"/>
+            </svg>
+          ) : (
+            /* Maximize: single clean square */
+            <svg width="11" height="11" viewBox="0 0 11 11" fill="none" aria-hidden>
+              <rect x="1.5" y="1.5" width="8" height="8" rx="1.2" stroke="currentColor" strokeWidth="1.4"/>
+            </svg>
+          )}
+        </span>
+      </button>
+
+      {/* --- Close --- */}
+      <button
+        onClick={() => void win.close()}
+        className={cn(
+          'group relative flex h-[28px] w-10 items-center justify-center rounded-md overflow-hidden',
+          'text-fg-subtle/50',
+          'transition-all duration-200 ease-out',
+          'hover:bg-rose-500/75 hover:text-white',
+          'active:scale-95 active:bg-rose-600/90',
+        )}
+        aria-label="Close window"
+        title="Close"
+      >
+        {/* Radial glow that blooms from the centre on hover */}
+        <span
+          className="pointer-events-none absolute inset-0 rounded-md opacity-0 transition-opacity duration-200 group-hover:opacity-100"
+          style={{ background: 'radial-gradient(ellipse 80% 60% at 50% 120%, rgba(244,63,94,0.35) 0%, transparent 70%)' }}
+          aria-hidden
+        />
+        <span className="pointer-events-none relative transition-transform duration-300 ease-out group-hover:rotate-90">
+          <svg width="11" height="11" viewBox="0 0 11 11" fill="none" aria-hidden>
+            <line x1="2" y1="2" x2="9" y2="9" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round"/>
+            <line x1="9" y1="2" x2="2" y2="9" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round"/>
+          </svg>
+        </span>
+      </button>
+    </div>
   );
 }
 
