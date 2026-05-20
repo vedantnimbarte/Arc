@@ -26,6 +26,7 @@ export default function App() {
   const { tabs, activeTabId, addTab } = useWorkspace();
   const hydrate = useWorkspace((s) => s.hydrate);
   const hydrateChat = useChat((s) => s.hydrate);
+  const hydrateSettings = useSettings((s) => s.hydrateSettings);
   const hydrateSecrets = useSettings((s) => s.hydrateSecrets);
   const activeTab = tabs.find((t) => t.id === activeTabId);
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -53,6 +54,11 @@ export default function App() {
   useEffect(() => {
     void hydrateChat();
   }, [hydrateChat]);
+
+  // Load non-secret settings from SQLite (with one-shot localStorage migration).
+  useEffect(() => {
+    void hydrateSettings();
+  }, [hydrateSettings]);
 
   // Pull API keys out of the OS credential vault into the settings store,
   // and migrate any legacy plaintext keys out of localStorage on the way.

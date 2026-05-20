@@ -20,6 +20,7 @@ pub mod agent;
 pub mod chat;
 pub mod commands;
 pub mod memory;
+pub mod settings;
 pub mod tabs;
 pub mod workspaces;
 

@@ -482,6 +482,28 @@ export async function sessionChatClear(conversationId: string): Promise<void> {
   await invoke('session_chat_clear', { conversationId });
 }
 
+// App settings (non-secret; persisted to SQLite)
+
+/** Shape stored in the `app_settings` table under key `"user_settings"`. */
+export interface PersistedSettings {
+  activeProvider: LlmProvider;
+  providers: Record<LlmProvider, { model: string; baseUrl?: string }>;
+  systemPrompt: string;
+  defaultShell: string | null;
+}
+
+/** Returns the stored settings blob, or `null` on first launch. */
+export async function sessionSettingsLoad(): Promise<PersistedSettings | null> {
+  const raw = await invoke<string | null>('session_settings_load');
+  if (!raw) return null;
+  return JSON.parse(raw) as PersistedSettings;
+}
+
+/** Serialise and persist `settings` to SQLite. */
+export async function sessionSettingsSave(settings: PersistedSettings): Promise<void> {
+  await invoke('session_settings_save', { value: JSON.stringify(settings) });
+}
+
 // Chat sessions (multi-conversation)
 
 export async function sessionChatSessionsList(

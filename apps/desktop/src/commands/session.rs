@@ -15,8 +15,8 @@
 //!   invoke("session_chat_clear",  { conversationId })        -> ()
 
 use arc_session_manager::{
-    chat, commands as cmd_history, tabs, workspaces, ChatConversation, ChatMessage, ChatRole,
-    CommandRecord, SessionState, SessionStore, TabInput, Workspace,
+    chat, commands as cmd_history, settings, tabs, workspaces, ChatConversation, ChatMessage,
+    ChatRole, CommandRecord, SessionState, SessionStore, TabInput, Workspace,
 };
 use serde::{Deserialize, Serialize};
 use tauri::State;
@@ -244,6 +244,29 @@ pub async fn session_commands_recent(
     query: Option<String>,
 ) -> Result<Vec<CommandRecord>, String> {
     cmd_history::recent(store.pool(), limit, query.as_deref())
+        .await
+        .map_err(str_err)
+}
+
+// ─── app settings ─────────────────────────────────────────────────────────
+
+/// Load the serialized user settings JSON, or `null` if none saved yet.
+#[tauri::command]
+pub async fn session_settings_load(
+    store: State<'_, SessionStore>,
+) -> Result<Option<String>, String> {
+    settings::load(store.pool(), "user_settings")
+        .await
+        .map_err(str_err)
+}
+
+/// Persist the serialized user settings JSON.
+#[tauri::command]
+pub async fn session_settings_save(
+    store: State<'_, SessionStore>,
+    value: String,
+) -> Result<(), String> {
+    settings::save(store.pool(), "user_settings", &value)
         .await
         .map_err(str_err)
 }

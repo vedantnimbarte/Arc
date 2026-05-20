@@ -67,6 +67,8 @@ fn main() {
             commands::session::session_command_log,
             commands::session::session_commands_recent,
             commands::session::session_command_finish,
+            commands::session::session_settings_load,
+            commands::session::session_settings_save,
             commands::git::git_status,
             commands::git::git_log,
             commands::git::git_diff,
