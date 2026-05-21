@@ -368,6 +368,13 @@ export function FileTree() {
     <div className="flex h-full min-w-0 flex-col">
       {/* Header */}
       <div className="flex h-11 shrink-0 items-center gap-1 border-b border-border-hairline px-2.5">
+        <span
+          className="min-w-0 flex-1 truncate font-display text-[12px] font-medium tracking-tight text-fg-base/90"
+          title={root ?? ''}
+        >
+          {root ? basename(root) : '—'}
+        </span>
+
         <button
           onClick={goUp}
           disabled={!root}
@@ -394,9 +401,6 @@ export function FileTree() {
         >
           <FolderSearch size={12} strokeWidth={2.1} />
         </button>
-
-        <div className="flex-1" />
-
         <button
           onClick={toggleSearch}
           className={cn(

@@ -29,7 +29,7 @@ export function TabBar({
   onOpenSettings,
   onOpenSearch,
 }: Props) {
-  const { tabs, activeTabId, setActive, closeTab, addTab, openFile, launchAiCli, tabDirty } =
+  const { tabs, activeTabId, setActive, closeTab, openFile, launchAiCli, newTerminal, tabDirty } =
     useWorkspace();
   const sidebarCollapsed = useFiles((s) => s.collapsed);
   const toggleSidebar = useFiles((s) => s.toggleCollapsed);
@@ -100,8 +100,8 @@ export function TabBar({
     ptyListAiClis().then(setAiClis).catch(() => {});
   }, [menuOpen]);
 
-  const newTerminal = () => {
-    addTab({ id: `term-${Date.now()}`, title: 'shell', kind: 'terminal' });
+  const handleNewTerminal = () => {
+    void newTerminal();
     setMenuOpen(false);
   };
 
@@ -111,7 +111,7 @@ export function TabBar({
   };
 
   const launchCli = (cli: AiCliInfo) => {
-    launchAiCli(cli);
+    void launchAiCli(cli);
     setMenuOpen(false);
   };
 
@@ -292,7 +292,7 @@ export function TabBar({
         >
           <button
             role="menuitem"
-            onClick={newTerminal}
+            onClick={handleNewTerminal}
             className="flex w-full items-center gap-2 px-3 py-2 text-left font-display text-[12px] text-fg-base/90 transition-colors hover:bg-white/[0.06]"
           >
             <TerminalIcon size={12} strokeWidth={2} className="text-fg-subtle" />

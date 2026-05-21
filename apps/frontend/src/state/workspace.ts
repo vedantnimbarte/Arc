@@ -1,11 +1,13 @@
 import { create } from 'zustand';
 import {
+  fsDefaultRoot,
   isTauri,
   sessionLoad,
   sessionSaveTabs,
   type AiCliInfo,
   type TabInput,
 } from '../lib/tauri';
+import { useFiles } from './files';
 
 export interface Tab {
   id: string;
@@ -43,8 +45,13 @@ interface WorkspaceState {
   /** Find an existing editor tab for `path`, or create one and focus it. */
   openFile: (path: string, title?: string) => string;
   /** Spawn a new terminal tab that runs an AI CLI (Claude Code / Codex /
-   *  OpenCode) directly instead of the default shell. */
-  launchAiCli: (cli: AiCliInfo) => string;
+   *  OpenCode) directly instead of the default shell. Anchors the new tab
+   *  (and the file tree) at the user's home directory. */
+  launchAiCli: (cli: AiCliInfo) => Promise<string>;
+  /** Open a new terminal tab anchored at the user's home directory.
+   *  Resets the file-tree root to home first so the spawning PTY inherits
+   *  it as CWD and both panes stay in sync. */
+  newTerminal: (override?: Partial<Pick<Tab, 'title' | 'shellOverride'>>) => Promise<string>;
   /** One-time load from SQLite at app startup. Idempotent. */
   hydrate: () => Promise<void>;
 }
@@ -114,13 +121,26 @@ export const useWorkspace = create<WorkspaceState>()((set, get) => ({
     set((s) => ({ tabs: [...s.tabs, tab], activeTabId: id }));
     return id;
   },
-  launchAiCli: (cli) => {
+  launchAiCli: async (cli) => {
+    await resetRootToHome();
     const id = `${cli.id}-${Date.now()}`;
     const tab: Tab = {
       id,
       title: cli.label,
       kind: 'terminal',
       shellOverride: cli.path,
+    };
+    set((s) => ({ tabs: [...s.tabs, tab], activeTabId: id }));
+    return id;
+  },
+  newTerminal: async (override) => {
+    await resetRootToHome();
+    const id = `term-${Date.now()}`;
+    const tab: Tab = {
+      id,
+      title: override?.title ?? 'shell',
+      kind: 'terminal',
+      shellOverride: override?.shellOverride,
     };
     set((s) => ({ tabs: [...s.tabs, tab], activeTabId: id }));
     return id;
@@ -265,6 +285,17 @@ function readLegacyLocalStorage(): { tabs: Tab[]; activeTabId: string | null } |
     return { tabs: cleaned, activeTabId: parsed.state?.activeTabId ?? null };
   } catch {
     return null;
+  }
+}
+
+async function resetRootToHome(): Promise<void> {
+  if (!isTauri) return;
+  try {
+    const home = await fsDefaultRoot();
+    if (home) useFiles.getState().setRoot(home);
+  } catch {
+    // Best-effort — fall through and let the terminal spawn with whatever
+    // root the tree currently has.
   }
 }
 

@@ -22,8 +22,9 @@ const Editor = lazy(() =>
 );
 
 export default function App() {
-  const { tabs, activeTabId, addTab } = useWorkspace();
+  const { tabs, activeTabId } = useWorkspace();
   const launchAiCli = useWorkspace((s) => s.launchAiCli);
+  const newTerminal = useWorkspace((s) => s.newTerminal);
   const hydrate = useWorkspace((s) => s.hydrate);
   const hydrateChat = useChat((s) => s.hydrate);
   const activeTab = tabs.find((t) => t.id === activeTabId);
@@ -59,8 +60,7 @@ export default function App() {
     const dispatch = (action: ActionId) => {
       switch (action) {
         case 'new-terminal': {
-          const id = `term-${Date.now()}`;
-          addTab({ id, title: 'shell', kind: 'terminal' });
+          void newTerminal();
           return;
         }
         case 'open-settings':
@@ -117,7 +117,7 @@ export default function App() {
           console.warn(`[shortcut] ${id} not detected on PATH`);
           return;
         }
-        launchAiCli(cli);
+        await launchAiCli(cli);
       } catch (err) {
         console.error(`[shortcut] launch ${id} failed:`, err);
       }
@@ -140,7 +140,7 @@ export default function App() {
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [addTab, toggleSidebar, chatOpen, launchAiCli]);
+  }, [newTerminal, toggleSidebar, chatOpen, launchAiCli]);
 
   return (
     <div className="relative flex h-full w-full flex-col overflow-hidden bg-bg-base text-fg-base">
