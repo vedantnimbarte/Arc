@@ -11,12 +11,20 @@ import {
   PanelLeftOpen,
   Search,
   Bot,
+  GitBranch,
 } from 'lucide-react';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { useWorkspace } from '../state/workspace';
 import { useFiles } from '../state/files';
 import { cn } from '../lib/cn';
-import { fsPickFolder, fsWriteFile, ptyListAiClis, type AiCliInfo } from '../lib/tauri';
+import {
+  fsPickFolder,
+  fsWriteFile,
+  gitStatus,
+  gitWindowOpen,
+  ptyListAiClis,
+  type AiCliInfo,
+} from '../lib/tauri';
 
 const isTauri = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
 
@@ -41,6 +49,28 @@ export function TabBar({
   // Installed AI CLIs (Claude Code / Codex / OpenCode). Refreshed on mount.
   // Empty in browser-only mode or when none are on PATH.
   const [aiClis, setAiClis] = useState<AiCliInfo[]>([]);
+  // Whether the current workspace root is a git repo. Hides the toolbar
+  // git icon when there's nothing to show. Same one-shot pattern as
+  // StatusBar — re-fires whenever the workspace root changes.
+  const [isGitRepo, setIsGitRepo] = useState(false);
+
+  useEffect(() => {
+    if (!isTauri || !root) {
+      setIsGitRepo(false);
+      return;
+    }
+    let cancelled = false;
+    void gitStatus(root)
+      .then((info) => {
+        if (!cancelled) setIsGitRepo(info?.branch != null);
+      })
+      .catch(() => {
+        if (!cancelled) setIsGitRepo(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [root]);
   const plusRef = useRef<HTMLButtonElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
 
@@ -266,6 +296,16 @@ export function TabBar({
       </button>
 
       <div className="ml-0.5 flex items-center gap-0.5 pr-2">
+        {isGitRepo && (
+          <button
+            onClick={() => void gitWindowOpen()}
+            className="group flex h-7 w-7 items-center justify-center rounded-md text-fg-muted transition-all duration-200 ease-apple hover:bg-white/[0.08] hover:text-fg-base active:bg-white/[0.12]"
+            aria-label="Open Git history"
+            title="Git history"
+          >
+            <GitBranch size={13} strokeWidth={1.9} />
+          </button>
+        )}
         <button
           onClick={onOpenSettings}
           className="group flex h-7 w-7 items-center justify-center rounded-md text-fg-muted transition-all duration-200 ease-apple hover:bg-white/[0.08] hover:text-fg-base active:bg-white/[0.12]"

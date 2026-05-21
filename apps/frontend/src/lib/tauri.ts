@@ -839,17 +839,43 @@ export interface GitLogEntry {
   /** Unix seconds (author time). */
   time: number;
   subject: string;
+  /** Full-SHA parent OIDs. Empty for the root commit; multiple for merges. */
+  parents: string[];
+}
+
+export interface GitLogOptions {
+  /** Restrict to commits touching this workspace-relative path. */
+  pathFilter?: string | null;
+  /** Unix seconds. Drop commits authored before this instant. */
+  since?: number | null;
+  /** Unix seconds. Drop commits authored after this instant. */
+  until?: number | null;
+  /** Case-insensitive substring matched against name OR email. */
+  author?: string | null;
+  /** Include merge commits — defaults to false everywhere except the graph view. */
+  includeMerges?: boolean;
 }
 
 export async function gitLog(
   path: string,
   limit: number,
-  pathFilter?: string | null,
+  options?: GitLogOptions | null,
 ): Promise<GitLogEntry[]> {
+  // The Rust side derives serde defaults via #[serde(default)] only when the
+  // *outer* options object is None, so we always send a struct — but with
+  // nulls filtered to `undefined` so serde swallows them on the other end.
+  const o = options ?? {};
+  const payload = {
+    path_filter: o.pathFilter ?? null,
+    since: o.since ?? null,
+    until: o.until ?? null,
+    author: o.author ?? null,
+    include_merges: o.includeMerges ?? false,
+  };
   return invoke<GitLogEntry[]>('git_log', {
     path,
     limit,
-    pathFilter: pathFilter ?? null,
+    options: payload,
   });
 }
 
@@ -924,4 +950,20 @@ export async function gitCheckout(
   name: string,
 ): Promise<GitCheckoutResult> {
   return invoke<GitCheckoutResult>('git_checkout', { path, name });
+}
+
+export interface GitAuthorInfo {
+  name: string;
+  email: string;
+  commits: number;
+}
+
+/** Every committer reachable from any ref, ranked by commit count desc. */
+export async function gitAuthors(path: string): Promise<GitAuthorInfo[]> {
+  return invoke<GitAuthorInfo[]>('git_authors', { path });
+}
+
+/** Open (or focus, if already open) the standalone Git history window. */
+export async function gitWindowOpen(): Promise<void> {
+  await invoke('git_window_open');
 }

@@ -531,8 +531,15 @@ impl Tool for GitLogTool {
             .and_then(|v| v.as_u64())
             .unwrap_or(20)
             .min(200) as usize;
-        let path_filter = input.get("path").and_then(|v| v.as_str());
-        let entries = arc_git::log(root, limit, path_filter)
+        let path_filter = input
+            .get("path")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string());
+        let opts = arc_git::LogOptions {
+            path_filter,
+            ..Default::default()
+        };
+        let entries = arc_git::log(root, limit, &opts)
             .await
             .map_err(|e| e.to_string())?;
         if entries.is_empty() {

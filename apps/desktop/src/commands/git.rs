@@ -2,13 +2,14 @@
 //!
 //! Frontend contract (see apps/frontend/src/lib/tauri.ts):
 //!   invoke("git_status",   { path })                              -> Option<GitInfo>
-//!   invoke("git_log",      { path, limit, pathFilter? })           -> Vec<LogEntry>
+//!   invoke("git_log",      { path, limit, options? })             -> Vec<LogEntry>
 //!   invoke("git_diff",     { path, scope, pathFilter? })           -> String
 //!   invoke("git_blame",    { path, file, startLine?, endLine? })   -> Vec<BlameLine>
 //!   invoke("git_branches", { path })                               -> Vec<BranchInfo>
 //!   invoke("git_checkout", { path, name })                         -> CheckoutResult
+//!   invoke("git_authors",  { path })                               -> Vec<AuthorInfo>
 
-use arc_git::{BlameLine, BranchInfo, CheckoutResult, DiffScope, GitInfo, LogEntry};
+use arc_git::{AuthorInfo, BlameLine, BranchInfo, CheckoutResult, DiffScope, GitInfo, LogEntry, LogOptions};
 
 #[tauri::command]
 pub async fn git_status(path: String) -> Result<Option<GitInfo>, String> {
@@ -19,11 +20,17 @@ pub async fn git_status(path: String) -> Result<Option<GitInfo>, String> {
 pub async fn git_log(
     path: String,
     limit: usize,
-    path_filter: Option<String>,
+    options: Option<LogOptions>,
 ) -> Result<Vec<LogEntry>, String> {
-    arc_git::log(&path, limit, path_filter.as_deref())
+    let opts = options.unwrap_or_default();
+    arc_git::log(&path, limit, &opts)
         .await
         .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn git_authors(path: String) -> Result<Vec<AuthorInfo>, String> {
+    arc_git::authors(&path).await.map_err(|e| e.to_string())
 }
 
 #[tauri::command]

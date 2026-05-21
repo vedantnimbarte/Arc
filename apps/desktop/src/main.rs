@@ -80,6 +80,7 @@ fn main() {
             commands::git::git_blame,
             commands::git::git_branches,
             commands::git::git_checkout,
+            commands::git::git_authors,
             commands::secrets::secrets_set_api_key,
             commands::secrets::secrets_get_api_key,
             commands::secrets::secrets_delete_api_key,
@@ -100,6 +101,7 @@ fn main() {
             commands::memory::memory_vector_search,
             commands::window::settings_window_open,
             commands::window::settings_broadcast_changed,
+            commands::window::git_window_open,
         ])
         .setup(|app| {
             // Open the SQLite store before the window appears so the first

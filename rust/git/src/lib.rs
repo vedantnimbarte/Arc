@@ -339,31 +339,59 @@ pub struct LogEntry {
     /// Unix seconds.
     pub time: i64,
     pub subject: String,
+    /// Full-SHA parent OIDs (empty for the root commit; multiple for merges).
+    pub parents: Vec<String>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(default)]
+pub struct LogOptions {
+    /// Restrict to commits touching this path.
+    pub path_filter: Option<String>,
+    /// Unix seconds. Drop commits authored before this instant.
+    pub since: Option<i64>,
+    /// Unix seconds. Drop commits authored after this instant.
+    pub until: Option<i64>,
+    /// `--author=<pattern>`. Case-insensitive substring on name OR email.
+    pub author: Option<String>,
+    /// When false (default), merge commits are excluded. The Git window
+    /// turns this on so the graph view can render fork/merge geometry.
+    pub include_merges: bool,
 }
 
 /// Most-recent commits reachable from HEAD, up to `limit`.
-/// `path_filter`, if Some, restricts to commits touching that path.
 pub async fn log<P: AsRef<Path>>(
     path: P,
     limit: usize,
-    path_filter: Option<&str>,
+    opts: &LogOptions,
 ) -> Result<Vec<LogEntry>> {
     let path = path.as_ref();
-    let limit = limit.clamp(1, 1000);
+    let limit = limit.clamp(1, 5000);
     // Custom format with a record separator that survives subjects containing newlines.
-    // Fields: %H<US>%h<US>%an<US>%ae<US>%at<US>%s<RS>
+    // Fields: %H<US>%h<US>%an<US>%ae<US>%at<US>%P<US>%s<RS>
     const US: &str = "\u{1f}";
     const RS: &str = "\u{1e}";
-    let format = format!("%H{US}%h{US}%an{US}%ae{US}%at{US}%s{RS}");
+    let format = format!("%H{US}%h{US}%an{US}%ae{US}%at{US}%P{US}%s{RS}");
 
     let mut cmd = Command::new("git");
     cmd.arg("-C").arg(path).args([
         "log",
-        "--no-merges",
         &format!("-n{limit}"),
         &format!("--format={format}"),
     ]);
-    if let Some(p) = path_filter {
+    if !opts.include_merges {
+        cmd.arg("--no-merges");
+    }
+    if let Some(ts) = opts.since {
+        cmd.arg(format!("--since={ts}"));
+    }
+    if let Some(ts) = opts.until {
+        cmd.arg(format!("--until={ts}"));
+    }
+    if let Some(a) = opts.author.as_deref().filter(|s| !s.is_empty()) {
+        cmd.arg("-i").arg(format!("--author={a}"));
+    }
+    if let Some(p) = opts.path_filter.as_deref().filter(|s| !s.is_empty()) {
         cmd.arg("--").arg(p);
     }
 
@@ -383,16 +411,22 @@ pub async fn log<P: AsRef<Path>>(
         if rec.is_empty() {
             continue;
         }
-        let mut fields = rec.splitn(6, US);
+        let mut fields = rec.splitn(7, US);
         let oid = fields.next().unwrap_or("").to_string();
         let short = fields.next().unwrap_or("").to_string();
         let author = fields.next().unwrap_or("").to_string();
         let email = fields.next().unwrap_or("").to_string();
         let time = fields.next().unwrap_or("0").parse::<i64>().unwrap_or(0);
+        let parents_field = fields.next().unwrap_or("");
         let subject = fields.next().unwrap_or("").to_string();
         if oid.is_empty() {
             continue;
         }
+        let parents = parents_field
+            .split_ascii_whitespace()
+            .filter(|s| !s.is_empty())
+            .map(|s| s.to_string())
+            .collect();
         entries.push(LogEntry {
             oid,
             short,
@@ -400,9 +434,66 @@ pub async fn log<P: AsRef<Path>>(
             email,
             time,
             subject,
+            parents,
         });
     }
     Ok(entries)
+}
+
+// ----- authors --------------------------------------------------------------
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AuthorInfo {
+    pub name: String,
+    pub email: String,
+    pub commits: usize,
+}
+
+/// All committers reachable from any ref, ranked by commit count desc.
+/// Falls back to an empty list (rather than erroring) on a bare repo.
+pub async fn authors<P: AsRef<Path>>(path: P) -> Result<Vec<AuthorInfo>> {
+    let path = path.as_ref();
+    let output = Command::new("git")
+        .arg("-C")
+        .arg(path)
+        .args(["shortlog", "-sne", "--all", "--no-merges"])
+        .env("GIT_PAGER", "")
+        .output()
+        .await
+        .map_err(|e| Error::Spawn(e.to_string()))?;
+    if !output.status.success() {
+        // Empty repo / detached refs → just return nothing rather than failing.
+        return Ok(Vec::new());
+    }
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let mut out = Vec::new();
+    for line in stdout.lines() {
+        // Each row: "  <count>\t<name> <email>" where email is wrapped in <>.
+        let line = line.trim_start();
+        let (count_str, rest) = match line.split_once('\t') {
+            Some(p) => p,
+            None => continue,
+        };
+        let commits: usize = count_str.trim().parse().unwrap_or(0);
+        let (name, email) = match (rest.rfind('<'), rest.rfind('>')) {
+            (Some(lt), Some(gt)) if gt > lt => {
+                let name = rest[..lt].trim().to_string();
+                let email = rest[lt + 1..gt].to_string();
+                (name, email)
+            }
+            _ => (rest.trim().to_string(), String::new()),
+        };
+        if name.is_empty() && email.is_empty() {
+            continue;
+        }
+        out.push(AuthorInfo {
+            name,
+            email,
+            commits,
+        });
+    }
+    Ok(out)
 }
 
 // ----- diff -----------------------------------------------------------------
