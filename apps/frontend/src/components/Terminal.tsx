@@ -3,7 +3,6 @@ import { Terminal as XTerm } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import { WebLinksAddon } from '@xterm/addon-web-links';
 import '@xterm/xterm/css/xterm.css';
-import { XTERM_THEME } from '@arc/terminal';
 import {
   isTauri,
   onPtyData,
@@ -19,6 +18,7 @@ import {
 import { useFiles } from '../state/files';
 import { useSettings } from '../state/settings';
 import { useWorkspace } from '../state/workspace';
+import { getFont, resolveTheme } from '../themes';
 
 interface Props {
   /** Stable id for the terminal (tab id). Also serves as the React-effect
@@ -41,9 +41,13 @@ export function Terminal({ sessionKey }: Props) {
     let ptyId: PtyId | null = null;
     let disposed = false;
 
+    const initialSettings = useSettings.getState();
+    const initialFont = getFont(initialSettings.fontId);
+    const initialTheme = resolveTheme(initialSettings.appearance);
+
     const term = new XTerm({
-      fontFamily: "'SF Mono', ui-monospace, 'JetBrains Mono', Menlo, Monaco, 'Cascadia Code', Consolas, monospace",
-      fontSize: 13,
+      fontFamily: initialFont.stack,
+      fontSize: initialSettings.fontSize,
       fontWeight: '400',
       fontWeightBold: '600',
       lineHeight: 1.32,
@@ -54,7 +58,7 @@ export function Terminal({ sessionKey }: Props) {
       scrollback: 10_000,
       allowTransparency: true,
       smoothScrollDuration: 80,
-      theme: XTERM_THEME,
+      theme: initialTheme.xterm,
     });
     termRef.current = term;
 
@@ -76,6 +80,24 @@ export function Terminal({ sessionKey }: Props) {
       }
     };
     safeFit();
+
+    // Live-update font + theme when the user changes them in Settings.
+    const unsubAppearance = useSettings.subscribe((s, prev) => {
+      if (
+        s.fontId !== prev.fontId ||
+        s.fontSize !== prev.fontSize ||
+        s.appearance !== prev.appearance
+      ) {
+        try {
+          term.options.fontFamily = getFont(s.fontId).stack;
+          term.options.fontSize = s.fontSize;
+          term.options.theme = resolveTheme(s.appearance).xterm;
+          safeFit();
+        } catch {
+          /* term may be disposed */
+        }
+      }
+    });
 
     // Deferred fit: on the next frame the flex layout is guaranteed to have
     // resolved, which matters when this pane is freshly created by a split.
@@ -322,6 +344,7 @@ export function Terminal({ sessionKey }: Props) {
       disposed = true;
       cancelAnimationFrame(rafId);
       ro.disconnect();
+      unsubAppearance();
       unlistens.forEach((u) => u());
       if (ptyId) void ptyKill(ptyId).catch(() => {});
       useWorkspace.getState().setTabPtyId(sessionKey, undefined);

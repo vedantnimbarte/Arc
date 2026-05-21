@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ArrowUp,
   Trash2,
@@ -14,6 +14,14 @@ import {
   Check,
   History,
   MessageSquarePlus,
+  Sparkles,
+  Plug,
+  List as ListIcon,
+  Zap,
+  PowerOff,
+  BookmarkPlus,
+  ListOrdered,
+  type LucideIcon,
 } from 'lucide-react';
 import { useChat } from '../state/chat';
 import { useSettings, PROVIDER_LABELS } from '../state/settings';
@@ -928,59 +936,129 @@ function Composer({
   providerLabel: string;
   agentName: string;
 }) {
+  // Slash-command popover: derived from the input. We use a "dismissedAt"
+  // value rather than a boolean so pressing Escape suppresses the popover
+  // for the current input but re-arms naturally as the user keeps typing.
+  const [dismissedAt, setDismissedAt] = useState<string | null>(null);
+  const [selected, setSelected] = useState(0);
+
+  const visibleCommands = useMemo(() => {
+    if (isStreaming || !input.startsWith('/')) return [];
+    const q = input.toLowerCase();
+    return SLASH_COMMANDS.filter((c) => c.command.toLowerCase().startsWith(q));
+  }, [input, isStreaming]);
+
+  const popoverOpen =
+    visibleCommands.length > 0 && input !== dismissedAt;
+
+  useEffect(() => {
+    // Clamp selection when the visible set shrinks; reset to top when the
+    // first match changes (so filtering feels responsive rather than sticky).
+    setSelected((s) => Math.min(s, Math.max(0, visibleCommands.length - 1)));
+  }, [visibleCommands.length]);
+
+  useEffect(() => {
+    setSelected(0);
+  }, [visibleCommands[0]?.command]);
+
+  const pickCommand = (idx: number) => {
+    const c = visibleCommands[idx];
+    if (!c) return;
+    onChange(c.command + ' ');
+  };
+
   return (
     <div className="shrink-0 px-3 pb-3 pt-1">
-      <div
-        className={cn(
-          'group flex items-end gap-2 rounded-[20px] border border-border-subtle bg-bg-base/55 px-3 py-2 backdrop-blur-md',
-          'transition-all duration-150 ease-apple',
-          'focus-within:border-accent/45 focus-within:bg-bg-base/75 focus-within:shadow-focus',
+      <div className="relative">
+        {popoverOpen && (
+          <SlashCommandsPopover
+            commands={visibleCommands}
+            selected={selected}
+            onHover={setSelected}
+            onPick={pickCommand}
+          />
         )}
-      >
-        <textarea
-          value={input}
-          onChange={(e) => onChange(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter' && !e.shiftKey) {
-              e.preventDefault();
-              onSend();
+        <div
+          className={cn(
+            'group flex items-end gap-2 rounded-[20px] border border-border-subtle bg-bg-base/55 px-3 py-2 backdrop-blur-md',
+            'transition-all duration-150 ease-apple',
+            'focus-within:border-accent/45 focus-within:bg-bg-base/75 focus-within:shadow-focus',
+          )}
+        >
+          <textarea
+            value={input}
+            onChange={(e) => onChange(e.target.value)}
+            onKeyDown={(e) => {
+              if (popoverOpen) {
+                if (e.key === 'ArrowDown') {
+                  e.preventDefault();
+                  setSelected((s) => (s + 1) % visibleCommands.length);
+                  return;
+                }
+                if (e.key === 'ArrowUp') {
+                  e.preventDefault();
+                  setSelected(
+                    (s) => (s - 1 + visibleCommands.length) % visibleCommands.length,
+                  );
+                  return;
+                }
+                if (e.key === 'Tab') {
+                  e.preventDefault();
+                  pickCommand(selected);
+                  return;
+                }
+                if (e.key === 'Enter' && !e.shiftKey) {
+                  e.preventDefault();
+                  pickCommand(selected);
+                  return;
+                }
+                if (e.key === 'Escape') {
+                  e.preventDefault();
+                  setDismissedAt(input);
+                  return;
+                }
+              }
+              if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                onSend();
+              }
+            }}
+            placeholder={
+              isStreaming ? `streaming from ${providerLabel}…` : `Ask ${agentName}…`
             }
-          }}
-          placeholder={
-            isStreaming ? `streaming from ${providerLabel}…` : `Ask ${agentName}…`
-          }
-          rows={1}
-          disabled={isStreaming}
-          className="selectable max-h-32 min-h-[22px] flex-1 resize-none bg-transparent font-display text-[13px] leading-relaxed text-fg-base placeholder:text-fg-subtle focus:outline-none disabled:opacity-60"
-        />
-        {isStreaming ? (
-          <button
-            onClick={onStop}
-            className="flex h-[26px] w-[26px] shrink-0 items-center justify-center rounded-full bg-status-err/15 text-status-err transition-all duration-150 hover:bg-status-err hover:text-white"
-            aria-label="Stop"
-            title="Stop streaming"
-          >
-            <Square size={10} fill="currentColor" strokeWidth={0} />
-          </button>
-        ) : (
-          <button
-            onClick={onSend}
-            disabled={!input.trim()}
-            className={cn(
-              'flex h-[26px] w-[26px] shrink-0 items-center justify-center rounded-full transition-all duration-150 ease-apple',
-              'enabled:surface-silver enabled:shadow-glow-sm',
-              'enabled:active:scale-[0.94]',
-              'disabled:bg-white/[0.08] disabled:text-fg-subtle',
-            )}
-            aria-label="Send"
-          >
-            <ArrowUp size={13} strokeWidth={2.6} />
-          </button>
-        )}
+            rows={1}
+            disabled={isStreaming}
+            className="selectable max-h-32 min-h-[22px] flex-1 resize-none bg-transparent font-display text-[13px] leading-relaxed text-fg-base placeholder:text-fg-subtle focus:outline-none disabled:opacity-60"
+          />
+          {isStreaming ? (
+            <button
+              onClick={onStop}
+              className="flex h-[26px] w-[26px] shrink-0 items-center justify-center rounded-full bg-status-err/15 text-status-err transition-all duration-150 hover:bg-status-err hover:text-white"
+              aria-label="Stop"
+              title="Stop streaming"
+            >
+              <Square size={10} fill="currentColor" strokeWidth={0} />
+            </button>
+          ) : (
+            <button
+              onClick={onSend}
+              disabled={!input.trim()}
+              className={cn(
+                'flex h-[26px] w-[26px] shrink-0 items-center justify-center rounded-full transition-all duration-150 ease-apple',
+                'enabled:surface-silver enabled:shadow-glow-sm',
+                'enabled:active:scale-[0.94]',
+                'disabled:bg-white/[0.08] disabled:text-fg-subtle',
+              )}
+              aria-label="Send"
+            >
+              <ArrowUp size={13} strokeWidth={2.6} />
+            </button>
+          )}
+        </div>
       </div>
       <div className="mt-1.5 flex items-center justify-between px-1.5 font-display text-[10px] text-fg-subtle">
         <span className="tracking-tight">
-          <kbd className="font-mono">return</kbd> to send · <kbd className="font-mono">⇧↵</kbd> for newline
+          <kbd className="font-mono">return</kbd> to send · <kbd className="font-mono">⇧↵</kbd> for newline · <kbd className="font-mono">/</kbd> for commands
         </span>
         {isStreaming && (
           <span className="flex items-center gap-1.5 text-accent">
@@ -990,6 +1068,277 @@ function Composer({
         )}
       </div>
     </div>
+  );
+}
+
+// --- Slash commands popover -----------------------------------------------
+
+type SlashCommandGroup = 'agent' | 'mcp' | 'memory';
+
+interface SlashCommand {
+  command: string;
+  args?: string;
+  description: string;
+  group: SlashCommandGroup;
+  icon: LucideIcon;
+}
+
+const SLASH_COMMANDS: SlashCommand[] = [
+  {
+    command: '/agent',
+    args: '<goal>',
+    description: 'Hand a goal to the tool-using coding agent',
+    group: 'agent',
+    icon: Sparkles,
+  },
+  {
+    command: '/mcp connect',
+    args: '<id> <command> [args…]',
+    description: 'Spawn and initialize an MCP server over stdio',
+    group: 'mcp',
+    icon: Plug,
+  },
+  {
+    command: '/mcp list',
+    args: '<id>',
+    description: 'List the tools exposed by a connected server',
+    group: 'mcp',
+    icon: ListIcon,
+  },
+  {
+    command: '/mcp call',
+    args: '<id> <tool> <json>',
+    description: 'Invoke a tool with a JSON argument blob',
+    group: 'mcp',
+    icon: Zap,
+  },
+  {
+    command: '/mcp disconnect',
+    args: '<id>',
+    description: 'Tear down a running MCP server',
+    group: 'mcp',
+    icon: PowerOff,
+  },
+  {
+    command: '/memory save',
+    args: '<content>',
+    description: 'Persist a note · `#tag` tokens become tags',
+    group: 'memory',
+    icon: BookmarkPlus,
+  },
+  {
+    command: '/memory search',
+    args: '<query>',
+    description: 'FTS5 keyword search · supports `foo*`, `"phrase"`',
+    group: 'memory',
+    icon: SearchIcon,
+  },
+  {
+    command: '/memory list',
+    args: '[N]',
+    description: 'Show the N most recently updated entries',
+    group: 'memory',
+    icon: ListOrdered,
+  },
+  {
+    command: '/memory delete',
+    args: '<id-prefix>',
+    description: 'Remove an entry by its short id',
+    group: 'memory',
+    icon: Trash2,
+  },
+];
+
+const GROUP_LABELS: Record<SlashCommandGroup, string> = {
+  agent: 'Agent',
+  mcp: 'MCP',
+  memory: 'Memory',
+};
+
+function SlashCommandsPopover({
+  commands,
+  selected,
+  onHover,
+  onPick,
+}: {
+  commands: SlashCommand[];
+  selected: number;
+  onHover: (i: number) => void;
+  onPick: (i: number) => void;
+}) {
+  // Group consecutive commands sharing the same `group`. We keep the
+  // original flat index alongside each entry so keyboard nav and the
+  // visible highlight stay in lockstep across group boundaries.
+  const groups: { group: SlashCommandGroup; items: { cmd: SlashCommand; idx: number }[] }[] = [];
+  commands.forEach((c, i) => {
+    const last = groups[groups.length - 1];
+    if (last && last.group === c.group) {
+      last.items.push({ cmd: c, idx: i });
+    } else {
+      groups.push({ group: c.group, items: [{ cmd: c, idx: i }] });
+    }
+  });
+
+  const listRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const el = listRef.current?.querySelector<HTMLElement>(
+      `[data-slash-idx="${selected}"]`,
+    );
+    el?.scrollIntoView({ block: 'nearest' });
+  }, [selected]);
+
+  return (
+    <div
+      role="listbox"
+      aria-label="Slash commands"
+      className={cn(
+        'absolute inset-x-0 bottom-full z-30 mb-2',
+        'overflow-hidden rounded-[18px] border border-border-subtle',
+        'bg-bg-panel/85 backdrop-blur-xl backdrop-saturate-180',
+        'shadow-sheet',
+        'animate-popover-in',
+      )}
+    >
+      {/* Hairline silver gleam along the top edge — subliminal "polished" cue. */}
+      <div className="pointer-events-none absolute inset-x-3 top-0 h-px bg-gradient-to-r from-transparent via-white/[0.10] to-transparent" />
+
+      <div ref={listRef} className="max-h-[296px] overflow-y-auto py-1">
+        {groups.map((g, gi) => (
+          <div key={g.group}>
+            {gi > 0 && (
+              <div className="mx-3 my-1 h-px bg-gradient-to-r from-transparent via-white/[0.05] to-transparent" />
+            )}
+            <div className="flex items-center gap-2 px-3.5 pb-1 pt-2">
+              <span className="font-mono text-[9.5px] uppercase tracking-widest2 text-fg-subtle">
+                {GROUP_LABELS[g.group]}
+              </span>
+              <span className="h-px flex-1 bg-white/[0.03]" />
+            </div>
+            {g.items.map(({ cmd, idx }) => (
+              <SlashRow
+                key={cmd.command}
+                cmd={cmd}
+                idx={idx}
+                selected={selected === idx}
+                onHover={() => onHover(idx)}
+                onPick={() => onPick(idx)}
+              />
+            ))}
+          </div>
+        ))}
+      </div>
+
+      <div className="flex items-center justify-between border-t border-white/[0.05] bg-black/[0.22] px-3 py-1.5 font-display text-[10px] text-fg-subtle">
+        <span className="flex items-center gap-3">
+          <KeyHint k="↑↓" label="navigate" />
+          <KeyHint k="↵" label="select" />
+          <KeyHint k="esc" label="dismiss" />
+        </span>
+        <span className="font-mono tracking-tight text-fg-subtle/70">
+          {commands.length} {commands.length === 1 ? 'match' : 'matches'}
+        </span>
+      </div>
+    </div>
+  );
+}
+
+function SlashRow({
+  cmd,
+  idx,
+  selected,
+  onHover,
+  onPick,
+}: {
+  cmd: SlashCommand;
+  idx: number;
+  selected: boolean;
+  onHover: () => void;
+  onPick: () => void;
+}) {
+  const Icon = cmd.icon;
+  return (
+    <button
+      type="button"
+      role="option"
+      aria-selected={selected}
+      data-slash-idx={idx}
+      onMouseEnter={onHover}
+      // Use onMouseDown + preventDefault so the click doesn't steal focus
+      // from the textarea (which would otherwise dismiss the popover before
+      // the pick resolves).
+      onMouseDown={(e) => {
+        e.preventDefault();
+        onPick();
+      }}
+      className={cn(
+        'group relative flex w-full items-start gap-2.5 px-3 py-1.5 text-left',
+        'transition-colors duration-100',
+        selected ? 'bg-white/[0.05]' : 'hover:bg-white/[0.025]',
+      )}
+    >
+      {selected && (
+        <span className="pointer-events-none absolute inset-y-1.5 left-0 w-[2px] rounded-r-full bg-gradient-to-b from-accent-bright via-accent to-accent/30" />
+      )}
+      <span
+        className={cn(
+          'mt-[3px] flex h-[22px] w-[22px] shrink-0 items-center justify-center rounded-md ring-1 transition-all duration-150 ease-apple',
+          selected
+            ? 'bg-white/[0.10] text-accent-bright ring-white/[0.12] shadow-glow-sm'
+            : 'bg-white/[0.035] text-fg-muted ring-white/[0.04]',
+        )}
+      >
+        <Icon size={11} strokeWidth={2.2} />
+      </span>
+      <div className="min-w-0 flex-1">
+        <div className="flex items-baseline gap-1.5">
+          <span
+            className={cn(
+              'font-mono text-[11.5px] font-semibold tracking-tight',
+              selected ? 'text-fg-base' : 'text-fg-base/90',
+            )}
+          >
+            {cmd.command}
+          </span>
+          {cmd.args && (
+            <span
+              className={cn(
+                'truncate font-mono text-[10.5px] tracking-tight',
+                selected ? 'text-fg-muted' : 'text-fg-subtle',
+              )}
+            >
+              {cmd.args}
+            </span>
+          )}
+        </div>
+        <p
+          className={cn(
+            'mt-0.5 truncate font-display text-[10.5px] leading-snug',
+            selected ? 'text-fg-muted' : 'text-fg-subtle',
+          )}
+        >
+          {cmd.description}
+        </p>
+      </div>
+      {selected && (
+        <span
+          className="self-center font-mono text-[9.5px] tracking-widest2 text-fg-subtle"
+          aria-hidden
+        >
+          ↵
+        </span>
+      )}
+    </button>
+  );
+}
+
+function KeyHint({ k, label }: { k: string; label: string }) {
+  return (
+    <span className="flex items-center gap-1">
+      <kbd className="inline-flex h-[15px] min-w-[15px] items-center justify-center rounded-[4px] border border-white/[0.08] bg-white/[0.04] px-1 font-mono text-[9px] leading-none text-fg-muted shadow-control">
+        {k}
+      </kbd>
+      <span className="tracking-tight">{label}</span>
+    </span>
   );
 }
 

@@ -7,3 +7,4 @@ pub mod memory;
 pub mod pty;
 pub mod secrets;
 pub mod session;
+pub mod window;

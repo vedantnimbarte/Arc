@@ -9,7 +9,8 @@
       "Bash(cargo build *)",
       "Bash(Get-ChildItem -Path \"c:\\\\Users\\\\PRENEEL\\\\Documents\\\\Vedant Nimbarte\\\\Arc-terminal\" -Recurse -Directory)",
       "Bash(Select-Object -ExpandProperty FullName)",
-      "Bash(xargs basename -a)"
+      "Bash(xargs basename -a)",
+      "Bash(xargs grep -l \"settings\")"
     ]
   }
 }

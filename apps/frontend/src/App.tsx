@@ -3,7 +3,6 @@ import { Terminal } from './components/Terminal';
 import { TabBar } from './components/TabBar';
 import { ChatPanel } from './components/ChatPanel';
 import { StatusBar } from './components/StatusBar';
-import { SettingsDialog } from './components/SettingsDialog';
 import { CommandPalette } from './components/CommandPalette';
 import { FileTree } from './components/FileTree';
 import { ResizeHandle } from './components/ResizeHandle';
@@ -11,11 +10,10 @@ import { SearchPalette } from './components/SearchPalette';
 import { ShortcutsDialog } from './components/ShortcutsDialog';
 import { useWorkspace } from './state/workspace';
 import { useFiles } from './state/files';
-import { useSettings } from './state/settings';
 import { useChat } from './state/chat';
 import { actionFor, type ActionId } from './state/shortcuts';
 import { cn } from './lib/cn';
-import { ptyListAiClis, type AiCliId } from './lib/tauri';
+import { ptyListAiClis, settingsWindowOpen, type AiCliId } from './lib/tauri';
 import type { ChatIntent } from './components/ChatPanel';
 
 // CodeMirror is heavy — defer its bundle until a file is actually opened.
@@ -28,10 +26,7 @@ export default function App() {
   const launchAiCli = useWorkspace((s) => s.launchAiCli);
   const hydrate = useWorkspace((s) => s.hydrate);
   const hydrateChat = useChat((s) => s.hydrate);
-  const hydrateSettings = useSettings((s) => s.hydrateSettings);
-  const hydrateSecrets = useSettings((s) => s.hydrateSecrets);
   const activeTab = tabs.find((t) => t.id === activeTabId);
-  const [settingsOpen, setSettingsOpen] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
@@ -57,16 +52,8 @@ export default function App() {
     void hydrateChat();
   }, [hydrateChat]);
 
-  // Load non-secret settings from SQLite (with one-shot localStorage migration).
-  useEffect(() => {
-    void hydrateSettings();
-  }, [hydrateSettings]);
-
-  // Pull API keys out of the OS credential vault into the settings store,
-  // and migrate any legacy plaintext keys out of localStorage on the way.
-  useEffect(() => {
-    void hydrateSecrets();
-  }, [hydrateSecrets]);
+  // Settings + secrets are hydrated by Root in main.tsx (shared across
+  // the main and Settings windows).
 
   useEffect(() => {
     const dispatch = (action: ActionId) => {
@@ -77,7 +64,9 @@ export default function App() {
           return;
         }
         case 'open-settings':
-          setSettingsOpen(true);
+          void settingsWindowOpen().catch((err) =>
+            console.error('[shortcut] open settings window failed:', err),
+          );
           return;
         case 'toggle-sidebar':
           toggleSidebar();
@@ -159,7 +148,11 @@ export default function App() {
 
       <div className="relative z-10 flex h-full w-full flex-col">
         <TabBar
-          onOpenSettings={() => setSettingsOpen(true)}
+          onOpenSettings={() =>
+            void settingsWindowOpen().catch((err) =>
+              console.error('[settings] open window failed:', err),
+            )
+          }
           onOpenSearch={() => setSearchOpen(true)}
           onOpenShortcuts={() => setShortcutsOpen(true)}
           onToggleChat={() => setChatOpen((o) => !o)}
@@ -255,7 +248,6 @@ export default function App() {
         <StatusBar />
       </div>
 
-      <SettingsDialog open={settingsOpen} onClose={() => setSettingsOpen(false)} />
       <CommandPalette open={historyOpen} onClose={() => setHistoryOpen(false)} />
       <SearchPalette open={searchOpen} onClose={() => setSearchOpen(false)} />
       <ShortcutsDialog open={shortcutsOpen} onClose={() => setShortcutsOpen(false)} />

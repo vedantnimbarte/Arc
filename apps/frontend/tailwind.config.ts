@@ -30,35 +30,35 @@ export default {
         ],
       },
       colors: {
-        // "Brushed platinum on graphite" — refined studio-gear dark theme.
-        // Base surfaces stay graphite (so terminal text reads cleanly);
-        // accents shift to a cool platinum that picks up steel undertones.
+        // Tokens are driven by CSS variables set on `<html>` by the active
+        // theme (see `src/themes/index.ts`). Tokens that should support
+        // Tailwind's opacity modifier (`bg-bg-base/40`) store their value
+        // as an `r g b` channel triple and are composed via `rgb(... / <alpha-value>)`.
+        // Tokens that already include an alpha (rgba) are passed through
+        // raw and don't accept the opacity modifier.
         bg: {
-          base: '#161618',     // window background — a touch deeper to give silver more contrast
-          panel: '#28282a',    // raised surface
-          subtle: '#34343660', // controls / hover targets (slight transparency)
-          hover: '#454547',    // active hover
-          chrome: '#222224',   // toolbar / title bar tint
+          base: 'rgb(var(--bg-base, 22 22 24) / <alpha-value>)',
+          panel: 'rgb(var(--bg-panel, 40 40 42) / <alpha-value>)',
+          hover: 'rgb(var(--bg-hover, 69 69 71) / <alpha-value>)',
+          chrome: 'rgb(var(--bg-chrome, 34 34 36) / <alpha-value>)',
+          subtle: 'var(--bg-subtle, rgba(52, 52, 54, 0.38))',
         },
         border: {
-          subtle: 'rgba(220, 224, 232, 0.07)',
-          strong: 'rgba(220, 224, 232, 0.14)',
-          hairline: 'rgba(0, 0, 0, 0.42)', // crisper hairlines against the deeper base
+          subtle: 'var(--border-subtle, rgba(220, 224, 232, 0.07))',
+          strong: 'var(--border-strong, rgba(220, 224, 232, 0.14))',
+          hairline: 'var(--border-hairline, rgba(0, 0, 0, 0.42))',
         },
         fg: {
-          base: '#eef0f3',                       // primary label — slight cool cast pairs with silver
-          muted: 'rgba(230, 234, 242, 0.58)',    // secondary label
-          subtle: 'rgba(220, 226, 238, 0.30)',   // tertiary label
+          base: 'rgb(var(--fg-base, 238 240 243) / <alpha-value>)',
+          muted: 'var(--fg-muted, rgba(230, 234, 242, 0.58))',
+          subtle: 'var(--fg-subtle, rgba(220, 226, 238, 0.30))',
         },
-        // Platinum accent system. `DEFAULT` is the workhorse fill; `bright`
-        // hovers; `muted` is the pressed state; `soft` and `glow` are tints
-        // for halos and backgrounds.
         accent: {
-          DEFAULT: '#c8cad0',
-          bright: '#e6e8ec',
-          muted: '#a3a5ab',
-          soft: 'rgba(200, 204, 214, 0.10)',
-          glow: 'rgba(220, 224, 232, 0.42)',
+          DEFAULT: 'rgb(var(--accent, 200 202 208) / <alpha-value>)',
+          bright: 'rgb(var(--accent-bright, 230 232 236) / <alpha-value>)',
+          muted: 'rgb(var(--accent-muted, 163 165 171) / <alpha-value>)',
+          soft: 'var(--accent-soft, rgba(200, 204, 214, 0.10))',
+          glow: 'var(--accent-glow, rgba(220, 224, 232, 0.42))',
         },
         // Status colors kept — semantic clarity beats palette purity. Tuned
         // slightly cooler so they sit naturally next to the silver accent.
