@@ -1,4 +1,5 @@
 import { useMemo } from 'react';
+import { GitMerge } from 'lucide-react';
 import { MOCHA } from '@arc/ui';
 import { cn } from '../../lib/cn';
 import { layoutGraph } from '../../lib/git-graph';
@@ -10,9 +11,9 @@ interface Props {
   emptyHint?: string;
 }
 
-const ROW_HEIGHT = 28;
-const LANE_WIDTH = 14;
-const LEFT_PAD = 12;
+const ROW_HEIGHT = 32;
+const LANE_WIDTH = 16;
+const LEFT_PAD = 14;
 
 // Lane palette — cycles through a handful of Mocha hues that contrast
 // against the dark surface and against each other.
@@ -33,8 +34,11 @@ export function CommitGraph({ commits, emptyHint }: Props) {
 
   if (commits.length === 0) {
     return (
-      <div className="flex flex-1 items-center justify-center px-6 py-10 font-display text-[12px] text-fg-subtle">
-        {emptyHint ?? 'No commits match the current filters.'}
+      <div className="flex flex-1 flex-col items-center justify-center px-6 py-10 text-center">
+        <span className="mb-3 h-10 w-10 rounded-full bg-white/[0.03] ring-1 ring-white/[0.04]" aria-hidden />
+        <p className="font-display text-[12px] text-fg-subtle">
+          {emptyHint ?? 'No commits match the current filters.'}
+        </p>
       </div>
     );
   }
@@ -75,8 +79,9 @@ export function CommitGraph({ commits, emptyHint }: Props) {
                           x2={x2}
                           y2={yNext}
                           stroke={stroke}
-                          strokeWidth={1.5}
+                          strokeWidth={1.75}
                           strokeLinecap="round"
+                          opacity={0.85}
                         />
                       );
                     }
@@ -88,20 +93,30 @@ export function CommitGraph({ commits, emptyHint }: Props) {
                         key={j}
                         d={`M ${x1} ${y} C ${x1} ${my}, ${x2} ${my}, ${x2} ${yNext}`}
                         stroke={stroke}
-                        strokeWidth={1.5}
+                        strokeWidth={1.75}
                         fill="none"
                         strokeLinecap="round"
+                        opacity={0.85}
                       />
                     );
                   })}
 
-                {/* The commit dot itself, painted on top of the edges. */}
+                {/* The commit dot itself, painted on top of the edges.
+                    A soft outer halo + crisp inner disk gives the graph
+                    a more lit, dimensional feel against dark backgrounds. */}
                 <circle
                   cx={cx}
                   cy={y}
-                  r={4}
+                  r={7}
                   fill={colorForAuthor(row.commit.author, row.commit.email)}
-                  stroke="#11111b"
+                  opacity={0.18}
+                />
+                <circle
+                  cx={cx}
+                  cy={y}
+                  r={4.25}
+                  fill={colorForAuthor(row.commit.author, row.commit.email)}
+                  stroke="rgba(17, 17, 27, 0.85)"
                   strokeWidth={1.5}
                 />
               </g>
@@ -119,13 +134,13 @@ export function CommitGraph({ commits, emptyHint }: Props) {
             <li
               key={row.commit.oid}
               className={cn(
-                'flex items-center gap-2 border-b border-border-hairline/40 px-3',
-                'transition-colors hover:bg-white/[0.03]',
+                'group flex items-center gap-2.5 rounded-lg px-3',
+                'transition-all duration-150 hover:bg-white/[0.035]',
               )}
-              style={{ height: ROW_HEIGHT }}
+              style={{ height: ROW_HEIGHT, marginRight: 8 }}
               title={row.commit.oid}
             >
-              <span className="shrink-0 font-mono text-[11px] text-fg-subtle">
+              <span className="shrink-0 rounded-md bg-white/[0.035] px-1.5 py-[1px] font-mono text-[10.5px] text-fg-muted ring-1 ring-inset ring-white/[0.03] transition-colors group-hover:bg-white/[0.06] group-hover:text-fg-base">
                 {row.commit.short}
               </span>
               <span className="min-w-0 flex-1 truncate font-display text-[12.5px] text-fg-base">
@@ -134,11 +149,15 @@ export function CommitGraph({ commits, emptyHint }: Props) {
                 )}
               </span>
               {row.commit.parents.length > 1 && (
-                <span className="rounded-sm bg-white/[0.05] px-1.5 py-[1px] font-display text-[9.5px] uppercase tracking-widest2 text-fg-subtle">
+                <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-white/[0.05] px-2 py-[1px] font-display text-[9.5px] uppercase tracking-widest2 text-fg-subtle ring-1 ring-inset ring-white/[0.04]">
+                  <GitMerge size={9} strokeWidth={2.2} />
                   merge
                 </span>
               )}
-              <span className="shrink-0 truncate font-display text-[11px] text-fg-muted">
+              <span
+                className="shrink-0 truncate font-display text-[11px] text-fg-muted"
+                style={{ maxWidth: 140 }}
+              >
                 {row.commit.author}
               </span>
               <span className="shrink-0 font-mono text-[10.5px] tabular-nums text-fg-subtle">

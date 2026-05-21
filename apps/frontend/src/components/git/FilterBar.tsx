@@ -70,25 +70,26 @@ export function FilterBar({
   };
 
   return (
-    <div className="flex shrink-0 flex-col gap-2 border-b border-border-hairline bg-bg-chrome/40 px-3 py-2">
+    <div className="relative flex shrink-0 flex-col gap-2.5 border-b border-border-subtle px-4 py-3 bg-gradient-to-b from-white/[0.015] to-transparent">
       {/* Row 1 — author chips + view toggle */}
       <div className="flex flex-wrap items-center gap-1.5">
         {selectedAuthors.length === 0 ? (
-          <span className="font-display text-[10.5px] uppercase tracking-widest2 text-fg-subtle/80">
+          <span className="inline-flex items-center gap-1.5 font-display text-[10.5px] uppercase tracking-widest2 text-fg-subtle/80">
+            <span className="h-1 w-1 rounded-full bg-fg-subtle/50" />
             All authors
           </span>
         ) : (
           selectedAuthors.map((a) => (
             <span
               key={authorKey(a)}
-              className="group inline-flex items-center gap-1 rounded-full border border-white/[0.06] bg-white/[0.04] py-[2px] pl-2 pr-1 font-display text-[11px] text-fg-base"
+              className="group inline-flex items-center gap-1.5 rounded-full bg-gradient-to-b from-white/[0.07] to-white/[0.03] py-[3px] pl-2.5 pr-1 font-display text-[11px] text-fg-base ring-1 ring-inset ring-white/[0.06] shadow-control animate-fade-in"
               title={`${a.name} <${a.email}>`}
             >
               <span className="max-w-[160px] truncate">{a.name || a.email}</span>
               <span className="font-mono text-[9.5px] text-fg-subtle">{a.commits}</span>
               <button
                 onClick={() => onRemoveAuthor(a)}
-                className="flex h-3.5 w-3.5 items-center justify-center rounded-full text-fg-subtle transition-colors hover:bg-white/10 hover:text-fg-base"
+                className="flex h-4 w-4 items-center justify-center rounded-full text-fg-subtle transition-all duration-150 hover:bg-white/10 hover:text-fg-base active:scale-90"
                 aria-label={`Remove filter ${a.name}`}
               >
                 <X size={9} strokeWidth={2.4} />
@@ -97,7 +98,7 @@ export function FilterBar({
           ))
         )}
 
-        <span className="ml-auto inline-flex shrink-0 items-center gap-px rounded-md border border-white/[0.06] bg-black/[0.18] p-[2px]">
+        <span className="ml-auto inline-flex shrink-0 items-center gap-px rounded-full bg-black/[0.22] p-[3px] ring-1 ring-inset ring-white/[0.04] shadow-control">
           <ToggleSegment
             active={view === 'flat'}
             onClick={() => onViewChange('flat')}
@@ -115,29 +116,46 @@ export function FilterBar({
 
       {/* Row 2 — date presets + custom range + count */}
       <div className="flex flex-wrap items-center gap-1.5">
-        {PRESETS.map((p) => (
-          <button
-            key={p.id}
-            onClick={() => setPreset(p.id)}
-            className={cn(
-              'rounded-md px-2 py-[2px] font-display text-[10.5px] transition-colors',
-              range.preset === p.id
-                ? 'bg-accent/[0.18] text-fg-base ring-1 ring-accent/30'
-                : 'text-fg-muted hover:bg-white/[0.05] hover:text-fg-base',
-            )}
-          >
-            {p.label}
-          </button>
-        ))}
+        <div className="inline-flex items-center gap-px rounded-full bg-black/[0.18] p-[3px] ring-1 ring-inset ring-white/[0.04]">
+          {PRESETS.map((p) => (
+            <button
+              key={p.id}
+              onClick={() => setPreset(p.id)}
+              className={cn(
+                'rounded-full px-2.5 py-[2px] font-display text-[10.5px] transition-all duration-200',
+                range.preset === p.id
+                  ? 'bg-gradient-to-b from-white/[0.14] to-white/[0.06] text-fg-base shadow-control'
+                  : 'text-fg-muted hover:text-fg-base',
+              )}
+            >
+              {p.label}
+            </button>
+          ))}
+        </div>
 
-        <span className="mx-1 h-3 w-px bg-border-hairline" />
+        <span className="mx-1 h-3 w-px bg-border-subtle" />
 
         <DateInput value={range.from ?? ''} onChange={setCustomFrom} label="from" />
         <span className="font-display text-[10.5px] text-fg-subtle">→</span>
         <DateInput value={range.to ?? ''} onChange={setCustomTo} label="to" />
 
-        <span className="ml-auto font-display text-[10.5px] tabular-nums text-fg-subtle">
-          {loading ? 'loading…' : `${count} ${count === 1 ? 'commit' : 'commits'}`}
+        <span
+          className={cn(
+            'ml-auto inline-flex items-center gap-1.5 rounded-full bg-white/[0.03] px-2.5 py-[2px] font-display text-[10.5px] tabular-nums text-fg-muted ring-1 ring-inset ring-white/[0.04]',
+            loading && 'animate-pulse-soft',
+          )}
+        >
+          {loading ? (
+            <>
+              <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-accent-bright" />
+              <span>loading…</span>
+            </>
+          ) : (
+            <>
+              <span className="font-mono text-fg-base">{count}</span>
+              <span className="text-fg-subtle">{count === 1 ? 'commit' : 'commits'}</span>
+            </>
+          )}
         </span>
       </div>
     </div>
@@ -159,8 +177,10 @@ function ToggleSegment({
     <button
       onClick={onClick}
       className={cn(
-        'flex items-center gap-1 rounded-[5px] px-2 py-[2px] font-display text-[11px] transition-colors',
-        active ? 'bg-white/[0.10] text-fg-base' : 'text-fg-muted hover:text-fg-base',
+        'flex items-center gap-1.5 rounded-full px-2.5 py-[3px] font-display text-[11px] transition-all duration-200',
+        active
+          ? 'bg-gradient-to-b from-white/[0.14] to-white/[0.06] text-fg-base shadow-control'
+          : 'text-fg-muted hover:text-fg-base',
       )}
     >
       {icon}
@@ -185,8 +205,8 @@ function DateInput({
       onChange={(e) => onChange(e.target.value)}
       aria-label={label}
       className={cn(
-        'h-[22px] rounded-md border border-white/[0.06] bg-black/[0.18] px-1.5 font-display text-[10.5px] text-fg-base',
-        'placeholder:text-fg-subtle/70 focus:border-accent/40 focus:outline-none',
+        'h-[24px] rounded-full bg-black/[0.18] px-2.5 font-display text-[10.5px] text-fg-base ring-1 ring-inset ring-white/[0.05] transition-all duration-200',
+        'placeholder:text-fg-subtle/70 hover:bg-black/[0.24] focus:ring-accent/40 focus:outline-none',
       )}
     />
   );

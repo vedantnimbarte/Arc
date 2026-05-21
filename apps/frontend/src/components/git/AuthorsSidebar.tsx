@@ -35,37 +35,55 @@ export function AuthorsSidebar({ authors, selected, onToggle, onClear, loading }
   );
 
   return (
-    <aside className="material-sidebar flex h-full w-[240px] shrink-0 flex-col border-r border-border-hairline">
-      <div className="flex items-center gap-1.5 border-b border-border-hairline px-3 py-2 font-display text-[10px] uppercase tracking-widest2 text-fg-subtle">
+    <aside className="material-sidebar flex h-full w-[252px] shrink-0 flex-col border-r border-border-subtle">
+      <div className="flex items-center gap-1.5 px-4 pb-2 pt-3 font-display text-[10px] uppercase tracking-widest2 text-fg-subtle">
         <Users size={11} strokeWidth={2.1} />
         <span>Authors</span>
-        <span className="ml-auto tabular-nums normal-case tracking-normal text-fg-subtle/70">
+        <span className="ml-auto rounded-full bg-white/[0.04] px-1.5 py-[1px] font-mono text-[9.5px] tabular-nums normal-case tracking-normal text-fg-muted">
           {authors.length}
         </span>
       </div>
 
-      <div className="flex items-center gap-1.5 border-b border-border-hairline px-2.5 py-1.5">
-        <Search size={10} strokeWidth={2.2} className="text-fg-subtle" />
-        <input
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          placeholder="filter authors…"
-          className="flex-1 bg-transparent font-display text-[11.5px] text-fg-base placeholder:text-fg-subtle/70 focus:outline-none"
-          spellCheck={false}
-          autoComplete="off"
-        />
+      <div className="px-3 pb-2">
+        <div className="group flex items-center gap-2 rounded-full bg-white/[0.04] px-3 py-1.5 ring-1 ring-inset ring-white/[0.05] transition-all duration-200 focus-within:bg-white/[0.06] focus-within:ring-accent/30">
+          <Search size={11} strokeWidth={2.2} className="text-fg-subtle transition-colors group-focus-within:text-accent-bright" />
+          <input
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="filter authors…"
+            className="flex-1 bg-transparent font-display text-[11.5px] text-fg-base placeholder:text-fg-subtle/70 focus:outline-none"
+            spellCheck={false}
+            autoComplete="off"
+          />
+          {query && (
+            <button
+              onClick={() => setQuery('')}
+              className="text-fg-subtle transition-colors hover:text-fg-base"
+              aria-label="Clear search"
+            >
+              ×
+            </button>
+          )}
+        </div>
       </div>
 
       {selected.size > 0 && (
-        <button
-          onClick={onClear}
-          className="border-b border-border-hairline px-3 py-1.5 text-left font-display text-[10.5px] text-fg-subtle transition-colors hover:bg-white/[0.04] hover:text-fg-base"
-        >
-          Clear filter ({selected.size} selected)
-        </button>
+        <div className="px-3 pb-2 animate-fade-in">
+          <button
+            onClick={onClear}
+            className={cn(
+              'flex w-full items-center justify-between rounded-lg px-3 py-1.5 text-left font-display text-[10.5px] transition-all duration-200',
+              'bg-accent-soft text-fg-muted ring-1 ring-inset ring-accent/15',
+              'hover:bg-accent/[0.12] hover:text-fg-base',
+            )}
+          >
+            <span>Clear filter</span>
+            <span className="font-mono tabular-nums text-fg-subtle">{selected.size}</span>
+          </button>
+        </div>
       )}
 
-      <div className="flex min-h-0 flex-1 flex-col overflow-y-auto py-1">
+      <div className="flex min-h-0 flex-1 flex-col gap-px overflow-y-auto px-2 pb-2">
         {loading && (
           <div className="px-3 py-4 font-display text-[11px] text-fg-subtle">loading…</div>
         )}
@@ -82,16 +100,21 @@ export function AuthorsSidebar({ authors, selected, onToggle, onClear, loading }
               key={key}
               onClick={() => onToggle(a)}
               className={cn(
-                'group flex items-center gap-2 px-3 py-1.5 text-left transition-colors',
+                'group relative flex items-center gap-2.5 rounded-lg px-2 py-1.5 text-left transition-all duration-150',
                 isSel
-                  ? 'bg-accent/[0.14] text-fg-base'
-                  : 'text-fg-muted hover:bg-white/[0.05] hover:text-fg-base',
+                  ? 'bg-gradient-to-r from-accent/[0.16] to-accent/[0.06] text-fg-base ring-1 ring-inset ring-accent/20'
+                  : 'text-fg-muted hover:bg-white/[0.045] hover:text-fg-base',
               )}
               title={`${a.name} <${a.email}>`}
             >
               <Avatar name={a.name} email={a.email} selected={isSel} />
               <span className="min-w-0 flex-1 truncate font-display text-[12px]">{a.name || a.email}</span>
-              <span className="shrink-0 font-mono text-[10.5px] tabular-nums text-fg-subtle">
+              <span
+                className={cn(
+                  'shrink-0 rounded-full px-1.5 py-[1px] font-mono text-[9.5px] tabular-nums transition-colors',
+                  isSel ? 'bg-white/[0.08] text-fg-base' : 'text-fg-subtle group-hover:bg-white/[0.04]',
+                )}
+              >
                 {a.commits}
               </span>
             </button>
@@ -99,8 +122,9 @@ export function AuthorsSidebar({ authors, selected, onToggle, onClear, loading }
         })}
       </div>
 
-      <div className="border-t border-border-hairline px-3 py-1.5 font-display text-[10px] tabular-nums text-fg-subtle">
-        {total} {total === 1 ? 'commit' : 'commits'} total
+      <div className="border-t border-border-subtle px-4 py-2 font-display text-[10px] tabular-nums text-fg-subtle">
+        <span className="text-fg-muted">{total}</span>{' '}
+        <span className="opacity-70">{total === 1 ? 'commit' : 'commits'} total</span>
       </div>
     </aside>
   );
@@ -128,10 +152,14 @@ function Avatar({ name, email, selected }: { name: string; email: string; select
   return (
     <span
       className={cn(
-        'flex h-5 w-5 shrink-0 items-center justify-center rounded-full font-display text-[9px] font-semibold text-black/80 ring-1 ring-white/10',
-        selected && 'ring-2 ring-accent/60',
+        'relative flex h-6 w-6 shrink-0 items-center justify-center rounded-full font-display text-[9.5px] font-semibold text-black/85 transition-all duration-200',
+        selected
+          ? 'ring-2 ring-accent/50 ring-offset-1 ring-offset-bg-base shadow-glow-sm'
+          : 'ring-1 ring-inset ring-black/20',
       )}
-      style={{ background: color }}
+      style={{
+        background: `linear-gradient(135deg, ${color} 0%, ${color}dd 100%)`,
+      }}
       aria-hidden
     >
       {initials}
