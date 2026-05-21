@@ -176,6 +176,26 @@ export async function fsIndexStatus(root: string): Promise<boolean> {
   return invoke<boolean>('fs_index_status', { root });
 }
 
+/** Rename `path` to `newName` (basename only, within the same directory). Returns the new absolute path. */
+export async function fsRename(path: string, newName: string): Promise<string> {
+  return invoke<string>('fs_rename', { path, newName });
+}
+
+/** Delete a file or directory (recursive for directories). */
+export async function fsDelete(path: string): Promise<void> {
+  await invoke('fs_delete', { path });
+}
+
+/** Reveal `path` in the OS file manager (Finder on macOS, Explorer on Windows, xdg-open on Linux). */
+export async function fsReveal(path: string): Promise<void> {
+  await invoke('fs_reveal', { path });
+}
+
+/** Create a directory (and any missing ancestors) at `path`. */
+export async function fsCreateDir(path: string): Promise<void> {
+  await invoke('fs_create_dir', { path });
+}
+
 // ----- Secrets (OS credential vault) ------------------------------------
 
 export async function secretsSetApiKey(provider: LlmProvider, key: string): Promise<void> {
@@ -509,6 +529,12 @@ export interface PersistedSettings {
   providers: Record<LlmProvider, { model: string; baseUrl?: string }>;
   systemPrompt: string;
   defaultShell: string | null;
+  /** Appearance preference: 'dark' | 'light' | 'system'. */
+  appearance?: 'dark' | 'light' | 'system';
+  /** Mono font id from `FONT_OPTIONS`. */
+  fontId?: string;
+  /** Terminal / editor font size in px. */
+  fontSize?: number;
 }
 
 /** Returns the stored settings blob, or `null` on first launch. */
@@ -521,6 +547,22 @@ export async function sessionSettingsLoad(): Promise<PersistedSettings | null> {
 /** Serialise and persist `settings` to SQLite. */
 export async function sessionSettingsSave(settings: PersistedSettings): Promise<void> {
   await invoke('session_settings_save', { value: JSON.stringify(settings) });
+}
+
+/** Open (or focus, if already open) the standalone Settings window. */
+export async function settingsWindowOpen(): Promise<void> {
+  await invoke('settings_window_open');
+}
+
+/** Broadcast a `settings://changed` event so the other window re-hydrates
+ *  its store. Fire-and-forget — the listener (if any) re-reads SQLite. */
+export async function settingsBroadcastChanged(): Promise<void> {
+  await invoke('settings_broadcast_changed');
+}
+
+/** Listen for cross-window settings updates. */
+export async function onSettingsChanged(handler: () => void): Promise<UnlistenFn> {
+  return listen('settings://changed', () => handler());
 }
 
 // Chat sessions (multi-conversation)

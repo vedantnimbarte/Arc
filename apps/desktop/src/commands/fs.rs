@@ -140,3 +140,67 @@ pub async fn fs_index_rebuild(root: String) -> Result<usize, String> {
 pub async fn fs_index_status(root: String) -> Result<bool, String> {
     Ok(arc_filesystem::index_is_built(&root))
 }
+
+#[tauri::command]
+pub async fn fs_rename(path: String, new_name: String) -> Result<String, String> {
+    use std::path::Path;
+    let src = Path::new(&path);
+    let parent = src.parent().ok_or_else(|| "path has no parent".to_string())?;
+    let dst = parent.join(&new_name);
+    tokio::fs::rename(&src, &dst).await.map_err(|e| e.to_string())?;
+    Ok(dst.to_string_lossy().to_string())
+}
+
+#[tauri::command]
+pub async fn fs_delete(path: String) -> Result<(), String> {
+    let p = std::path::Path::new(&path);
+    if p.is_dir() {
+        tokio::fs::remove_dir_all(p).await.map_err(|e| e.to_string())
+    } else {
+        tokio::fs::remove_file(p).await.map_err(|e| e.to_string())
+    }
+}
+
+#[tauri::command]
+pub async fn fs_reveal(path: String) -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    {
+        std::process::Command::new("open")
+            .args(["-R", &path])
+            .spawn()
+            .map_err(|e| e.to_string())?;
+    }
+    #[cfg(target_os = "windows")]
+    {
+        let p = std::path::Path::new(&path);
+        if p.is_dir() {
+            std::process::Command::new("explorer.exe")
+                .arg(&path)
+                .spawn()
+                .map_err(|e| e.to_string())?;
+        } else {
+            std::process::Command::new("explorer.exe")
+                .arg(format!("/select,{}", path))
+                .spawn()
+                .map_err(|e| e.to_string())?;
+        }
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+    {
+        let parent = std::path::Path::new(&path)
+            .parent()
+            .unwrap_or_else(|| std::path::Path::new("/"))
+            .to_string_lossy()
+            .to_string();
+        std::process::Command::new("xdg-open")
+            .arg(&parent)
+            .spawn()
+            .map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn fs_create_dir(path: String) -> Result<(), String> {
+    tokio::fs::create_dir_all(&path).await.map_err(|e| e.to_string())
+}

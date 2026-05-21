@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import {
   ArrowUp,
   ChevronRight,
@@ -19,6 +20,11 @@ import {
   fsReadDir,
   fsWatchStart,
   fsWatchStop,
+  fsWriteFile,
+  fsRename,
+  fsDelete,
+  fsReveal,
+  fsCreateDir,
   isTauri,
   ptyWrite,
   type FsEntry,
@@ -35,12 +41,40 @@ interface NodeState {
   expanded: boolean;
 }
 
+interface ContextMenuState {
+  entry: FsEntry;
+  x: number;
+  y: number;
+}
+
+interface CreatingState {
+  parentPath: string;
+  kind: 'file' | 'dir';
+  value: string;
+}
+
+interface RenamingState {
+  entry: FsEntry;
+  value: string;
+}
+
+// Derive path separator from a path string.
+function pathSep(p: string): string {
+  return p.includes('\\') ? '\\' : '/';
+}
+
+// Cross-platform parent directory.
+function parentDir(p: string): string {
+  const cleaned = p.replace(/[\\/]+$/, '');
+  const idx = Math.max(cleaned.lastIndexOf('/'), cleaned.lastIndexOf('\\'));
+  return idx > 0 ? cleaned.slice(0, idx) : cleaned;
+}
+
 export function FileTree() {
   const { root, setRoot, showHidden, toggleHidden } = useFiles();
   const addTab = useWorkspace((s) => s.addTab);
   const openFile = useWorkspace((s) => s.openFile);
 
-  /** Write a snippet into the active terminal — used for click-to-paste path. */
   const pasteIntoActiveTerminal = useCallback(async (snippet: string) => {
     const { tabs, activeTabId } = useWorkspace.getState();
     const active = tabs.find((t) => t.id === activeTabId);
@@ -52,24 +86,22 @@ export function FileTree() {
     }
   }, []);
 
-  /** Map keyed by absolute path → load + expand state. */
   const [nodes, setNodes] = useState<Record<string, NodeState>>({});
-  /** Ref mirrors `nodes` so the watcher callback can read the latest set
-   *  of expanded paths without listing nodes in its dep array (which would
-   *  tear down the watcher on every load). */
   const nodesRef = useRef(nodes);
   useEffect(() => {
     nodesRef.current = nodes;
   }, [nodes]);
-  /** Top-level error (e.g., resolving the default root). */
   const [rootError, setRootError] = useState<string | null>(null);
-  /** Inline filename filter — slides in over the top of the tree when the
-   *  search button in the header is clicked. */
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const searchInputRef = useRef<HTMLInputElement>(null);
 
-  // Resolve a starting root on first mount (or after explicit reset).
+  // Context menu + dialog state
+  const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
+  const [creating, setCreating] = useState<CreatingState | null>(null);
+  const [renaming, setRenaming] = useState<RenamingState | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<FsEntry | null>(null);
+
   useEffect(() => {
     if (root) return;
     if (!isTauri) {
@@ -81,7 +113,6 @@ export function FileTree() {
       .catch((e) => setRootError(String(e)));
   }, [root, setRoot]);
 
-  /** Load children for a given path; cached after the first hit. */
   const ensureLoaded = useCallback(
     async (path: string, force = false) => {
       setNodes((prev) => {
@@ -116,15 +147,11 @@ export function FileTree() {
     [],
   );
 
-  // Initial load of root.
   useEffect(() => {
     if (!root) return;
     void ensureLoaded(root);
   }, [root, ensureLoaded]);
 
-  // Subscribe to filesystem changes under root. Rust debounces to ~150ms;
-  // we add a small JS-side coalesce so a burst lands as a single refresh
-  // pass over the currently-expanded folders.
   useEffect(() => {
     if (!isTauri || !root) return;
     let active = true;
@@ -151,7 +178,6 @@ export function FileTree() {
     void fsWatchStart(root, onChange)
       .then((res) => {
         if (!active) {
-          // Effect already cleaned up; close the watcher we just opened.
           res.unlisten();
           void fsWatchStop(res.watchId);
           return;
@@ -173,13 +199,6 @@ export function FileTree() {
 
   const toggle = useCallback(
     (path: string) => {
-      // Read current state via nodesRef (always up-to-date after commit)
-      // to decide whether to kick off a load. We don't read from a closure-
-      // captured `nodes` (which would require adding it to the dep array and
-      // recreating toggle on every state change) and we don't set a side-effect
-      // variable inside the setNodes updater (React 18 doesn't guarantee the
-      // updater runs synchronously before the if-check in concurrent/transition
-      // mode, which would leave the loading indicator stuck forever).
       const cur = nodesRef.current[path];
       const willExpand = !(cur?.expanded ?? false);
       setNodes((prev) => {
@@ -219,7 +238,6 @@ export function FileTree() {
     }
   }, [setRoot]);
 
-  /** Open the native folder picker. Falls through silently if cancelled. */
   const pickFolder = useCallback(async () => {
     if (!isTauri) return;
     try {
@@ -241,14 +259,12 @@ export function FileTree() {
       title: basename(root) || 'shell',
       kind: 'terminal',
     });
-    // The terminal component reads the latest root from the store on spawn.
   }, [root, addTab]);
 
   const toggleSearch = useCallback(() => {
     setSearchOpen((open) => {
       const next = !open;
       if (next) {
-        // Defer focus to the next paint so the input is mounted.
         requestAnimationFrame(() => searchInputRef.current?.focus());
       } else {
         setSearchQuery('');
@@ -262,14 +278,112 @@ export function FileTree() {
     setSearchQuery('');
   }, []);
 
+  // ── Context menu handlers ────────────────────────────────────────────────
+
+  const handleContextMenu = useCallback((entry: FsEntry, e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setContextMenu({ entry, x: e.clientX, y: e.clientY });
+  }, []);
+
+  const closeContextMenu = useCallback(() => setContextMenu(null), []);
+
+  const ctxOpenInTerminal = useCallback((path: string) => {
+    addTab({
+      id: `term-${Date.now()}`,
+      title: basename(path) || 'shell',
+      kind: 'terminal',
+    });
+    // cd into the target folder once the terminal is ready
+    setTimeout(() => void pasteIntoActiveTerminal(`cd ${shellQuote(path)}\r`), 350);
+  }, [addTab, pasteIntoActiveTerminal]);
+
+  const ctxReveal = useCallback(async (path: string) => {
+    if (!isTauri) return;
+    try { await fsReveal(path); } catch { /* ignore */ }
+  }, []);
+
+  const ctxCopyPath = useCallback((path: string) => {
+    void navigator.clipboard.writeText(path);
+  }, []);
+
+  const ctxCopyRelativePath = useCallback((path: string) => {
+    if (!root) return;
+    const sep = pathSep(root);
+    const rootWithSep = root.endsWith(sep) ? root : root + sep;
+    const rel = path.startsWith(rootWithSep) ? path.slice(rootWithSep.length) : path;
+    void navigator.clipboard.writeText(rel);
+  }, [root]);
+
+  const ctxAttachToAgent = useCallback((path: string) => {
+    // Broadcast to ChatPanel; also copy path as fallback.
+    window.dispatchEvent(new CustomEvent('arc:attach-file', { detail: { path } }));
+    void navigator.clipboard.writeText(path);
+  }, []);
+
+  const ctxNewFile = useCallback((entry: FsEntry) => {
+    const parentPath = entry.kind === 'dir' ? entry.path : parentDir(entry.path);
+    setCreating({ parentPath, kind: 'file', value: '' });
+  }, []);
+
+  const ctxNewFolder = useCallback((entry: FsEntry) => {
+    const parentPath = entry.kind === 'dir' ? entry.path : parentDir(entry.path);
+    setCreating({ parentPath, kind: 'dir', value: '' });
+  }, []);
+
+  const ctxRename = useCallback((entry: FsEntry) => {
+    setRenaming({ entry, value: entry.name });
+  }, []);
+
+  const ctxDelete = useCallback((entry: FsEntry) => {
+    setDeleteTarget(entry);
+  }, []);
+
+  // ── Confirm/cancel for dialogs ───────────────────────────────────────────
+
+  const confirmCreate = useCallback(async (name: string) => {
+    if (!creating) return;
+    const { parentPath, kind } = creating;
+    const sep = pathSep(parentPath);
+    const fullPath = `${parentPath}${sep}${name}`;
+    try {
+      if (kind === 'file') {
+        await fsWriteFile(fullPath, '');
+        openFile(fullPath);
+      } else {
+        await fsCreateDir(fullPath);
+      }
+    } catch (e) {
+      console.error('[FileTree] create failed:', e);
+    }
+    setCreating(null);
+  }, [creating, openFile]);
+
+  const confirmRename = useCallback(async (newName: string) => {
+    if (!renaming) return;
+    try {
+      await fsRename(renaming.entry.path, newName);
+    } catch (e) {
+      console.error('[FileTree] rename failed:', e);
+    }
+    setRenaming(null);
+  }, [renaming]);
+
+  const confirmDelete = useCallback(async () => {
+    if (!deleteTarget) return;
+    try {
+      await fsDelete(deleteTarget.path);
+    } catch (e) {
+      console.error('[FileTree] delete failed:', e);
+    }
+    setDeleteTarget(null);
+  }, [deleteTarget]);
+
   const query = searchQuery.trim().toLowerCase();
 
   return (
     <div className="flex h-full min-w-0 flex-col">
-      {/* Header — Finder-style toolbar. Navigation on the left, view +
-          search controls on the right. The window title used to live in
-          this row but has been moved out so the header reads as pure
-          chrome. */}
+      {/* Header */}
       <div className="flex h-11 shrink-0 items-center gap-1 border-b border-border-hairline px-2.5">
         <button
           onClick={goUp}
@@ -298,7 +412,6 @@ export function FileTree() {
           <FolderSearch size={12} strokeWidth={2.1} />
         </button>
 
-        {/* Flexible spacer so the right cluster anchors to the edge. */}
         <div className="flex-1" />
 
         <button
@@ -342,9 +455,7 @@ export function FileTree() {
         </button>
       </div>
 
-      {/* Search bar — animates in via grid-rows trick (max-height transitions
-          require a hardcoded height; grid-rows 0fr → 1fr lets the inner
-          content drive the size). Auto-focused on open, Esc closes. */}
+      {/* Search bar */}
       <div
         className={cn(
           'grid shrink-0 overflow-hidden border-b border-border-hairline transition-[grid-template-rows,opacity] duration-200 ease-apple',
@@ -402,12 +513,329 @@ export function FileTree() {
             onToggle={toggle}
             onPaste={pasteIntoActiveTerminal}
             onOpenFile={openFile}
+            onContextMenu={handleContextMenu}
           />
         )}
       </div>
+
+      {/* Context menu */}
+      {contextMenu && (
+        <ContextMenu
+          entry={contextMenu.entry}
+          x={contextMenu.x}
+          y={contextMenu.y}
+          root={root}
+          onClose={closeContextMenu}
+          onOpenInTerminal={() => { ctxOpenInTerminal(contextMenu.entry.path); }}
+          onReveal={() => { void ctxReveal(contextMenu.entry.path); }}
+          onNewFile={() => { ctxNewFile(contextMenu.entry); }}
+          onNewFolder={() => { ctxNewFolder(contextMenu.entry); }}
+          onCopyPath={() => { ctxCopyPath(contextMenu.entry.path); }}
+          onCopyRelativePath={() => { ctxCopyRelativePath(contextMenu.entry.path); }}
+          onAttachToAgent={() => { ctxAttachToAgent(contextMenu.entry.path); }}
+          onRename={() => { ctxRename(contextMenu.entry); }}
+          onDelete={() => { ctxDelete(contextMenu.entry); }}
+          onOpenFile={() => { openFile(contextMenu.entry.path); }}
+        />
+      )}
+
+      {/* New file / folder dialog */}
+      {creating && (
+        <InputDialog
+          title={creating.kind === 'file' ? 'New File' : 'New Folder'}
+          placeholder={creating.kind === 'file' ? 'filename.ts' : 'folder-name'}
+          initialValue=""
+          onConfirm={(v) => void confirmCreate(v)}
+          onCancel={() => setCreating(null)}
+        />
+      )}
+
+      {/* Rename dialog */}
+      {renaming && (
+        <InputDialog
+          title={`Rename "${renaming.entry.name}"`}
+          placeholder="new name"
+          initialValue={renaming.value}
+          onConfirm={(v) => void confirmRename(v)}
+          onCancel={() => setRenaming(null)}
+        />
+      )}
+
+      {/* Delete confirmation */}
+      {deleteTarget && (
+        <DeleteDialog
+          entry={deleteTarget}
+          onConfirm={() => void confirmDelete()}
+          onCancel={() => setDeleteTarget(null)}
+        />
+      )}
     </div>
   );
 }
+
+// ── ContextMenu ─────────────────────────────────────────────────────────────
+
+function ContextMenu({
+  entry,
+  x,
+  y,
+  root,
+  onClose,
+  onOpenInTerminal,
+  onReveal,
+  onNewFile,
+  onNewFolder,
+  onCopyPath,
+  onCopyRelativePath,
+  onAttachToAgent,
+  onRename,
+  onDelete,
+  onOpenFile,
+}: {
+  entry: FsEntry;
+  x: number;
+  y: number;
+  root: string | null;
+  onClose: () => void;
+  onOpenInTerminal: () => void;
+  onReveal: () => void;
+  onNewFile: () => void;
+  onNewFolder: () => void;
+  onCopyPath: () => void;
+  onCopyRelativePath: () => void;
+  onAttachToAgent: () => void;
+  onRename: () => void;
+  onDelete: () => void;
+  onOpenFile: () => void;
+}) {
+  const menuRef = useRef<HTMLDivElement>(null);
+  const [pos, setPos] = useState({ x, y });
+
+  // Shift menu so it stays within the viewport.
+  useLayoutEffect(() => {
+    const el = menuRef.current;
+    if (!el) return;
+    const { width, height } = el.getBoundingClientRect();
+    const vw = window.innerWidth;
+    const vh = window.innerHeight;
+    setPos({
+      x: x + width > vw ? Math.max(0, vw - width - 8) : x,
+      y: y + height > vh ? Math.max(0, vh - height - 8) : y,
+    });
+  }, [x, y]);
+
+  // Close on outside click or Escape.
+  useEffect(() => {
+    const onMouse = (e: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) onClose();
+    };
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
+    document.addEventListener('mousedown', onMouse, { capture: true });
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('mousedown', onMouse, { capture: true });
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [onClose]);
+
+  const isDir = entry.kind === 'dir';
+
+  const revealLabel =
+    typeof navigator !== 'undefined' && /Mac/i.test(navigator.platform)
+      ? 'Reveal in Finder'
+      : 'Reveal in Explorer';
+
+  const item = (label: string, action: () => void, danger = false) => (
+    <button
+      key={label}
+      onClick={() => { action(); onClose(); }}
+      className={cn(
+        'flex w-full items-center rounded-md px-3 py-[5px] font-display text-[12.5px] tracking-tight transition-colors duration-100',
+        danger
+          ? 'text-red-400 hover:bg-red-500/[0.12]'
+          : 'text-fg-base/90 hover:bg-white/[0.07] hover:text-fg-base',
+      )}
+    >
+      {label}
+    </button>
+  );
+
+  const sep = <div className="my-[3px] border-t border-white/[0.06]" />;
+
+  void root; // root is available for future use (e.g. relative path display)
+
+  return createPortal(
+    <div
+      ref={menuRef}
+      style={{ left: pos.x, top: pos.y }}
+      className="fixed z-[9999] min-w-[196px] rounded-xl border border-white/[0.09] bg-[#1b1b1d] p-1.5 shadow-2xl shadow-black/70"
+      role="menu"
+      aria-label="File actions"
+    >
+      {isDir ? (
+        <>
+          {item('Open in Terminal', onOpenInTerminal)}
+          {item(revealLabel, onReveal)}
+          {sep}
+          {item('New File', onNewFile)}
+          {item('New Folder', onNewFolder)}
+          {sep}
+          {item('Copy Path', onCopyPath)}
+          {item('Copy Relative Path', onCopyRelativePath)}
+          {sep}
+          {item('Attach to Agent', onAttachToAgent)}
+          {sep}
+          {item('Rename', onRename)}
+          {item('Delete', onDelete, true)}
+        </>
+      ) : (
+        <>
+          {item('Open', onOpenFile)}
+          {item(revealLabel, onReveal)}
+          {sep}
+          {item('New File', onNewFile)}
+          {item('New Folder', onNewFolder)}
+          {sep}
+          {item('Copy Path', onCopyPath)}
+          {item('Copy Relative Path', onCopyRelativePath)}
+          {sep}
+          {item('Attach to Agent', onAttachToAgent)}
+          {sep}
+          {item('Rename', onRename)}
+          {item('Delete', onDelete, true)}
+        </>
+      )}
+    </div>,
+    document.body,
+  );
+}
+
+// ── InputDialog ──────────────────────────────────────────────────────────────
+
+function InputDialog({
+  title,
+  placeholder,
+  initialValue,
+  onConfirm,
+  onCancel,
+}: {
+  title: string;
+  placeholder: string;
+  initialValue: string;
+  onConfirm: (value: string) => void;
+  onCancel: () => void;
+}) {
+  const [value, setValue] = useState(initialValue);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    const el = inputRef.current;
+    if (!el) return;
+    el.focus();
+    const dot = initialValue.lastIndexOf('.');
+    if (dot > 0) {
+      el.setSelectionRange(0, dot);
+    } else {
+      el.select();
+    }
+  }, [initialValue]);
+
+  const confirm = () => { if (value.trim()) onConfirm(value.trim()); };
+
+  return createPortal(
+    <div
+      className="fixed inset-0 z-[10000] flex items-center justify-center bg-black/50"
+      onMouseDown={(e) => { if (e.target === e.currentTarget) onCancel(); }}
+    >
+      <div className="w-80 rounded-xl border border-white/[0.09] bg-[#1c1c1e] p-4 shadow-2xl shadow-black/70">
+        <p className="mb-3 font-display text-[13px] font-medium text-fg-base">{title}</p>
+        <input
+          ref={inputRef}
+          value={value}
+          onChange={(e) => setValue(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') { e.preventDefault(); confirm(); }
+            if (e.key === 'Escape') { e.preventDefault(); onCancel(); }
+          }}
+          placeholder={placeholder}
+          className="selectable w-full rounded-lg border border-white/[0.07] bg-black/30 px-3 py-1.5 font-display text-[12.5px] text-fg-base placeholder:text-fg-subtle focus:border-accent/50 focus:outline-none"
+        />
+        <div className="mt-3 flex justify-end gap-2">
+          <button
+            onClick={onCancel}
+            className="rounded-md px-3 py-1.5 font-display text-[11.5px] text-fg-muted transition-colors hover:bg-white/[0.06] hover:text-fg-base"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={confirm}
+            disabled={!value.trim()}
+            className="rounded-md bg-accent/90 px-3 py-1.5 font-display text-[11.5px] text-white transition-colors hover:bg-accent disabled:opacity-40"
+          >
+            Confirm
+          </button>
+        </div>
+      </div>
+    </div>,
+    document.body,
+  );
+}
+
+// ── DeleteDialog ─────────────────────────────────────────────────────────────
+
+function DeleteDialog({
+  entry,
+  onConfirm,
+  onCancel,
+}: {
+  entry: FsEntry;
+  onConfirm: () => void;
+  onCancel: () => void;
+}) {
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onCancel();
+      if (e.key === 'Enter') onConfirm();
+    };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [onConfirm, onCancel]);
+
+  return createPortal(
+    <div
+      className="fixed inset-0 z-[10000] flex items-center justify-center bg-black/50"
+      onMouseDown={(e) => { if (e.target === e.currentTarget) onCancel(); }}
+    >
+      <div className="w-80 rounded-xl border border-white/[0.09] bg-[#1c1c1e] p-4 shadow-2xl shadow-black/70">
+        <p className="mb-1.5 font-display text-[13px] font-medium text-fg-base">
+          Delete &ldquo;{entry.name}&rdquo;?
+        </p>
+        <p className="mb-4 font-display text-[11.5px] leading-relaxed text-fg-muted">
+          {entry.kind === 'dir'
+            ? 'This will permanently delete the folder and all its contents.'
+            : 'This file will be permanently deleted.'}
+        </p>
+        <div className="flex justify-end gap-2">
+          <button
+            onClick={onCancel}
+            className="rounded-md px-3 py-1.5 font-display text-[11.5px] text-fg-muted transition-colors hover:bg-white/[0.06] hover:text-fg-base"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={onConfirm}
+            className="rounded-md bg-red-500/80 px-3 py-1.5 font-display text-[11.5px] text-white transition-colors hover:bg-red-500"
+          >
+            Delete
+          </button>
+        </div>
+      </div>
+    </div>,
+    document.body,
+  );
+}
+
+// ── TreeChildren ─────────────────────────────────────────────────────────────
 
 function TreeChildren({
   parentPath,
@@ -418,6 +846,7 @@ function TreeChildren({
   onToggle,
   onPaste,
   onOpenFile,
+  onContextMenu,
 }: {
   parentPath: string;
   depth: number;
@@ -427,13 +856,10 @@ function TreeChildren({
   onToggle: (path: string) => void;
   onPaste: (snippet: string) => void | Promise<void>;
   onOpenFile: (path: string) => string;
+  onContextMenu: (entry: FsEntry, e: React.MouseEvent) => void;
 }) {
   const state = nodes[parentPath];
 
-  // Loading affordance — render at every depth so an expanded subfolder
-  // doesn't visually "vanish" during the fsReadDir gap on slow disks /
-  // AV-scanned trees. (Previously only depth 0 showed a row, which made
-  // nested loads look like the folder was empty.)
   if (state?.loading && !state.children) {
     return <LoadingRow indent={depth} />;
   }
@@ -441,8 +867,6 @@ function TreeChildren({
     return <ErrorRow message={state.error} indent={depth} />;
   }
   if (!state?.children) {
-    // State exists (we set expanded=true) but the load hasn't started
-    // yet — surface a faint placeholder so something is always visible.
     if (state?.expanded) return <LoadingRow indent={depth} />;
     return null;
   }
@@ -451,8 +875,6 @@ function TreeChildren({
     if (!showHidden && e.hidden) return false;
     if (!query) return true;
     if (e.name.toLowerCase().includes(query)) return true;
-    // Keep ancestors visible when a descendant matches, but only across the
-    // already-loaded slice of the tree — unloaded folders aren't searched.
     if (e.kind === 'dir' && hasDescendantMatch(e.path, nodes, query, showHidden)) {
       return true;
     }
@@ -480,14 +902,15 @@ function TreeChildren({
           onToggle={onToggle}
           onPaste={onPaste}
           onOpenFile={onOpenFile}
+          onContextMenu={onContextMenu}
         />
       ))}
     </ul>
   );
 }
 
-/** Does any loaded descendant of `path` match the (already lowercased)
- *  query? Bounded by what's currently expanded in the tree. */
+// ── hasDescendantMatch ────────────────────────────────────────────────────────
+
 function hasDescendantMatch(
   path: string,
   nodes: Record<string, NodeState>,
@@ -506,6 +929,8 @@ function hasDescendantMatch(
   return false;
 }
 
+// ── TreeNode ──────────────────────────────────────────────────────────────────
+
 function TreeNode({
   entry,
   depth,
@@ -515,6 +940,7 @@ function TreeNode({
   onToggle,
   onPaste,
   onOpenFile,
+  onContextMenu,
 }: {
   entry: FsEntry;
   depth: number;
@@ -524,6 +950,7 @@ function TreeNode({
   onToggle: (path: string) => void;
   onPaste: (snippet: string) => void | Promise<void>;
   onOpenFile: (path: string) => string;
+  onContextMenu: (entry: FsEntry, e: React.MouseEvent) => void;
 }) {
   const isDir = entry.kind === 'dir';
   const state = nodes[entry.path];
@@ -535,11 +962,6 @@ function TreeNode({
 
   const indent = depth * 14;
 
-  // Click semantics:
-  //   dir click          → expand/collapse
-  //   dir double-click   → `cd` the active terminal into it
-  //   file click         → open in the editor pane
-  //   file alt/opt-click → paste the path into the active terminal
   const handleClick = (e: React.MouseEvent) => {
     if (isDir) {
       onToggle(entry.path);
@@ -558,6 +980,10 @@ function TreeNode({
     }
   };
 
+  const handleContextMenu = (e: React.MouseEvent) => {
+    onContextMenu(entry, e);
+  };
+
   const tooltip = isDir
     ? `${entry.path} · click to expand · double-click to cd`
     : `${entry.path} · click to open · ⌥/alt+click to paste path`;
@@ -567,6 +993,7 @@ function TreeNode({
       <button
         onClick={handleClick}
         onDoubleClick={handleDoubleClick}
+        onContextMenu={handleContextMenu}
         className={cn(
           'group relative flex h-[26px] w-full items-center gap-1.5 rounded-md pr-2 font-display text-[12.5px] tracking-tight transition-colors duration-100',
           'hover:bg-white/[0.045]',
@@ -586,7 +1013,7 @@ function TreeNode({
           />
         ))}
 
-        {/* Chevron — invisible for files, keeps row alignment tight */}
+        {/* Chevron */}
         <span className="flex h-3 w-3 shrink-0 items-center justify-center text-fg-subtle">
           {isDir && (
             <ChevronRight
@@ -615,7 +1042,6 @@ function TreeNode({
           {entry.name}
         </span>
 
-        {/* Symlink tag */}
         {entry.kind === 'symlink' && (
           <span
             className="ml-auto font-mono text-[9px] uppercase tracking-widest2"
@@ -636,11 +1062,14 @@ function TreeNode({
           onToggle={onToggle}
           onPaste={onPaste}
           onOpenFile={onOpenFile}
+          onContextMenu={onContextMenu}
         />
       )}
     </li>
   );
 }
+
+// ── Utility rows ──────────────────────────────────────────────────────────────
 
 function LoadingRow({ indent = 0 }: { indent?: number }) {
   return (
@@ -669,19 +1098,14 @@ function ErrorRow({ message, indent = 0 }: { message: string; indent?: number })
   );
 }
 
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
 function basename(p: string): string {
-  // Cross-platform basename — Tauri returns native separators.
   const cleaned = p.replace(/[\\/]+$/, '');
   const idx = Math.max(cleaned.lastIndexOf('/'), cleaned.lastIndexOf('\\'));
   return idx >= 0 ? cleaned.slice(idx + 1) : cleaned;
 }
 
-/**
- * Cross-platform shell quoting. POSIX shells accept double-quoted paths
- * with backslash escaping; cmd.exe also accepts double quotes (it can't
- * escape literal `"` inside them, but our paths never contain one).
- * Skip quoting when the path is plain alphanumerics + safe punctuation.
- */
 function shellQuote(p: string): string {
   if (/^[\w./\\:+-]+$/.test(p)) return p;
   return `"${p.replace(/(["\\])/g, '\\$1')}"`;

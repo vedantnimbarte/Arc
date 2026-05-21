@@ -51,6 +51,10 @@ fn main() {
             commands::fs::fs_search,
             commands::fs::fs_index_rebuild,
             commands::fs::fs_index_status,
+            commands::fs::fs_rename,
+            commands::fs::fs_delete,
+            commands::fs::fs_reveal,
+            commands::fs::fs_create_dir,
             commands::session::session_load,
             commands::session::session_save_tabs,
             commands::session::session_set_workspace,
@@ -92,6 +96,8 @@ fn main() {
             commands::memory::memory_search,
             commands::memory::memory_embed_entry,
             commands::memory::memory_vector_search,
+            commands::window::settings_window_open,
+            commands::window::settings_broadcast_changed,
         ])
         .setup(|app| {
             // Open the SQLite store before the window appears so the first
