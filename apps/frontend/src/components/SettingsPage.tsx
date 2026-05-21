@@ -29,6 +29,7 @@ import {
   PROVIDER_MODELS,
   useSettings,
 } from '../state/settings';
+import { useFiles } from '../state/files';
 import { isTauri, ptyListShells, type LlmProvider, type ShellInfo } from '../lib/tauri';
 import { cn } from '../lib/cn';
 import {
@@ -193,6 +194,9 @@ function AppearancePane({
   onFontChange: (id: string) => void;
   onFontSizeChange: (size: number) => void;
 }) {
+  const showHidden = useFiles((s) => s.showHidden);
+  const toggleHidden = useFiles((s) => s.toggleHidden);
+
   return (
     <div className="space-y-7">
       <Section title="Appearance" hint="Choose how ARC looks. 'System' follows your OS color scheme.">
@@ -266,7 +270,77 @@ function AppearancePane({
           </button>
         </div>
       </Section>
+
+      <Section title="File Tree">
+        <ToggleRow
+          label="Show hidden files"
+          hint="Display dotfiles and other hidden entries in the sidebar."
+          checked={showHidden}
+          onChange={toggleHidden}
+        />
+      </Section>
     </div>
+  );
+}
+
+function ToggleRow({
+  label,
+  hint,
+  checked,
+  onChange,
+}: {
+  label: string;
+  hint?: string;
+  checked: boolean;
+  onChange: () => void;
+}) {
+  return (
+    <div className="flex items-center justify-between gap-4 rounded-lg border border-border-subtle bg-bg-base/40 px-3 py-2.5">
+      <div className="min-w-0">
+        <p className="font-display text-[12.5px] font-medium tracking-tight text-fg-base">
+          {label}
+        </p>
+        {hint && (
+          <p className="mt-0.5 font-display text-[11px] leading-relaxed text-fg-subtle">
+            {hint}
+          </p>
+        )}
+      </div>
+      <Switch checked={checked} onChange={onChange} ariaLabel={label} />
+    </div>
+  );
+}
+
+function Switch({
+  checked,
+  onChange,
+  ariaLabel,
+}: {
+  checked: boolean;
+  onChange: () => void;
+  ariaLabel: string;
+}) {
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={checked}
+      aria-label={ariaLabel}
+      onClick={onChange}
+      className={cn(
+        'relative inline-flex h-[20px] w-[34px] shrink-0 cursor-pointer items-center rounded-full border transition-colors duration-150 ease-apple',
+        checked
+          ? 'border-accent/50 bg-accent/80'
+          : 'border-border-subtle bg-bg-base/60 hover:bg-bg-base/80',
+      )}
+    >
+      <span
+        className={cn(
+          'pointer-events-none inline-block h-[14px] w-[14px] transform rounded-full bg-white shadow-sm transition-transform duration-150 ease-apple',
+          checked ? 'translate-x-[17px]' : 'translate-x-[3px]',
+        )}
+      />
+    </button>
   );
 }
 

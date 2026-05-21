@@ -32,6 +32,8 @@ interface FilesState {
 const clamp = (n: number, min: number, max: number) =>
   Math.min(Math.max(n, min), max);
 
+const STORAGE_KEY = 'arc-files';
+
 export const useFiles = create<FilesState>()(
   persist(
     (set) => ({
@@ -46,6 +48,18 @@ export const useFiles = create<FilesState>()(
       setSidebarWidth: (w) => set({ sidebarWidth: clamp(w, SIDEBAR_MIN, SIDEBAR_MAX) }),
       setChatWidth: (w) => set({ chatWidth: clamp(w, CHAT_MIN, CHAT_MAX) }),
     }),
-    { name: 'arc-files', version: 2 },
+    { name: STORAGE_KEY, version: 2 },
   ),
 );
+
+// The Settings window is a separate Tauri window with its own JS context.
+// localStorage is shared (same origin), but Zustand state isn't — so a
+// toggle in Settings won't reach the main window's FileTree without this
+// cross-window rehydrate.
+if (typeof window !== 'undefined') {
+  window.addEventListener('storage', (e) => {
+    if (e.key === STORAGE_KEY) {
+      void useFiles.persist.rehydrate();
+    }
+  });
+}

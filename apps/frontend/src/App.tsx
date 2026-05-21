@@ -154,9 +154,6 @@ export default function App() {
             )
           }
           onOpenSearch={() => setSearchOpen(true)}
-          onOpenShortcuts={() => setShortcutsOpen(true)}
-          onToggleChat={() => setChatOpen((o) => !o)}
-          chatOpen={chatOpen}
         />
 
         {/* Two-pane layout (file tree · main). The assistant lives in a
@@ -245,7 +242,11 @@ export default function App() {
           )}
         </div>
 
-        <StatusBar />
+        <StatusBar
+          chatOpen={chatOpen}
+          onToggleChat={() => setChatOpen((o) => !o)}
+          onOpenShortcuts={() => setShortcutsOpen(true)}
+        />
       </div>
 
       <CommandPalette open={historyOpen} onClose={() => setHistoryOpen(false)} />

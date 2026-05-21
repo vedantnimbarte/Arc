@@ -151,6 +151,183 @@ fn count_xy(info: &mut GitInfo, rest: &str) {
     }
 }
 
+// ----- branches -------------------------------------------------------------
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BranchInfo {
+    /// Display name. For locals: `main`. For remotes: `origin/main`.
+    pub name: String,
+    /// True when this branch is the current HEAD (locals only).
+    pub current: bool,
+    /// True when `refs/remotes/...` (e.g. `origin/main`); false for locals.
+    pub remote: bool,
+    /// Tracked upstream branch for a local (e.g. `origin/main`), if configured.
+    pub upstream: Option<String>,
+    /// Short HEAD commit id (7 chars).
+    pub head_short: Option<String>,
+    /// Most-recent commit subject on this branch.
+    pub subject: Option<String>,
+    /// Commit time in unix seconds (committer time).
+    pub time: i64,
+}
+
+/// Enumerate every local + remote branch in the repository.
+///
+/// Sorted by committer time descending so freshly-touched branches surface
+/// first — empirically what users want when they reach for a branch picker.
+/// Returns `Ok(vec![])` when `path` is not inside a git repo.
+pub async fn branches<P: AsRef<Path>>(path: P) -> Result<Vec<BranchInfo>> {
+    let path = path.as_ref();
+    // Fields, US-separated:
+    //   refname:short, HEAD (`*` or ` `), refname (full),
+    //   objectname (full), committerdate:unix, contents:subject,
+    //   upstream:short
+    const US: &str = "\u{1f}";
+    let format = format!(
+        "%(refname:short){US}%(HEAD){US}%(refname){US}%(objectname){US}%(committerdate:unix){US}%(contents:subject){US}%(upstream:short)"
+    );
+
+    let output = Command::new("git")
+        .arg("-C")
+        .arg(path)
+        .args([
+            "for-each-ref",
+            "--sort=-committerdate",
+            &format!("--format={format}"),
+            "refs/heads",
+            "refs/remotes",
+        ])
+        .output()
+        .await
+        .map_err(|e| Error::Spawn(e.to_string()))?;
+
+    if !output.status.success() {
+        return Ok(Vec::new());
+    }
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let mut out = Vec::new();
+    for line in stdout.lines() {
+        if line.is_empty() {
+            continue;
+        }
+        let mut fields = line.splitn(7, US);
+        let short = fields.next().unwrap_or("").trim().to_string();
+        let head_marker = fields.next().unwrap_or(" ").trim();
+        let refname = fields.next().unwrap_or("");
+        let oid = fields.next().unwrap_or("").trim().to_string();
+        let time = fields.next().unwrap_or("0").trim().parse::<i64>().unwrap_or(0);
+        let subject = fields.next().unwrap_or("").trim().to_string();
+        let upstream = fields.next().unwrap_or("").trim().to_string();
+
+        // Skip the symbolic `origin/HEAD -> origin/main` pseudo-ref.
+        if short.ends_with("/HEAD") || refname == "refs/remotes/origin/HEAD" {
+            continue;
+        }
+        if short.is_empty() {
+            continue;
+        }
+
+        let remote = refname.starts_with("refs/remotes/");
+        out.push(BranchInfo {
+            name: short,
+            current: head_marker == "*",
+            remote,
+            upstream: if upstream.is_empty() { None } else { Some(upstream) },
+            head_short: if oid.is_empty() { None } else { Some(oid.chars().take(7).collect()) },
+            subject: if subject.is_empty() { None } else { Some(subject) },
+            time,
+        });
+    }
+    Ok(out)
+}
+
+// ----- checkout -------------------------------------------------------------
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CheckoutResult {
+    /// Branch that HEAD ended up on (locals only; None on detached HEAD).
+    pub branch: Option<String>,
+    /// True when we created a new local tracking branch from a remote ref.
+    pub created_tracking: bool,
+}
+
+/// Check out an existing branch by name.
+///
+/// `name` may be a local (`main`) or remote (`origin/feature/x`) short name.
+/// Remote names trigger `git switch --track <remote>` so the working tree
+/// lands on a fresh local branch tracking that remote.
+pub async fn checkout<P: AsRef<Path>>(path: P, name: &str) -> Result<CheckoutResult> {
+    let path = path.as_ref();
+    let trimmed = name.trim();
+    if trimmed.is_empty() {
+        return Err(Error::Failed("empty branch name".into()));
+    }
+
+    // Heuristic: if the ref looks like `<remote>/<rest>` and there's no local
+    // ref of the same name, create a tracking branch.
+    let (args, created_tracking): (Vec<&str>, bool) = if let Some((_remote, rest)) =
+        trimmed.split_once('/')
+    {
+        // Probe for a local branch with this exact short name.
+        let probe = Command::new("git")
+            .arg("-C")
+            .arg(path)
+            .args(["show-ref", "--verify", "--quiet"])
+            .arg(format!("refs/heads/{trimmed}"))
+            .output()
+            .await
+            .map_err(|e| Error::Spawn(e.to_string()))?;
+        if probe.status.success() {
+            (vec!["switch", trimmed], false)
+        } else {
+            // `git switch --track origin/main` creates a local `main` tracking origin/main.
+            // The shortened branch name git picks is `rest`.
+            let _ = rest; // for clarity
+            (vec!["switch", "--track", trimmed], true)
+        }
+    } else {
+        (vec!["switch", trimmed], false)
+    };
+
+    let output = Command::new("git")
+        .arg("-C")
+        .arg(path)
+        .args(&args)
+        .output()
+        .await
+        .map_err(|e| Error::Spawn(e.to_string()))?;
+
+    if !output.status.success() {
+        let err = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        return Err(Error::Failed(if err.is_empty() {
+            "checkout failed".into()
+        } else {
+            err
+        }));
+    }
+
+    // Resolve the branch HEAD ended up on.
+    let head = Command::new("git")
+        .arg("-C")
+        .arg(path)
+        .args(["symbolic-ref", "--short", "HEAD"])
+        .output()
+        .await
+        .map_err(|e| Error::Spawn(e.to_string()))?;
+    let branch = if head.status.success() {
+        let s = String::from_utf8_lossy(&head.stdout).trim().to_string();
+        if s.is_empty() { None } else { Some(s) }
+    } else {
+        None
+    };
+
+    Ok(CheckoutResult {
+        branch,
+        created_tracking,
+    })
+}
+
 // ----- log ------------------------------------------------------------------
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

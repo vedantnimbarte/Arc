@@ -890,3 +890,38 @@ export async function gitBlame(
     endLine: range?.end ?? null,
   });
 }
+
+export interface GitBranchInfo {
+  /** Local: `main`. Remote: `origin/main`. */
+  name: string;
+  /** True for the current HEAD. */
+  current: boolean;
+  /** True for `refs/remotes/...`. */
+  remote: boolean;
+  /** Tracked upstream short name for locals (e.g. `origin/main`). */
+  upstream: string | null;
+  /** Short HEAD oid (7 chars). */
+  head_short: string | null;
+  /** Tip commit subject line. */
+  subject: string | null;
+  /** Committer time, unix seconds. */
+  time: number;
+}
+
+/** List local + remote branches, sorted by recency. Empty when not a repo. */
+export async function gitBranches(path: string): Promise<GitBranchInfo[]> {
+  return invoke<GitBranchInfo[]>('git_branches', { path });
+}
+
+export interface GitCheckoutResult {
+  branch: string | null;
+  created_tracking: boolean;
+}
+
+/** Switch to `name`. Remote short names ("origin/foo") create a tracking local. */
+export async function gitCheckout(
+  path: string,
+  name: string,
+): Promise<GitCheckoutResult> {
+  return invoke<GitCheckoutResult>('git_checkout', { path, name });
+}

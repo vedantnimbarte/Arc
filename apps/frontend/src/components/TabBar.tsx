@@ -10,15 +10,12 @@ import {
   PanelLeftClose,
   PanelLeftOpen,
   Search,
-  Sparkles,
-  Keyboard,
   Bot,
 } from 'lucide-react';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { useWorkspace } from '../state/workspace';
 import { useFiles } from '../state/files';
 import { cn } from '../lib/cn';
-import { formatBinding, getBinding } from '../state/shortcuts';
 import { fsPickFolder, fsWriteFile, ptyListAiClis, type AiCliInfo } from '../lib/tauri';
 
 const isTauri = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
@@ -26,17 +23,11 @@ const isTauri = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window
 interface Props {
   onOpenSettings: () => void;
   onOpenSearch: () => void;
-  onOpenShortcuts: () => void;
-  onToggleChat: () => void;
-  chatOpen: boolean;
 }
 
 export function TabBar({
   onOpenSettings,
   onOpenSearch,
-  onOpenShortcuts,
-  onToggleChat,
-  chatOpen,
 }: Props) {
   const { tabs, activeTabId, setActive, closeTab, addTab, openFile, launchAiCli, tabDirty } =
     useWorkspace();
@@ -47,15 +38,11 @@ export function TabBar({
   const [menuOpen, setMenuOpen] = useState(false);
   const [menuPos, setMenuPos] = useState<{ top: number; left: number } | null>(null);
   const [newFileOpen, setNewFileOpen] = useState(false);
-  const [aiMenuOpen, setAiMenuOpen] = useState(false);
-  const [aiMenuPos, setAiMenuPos] = useState<{ top: number; left: number } | null>(null);
   // Installed AI CLIs (Claude Code / Codex / OpenCode). Refreshed on mount.
   // Empty in browser-only mode or when none are on PATH.
   const [aiClis, setAiClis] = useState<AiCliInfo[]>([]);
   const plusRef = useRef<HTMLButtonElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
-  const aiBtnRef = useRef<HTMLButtonElement>(null);
-  const aiMenuRef = useRef<HTMLDivElement>(null);
 
   // One-shot detection. The list is cheap (PATH scan) but doesn't change
   // mid-session, so we cache it. Users who install a CLI mid-session can
@@ -107,48 +94,11 @@ export function TabBar({
     };
   }, [menuOpen]);
 
-  // Mirror of the +menu positioning for the AI launcher dropdown.
-  useLayoutEffect(() => {
-    if (!aiMenuOpen) {
-      setAiMenuPos(null);
-      return;
-    }
-    const update = () => {
-      const r = aiBtnRef.current?.getBoundingClientRect();
-      if (!r) return;
-      // Right-align to the button so the menu doesn't extend off-screen.
-      setAiMenuPos({ top: r.bottom + 4, left: r.right - 192 });
-    };
-    update();
-    window.addEventListener('resize', update);
-    return () => window.removeEventListener('resize', update);
-  }, [aiMenuOpen]);
-
+  // Re-detect when the +menu opens — picks up CLIs installed mid-session.
   useEffect(() => {
-    if (!aiMenuOpen) return;
-    const onDown = (e: MouseEvent) => {
-      const t = e.target as Node | null;
-      if (!t) return;
-      if (aiMenuRef.current?.contains(t)) return;
-      if (aiBtnRef.current?.contains(t)) return;
-      setAiMenuOpen(false);
-    };
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setAiMenuOpen(false);
-    };
-    window.addEventListener('mousedown', onDown);
-    window.addEventListener('keydown', onKey);
-    return () => {
-      window.removeEventListener('mousedown', onDown);
-      window.removeEventListener('keydown', onKey);
-    };
-  }, [aiMenuOpen]);
-
-  // Re-detect when either menu opens — picks up CLIs installed mid-session.
-  useEffect(() => {
-    if ((!menuOpen && !aiMenuOpen) || !isTauri) return;
+    if (!menuOpen || !isTauri) return;
     ptyListAiClis().then(setAiClis).catch(() => {});
-  }, [menuOpen, aiMenuOpen]);
+  }, [menuOpen]);
 
   const newTerminal = () => {
     addTab({ id: `term-${Date.now()}`, title: 'shell', kind: 'terminal' });
@@ -163,7 +113,6 @@ export function TabBar({
   const launchCli = (cli: AiCliInfo) => {
     launchAiCli(cli);
     setMenuOpen(false);
-    setAiMenuOpen(false);
   };
 
   const requestClose = (id: string, title: string) => {
@@ -318,65 +267,6 @@ export function TabBar({
 
       <div className="ml-0.5 flex items-center gap-0.5 pr-2">
         <button
-          onClick={onOpenShortcuts}
-          className="group flex h-7 w-7 items-center justify-center rounded-md text-fg-muted transition-all duration-200 ease-apple hover:bg-white/[0.08] hover:text-fg-base active:bg-white/[0.12]"
-          aria-label="Keyboard shortcuts"
-          title={`Keyboard shortcuts (${formatBinding(getBinding('open-shortcuts'))})`}
-        >
-          <Keyboard size={13} strokeWidth={1.9} />
-        </button>
-        {/* AI CLI launcher — dimmed when none installed, but still clickable
-            so the user sees the hint about installing one. */}
-        <button
-          ref={aiBtnRef}
-          onClick={() => setAiMenuOpen((o) => !o)}
-          className={cn(
-            'group relative flex h-7 w-7 items-center justify-center rounded-md transition-all duration-200 ease-apple',
-            aiMenuOpen
-              ? 'bg-white/[0.10] text-fg-base shadow-[inset_0_1px_0_0_rgba(255,255,255,0.08)]'
-              : aiClis.length > 0
-                ? 'text-fg-muted hover:bg-white/[0.08] hover:text-fg-base'
-                : 'text-fg-subtle/60 hover:bg-white/[0.04] hover:text-fg-muted',
-          )}
-          aria-label="Launch AI CLI"
-          aria-expanded={aiMenuOpen}
-          aria-haspopup="menu"
-          title={
-            aiClis.length > 0
-              ? `Launch AI CLI (${aiClis.length} installed)`
-              : 'Launch AI CLI (none detected on PATH)'
-          }
-        >
-          <Bot size={13} strokeWidth={1.9} />
-        </button>
-        <button
-          onClick={onToggleChat}
-          className={cn(
-            'group relative flex h-7 w-7 items-center justify-center rounded-md transition-all duration-200 ease-apple',
-            chatOpen
-              ? 'bg-white/[0.10] text-accent-bright shadow-[inset_0_1px_0_0_rgba(255,255,255,0.08)]'
-              : 'text-fg-muted hover:bg-white/[0.08] hover:text-fg-base',
-          )}
-          aria-label={chatOpen ? 'Close assistant' : 'Open assistant'}
-          aria-pressed={chatOpen}
-          title="Assistant"
-        >
-          <Sparkles
-            size={13}
-            strokeWidth={2}
-            className={cn(
-              'transition-transform duration-300 ease-apple',
-              chatOpen && 'scale-110 drop-shadow-[0_0_6px_rgba(220,224,232,0.55)]',
-            )}
-          />
-          {chatOpen && (
-            <span
-              className="pointer-events-none absolute -bottom-0.5 left-1/2 h-0.5 w-3 -translate-x-1/2 rounded-full bg-accent-bright/80 shadow-glow-sm"
-              aria-hidden
-            />
-          )}
-        </button>
-        <button
           onClick={onOpenSettings}
           className="group flex h-7 w-7 items-center justify-center rounded-md text-fg-muted transition-all duration-200 ease-apple hover:bg-white/[0.08] hover:text-fg-base active:bg-white/[0.12]"
           aria-label="Open settings"
@@ -436,40 +326,6 @@ export function TabBar({
                 </button>
               ))}
             </>
-          )}
-        </div>,
-        document.body,
-      )}
-    {aiMenuOpen && aiMenuPos && typeof document !== 'undefined' &&
-      createPortal(
-        <div
-          ref={aiMenuRef}
-          role="menu"
-          style={{ position: 'fixed', top: aiMenuPos.top, left: aiMenuPos.left }}
-          className="material-sheet z-50 w-48 animate-popover-in overflow-hidden rounded-md shadow-sheet ring-1 ring-white/10"
-        >
-          {aiClis.length === 0 ? (
-            <div className="px-3 py-3 font-display text-[11.5px] leading-snug text-fg-muted">
-              <div className="mb-1 font-medium text-fg-base">No AI CLIs found</div>
-              <div className="text-fg-subtle">
-                Install <code className="font-mono">claude</code>,{' '}
-                <code className="font-mono">codex</code>, or{' '}
-                <code className="font-mono">opencode</code> on your <code className="font-mono">PATH</code>.
-              </div>
-            </div>
-          ) : (
-            aiClis.map((cli) => (
-              <button
-                key={cli.id}
-                role="menuitem"
-                onClick={() => launchCli(cli)}
-                className="flex w-full items-center gap-2 px-3 py-2 text-left font-display text-[12px] text-fg-base/90 transition-colors hover:bg-white/[0.06]"
-                title={cli.path}
-              >
-                <Bot size={12} strokeWidth={2} className="text-fg-subtle" />
-                <span className="flex-1 truncate">{cli.label}</span>
-              </button>
-            ))
           )}
         </div>,
         document.body,

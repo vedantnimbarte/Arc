@@ -3,13 +3,9 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react
 import {
   ArrowUp,
   ChevronRight,
-  Eye,
-  EyeOff,
   FolderSearch,
   Home,
-  RefreshCw,
   Search,
-  TerminalSquare,
   AlertCircle,
   X,
 } from 'lucide-react';
@@ -71,7 +67,7 @@ function parentDir(p: string): string {
 }
 
 export function FileTree() {
-  const { root, setRoot, showHidden, toggleHidden } = useFiles();
+  const { root, setRoot, showHidden } = useFiles();
   const addTab = useWorkspace((s) => s.addTab);
   const openFile = useWorkspace((s) => s.openFile);
 
@@ -248,19 +244,6 @@ export function FileTree() {
     }
   }, [root, setRoot]);
 
-  const refresh = useCallback(() => {
-    if (root) void ensureLoaded(root, true);
-  }, [root, ensureLoaded]);
-
-  const openInTerminal = useCallback(() => {
-    if (!root) return;
-    addTab({
-      id: `term-${Date.now()}`,
-      title: basename(root) || 'shell',
-      kind: 'terminal',
-    });
-  }, [root, addTab]);
-
   const toggleSearch = useCallback(() => {
     setSearchOpen((open) => {
       const next = !open;
@@ -425,33 +408,6 @@ export function FileTree() {
           title="Filter visible files"
         >
           <Search size={12} strokeWidth={2.1} />
-        </button>
-        <button
-          onClick={toggleHidden}
-          className={cn(
-            'flex h-6 w-6 items-center justify-center rounded-md transition-colors duration-150 hover:bg-white/[0.08] hover:text-fg-base',
-            showHidden ? 'text-accent' : 'text-fg-muted',
-          )}
-          aria-label="Toggle hidden files"
-          title={showHidden ? 'Hide dotfiles' : 'Show dotfiles'}
-        >
-          {showHidden ? <Eye size={12} strokeWidth={2.1} /> : <EyeOff size={12} strokeWidth={2.1} />}
-        </button>
-        <button
-          onClick={refresh}
-          className="flex h-6 w-6 items-center justify-center rounded-md text-fg-muted transition-colors duration-150 hover:bg-white/[0.08] hover:text-fg-base"
-          aria-label="Refresh"
-          title="Refresh"
-        >
-          <RefreshCw size={11} strokeWidth={2.1} />
-        </button>
-        <button
-          onClick={openInTerminal}
-          className="flex h-6 w-6 items-center justify-center rounded-md text-fg-muted transition-colors duration-150 hover:bg-white/[0.08] hover:text-fg-base"
-          aria-label="Open in new terminal"
-          title="Open in new terminal"
-        >
-          <TerminalSquare size={11} strokeWidth={2.1} />
         </button>
       </div>
 

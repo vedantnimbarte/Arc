@@ -24,7 +24,7 @@ pub fn read_dir(path: impl AsRef<Path>) -> Result<Vec<DirEntry>> {
     for entry in read.flatten() {
         let Ok(meta) = entry.metadata() else { continue };
         let name = entry.file_name().to_string_lossy().to_string();
-        let hidden = name.starts_with('.');
+        let hidden = name.starts_with('.') || is_os_hidden(&meta);
         let kind = if meta.is_dir() {
             "dir"
         } else if meta.file_type().is_symlink() {
@@ -47,4 +47,18 @@ pub fn read_dir(path: impl AsRef<Path>) -> Result<Vec<DirEntry>> {
     });
 
     Ok(out)
+}
+
+#[cfg(windows)]
+fn is_os_hidden(meta: &std::fs::Metadata) -> bool {
+    use std::os::windows::fs::MetadataExt;
+    const FILE_ATTRIBUTE_HIDDEN: u32 = 0x2;
+    const FILE_ATTRIBUTE_SYSTEM: u32 = 0x4;
+    let attrs = meta.file_attributes();
+    (attrs & (FILE_ATTRIBUTE_HIDDEN | FILE_ATTRIBUTE_SYSTEM)) != 0
+}
+
+#[cfg(not(windows))]
+fn is_os_hidden(_meta: &std::fs::Metadata) -> bool {
+    false
 }
