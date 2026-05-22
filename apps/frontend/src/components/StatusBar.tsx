@@ -63,8 +63,6 @@ export function StatusBar({ chatOpen, onToggleChat, onOpenShortcuts }: Props) {
       >
         <div className="flex items-center gap-3.5">
           <ShellPickerPill onSpawn={(shell) => void newTerminal({ shellOverride: shell })} />
-          <span className="text-fg-subtle">·</span>
-          <span className="font-mono text-[10px] text-fg-subtle">arc 0.0.1</span>
           {!isTauri && (
             <>
               <span className="text-fg-subtle">·</span>
@@ -84,6 +82,8 @@ export function StatusBar({ chatOpen, onToggleChat, onOpenShortcuts }: Props) {
           <span className="tabular-nums">
             {tabs.length} {tabs.length === 1 ? 'tab' : 'tabs'}
           </span>
+          <span className="text-fg-subtle">·</span>
+          <span className="font-mono text-[10px] text-fg-subtle">arc 0.0.1</span>
           <span className="text-fg-subtle">·</span>
           <ModelTriggerPill placement="up" align="end" compact />
           <span className="text-fg-subtle">·</span>
