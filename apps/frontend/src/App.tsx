@@ -4,7 +4,7 @@ import { TabBar } from './components/TabBar';
 import { ChatPanel } from './components/ChatPanel';
 import { StatusBar } from './components/StatusBar';
 import { CommandPalette } from './components/CommandPalette';
-import { FileTree } from './components/FileTree';
+import { Sidebar } from './components/Sidebar';
 import { ResizeHandle } from './components/ResizeHandle';
 import { SearchPalette } from './components/SearchPalette';
 import { ShortcutsDialog } from './components/ShortcutsDialog';
@@ -170,7 +170,7 @@ export default function App() {
                 className="material-sidebar h-full border-r border-border-hairline"
                 style={{ width: sidebarWidth }}
               >
-                <FileTree />
+                <Sidebar />
               </div>
             </aside>
 

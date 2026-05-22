@@ -869,6 +869,23 @@ export async function gitStatus(path: string): Promise<GitInfo | null> {
   return invoke<GitInfo | null>('git_status', { path });
 }
 
+export type GitChangeKind = 'staged' | 'unstaged' | 'both' | 'untracked' | 'conflict';
+
+export interface GitChangeEntry {
+  /** Repository-relative path. */
+  path: string;
+  /** Original path for rename/copy entries. */
+  orig_path: string | null;
+  kind: GitChangeKind;
+  /** Single-letter porcelain status (M / A / D / R / C / U / ?). */
+  status: string;
+}
+
+/** Per-file working-copy status. Returns [] when not in a repo. */
+export async function gitChanges(path: string): Promise<GitChangeEntry[]> {
+  return invoke<GitChangeEntry[]>('git_changes', { path });
+}
+
 export interface GitLogEntry {
   oid: string;
   short: string;
@@ -1004,4 +1021,44 @@ export async function gitAuthors(path: string): Promise<GitAuthorInfo[]> {
 /** Open (or focus, if already open) the standalone Git history window. */
 export async function gitWindowOpen(): Promise<void> {
   await invoke('git_window_open');
+}
+
+/** Stage repository-relative paths. Empty array no-ops. */
+export async function gitStage(path: string, paths: string[]): Promise<void> {
+  await invoke('git_stage', { path, paths });
+}
+
+/** Unstage repository-relative paths (reset to working tree). */
+export async function gitUnstage(path: string, paths: string[]): Promise<void> {
+  await invoke('git_unstage', { path, paths });
+}
+
+export interface GitCommitResult {
+  /** Short SHA of the newly-created commit. */
+  short: string;
+  subject: string;
+}
+
+/** Commit whatever is currently staged with `message`. */
+export async function gitCommit(
+  path: string,
+  message: string,
+): Promise<GitCommitResult> {
+  return invoke<GitCommitResult>('git_commit', { path, message });
+}
+
+/**
+ * Discard local changes. `trackedPaths` are restored from HEAD; `untrackedPaths`
+ * are deleted from disk. Either list may be empty.
+ */
+export async function gitDiscard(
+  path: string,
+  trackedPaths: string[],
+  untrackedPaths: string[],
+): Promise<void> {
+  await invoke('git_discard', {
+    path,
+    trackedPaths,
+    untrackedPaths,
+  });
 }

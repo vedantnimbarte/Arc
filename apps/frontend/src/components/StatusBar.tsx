@@ -1,12 +1,14 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { Bot, GitBranch, Keyboard, Sparkles } from 'lucide-react';
+import { Bot, GitBranch, Keyboard, Sparkles, Terminal as TerminalIcon } from 'lucide-react';
 import {
   gitStatus,
   isTauri,
   ptyListAiClis,
+  ptyListShells,
   type AiCliInfo,
   type GitInfo,
+  type ShellInfo,
 } from '../lib/tauri';
 import { useWorkspace } from '../state/workspace';
 import { useFiles } from '../state/files';
@@ -23,8 +25,8 @@ interface Props {
 
 export function StatusBar({ chatOpen, onToggleChat, onOpenShortcuts }: Props) {
   const tabs = useWorkspace((s) => s.tabs);
-  const active = useWorkspace((s) => s.activeTabId);
   const launchAiCli = useWorkspace((s) => s.launchAiCli);
+  const newTerminal = useWorkspace((s) => s.newTerminal);
   const root = useFiles((s) => s.root);
 
   const [git, setGit] = useState<GitInfo | null>(null);
@@ -60,21 +62,15 @@ export function StatusBar({ chatOpen, onToggleChat, onOpenShortcuts }: Props) {
         )}
       >
         <div className="flex items-center gap-3.5">
-          <div className="flex items-center gap-1.5">
-            <span
-              className={cn(
-                'h-[6px] w-[6px] rounded-full',
-                isTauri
-                  ? 'bg-status-ok shadow-[0_0_8px_rgba(58,210,138,0.7)]'
-                  : 'bg-status-warn shadow-[0_0_8px_rgba(240,169,88,0.6)]',
-              )}
-            />
-            <span className={isTauri ? 'text-fg-base/85' : 'text-status-warn'}>
-              {isTauri ? 'connected' : 'web preview'}
-            </span>
-          </div>
+          <ShellPickerPill onSpawn={(shell) => void newTerminal({ shellOverride: shell })} />
           <span className="text-fg-subtle">·</span>
           <span className="font-mono text-[10px] text-fg-subtle">arc 0.0.1</span>
+          {!isTauri && (
+            <>
+              <span className="text-fg-subtle">·</span>
+              <span className="text-status-warn">web preview</span>
+            </>
+          )}
         </div>
 
         <div className="flex items-center gap-3.5">
@@ -87,10 +83,6 @@ export function StatusBar({ chatOpen, onToggleChat, onOpenShortcuts }: Props) {
           {git?.branch && <span className="text-fg-subtle">·</span>}
           <span className="tabular-nums">
             {tabs.length} {tabs.length === 1 ? 'tab' : 'tabs'}
-          </span>
-          <span className="text-fg-subtle">·</span>
-          <span className="max-w-[220px] truncate font-mono text-[10px] text-fg-subtle">
-            {active ?? '—'}
           </span>
           <span className="text-fg-subtle">·</span>
           <ModelTriggerPill placement="up" align="end" compact />
@@ -324,6 +316,142 @@ function AiCliButton({ onLaunch }: { onLaunch: (cli: AiCliInfo) => void }) {
                 >
                   <Bot size={12} strokeWidth={2} className="text-fg-subtle" />
                   <span className="flex-1 truncate">{cli.label}</span>
+                </button>
+              ))
+            )}
+          </div>,
+          document.body,
+        )}
+    </>
+  );
+}
+
+/**
+ * Status-bar pill anchored to the left cluster. Lists every shell detected
+ * on the user's machine (same source as Settings → Terminal) and spawns a
+ * new terminal tab running the chosen shell. Menu pops *upward* through a
+ * portal so the status bar's backdrop-filter doesn't trap it.
+ */
+function ShellPickerPill({ onSpawn }: { onSpawn: (shellPath: string) => void }) {
+  const [open, setOpen] = useState(false);
+  const [pos, setPos] = useState<{ bottom: number; left: number } | null>(null);
+  const [shells, setShells] = useState<ShellInfo[]>([]);
+  const btnRef = useRef<HTMLButtonElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+
+  // Probe once on mount, then again every time the menu opens to catch
+  // shells installed mid-session.
+  useEffect(() => {
+    if (!isTauri) return;
+    ptyListShells().then(setShells).catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    if (!open || !isTauri) return;
+    ptyListShells().then(setShells).catch(() => {});
+  }, [open]);
+
+  useLayoutEffect(() => {
+    if (!open) {
+      setPos(null);
+      return;
+    }
+    const update = () => {
+      const r = btnRef.current?.getBoundingClientRect();
+      if (!r) return;
+      const vh = window.innerHeight;
+      setPos({
+        bottom: vh - r.top + 4,
+        left: Math.max(8, r.left),
+      });
+    };
+    update();
+    window.addEventListener('resize', update);
+    window.addEventListener('scroll', update, true);
+    return () => {
+      window.removeEventListener('resize', update);
+      window.removeEventListener('scroll', update, true);
+    };
+  }, [open]);
+
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e: MouseEvent) => {
+      const t = e.target as Node | null;
+      if (!t) return;
+      if (menuRef.current?.contains(t)) return;
+      if (btnRef.current?.contains(t)) return;
+      setOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setOpen(false);
+    };
+    window.addEventListener('mousedown', onDown);
+    window.addEventListener('keydown', onKey);
+    return () => {
+      window.removeEventListener('mousedown', onDown);
+      window.removeEventListener('keydown', onKey);
+    };
+  }, [open]);
+
+  return (
+    <>
+      <button
+        ref={btnRef}
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        aria-haspopup="menu"
+        aria-expanded={open}
+        title={
+          shells.length > 0
+            ? `Open terminal (${shells.length} shell${shells.length === 1 ? '' : 's'} detected)`
+            : 'Open terminal'
+        }
+        className={cn(
+          'group relative -my-1 flex h-5 items-center gap-1.5 rounded-md px-1.5 transition-colors focus:outline-none',
+          open
+            ? 'bg-accent-soft text-accent-bright shadow-[inset_0_0_0_1px_rgba(220,224,232,0.18)]'
+            : 'text-fg-muted hover:bg-white/[0.06] hover:text-fg-base/95 focus-visible:bg-white/[0.06]',
+        )}
+      >
+        <TerminalIcon size={11} strokeWidth={2} />
+        <span className="font-display text-[10px] tracking-tight">terminal</span>
+      </button>
+
+      {open && pos && typeof document !== 'undefined' &&
+        createPortal(
+          <div
+            ref={menuRef}
+            role="menu"
+            style={{ position: 'fixed', bottom: pos.bottom, left: pos.left }}
+            className="material-sheet z-50 max-h-[280px] w-56 animate-popover-in overflow-y-auto rounded-md shadow-sheet ring-1 ring-white/10"
+          >
+            {shells.length === 0 ? (
+              <div className="px-3 py-3 font-display text-[11.5px] leading-snug text-fg-muted">
+                <div className="mb-1 font-medium text-fg-base">No shells detected</div>
+                <div className="text-fg-subtle">
+                  Tauri shell wasn’t able to probe <code className="font-mono">PATH</code>.
+                </div>
+              </div>
+            ) : (
+              shells.map((s) => (
+                <button
+                  key={s.path}
+                  role="menuitem"
+                  onClick={() => {
+                    onSpawn(s.path);
+                    setOpen(false);
+                  }}
+                  className="flex w-full items-center gap-2 px-3 py-1.5 text-left font-display text-[12px] text-fg-base/90 transition-colors hover:bg-white/[0.06]"
+                  title={s.path}
+                >
+                  <TerminalIcon size={11} strokeWidth={2} className="text-fg-subtle" />
+                  <span className="flex-1 truncate">{s.label}</span>
+                  {s.is_default && (
+                    <span className="font-mono text-[9.5px] uppercase tracking-widest2 text-fg-subtle">
+                      default
+                    </span>
+                  )}
                 </button>
               ))
             )}

@@ -9,6 +9,9 @@ export const CHAT_MIN = 260;
 export const CHAT_MAX = 560;
 export const CHAT_DEFAULT = 340;
 
+/** Which panel is showing in the left sidebar. */
+export type SidebarView = 'files' | 'source-control';
+
 interface FilesState {
   /**
    * Root the file tree is showing. New terminals inherit this as their CWD,
@@ -22,11 +25,14 @@ interface FilesState {
   /** Persistent pane widths (px). Clamped on the way in. */
   sidebarWidth: number;
   chatWidth: number;
+  /** Which panel is mounted in the left sidebar. Persisted. */
+  sidebarView: SidebarView;
   setRoot: (root: string) => void;
   toggleHidden: () => void;
   toggleCollapsed: () => void;
   setSidebarWidth: (w: number) => void;
   setChatWidth: (w: number) => void;
+  setSidebarView: (view: SidebarView) => void;
 }
 
 const clamp = (n: number, min: number, max: number) =>
@@ -42,11 +48,13 @@ export const useFiles = create<FilesState>()(
       collapsed: false,
       sidebarWidth: SIDEBAR_DEFAULT,
       chatWidth: CHAT_DEFAULT,
+      sidebarView: 'files',
       setRoot: (root) => set({ root }),
       toggleHidden: () => set((s) => ({ showHidden: !s.showHidden })),
       toggleCollapsed: () => set((s) => ({ collapsed: !s.collapsed })),
       setSidebarWidth: (w) => set({ sidebarWidth: clamp(w, SIDEBAR_MIN, SIDEBAR_MAX) }),
       setChatWidth: (w) => set({ chatWidth: clamp(w, CHAT_MIN, CHAT_MAX) }),
+      setSidebarView: (view) => set({ sidebarView: view }),
     }),
     { name: STORAGE_KEY, version: 2 },
   ),

@@ -4,7 +4,6 @@ import {
   ArrowUp,
   ChevronRight,
   FolderSearch,
-  Home,
   Search,
   AlertCircle,
   X,
@@ -225,15 +224,6 @@ export function FileTree() {
     }
   }, [root, setRoot]);
 
-  const goHome = useCallback(async () => {
-    try {
-      const home = await fsDefaultRoot();
-      setRoot(home);
-    } catch (e) {
-      setRootError(String(e));
-    }
-  }, [setRoot]);
-
   const pickFolder = useCallback(async () => {
     if (!isTauri) return;
     try {
@@ -383,14 +373,6 @@ export function FileTree() {
           title="Up"
         >
           <ArrowUp size={12} strokeWidth={2.1} />
-        </button>
-        <button
-          onClick={() => void goHome()}
-          className="flex h-6 w-6 items-center justify-center rounded-md text-fg-muted transition-colors duration-150 hover:bg-white/[0.08] hover:text-fg-base"
-          aria-label="Home"
-          title="Home"
-        >
-          <Home size={12} strokeWidth={2.1} />
         </button>
         <button
           onClick={() => void pickFolder()}

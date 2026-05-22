@@ -151,6 +151,371 @@ fn count_xy(info: &mut GitInfo, rest: &str) {
     }
 }
 
+// ----- changes (per-file) ---------------------------------------------------
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum ChangeKind {
+    /// Staged-only change (X in porcelain).
+    Staged,
+    /// Worktree-only change (Y in porcelain).
+    Unstaged,
+    /// Both staged and unstaged modifications.
+    Both,
+    /// Untracked file (`?`).
+    Untracked,
+    /// Unmerged / conflicted (`u`).
+    Conflict,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ChangeEntry {
+    /// Repository-relative path.
+    pub path: String,
+    /// Original path for rename/copy entries.
+    pub orig_path: Option<String>,
+    pub kind: ChangeKind,
+    /// Single-letter status (M, A, D, R, C, U, ?). Worktree side preferred,
+    /// fallback to index side. Useful for badges in the UI.
+    pub status: String,
+}
+
+/// Per-file working-copy status, derived from `git status --porcelain=v2`.
+///
+/// Returns `Ok(vec![])` when `path` is not inside a repo.
+pub async fn changes<P: AsRef<Path>>(path: P) -> Result<Vec<ChangeEntry>> {
+    let path = path.as_ref();
+    let output = Command::new("git")
+        .arg("-C")
+        .arg(path)
+        .args([
+            "status",
+            "--porcelain=v2",
+            "--untracked-files=normal",
+            "-z",
+        ])
+        .output()
+        .await
+        .map_err(|e| Error::Spawn(e.to_string()))?;
+
+    if !output.status.success() {
+        return Ok(Vec::new());
+    }
+
+    // `-z` produces NUL-terminated records. Rename/copy ("2") entries use
+    // NUL to separate the new path and origin path as well, so we have to
+    // parse sequentially rather than splitting once.
+    let mut out = Vec::new();
+    let bytes = &output.stdout[..];
+    let mut i = 0;
+    while i < bytes.len() {
+        let end = bytes[i..]
+            .iter()
+            .position(|&b| b == 0)
+            .map(|p| i + p)
+            .unwrap_or(bytes.len());
+        let line = std::str::from_utf8(&bytes[i..end]).unwrap_or("");
+        i = end + 1;
+
+        if let Some(rest) = line.strip_prefix("1 ") {
+            // "XY <sub> <mH> <mI> <mW> <hH> <hI> <path>"
+            let (x, y) = first_two(rest);
+            if let Some(p) = nth_token(rest, 8) {
+                out.push(make_entry(p, None, x, y));
+            }
+        } else if let Some(rest) = line.strip_prefix("2 ") {
+            // "XY <sub> <mH> <mI> <mW> <hH> <hI> <X><score> <path>"
+            // followed by NUL-separated <orig_path>.
+            let (x, y) = first_two(rest);
+            let new_path = nth_token(rest, 9);
+            let orig_end = bytes[i..]
+                .iter()
+                .position(|&b| b == 0)
+                .map(|p| i + p)
+                .unwrap_or(bytes.len());
+            let orig = std::str::from_utf8(&bytes[i..orig_end]).unwrap_or("");
+            i = orig_end + 1;
+            if let Some(p) = new_path {
+                out.push(make_entry(
+                    p,
+                    if orig.is_empty() { None } else { Some(orig.to_string()) },
+                    x,
+                    y,
+                ));
+            }
+        } else if let Some(rest) = line.strip_prefix("u ") {
+            // "XY <sub> <m1> <m2> <m3> <mW> <h1> <h2> <h3> <path>"
+            if let Some(p) = nth_token(rest, 10) {
+                let _ = rest;
+                out.push(ChangeEntry {
+                    path: p.to_string(),
+                    orig_path: None,
+                    kind: ChangeKind::Conflict,
+                    status: "U".into(),
+                });
+            }
+        } else if let Some(rest) = line.strip_prefix("? ") {
+            out.push(ChangeEntry {
+                path: rest.to_string(),
+                orig_path: None,
+                kind: ChangeKind::Untracked,
+                status: "?".into(),
+            });
+        }
+    }
+
+    Ok(out)
+}
+
+fn first_two(s: &str) -> (char, char) {
+    let mut it = s.chars();
+    (it.next().unwrap_or('.'), it.next().unwrap_or('.'))
+}
+
+/// Take the Nth whitespace-separated token from `s` and return everything
+/// from its start to end-of-string (so paths with spaces survive intact).
+fn nth_token(s: &str, n: usize) -> Option<&str> {
+    let mut count = 0;
+    let mut in_tok = false;
+    for (idx, ch) in s.char_indices() {
+        let is_ws = ch == ' ';
+        if !is_ws && !in_tok {
+            count += 1;
+            if count == n {
+                return Some(&s[idx..]);
+            }
+            in_tok = true;
+        } else if is_ws {
+            in_tok = false;
+        }
+    }
+    None
+}
+
+fn make_entry(path: &str, orig: Option<String>, x: char, y: char) -> ChangeEntry {
+    let x_changed = x != '.';
+    let y_changed = y != '.';
+    let kind = match (x_changed, y_changed) {
+        (true, true) => ChangeKind::Both,
+        (true, false) => ChangeKind::Staged,
+        (false, true) => ChangeKind::Unstaged,
+        (false, false) => ChangeKind::Unstaged,
+    };
+    // Prefer the worktree status letter; fall back to index side.
+    let status = if y_changed { y } else { x };
+    ChangeEntry {
+        path: path.to_string(),
+        orig_path: orig,
+        kind,
+        status: status.to_string(),
+    }
+}
+
+// ----- stage / unstage / commit --------------------------------------------
+
+/// Stage the given repository-relative paths (`git add -- <paths>`).
+///
+/// Works for tracked modifications, deletions, and untracked files — `git add`
+/// records whatever the working-tree state currently shows. Empty `paths`
+/// no-ops; pass an explicit `vec!["."]` to stage everything.
+pub async fn stage<P: AsRef<Path>>(path: P, paths: &[String]) -> Result<()> {
+    if paths.is_empty() {
+        return Ok(());
+    }
+    let path = path.as_ref();
+    let mut cmd = Command::new("git");
+    cmd.arg("-C").arg(path).args(["add", "--"]);
+    for p in paths {
+        cmd.arg(p);
+    }
+    let output = cmd
+        .output()
+        .await
+        .map_err(|e| Error::Spawn(e.to_string()))?;
+    if !output.status.success() {
+        let err = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        return Err(Error::Failed(if err.is_empty() {
+            "git add failed".into()
+        } else {
+            err
+        }));
+    }
+    Ok(())
+}
+
+/// Unstage the given paths so they return to the working tree without touching
+/// the file contents.
+///
+/// Uses `git reset HEAD -- <paths>` rather than `git restore --staged` because
+/// the former gracefully handles the initial-commit case (no HEAD yet) by
+/// falling back to `git rm --cached`.
+pub async fn unstage<P: AsRef<Path>>(path: P, paths: &[String]) -> Result<()> {
+    if paths.is_empty() {
+        return Ok(());
+    }
+    let path = path.as_ref();
+
+    // Detect whether the repo has any commits yet — `git reset HEAD` fails
+    // on a fresh repo before the first commit.
+    let head = Command::new("git")
+        .arg("-C")
+        .arg(path)
+        .args(["rev-parse", "--verify", "--quiet", "HEAD"])
+        .output()
+        .await
+        .map_err(|e| Error::Spawn(e.to_string()))?;
+    let has_head = head.status.success();
+
+    let mut cmd = Command::new("git");
+    cmd.arg("-C").arg(path);
+    if has_head {
+        cmd.args(["reset", "HEAD", "--"]);
+    } else {
+        // Pre-first-commit: drop entries from the index entirely.
+        cmd.args(["rm", "--cached", "--"]);
+    }
+    for p in paths {
+        cmd.arg(p);
+    }
+
+    let output = cmd
+        .output()
+        .await
+        .map_err(|e| Error::Spawn(e.to_string()))?;
+    if !output.status.success() {
+        let err = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        return Err(Error::Failed(if err.is_empty() {
+            "unstage failed".into()
+        } else {
+            err
+        }));
+    }
+    Ok(())
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CommitResult {
+    /// Short SHA of the new commit (7 chars). Empty when git produced no oid
+    /// (shouldn't happen on success, but we don't want to panic).
+    pub short: String,
+    /// First line of the commit subject as recorded.
+    pub subject: String,
+}
+
+/// Create a new commit from whatever is currently staged.
+///
+/// Fails (with the git error surfaced) when there's nothing staged, when the
+/// message is empty, or when a hook rejects the commit. We deliberately do
+/// **not** pass `-a` — the UI's stage/unstage model is the source of truth.
+pub async fn commit<P: AsRef<Path>>(path: P, message: &str) -> Result<CommitResult> {
+    let msg = message.trim();
+    if msg.is_empty() {
+        return Err(Error::Failed("empty commit message".into()));
+    }
+    let path = path.as_ref();
+    let output = Command::new("git")
+        .arg("-C")
+        .arg(path)
+        .args(["commit", "-m", msg])
+        .output()
+        .await
+        .map_err(|e| Error::Spawn(e.to_string()))?;
+    if !output.status.success() {
+        let err = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        let out = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        let detail = if !err.is_empty() {
+            err
+        } else if !out.is_empty() {
+            out
+        } else {
+            "commit failed".into()
+        };
+        return Err(Error::Failed(detail));
+    }
+
+    // Resolve the new HEAD so the UI can confirm. Don't fail the call if this
+    // probe trips — the commit already landed.
+    let probe = Command::new("git")
+        .arg("-C")
+        .arg(path)
+        .args(["log", "-1", "--format=%h%n%s"])
+        .output()
+        .await
+        .map_err(|e| Error::Spawn(e.to_string()))?;
+    let (short, subject) = if probe.status.success() {
+        let s = String::from_utf8_lossy(&probe.stdout);
+        let mut it = s.lines();
+        (
+            it.next().unwrap_or("").to_string(),
+            it.next().unwrap_or("").to_string(),
+        )
+    } else {
+        (String::new(), msg.to_string())
+    };
+    Ok(CommitResult { short, subject })
+}
+
+/// Discard local changes for the given repository-relative paths.
+///
+/// Two flavors, both expected to be present in a single call so the UI can fire
+/// one command for a mixed selection:
+///   * `tracked_paths` are restored from `HEAD` via `git checkout HEAD -- …`,
+///     which throws away both worktree and staged modifications.
+///   * `untracked_paths` have no history to restore from — they're deleted
+///     from disk directly. Missing files are tolerated (already gone).
+///
+/// Empty inputs no-op.
+pub async fn discard<P: AsRef<Path>>(
+    path: P,
+    tracked_paths: &[String],
+    untracked_paths: &[String],
+) -> Result<()> {
+    let path = path.as_ref();
+
+    if !tracked_paths.is_empty() {
+        let mut cmd = Command::new("git");
+        cmd.arg("-C").arg(path).args(["checkout", "HEAD", "--"]);
+        for p in tracked_paths {
+            cmd.arg(p);
+        }
+        let output = cmd
+            .output()
+            .await
+            .map_err(|e| Error::Spawn(e.to_string()))?;
+        if !output.status.success() {
+            let err = String::from_utf8_lossy(&output.stderr).trim().to_string();
+            return Err(Error::Failed(if err.is_empty() {
+                "discard failed".into()
+            } else {
+                err
+            }));
+        }
+    }
+
+    if !untracked_paths.is_empty() {
+        for rel in untracked_paths {
+            let full = path.join(rel);
+            // Tolerate missing files — the goal is "ensure it's gone".
+            match tokio::fs::metadata(&full).await {
+                Ok(meta) if meta.is_dir() => {
+                    tokio::fs::remove_dir_all(&full)
+                        .await
+                        .map_err(|e| Error::Failed(format!("removing {rel}: {e}")))?;
+                }
+                Ok(_) => {
+                    tokio::fs::remove_file(&full)
+                        .await
+                        .map_err(|e| Error::Failed(format!("removing {rel}: {e}")))?;
+                }
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+                Err(e) => return Err(Error::Failed(format!("stat {rel}: {e}"))),
+            }
+        }
+    }
+
+    Ok(())
+}
+
 // ----- branches -------------------------------------------------------------
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

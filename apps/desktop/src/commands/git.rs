@@ -2,6 +2,7 @@
 //!
 //! Frontend contract (see apps/frontend/src/lib/tauri.ts):
 //!   invoke("git_status",   { path })                              -> Option<GitInfo>
+//!   invoke("git_changes",  { path })                              -> Vec<ChangeEntry>
 //!   invoke("git_log",      { path, limit, options? })             -> Vec<LogEntry>
 //!   invoke("git_diff",     { path, scope, pathFilter? })           -> String
 //!   invoke("git_blame",    { path, file, startLine?, endLine? })   -> Vec<BlameLine>
@@ -9,11 +10,16 @@
 //!   invoke("git_checkout", { path, name })                         -> CheckoutResult
 //!   invoke("git_authors",  { path })                               -> Vec<AuthorInfo>
 
-use arc_git::{AuthorInfo, BlameLine, BranchInfo, CheckoutResult, DiffScope, GitInfo, LogEntry, LogOptions};
+use arc_git::{AuthorInfo, BlameLine, BranchInfo, ChangeEntry, CheckoutResult, CommitResult, DiffScope, GitInfo, LogEntry, LogOptions};
 
 #[tauri::command]
 pub async fn git_status(path: String) -> Result<Option<GitInfo>, String> {
     arc_git::status(&path).await.map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn git_changes(path: String) -> Result<Vec<ChangeEntry>, String> {
+    arc_git::changes(&path).await.map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -68,6 +74,36 @@ pub async fn git_branches(path: String) -> Result<Vec<BranchInfo>, String> {
 #[tauri::command]
 pub async fn git_checkout(path: String, name: String) -> Result<CheckoutResult, String> {
     arc_git::checkout(&path, &name)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn git_stage(path: String, paths: Vec<String>) -> Result<(), String> {
+    arc_git::stage(&path, &paths).await.map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn git_unstage(path: String, paths: Vec<String>) -> Result<(), String> {
+    arc_git::unstage(&path, &paths)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn git_commit(path: String, message: String) -> Result<CommitResult, String> {
+    arc_git::commit(&path, &message)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn git_discard(
+    path: String,
+    tracked_paths: Vec<String>,
+    untracked_paths: Vec<String>,
+) -> Result<(), String> {
+    arc_git::discard(&path, &tracked_paths, &untracked_paths)
         .await
         .map_err(|e| e.to_string())
 }
