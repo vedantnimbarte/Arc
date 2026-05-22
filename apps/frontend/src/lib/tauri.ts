@@ -1032,6 +1032,21 @@ export async function gitWindowOpen(): Promise<void> {
   await invoke('git_window_open');
 }
 
+/** Open (or focus) the Agent-editor window pointed at `agentId`. If the
+ *  window already exists it's refocused and a navigation ping is emitted
+ *  so the page can swap to the new id without a full reload. */
+export async function agentEditorWindowOpen(agentId: string): Promise<void> {
+  await invoke('agent_editor_window_open', { agentId });
+}
+
+/** Subscribe to agent-editor navigation pings (fires when a second `Edit`
+ *  click from the Settings grid hits a window that's already open). */
+export async function onAgentEditorNavigate(
+  handler: (agentId: string) => void,
+): Promise<UnlistenFn> {
+  return listen<string>('agent-editor://navigate', (e) => handler(e.payload));
+}
+
 /** Stage repository-relative paths. Empty array no-ops. */
 export async function gitStage(path: string, paths: string[]): Promise<void> {
   await invoke('git_stage', { path, paths });

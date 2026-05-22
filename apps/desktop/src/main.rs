@@ -71,7 +71,7 @@ fn main() {
         .plugin(
             WindowStateBuilder::default()
                 .with_state_flags(WINDOW_STATE_FLAGS)
-                .with_denylist(&["settings", "git"])
+                .with_denylist(&["settings", "git", "agent-editor"])
                 .skip_initial_state("main")
                 .build(),
         )
@@ -157,6 +157,7 @@ fn main() {
             commands::window::settings_window_open,
             commands::window::settings_broadcast_changed,
             commands::window::git_window_open,
+            commands::window::agent_editor_window_open,
         ])
         .setup(|app| {
             // Open the SQLite store before the window appears so the first

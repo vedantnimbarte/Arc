@@ -29,8 +29,18 @@ import {
   ClipboardPaste,
   RefreshCw,
   PowerOff,
+  Bot,
+  Trash2,
+  Lock,
 } from 'lucide-react';
 import { useSettings } from '../state/settings';
+import {
+  AGENT_ICONS,
+  AGENT_TINTS,
+  DEFAULT_AGENTS,
+  useAgents,
+  type Agent,
+} from '../state/agents';
 import {
   PROVIDER_PRESETS,
   presetOrDefault,
@@ -39,7 +49,7 @@ import {
 import { resolveModelsFor, useModels } from '../state/models';
 import { ProviderIcon } from './ProviderIcon';
 import { useFiles } from '../state/files';
-import { isTauri, ptyListShells, type ShellInfo } from '../lib/tauri';
+import { agentEditorWindowOpen, isTauri, ptyListShells, type ShellInfo } from '../lib/tauri';
 import { cn } from '../lib/cn';
 import {
   FONT_OPTIONS,
@@ -62,7 +72,7 @@ import {
 } from '../state/shortcuts';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 
-type Pane = 'appearance' | 'shortcuts' | 'terminal' | 'providers' | 'about';
+type Pane = 'appearance' | 'shortcuts' | 'terminal' | 'agents' | 'providers' | 'about';
 
 export function SettingsPage() {
   const {
@@ -141,6 +151,7 @@ export function SettingsPage() {
             <SidebarRow icon={Palette} label="Appearance" active={pane === 'appearance'} onClick={() => setPane('appearance')} />
             <SidebarRow icon={Keyboard} label="Shortcuts" active={pane === 'shortcuts'} onClick={() => setPane('shortcuts')} />
             <SidebarRow icon={TerminalIcon} label="Terminal" active={pane === 'terminal'} onClick={() => setPane('terminal')} />
+            <SidebarRow icon={Bot} label="Agents" active={pane === 'agents'} onClick={() => setPane('agents')} />
             <SidebarRow icon={SlidersHorizontal} label="Providers" active={pane === 'providers'} onClick={() => setPane('providers')} />
             <SidebarRow icon={Info} label="About" active={pane === 'about'} onClick={() => setPane('about')} />
           </nav>
@@ -160,6 +171,8 @@ export function SettingsPage() {
               onToggleEnabled={setPresetEnabled}
               onUpdateProvider={updateProvider}
             />
+          ) : pane === 'agents' ? (
+            <AgentsPane />
           ) : (
             <div className="flex flex-1 flex-col overflow-y-auto p-6">
               {pane === 'appearance' && (
@@ -1723,6 +1736,327 @@ function detectPlatform(): string {
   if (p.includes('linux')) return 'Linux';
   return navigator.platform;
 }
+
+// ─── Agents ────────────────────────────────────────────────────────────────
+
+/**
+ * Settings → Agents pane. A purely declarative grid of agent cards — the
+ * editor lives in its own Tauri window (see `AgentEditorPage`), so opening
+ * "New agent" or any existing card hands off to that window and leaves the
+ * directory clean of in-place modes.
+ *
+ * Built-in agents are *opened* (read-only fields + editable custom
+ * instructions); only custom agents expose Edit / Delete affordances.
+ */
+function AgentsPane() {
+  const custom = useAgents((s) => s.custom);
+  const instructions = useAgents((s) => s.instructions);
+  const createAgent = useAgents((s) => s.createAgent);
+  const deleteAgent = useAgents((s) => s.deleteAgent);
+
+  const [query, setQuery] = useState('');
+
+  // Filter happens here so we can render both built-in and custom sections
+  // off the same trimmed list. Permissive match — name, blurb, or id.
+  const q = query.trim().toLowerCase();
+  const matches = (a: Agent) =>
+    !q ||
+    a.name.toLowerCase().includes(q) ||
+    a.description.toLowerCase().includes(q) ||
+    a.id.toLowerCase().includes(q);
+  const filteredBuiltins = DEFAULT_AGENTS.filter(matches);
+  const filteredCustom = custom.filter(matches);
+  const totalShown = filteredBuiltins.length + filteredCustom.length;
+
+  // Opening a card hands off to the dedicated Tauri window. New agent =
+  // spawn a blank entry first so the editor has a real id to work with.
+  const openEditor = (id: string) => {
+    void agentEditorWindowOpen(id).catch((err) =>
+      console.error('[settings] open agent editor failed:', err),
+    );
+  };
+  const createBlank = () => {
+    const id = createAgent({
+      name: 'New agent',
+      description: '',
+      systemPrompt: 'You are a helpful assistant.',
+      iconKey: 'bot',
+      tint: 'platinum',
+    });
+    openEditor(id);
+  };
+
+  return (
+    <div className="flex h-full min-h-0 flex-1 flex-col overflow-hidden">
+      {/* Header: title, count, filter, primary action. Lower-contrast than
+          the previous iteration — only the "New agent" pill draws focus. */}
+      <header className="flex shrink-0 items-center gap-3 border-b border-border-hairline px-7 py-4">
+        <h2 className="font-display text-[14px] font-semibold tracking-tight text-fg-base">
+          Agents
+        </h2>
+        <span className="font-mono text-[10px] uppercase tracking-widest2 text-fg-subtle tabular-nums">
+          {DEFAULT_AGENTS.length + custom.length}
+        </span>
+        <div className="relative ml-1 flex min-w-0 max-w-[260px] flex-1 items-center">
+          <Search
+            size={11}
+            strokeWidth={2.2}
+            className="pointer-events-none absolute left-2.5 text-fg-subtle"
+          />
+          <input
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="filter…"
+            className="w-full rounded-md border border-transparent bg-white/[0.03] py-1.5 pl-7 pr-7 font-display text-[12px] text-fg-base placeholder:text-fg-subtle transition-colors hover:bg-white/[0.05] focus:border-accent/45 focus:bg-white/[0.05] focus:outline-none"
+            autoComplete="off"
+            spellCheck={false}
+          />
+          {query && (
+            <button
+              onClick={() => setQuery('')}
+              className="absolute right-1.5 rounded p-0.5 text-fg-subtle hover:bg-white/[0.08] hover:text-fg-base"
+              aria-label="Clear filter"
+            >
+              <X size={9} strokeWidth={2.2} />
+            </button>
+          )}
+        </div>
+        <span aria-hidden className="flex-1" />
+        <button
+          onClick={createBlank}
+          className={cn(
+            'flex items-center gap-1.5 rounded-md px-3 py-1.5 font-display text-[11.5px] font-medium tracking-tight',
+            'bg-white/[0.08] text-fg-base ring-1 ring-white/[0.10]',
+            'transition-colors duration-150 ease-apple',
+            'hover:bg-white/[0.12] hover:ring-white/[0.18]',
+            'focus-visible:ring-accent/50 focus:outline-none',
+          )}
+        >
+          <Plus size={11} strokeWidth={2.4} />
+          New agent
+        </button>
+      </header>
+
+      {/* Cards */}
+      <div className="flex-1 overflow-y-auto px-7 py-7">
+        <AgentGridSection
+          label="Built-in"
+          count={filteredBuiltins.length}
+          items={filteredBuiltins}
+          instructions={instructions}
+          onOpen={openEditor}
+        />
+        <AgentGridSection
+          label="Custom"
+          count={filteredCustom.length}
+          items={filteredCustom}
+          instructions={instructions}
+          onOpen={openEditor}
+          onDelete={(id) => {
+            const a = custom.find((x) => x.id === id);
+            if (!a) return;
+            if (window.confirm(`Delete agent "${a.name}"?`)) deleteAgent(id);
+          }}
+          emptyState={!q ? <EmptyCustomAgentCard onCreate={createBlank} /> : undefined}
+        />
+
+        {totalShown === 0 && q && (
+          <div className="mt-12 flex flex-col items-center gap-1 text-center">
+            <span className="font-display text-[12px] text-fg-muted">
+              No agents match{' '}
+              <span className="font-mono text-fg-base/85">"{query}"</span>
+            </span>
+            <button
+              onClick={() => setQuery('')}
+              className="font-display text-[11px] text-fg-subtle underline-offset-2 hover:text-fg-muted hover:underline"
+            >
+              clear filter
+            </button>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/** Titled grid. Header is intentionally quiet — a small mono label, a count,
+ *  and a hairline ruling. No icon, no chip; the cards carry the weight. */
+function AgentGridSection({
+  label,
+  count,
+  items,
+  instructions,
+  onOpen,
+  onDelete,
+  emptyState,
+}: {
+  label: string;
+  count: number;
+  items: Agent[];
+  instructions: Record<string, string>;
+  onOpen: (id: string) => void;
+  onDelete?: (id: string) => void;
+  emptyState?: React.ReactNode;
+}) {
+  // Don't render the section at all when there's nothing to show *and* no
+  // placeholder is on offer. Keeps the page tidy under active filters.
+  if (items.length === 0 && !emptyState) return null;
+
+  return (
+    <section className="mb-9 last:mb-2">
+      <div className="mb-4 flex items-baseline gap-3 px-0.5">
+        <span className="font-mono text-[10px] font-semibold uppercase tracking-widest2 text-fg-muted">
+          {label}
+        </span>
+        <span className="font-mono text-[10px] tabular-nums text-fg-subtle">
+          {count}
+        </span>
+        <span className="h-px flex-1 bg-border-hairline/70" />
+      </div>
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
+        {items.map((a) => (
+          <AgentCard
+            key={a.id}
+            agent={a}
+            hasOverride={Boolean((instructions[a.id] ?? '').trim())}
+            onOpen={() => onOpen(a.id)}
+            onDelete={onDelete ? () => onDelete(a.id) : undefined}
+          />
+        ))}
+        {items.length === 0 && emptyState}
+      </div>
+    </section>
+  );
+}
+
+/** One agent in the grid. The wax-seal vertical stripe at the left edge
+ *  appears on hover/focus and uses the agent's tint — gives the grid a
+ *  scannable color rhythm without dyeing every card by default. */
+function AgentCard({
+  agent,
+  hasOverride,
+  onOpen,
+  onDelete,
+}: {
+  agent: Agent;
+  hasOverride: boolean;
+  onOpen: () => void;
+  onDelete?: () => void;
+}) {
+  const Icon = AGENT_ICONS[agent.iconKey];
+  const tint = AGENT_TINTS[agent.tint];
+  return (
+    <div className="group relative">
+      <button
+        onClick={onOpen}
+        className={cn(
+          'relative flex h-full w-full flex-col items-stretch rounded-xl text-left',
+          'border border-border-subtle bg-white/[0.015]',
+          'px-4 pb-4 pt-4',
+          'transition-[transform,border-color,background-color] duration-200 ease-apple',
+          'hover:-translate-y-[1px] hover:border-border-strong hover:bg-white/[0.035]',
+          'focus-visible:-translate-y-[1px] focus-visible:border-accent/45 focus-visible:shadow-focus focus:outline-none',
+        )}
+      >
+        {/* Icon chip + corner accents. The tuned-dot overlaps the chip's
+            corner so the indicator is felt before read; the lock sits
+            opposite for built-ins. */}
+        <div className="flex items-start justify-between">
+          <div className="relative">
+            <span
+              className={cn(
+                'flex h-9 w-9 items-center justify-center rounded-lg ring-1',
+                tint.chipBg,
+                tint.chipFg,
+                tint.chipRing,
+              )}
+            >
+              <Icon size={14} strokeWidth={2} />
+            </span>
+            {hasOverride && (
+              <span
+                className={cn(
+                  'absolute -right-0.5 -top-0.5 h-2 w-2 rounded-full ring-2 ring-bg-base',
+                  tint.dot,
+                )}
+                aria-label="Has custom instructions"
+                title="Has custom instructions"
+              />
+            )}
+          </div>
+          {agent.builtin && (
+            <Lock
+              size={10}
+              strokeWidth={2.1}
+              className="mt-1 text-fg-subtle/55"
+              aria-label="Built-in agent"
+            />
+          )}
+        </div>
+
+        {/* Name + description. min-h holds card height when descriptions
+            are short, so a row of cards stays even. */}
+        <div className="mt-4">
+          <h3 className="truncate font-display text-[13px] font-semibold tracking-tight text-fg-base">
+            {agent.name || 'Untitled agent'}
+          </h3>
+          <p className="mt-1.5 line-clamp-2 min-h-[2.5rem] font-display text-[11.5px] leading-snug text-fg-muted">
+            {agent.description || (agent.builtin ? ' ' : 'No description.')}
+          </p>
+        </div>
+      </button>
+
+      {/* Hover-revealed delete — only for custom agents. Lives outside the
+          main button so it doesn't trigger the open click. */}
+      {onDelete && (
+        <button
+          onClick={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            onDelete();
+          }}
+          className={cn(
+            'absolute right-2 top-2 flex h-6 w-6 items-center justify-center rounded-md',
+            'opacity-0 transition-opacity duration-150 focus-visible:opacity-100 group-hover:opacity-100 group-focus-within:opacity-100',
+            'bg-bg-base/85 text-fg-muted ring-1 ring-white/[0.08] backdrop-blur-sm',
+            'hover:bg-status-err/20 hover:text-status-err hover:ring-status-err/30',
+            'focus:outline-none',
+          )}
+          aria-label={`Delete ${agent.name}`}
+          title="Delete agent"
+        >
+          <Trash2 size={11} strokeWidth={2.1} />
+        </button>
+      )}
+    </div>
+  );
+}
+
+/** Placeholder card shown in the Custom section when the user hasn't
+ *  created anything yet. Dashed border + centered plus — same shape as a
+ *  real card so the row stays aligned. */
+function EmptyCustomAgentCard({ onCreate }: { onCreate: () => void }) {
+  return (
+    <button
+      onClick={onCreate}
+      className={cn(
+        'group flex min-h-[120px] flex-col items-center justify-center gap-2 rounded-xl text-center',
+        'border border-dashed border-white/[0.09] bg-transparent',
+        'transition-colors duration-200 ease-apple',
+        'hover:border-white/[0.18] hover:bg-white/[0.02]',
+        'focus-visible:border-accent/40 focus-visible:shadow-focus focus:outline-none',
+      )}
+    >
+      <span className="flex h-8 w-8 items-center justify-center rounded-full bg-white/[0.03] text-fg-muted ring-1 ring-white/[0.07] transition-colors group-hover:bg-white/[0.06] group-hover:text-fg-base">
+        <Plus size={13} strokeWidth={2.1} />
+      </span>
+      <div className="font-display text-[11.5px] font-medium tracking-tight text-fg-muted group-hover:text-fg-base">
+        New custom agent
+      </div>
+    </button>
+  );
+}
+
 
 // ─── primitives ────────────────────────────────────────────────────────────
 

@@ -2,7 +2,7 @@
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
   "description": "Default capabilities for the ARC main window.",
-  "windows": ["main", "settings", "git"],
+  "windows": ["main", "settings", "git", "agent-editor"],
   "permissions": [
     "core:default",
     "core:event:default",

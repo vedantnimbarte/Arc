@@ -11,9 +11,13 @@ const GitPage = React.lazy(() =>
   import('./components/GitPage').then((m) => ({ default: m.GitPage })),
 );
 
-// One frontend bundle, three entry points. The Settings and Git windows
-// are opened with `?view=settings` / `?view=git` (see rust/window.rs);
-// main.tsx dispatches on that flag so we don't have to ship extra html.
+const AgentEditorPage = React.lazy(() =>
+  import('./components/AgentEditorPage').then((m) => ({ default: m.AgentEditorPage })),
+);
+
+// One frontend bundle, four entry points. Standalone windows pass a `view`
+// query param so main.tsx can dispatch — see rust/window.rs for the
+// Settings, Git, and Agent-editor launchers.
 const view =
   typeof window !== 'undefined'
     ? new URLSearchParams(window.location.search).get('view')
@@ -58,6 +62,12 @@ function Root() {
     return (
       <Suspense fallback={null}>
         <GitPage />
+      </Suspense>
+    );
+  if (view === 'agent-editor')
+    return (
+      <Suspense fallback={null}>
+        <AgentEditorPage />
       </Suspense>
     );
   return <App />;

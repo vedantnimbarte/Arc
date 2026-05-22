@@ -196,6 +196,10 @@ export const DEFAULT_AGENTS: Agent[] = [
 
 interface AgentsState {
   custom: Agent[];
+  /** Per-agent extra instructions appended to the base systemPrompt. Keyed
+   *  by agent id; applies to both built-in and custom agents. Empty/whitespace
+   *  values mean "no override" — same as a missing entry. */
+  instructions: Record<string, string>;
   createAgent: (
     input: Omit<Agent, 'id' | 'builtin' | 'createdAt'>,
   ) => string;
@@ -204,12 +208,16 @@ interface AgentsState {
     patch: Partial<Omit<Agent, 'id' | 'builtin' | 'createdAt'>>,
   ) => void;
   deleteAgent: (id: string) => void;
+  /** Set the custom-instruction override for an agent. Pass null/empty to
+   *  clear so the agent falls back to its default systemPrompt. */
+  setInstructions: (agentId: string, text: string | null) => void;
 }
 
 export const useAgents = create<AgentsState>()(
   persist(
     (set) => ({
       custom: [],
+      instructions: {},
       createAgent: (input) => {
         const id = `custom-${crypto.randomUUID()}`;
         set((s) => ({
@@ -227,11 +235,42 @@ export const useAgents = create<AgentsState>()(
           ),
         })),
       deleteAgent: (id) =>
-        set((s) => ({ custom: s.custom.filter((a) => a.id !== id || a.builtin) })),
+        set((s) => {
+          // Drop the instructions row too — orphan overrides waste storage
+          // and confuse the UI if the same id is ever reissued.
+          const { [id]: _gone, ...rest } = s.instructions;
+          return {
+            custom: s.custom.filter((a) => a.id !== id || a.builtin),
+            instructions: rest,
+          };
+        }),
+      setInstructions: (agentId, text) =>
+        set((s) => {
+          const trimmed = (text ?? '').trim();
+          if (trimmed.length === 0) {
+            const { [agentId]: _gone, ...rest } = s.instructions;
+            return { instructions: rest };
+          }
+          return { instructions: { ...s.instructions, [agentId]: trimmed } };
+        }),
     }),
+    // Version stays at 1 — adding the `instructions` field is backwards
+    // compatible because Zustand persist shallow-merges the loaded blob
+    // onto the initial state, so v1 stores get `instructions: {}` for free.
     { name: 'arc-agents', version: 1 },
   ),
 );
+
+// Cross-window rehydrate. The Settings, Agent-editor, and main windows all
+// share localStorage but each has its own Zustand instance — a save in one
+// won't reach the others without this listener.
+if (typeof window !== 'undefined') {
+  window.addEventListener('storage', (e) => {
+    if (e.key === 'arc-agents') {
+      void useAgents.persist.rehydrate();
+    }
+  });
+}
 
 // --- Selectors -------------------------------------------------------------
 
@@ -240,8 +279,23 @@ export function getAllAgents(state: AgentsState = useAgents.getState()): Agent[]
   return [...DEFAULT_AGENTS, ...state.custom];
 }
 
+/** Resolve an agent and layer the user's custom instructions on top. The
+ *  returned object's `systemPrompt` is what should actually be sent to the
+ *  model — base prompt + a blank line + the user's extras. */
 export function getAgentById(id: string | undefined | null): Agent {
+  const state = useAgents.getState();
+  const all = [...DEFAULT_AGENTS, ...state.custom];
+  const base = (id ? all.find((a) => a.id === id) : undefined) ?? DEFAULT_AGENTS[0]!;
+  const extra = (state.instructions[base.id] ?? '').trim();
+  if (extra.length === 0) return base;
+  return { ...base, systemPrompt: `${base.systemPrompt}\n\n${extra}` };
+}
+
+/** Same lookup as {@link getAgentById} but without merging instructions —
+ *  the Settings UI uses this to render the unmodified default alongside
+ *  the user's override. */
+export function getRawAgentById(id: string | undefined | null): Agent {
   if (!id) return DEFAULT_AGENTS[0]!;
-  const found = getAllAgents().find((a) => a.id === id);
-  return found ?? DEFAULT_AGENTS[0]!;
+  const all = [...DEFAULT_AGENTS, ...useAgents.getState().custom];
+  return all.find((a) => a.id === id) ?? DEFAULT_AGENTS[0]!;
 }
