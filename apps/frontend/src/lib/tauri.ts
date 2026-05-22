@@ -573,6 +573,15 @@ export interface PersistedSettings {
   fontId?: string;
   /** Terminal / editor font size in px. */
   fontSize?: number;
+  /** Start ARC on OS login. Wired to `tauri-plugin-autostart`. */
+  launchAtLogin?: boolean;
+  /** Re-open the main window at its last position/size (handled by
+   *  `tauri-plugin-window-state`). The Rust side reads this on launch. */
+  restoreWindowState?: boolean;
+  /** Use the WebGL renderer for newly-opened terminal tabs. Falls back to
+   *  the default canvas/DOM renderer on context-loss or when WebGL is
+   *  unsupported. */
+  terminalWebgl?: boolean;
 }
 
 /** Returns the stored settings blob, or `null` on first launch. */

@@ -58,6 +58,13 @@ export interface Settings {
   fontId: string;
   /** Terminal / editor font size in px. */
   fontSize: number;
+  /** Auto-launch ARC at OS login. Mirrors the autostart plugin's state. */
+  launchAtLogin: boolean;
+  /** Persist the main window's last position and size across launches. The
+   *  Rust side reads this at startup; toggling takes effect after restart. */
+  restoreWindowState: boolean;
+  /** Use the WebGL renderer for newly-opened terminal tabs. */
+  terminalWebgl: boolean;
   /** True once hydrateSecrets() has finished. */
   secretsHydrated: boolean;
   /** True once hydrateSettings() has applied stored values. */
@@ -74,6 +81,12 @@ export interface Settings {
   setAppearance: (a: Appearance) => void;
   setFontId: (id: string) => void;
   setFontSize: (size: number) => void;
+  /** Toggle autostart at login. Also syncs the OS-level registration via
+   *  `tauri-plugin-autostart` — failures are logged but don't block the
+   *  in-app preference flip. */
+  setLaunchAtLogin: (on: boolean) => Promise<void>;
+  setRestoreWindowState: (on: boolean) => void;
+  setTerminalWebgl: (on: boolean) => void;
   hydrateSettings: () => Promise<void>;
   hydrateSecrets: () => Promise<void>;
 }
@@ -112,6 +125,9 @@ const DEFAULTS = {
   appearance: DEFAULT_APPEARANCE,
   fontId: DEFAULT_FONT_ID,
   fontSize: DEFAULT_FONT_SIZE,
+  launchAtLogin: false,
+  restoreWindowState: true,
+  terminalWebgl: true,
 };
 
 const clampFontSize = (n: number): number =>
@@ -227,12 +243,46 @@ export const useSettings = create<Settings>()((set, get) => ({
   setFontId: (id) => set({ fontId: id }),
   setFontSize: (size) => set({ fontSize: clampFontSize(size) }),
 
+  setLaunchAtLogin: async (on) => {
+    set({ launchAtLogin: on });
+    if (!isTauri) return;
+    try {
+      // Lazy-import so the web-only build doesn't try to load the Tauri
+      // bridge module.
+      const { enable, disable } = await import('@tauri-apps/plugin-autostart');
+      if (on) await enable();
+      else await disable();
+    } catch (err) {
+      console.error('[settings] autostart toggle failed:', err);
+    }
+  },
+  setRestoreWindowState: (on) => set({ restoreWindowState: on }),
+  setTerminalWebgl: (on) => set({ terminalWebgl: on }),
+
   hydrateSettings: async () => {
     if (get().settingsHydrated) return;
     set({ settingsHydrated: true });
 
     applyTheme(resolveTheme(get().appearance));
     if (!isTauri) return;
+
+    // Reconcile launchAtLogin with the OS: the user may have disabled
+    // autostart from System Preferences or Task Manager directly, in which
+    // case the stored preference would be a lie. The plugin's `isEnabled`
+    // is the source of truth.
+    try {
+      const { isEnabled } = await import('@tauri-apps/plugin-autostart');
+      const osEnabled = await isEnabled();
+      if (osEnabled !== get().launchAtLogin) {
+        suppressSave = true;
+        set({ launchAtLogin: osEnabled });
+        queueMicrotask(() => {
+          suppressSave = false;
+        });
+      }
+    } catch (err) {
+      console.error('[settings] autostart probe failed:', err);
+    }
 
     try {
       const stored = await sessionSettingsLoad();
@@ -409,6 +459,18 @@ function applyStored(
       typeof stored.fontSize === 'number'
         ? clampFontSize(stored.fontSize)
         : current.fontSize,
+    launchAtLogin:
+      typeof stored.launchAtLogin === 'boolean'
+        ? stored.launchAtLogin
+        : current.launchAtLogin,
+    restoreWindowState:
+      typeof stored.restoreWindowState === 'boolean'
+        ? stored.restoreWindowState
+        : current.restoreWindowState,
+    terminalWebgl:
+      typeof stored.terminalWebgl === 'boolean'
+        ? stored.terminalWebgl
+        : current.terminalWebgl,
   };
 }
 
@@ -432,6 +494,9 @@ function toPersistedSettings(s: Settings): PersistedSettings {
     appearance: s.appearance,
     fontId: s.fontId,
     fontSize: s.fontSize,
+    launchAtLogin: s.launchAtLogin,
+    restoreWindowState: s.restoreWindowState,
+    terminalWebgl: s.terminalWebgl,
   };
 }
 
@@ -472,7 +537,11 @@ export async function rehydrateSettingsFromBroadcast(): Promise<void> {
         ? clampFontSize(stored.fontSize)
         : current.fontSize) === current.fontSize;
     const sameShell = (stored.defaultShell ?? current.defaultShell) === current.defaultShell;
-    if (samePreset && sameAppearance && sameFont && sameShell) return;
+    const sameStartup =
+      (stored.launchAtLogin ?? current.launchAtLogin) === current.launchAtLogin &&
+      (stored.restoreWindowState ?? current.restoreWindowState) === current.restoreWindowState &&
+      (stored.terminalWebgl ?? current.terminalWebgl) === current.terminalWebgl;
+    if (samePreset && sameAppearance && sameFont && sameShell && sameStartup) return;
 
     suppressSave = true;
     useSettings.setState((s) => applyStored(s, stored));

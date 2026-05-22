@@ -74,6 +74,28 @@ export function Terminal({ sessionKey }: Props) {
     while (container.firstChild) container.removeChild(container.firstChild);
     term.open(container);
 
+    // Optional WebGL renderer. xterm requires it to be loaded *after*
+    // `open()` because it needs a live canvas to grab a GL context from.
+    // The setting captures the user's preference at mount time; switching
+    // it in Settings applies to subsequently-opened tabs.
+    if (initialSettings.terminalWebgl) {
+      void (async () => {
+        try {
+          const { WebglAddon } = await import('@xterm/addon-webgl');
+          if (disposed) return;
+          const webgl = new WebglAddon();
+          // Dispose on context loss so xterm transparently falls back to
+          // its canvas renderer instead of freezing the pane.
+          webgl.onContextLoss(() => webgl.dispose());
+          term.loadAddon(webgl);
+        } catch (err) {
+          // GPU lacks WebGL2, driver crashed, etc. — terminal keeps working
+          // with the default renderer.
+          console.warn('[terminal] WebGL renderer unavailable:', err);
+        }
+      })();
+    }
+
     const safeFit = () => {
       try {
         fit.fit();

@@ -73,6 +73,9 @@ export function SettingsPage() {
     appearance,
     fontId,
     fontSize,
+    launchAtLogin,
+    restoreWindowState,
+    terminalWebgl,
     setActivePresetId,
     setPresetEnabled,
     updateProvider,
@@ -80,6 +83,9 @@ export function SettingsPage() {
     setAppearance,
     setFontId,
     setFontSize,
+    setLaunchAtLogin,
+    setRestoreWindowState,
+    setTerminalWebgl,
   } = useSettings();
 
   const [pane, setPane] = useState<Pane>('appearance');
@@ -161,14 +167,24 @@ export function SettingsPage() {
                   appearance={appearance}
                   fontId={fontId}
                   fontSize={fontSize}
+                  launchAtLogin={launchAtLogin}
+                  restoreWindowState={restoreWindowState}
                   onAppearanceChange={setAppearance}
                   onFontChange={setFontId}
                   onFontSizeChange={setFontSize}
+                  onLaunchAtLoginChange={setLaunchAtLogin}
+                  onRestoreWindowStateChange={setRestoreWindowState}
                 />
               )}
               {pane === 'shortcuts' && <ShortcutsPane />}
               {pane === 'terminal' && (
-                <ShellPicker shells={shells} defaultShell={defaultShell} onPick={setDefaultShell} />
+                <TerminalPane
+                  shells={shells}
+                  defaultShell={defaultShell}
+                  onPickShell={setDefaultShell}
+                  terminalWebgl={terminalWebgl}
+                  onTerminalWebglChange={setTerminalWebgl}
+                />
               )}
               {pane === 'about' && <AboutPane />}
             </div>
@@ -185,16 +201,24 @@ function AppearancePane({
   appearance,
   fontId,
   fontSize,
+  launchAtLogin,
+  restoreWindowState,
   onAppearanceChange,
   onFontChange,
   onFontSizeChange,
+  onLaunchAtLoginChange,
+  onRestoreWindowStateChange,
 }: {
   appearance: Appearance;
   fontId: string;
   fontSize: number;
+  launchAtLogin: boolean;
+  restoreWindowState: boolean;
   onAppearanceChange: (a: Appearance) => void;
   onFontChange: (id: string) => void;
   onFontSizeChange: (size: number) => void;
+  onLaunchAtLoginChange: (on: boolean) => void;
+  onRestoreWindowStateChange: (on: boolean) => void;
 }) {
   const showHidden = useFiles((s) => s.showHidden);
   const toggleHidden = useFiles((s) => s.toggleHidden);
@@ -280,6 +304,23 @@ function AppearancePane({
           checked={showHidden}
           onChange={toggleHidden}
         />
+      </Section>
+
+      <Section title="Startup & Window" hint="Window-state changes take effect on next launch.">
+        <div className="flex flex-col gap-2">
+          <ToggleRow
+            label="Launch ARC at login"
+            hint="Start ARC automatically when you sign in to your computer."
+            checked={launchAtLogin}
+            onChange={() => onLaunchAtLoginChange(!launchAtLogin)}
+          />
+          <ToggleRow
+            label="Restore window position and size"
+            hint="Re-open at the position and size it was when you last closed it."
+            checked={restoreWindowState}
+            onChange={() => onRestoreWindowStateChange(!restoreWindowState)}
+          />
+        </div>
       </Section>
     </div>
   );
@@ -1449,6 +1490,38 @@ function FieldSection({
 }
 
 // ─── Shell ──────────────────────────────────────────────────────────────────
+
+function TerminalPane({
+  shells,
+  defaultShell,
+  onPickShell,
+  terminalWebgl,
+  onTerminalWebglChange,
+}: {
+  shells: ShellInfo[] | null;
+  defaultShell: string | null;
+  onPickShell: (shell: string | null) => void;
+  terminalWebgl: boolean;
+  onTerminalWebglChange: (on: boolean) => void;
+}) {
+  return (
+    <div className="space-y-7">
+      <ShellPicker shells={shells} defaultShell={defaultShell} onPick={onPickShell} />
+
+      <Section
+        title="Renderer"
+        hint="WebGL is faster and smoother on most machines. Falls back to the canvas renderer automatically when WebGL isn't available. Applies to newly-opened terminal tabs."
+      >
+        <ToggleRow
+          label="Use WebGL renderer"
+          hint="Accelerated drawing via GPU. Disable if you see glitches or your GPU is flaky."
+          checked={terminalWebgl}
+          onChange={() => onTerminalWebglChange(!terminalWebgl)}
+        />
+      </Section>
+    </div>
+  );
+}
 
 function ShellPicker({
   shells,

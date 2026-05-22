@@ -73,6 +73,8 @@ dirs = "5"
 # Tauri (workspace-pinned for app crate)
 tauri = { version = "2", features = [] }
 tauri-build = { version = "2", features = [] }
+tauri-plugin-autostart = "2"
+tauri-plugin-window-state = "2"
 
 # Internal crates
 arc-pty = { path = "rust/pty" }

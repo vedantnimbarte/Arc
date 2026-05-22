@@ -11,7 +11,37 @@ use commands::llm::LlmState;
 use commands::mcp::McpState;
 use commands::pty::PtyState;
 use tauri::Manager;
+use tauri_plugin_autostart::MacosLauncher;
+use tauri_plugin_window_state::{Builder as WindowStateBuilder, StateFlags, WindowExt};
 use tracing_subscriber::EnvFilter;
+
+/// State flags the window-state plugin saves on close and (conditionally)
+/// restores on launch. We intentionally skip `VISIBLE` — the main window
+/// should always come back up.
+const WINDOW_STATE_FLAGS: StateFlags = StateFlags::from_bits_truncate(
+    StateFlags::POSITION.bits() | StateFlags::SIZE.bits() | StateFlags::MAXIMIZED.bits(),
+);
+
+/// Peek at the persisted user-settings blob to decide whether to restore
+/// the main window's saved geometry. Defaults to `true` on any read error so
+/// users who never visited the settings pane get the natural behaviour.
+fn read_restore_window_pref(store: &SessionStore) -> bool {
+    let result: Result<Option<String>, _> = tauri::async_runtime::block_on(async {
+        arc_session_manager::settings::load(store.pool(), "user_settings").await
+    });
+    let raw = match result {
+        Ok(Some(s)) => s,
+        _ => return true,
+    };
+    let parsed: serde_json::Value = match serde_json::from_str(&raw) {
+        Ok(v) => v,
+        Err(_) => return true,
+    };
+    parsed
+        .get("restoreWindowState")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(true)
+}
 
 fn main() {
     tracing_subscriber::fmt()
@@ -26,6 +56,25 @@ fn main() {
         .init();
 
     tauri::Builder::default()
+        // Auto-launch at login (toggleable from Settings → Appearance).
+        // The plugin only flips OS-level autostart when the frontend calls
+        // its `enable()` / `disable()` JS API; registering is otherwise
+        // inert.
+        .plugin(tauri_plugin_autostart::init(
+            MacosLauncher::LaunchAgent,
+            None,
+        ))
+        // Save the main window's geometry on close. Restore is gated by the
+        // user's `restoreWindowState` preference, checked in `setup` below.
+        // The settings & git popups are excluded — they have their own
+        // sensible defaults and we don't want them migrating around.
+        .plugin(
+            WindowStateBuilder::default()
+                .with_state_flags(WINDOW_STATE_FLAGS)
+                .with_denylist(&["settings", "git"])
+                .skip_initial_state("main")
+                .build(),
+        )
         .manage(PtyState::default())
         .manage(LlmState::default())
         .manage(WatchState::default())
@@ -114,6 +163,19 @@ fn main() {
             // `session_load` call from the frontend always has a pool ready.
             let store = tauri::async_runtime::block_on(SessionStore::open_default())
                 .expect("opening session store");
+
+            // Honour the user's window-state preference. We had the plugin
+            // skip the auto-restore for "main" above; do it here only when
+            // the saved blob says we should. Failures are non-fatal — the
+            // window just keeps its default geometry.
+            if read_restore_window_pref(&store) {
+                if let Some(window) = app.get_webview_window("main") {
+                    if let Err(err) = window.restore_state(WINDOW_STATE_FLAGS) {
+                        tracing::warn!("restore_state(main) failed: {err}");
+                    }
+                }
+            }
+
             app.manage(store);
             tracing::info!("arc desktop started");
             Ok(())
