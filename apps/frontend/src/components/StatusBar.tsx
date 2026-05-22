@@ -1,17 +1,27 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { Fragment, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { Bot, GitBranch, Keyboard, Sparkles, Terminal as TerminalIcon } from 'lucide-react';
+import {
+  Bot,
+  ChevronRight,
+  Folder,
+  GitBranch,
+  Keyboard,
+  Sparkles,
+  Terminal as TerminalIcon,
+} from 'lucide-react';
 import {
   gitStatus,
   isTauri,
   ptyListAiClis,
   ptyListShells,
+  ptyWrite,
   type AiCliInfo,
   type GitInfo,
   type ShellInfo,
 } from '../lib/tauri';
 import { useWorkspace } from '../state/workspace';
 import { useFiles } from '../state/files';
+import { useSettings } from '../state/settings';
 import { cn } from '../lib/cn';
 import { formatBinding, getBinding } from '../state/shortcuts';
 import { BranchPicker } from './BranchPicker';
@@ -56,40 +66,46 @@ export function StatusBar({ chatOpen, onToggleChat, onOpenShortcuts }: Props) {
     <>
       <footer
         className={cn(
-          'flex h-6 shrink-0 items-center justify-between px-3.5',
+          'flex h-7 shrink-0 items-center justify-between gap-4 px-4',
           'border-t border-border-hairline bg-bg-chrome/60 backdrop-blur-md',
           'font-display text-[10.5px] tracking-tight text-fg-muted',
         )}
       >
-        <div className="flex items-center gap-3.5">
+        <div className="flex min-w-0 items-center gap-4">
           <ShellPickerPill onSpawn={(shell) => void newTerminal({ shellOverride: shell })} />
+          {root && (
+            <>
+              <Dot />
+              <Breadcrumbs root={root} />
+            </>
+          )}
           {!isTauri && (
             <>
-              <span className="text-fg-subtle">·</span>
+              <Dot />
               <span className="text-status-warn">web preview</span>
             </>
           )}
         </div>
 
-        <div className="flex items-center gap-3.5">
+        <div className="flex shrink-0 items-center gap-4">
           {git?.branch && (
-            <BranchIndicator
-              info={git}
-              onClick={() => setPickerOpen(true)}
-            />
+            <>
+              <BranchIndicator
+                info={git}
+                onClick={() => setPickerOpen(true)}
+              />
+              <Dot />
+            </>
           )}
-          {git?.branch && <span className="text-fg-subtle">·</span>}
           <span className="tabular-nums">
             {tabs.length} {tabs.length === 1 ? 'tab' : 'tabs'}
           </span>
-          <span className="text-fg-subtle">·</span>
-          <span className="font-mono text-[10px] text-fg-subtle">arc 0.0.1</span>
-          <span className="text-fg-subtle">·</span>
+          <Dot />
           <ModelTriggerPill placement="up" align="end" compact />
-          <span className="text-fg-subtle">·</span>
+          <Dot />
 
           {/* Trailing control cluster — all three pills share the same
-              -my-1 trick so they hug the status bar's 24px chrome without
+              -my-1 trick so they hug the status bar's 28px chrome without
               overflowing it, and the same accent-soft "active" tint. */}
           <div className="flex items-center gap-0.5">
             <StatusIconButton
@@ -132,6 +148,9 @@ export function StatusBar({ chatOpen, onToggleChat, onOpenShortcuts }: Props) {
               )}
             </button>
           </div>
+
+          <Dot />
+          <span className="font-mono text-[10px] tabular-nums text-fg-subtle">arc 0.0.1</span>
         </div>
       </footer>
 
@@ -146,7 +165,13 @@ export function StatusBar({ chatOpen, onToggleChat, onOpenShortcuts }: Props) {
 
 // ----- subcomponents -------------------------------------------------------
 
-/** Square icon button sized to fit inside the 24px status bar chrome. */
+/** Inter-pill separator. Kept as its own component so the rhythm stays
+ *  identical everywhere — change the glyph or weight once. */
+function Dot() {
+  return <span className="text-fg-subtle/70 select-none">·</span>;
+}
+
+/** Square icon button sized to fit inside the 28px status bar chrome. */
 function StatusIconButton({
   children,
   onClick,
@@ -513,5 +538,364 @@ function BranchIndicator({
         <span className="tabular-nums text-fg-subtle">↓{info.behind}</span>
       )}
     </button>
+  );
+}
+
+// ----- Breadcrumbs ---------------------------------------------------------
+
+interface PathSegment {
+  /** Display label for the segment ("C:", "Users", "foo"). */
+  label: string;
+  /** Absolute path to navigate to when this segment is clicked. */
+  path: string;
+}
+
+/**
+ * Decompose an absolute path into clickable ancestor segments. Handles both
+ * Windows (`C:\Users\foo` or `C:/Users/foo`) and POSIX (`/home/foo`). The
+ * separator used in the returned paths matches whichever the input used —
+ * so navigating to a segment hands the rest of the app a path that looks
+ * like the one it gave us.
+ */
+function splitPath(root: string): PathSegment[] {
+  if (!root) return [];
+
+  // Windows drive + body: C:\Users\foo
+  const winMatch = root.match(/^([A-Za-z]:)[\\/](.*)$/);
+  if (winMatch) {
+    const drive = winMatch[1]!;
+    const sep = root.includes('\\') ? '\\' : '/';
+    const rest = winMatch[2]!;
+    const parts = rest.split(/[\\/]+/).filter(Boolean);
+    const segments: PathSegment[] = [{ label: drive, path: drive + sep }];
+    let acc = drive;
+    for (const p of parts) {
+      acc = acc + sep + p;
+      segments.push({ label: p, path: acc });
+    }
+    return segments;
+  }
+
+  // Bare drive: "C:" or "C:\"
+  const bareDrive = root.match(/^([A-Za-z]:)[\\/]?$/);
+  if (bareDrive) {
+    const sep = root.includes('\\') ? '\\' : '/';
+    return [{ label: bareDrive[1]!, path: bareDrive[1]! + sep }];
+  }
+
+  // POSIX absolute: /home/foo
+  if (root.startsWith('/')) {
+    const parts = root.split('/').filter(Boolean);
+    const segments: PathSegment[] = [{ label: '/', path: '/' }];
+    let acc = '';
+    for (const p of parts) {
+      acc = acc + '/' + p;
+      segments.push({ label: p, path: acc });
+    }
+    return segments;
+  }
+
+  // Relative fallback — uncommon for `root`, but degrade gracefully.
+  const parts = root.split(/[\\/]+/).filter(Boolean);
+  const sep = root.includes('\\') ? '\\' : '/';
+  return parts.map((p, i) => ({
+    label: p,
+    path: parts.slice(0, i + 1).join(sep),
+  }));
+}
+
+/** Quote a path for safe insertion after `cd` in any shell we support. Mirrors
+ *  the helper FileTree uses for click-to-paste so navigation feels uniform. */
+function shellQuote(p: string): string {
+  if (/^[\w./\\:+-]+$/.test(p)) return p;
+  return `"${p.replace(/(["\\])/g, '\\$1')}"`;
+}
+
+/** True when `shellPath` points at cmd.exe — which needs `/d` to cross drives.
+ *  PowerShell, bash, zsh, fish, nu all swallow `cd <path>` cross-drive. */
+function isCmdExe(shellPath: string | null | undefined): boolean {
+  if (!shellPath) return false;
+  const name = shellPath.toLowerCase().replace(/^.*[\\/]/, '');
+  return name === 'cmd.exe' || name === 'cmd';
+}
+
+/** Send a `cd <path>` to the active terminal tab so it follows wherever the
+ *  file tree just moved. No-op when the active tab isn't a live terminal. */
+function cdActiveTerminal(target: string) {
+  const { tabs, activeTabId } = useWorkspace.getState();
+  const active = tabs.find((t) => t.id === activeTabId);
+  if (!active?.ptyId) return;
+  const shellPath = active.shellOverride ?? useSettings.getState().defaultShell ?? null;
+  const quoted = shellQuote(target);
+  const cmd = isCmdExe(shellPath) ? `cd /d ${quoted}\r` : `cd ${quoted}\r`;
+  void ptyWrite(active.ptyId, cmd).catch(() => {
+    /* terminal closing */
+  });
+}
+
+/**
+ * Breadcrumb trail anchored to the left cluster of the status bar. When the
+ * trail exceeds {@link COLLAPSE_THRESHOLD} segments we keep the root + last
+ * two visible and tuck the middle behind an ellipsis dropdown.
+ */
+function Breadcrumbs({ root }: { root: string | null }) {
+  if (!root) return null;
+  const segments = splitPath(root);
+  if (segments.length === 0) return null;
+
+  const COLLAPSE_THRESHOLD = 4;
+  // Clicking a segment moves both panes: the file tree (setRoot) and the
+  // active terminal (cd). The terminal's own OSC 7 / cd-sniffer will then
+  // re-confirm the cwd on the next prompt, so the two stay coherent even if
+  // the shell rejects the cd.
+  const navigate = (p: string) => {
+    useFiles.getState().setRoot(p);
+    cdActiveTerminal(p);
+  };
+  const lastIdx = segments.length - 1;
+  const collapse = segments.length > COLLAPSE_THRESHOLD;
+
+  return (
+    <div
+      className="flex min-w-0 items-center gap-1"
+      aria-label="folder breadcrumbs"
+    >
+      {!collapse &&
+        segments.map((s, i) => (
+          <Fragment key={`${i}-${s.path}`}>
+            {i > 0 && <Chevron />}
+            <BreadcrumbSegment
+              label={s.label}
+              path={s.path}
+              first={i === 0}
+              current={i === lastIdx}
+              onClick={navigate}
+            />
+          </Fragment>
+        ))}
+
+      {collapse && (
+        <>
+          <BreadcrumbSegment
+            label={segments[0]!.label}
+            path={segments[0]!.path}
+            first
+            onClick={navigate}
+          />
+          <Chevron />
+          <BreadcrumbEllipsis hidden={segments.slice(1, -2)} onPick={navigate} />
+          <Chevron />
+          <BreadcrumbSegment
+            label={segments[lastIdx - 1]!.label}
+            path={segments[lastIdx - 1]!.path}
+            onClick={navigate}
+          />
+          <Chevron />
+          <BreadcrumbSegment
+            label={segments[lastIdx]!.label}
+            path={segments[lastIdx]!.path}
+            current
+            onClick={navigate}
+          />
+        </>
+      )}
+    </div>
+  );
+}
+
+/** Narrow chevron separator between breadcrumb segments. Drawn lighter than
+ *  the inter-pill dot so segments read as one continuous trail. */
+function Chevron() {
+  return (
+    <ChevronRight
+      size={10}
+      strokeWidth={2}
+      className="shrink-0 text-fg-subtle/55"
+      aria-hidden
+    />
+  );
+}
+
+function BreadcrumbSegment({
+  label,
+  path,
+  first,
+  current,
+  onClick,
+}: {
+  label: string;
+  path: string;
+  first?: boolean;
+  current?: boolean;
+  onClick: (path: string) => void;
+}) {
+  // The current (rightmost) segment is rendered as a static span: clicking
+  // it would be a no-op anyway, and the visual weight signals "you are here".
+  if (current) {
+    return (
+      <span
+        className={cn(
+          'inline-flex max-w-[160px] items-center gap-1 rounded-md px-1.5 py-[1px]',
+          'font-display text-[10.5px] tracking-tight text-fg-base/95',
+          'shadow-[inset_0_0_0_1px_rgba(220,224,232,0.07)]',
+        )}
+        title={path}
+      >
+        {first && (
+          <Folder
+            size={10}
+            strokeWidth={2}
+            className="shrink-0 text-fg-muted"
+            aria-hidden
+          />
+        )}
+        <span className="truncate">{label}</span>
+      </span>
+    );
+  }
+  return (
+    <button
+      type="button"
+      onClick={() => onClick(path)}
+      title={path}
+      className={cn(
+        'group inline-flex max-w-[140px] items-center gap-1 rounded-md px-1.5 py-[1px]',
+        'font-display text-[10.5px] tracking-tight text-fg-muted',
+        'transition-colors hover:bg-white/[0.06] hover:text-fg-base/95',
+        'focus-visible:bg-white/[0.06] focus:outline-none',
+      )}
+    >
+      {first && (
+        <Folder
+          size={10}
+          strokeWidth={2}
+          className="shrink-0 text-fg-subtle transition-colors group-hover:text-fg-muted"
+          aria-hidden
+        />
+      )}
+      <span className="truncate">{label}</span>
+    </button>
+  );
+}
+
+/**
+ * Ellipsis button shown in place of the middle segments when the path is
+ * deeper than the visible limit. Opens a portaled, upward-facing dropdown
+ * listing the hidden ancestors — same affordance grammar as the AI CLI and
+ * shell pickers, so the bar reads as one consistent surface.
+ */
+function BreadcrumbEllipsis({
+  hidden,
+  onPick,
+}: {
+  hidden: PathSegment[];
+  onPick: (path: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [pos, setPos] = useState<{ bottom: number; left: number } | null>(null);
+  const btnRef = useRef<HTMLButtonElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+
+  useLayoutEffect(() => {
+    if (!open) {
+      setPos(null);
+      return;
+    }
+    const update = () => {
+      const r = btnRef.current?.getBoundingClientRect();
+      if (!r) return;
+      const vh = window.innerHeight;
+      setPos({
+        bottom: vh - r.top + 4,
+        left: Math.max(8, r.left - 6),
+      });
+    };
+    update();
+    window.addEventListener('resize', update);
+    window.addEventListener('scroll', update, true);
+    return () => {
+      window.removeEventListener('resize', update);
+      window.removeEventListener('scroll', update, true);
+    };
+  }, [open]);
+
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e: MouseEvent) => {
+      const t = e.target as Node | null;
+      if (!t) return;
+      if (menuRef.current?.contains(t)) return;
+      if (btnRef.current?.contains(t)) return;
+      setOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setOpen(false);
+    };
+    window.addEventListener('mousedown', onDown);
+    window.addEventListener('keydown', onKey);
+    return () => {
+      window.removeEventListener('mousedown', onDown);
+      window.removeEventListener('keydown', onKey);
+    };
+  }, [open]);
+
+  return (
+    <>
+      <button
+        ref={btnRef}
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        aria-haspopup="menu"
+        aria-expanded={open}
+        aria-label={`Show ${hidden.length} hidden ${hidden.length === 1 ? 'folder' : 'folders'}`}
+        title={`${hidden.length} hidden ${hidden.length === 1 ? 'folder' : 'folders'}`}
+        className={cn(
+          'inline-flex h-[18px] min-w-[20px] items-center justify-center rounded-md px-1',
+          'font-display text-[11px] leading-none tracking-tight transition-colors',
+          'focus:outline-none',
+          open
+            ? 'bg-accent-soft text-accent-bright shadow-[inset_0_0_0_1px_rgba(220,224,232,0.18)]'
+            : 'text-fg-subtle hover:bg-white/[0.06] hover:text-fg-base/95 focus-visible:bg-white/[0.06]',
+        )}
+      >
+        <span className="-mt-px tracking-[1px]">…</span>
+      </button>
+
+      {open && pos && typeof document !== 'undefined' &&
+        createPortal(
+          <div
+            ref={menuRef}
+            role="menu"
+            style={{ position: 'fixed', bottom: pos.bottom, left: pos.left }}
+            className="material-sheet z-50 min-w-[200px] max-w-[320px] animate-popover-in overflow-hidden rounded-md shadow-sheet ring-1 ring-white/10"
+          >
+            <div className="border-b border-white/[0.06] px-3 py-1.5 font-mono text-[9.5px] uppercase tracking-widest text-fg-subtle">
+              jump to ancestor
+            </div>
+            {hidden.map((seg) => (
+              <button
+                key={seg.path}
+                role="menuitem"
+                onClick={() => {
+                  onPick(seg.path);
+                  setOpen(false);
+                }}
+                title={seg.path}
+                className="flex w-full items-center gap-2 px-3 py-1.5 text-left font-display text-[12px] text-fg-base/90 transition-colors hover:bg-white/[0.06]"
+              >
+                <Folder size={11} strokeWidth={2} className="shrink-0 text-fg-subtle" />
+                <span className="flex-1 truncate">{seg.label}</span>
+                <ChevronRight
+                  size={10}
+                  strokeWidth={2}
+                  className="shrink-0 text-fg-subtle/60"
+                  aria-hidden
+                />
+              </button>
+            ))}
+          </div>,
+          document.body,
+        )}
+    </>
   );
 }

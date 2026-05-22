@@ -101,6 +101,45 @@ impl PtyManager {
         cmd.env("TERM", "xterm-256color");
         cmd.env("COLORTERM", "truecolor");
 
+        // Inject OSC 7 emission so the frontend's file tree can follow the
+        // shell's CWD. Default cmd.exe and PowerShell don't emit it; we
+        // prepend an OSC 7 escape to the shell's prompt at spawn time.
+        //   * cmd.exe — `$e` is ESC, `$P` is the current path. We wrap the
+        //     existing PROMPT (or the default `$P$G`) so the user's
+        //     customizations survive.
+        //   * PowerShell — handled by a `-NoExit -Command` arg below.
+        // bash/zsh/fish all emit OSC 7 already with shell-integration on, so
+        // we leave them alone.
+        if let Some(name) = std::path::Path::new(&shell)
+            .file_name()
+            .and_then(|f| f.to_str())
+            .map(|s| s.to_ascii_lowercase())
+        {
+            if name == "cmd.exe" || name == "cmd" {
+                let existing = std::env::var("PROMPT").unwrap_or_else(|_| "$P$G".to_string());
+                cmd.env("PROMPT", format!("$e]7;file:///$P$e\\{}", existing));
+            } else if name == "powershell.exe"
+                || name == "powershell"
+                || name == "pwsh.exe"
+                || name == "pwsh"
+            {
+                // Wrap the user's existing prompt function with one that
+                // prepends an OSC 7 escape. `& $prev` re-invokes whatever
+                // prompt the user had configured (default or custom).
+                cmd.arg("-NoExit");
+                cmd.arg("-Command");
+                cmd.arg(
+                    "$arcPrev = (Get-Command prompt).ScriptBlock; \
+                     function global:prompt { \
+                         [Console]::Write([char]27 + ']7;file:///' + \
+                             ($PWD.Path -replace '\\\\','/') + \
+                             [char]27 + '\\'); \
+                         & $arcPrev \
+                     }",
+                );
+            }
+        }
+
         let mut child = pair
             .slave
             .spawn_command(cmd)

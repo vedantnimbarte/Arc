@@ -4,6 +4,8 @@ import { FitAddon } from '@xterm/addon-fit';
 import { WebLinksAddon } from '@xterm/addon-web-links';
 import '@xterm/xterm/css/xterm.css';
 import {
+  fsDefaultRoot,
+  fsReadDir,
   isTauri,
   onPtyData,
   onPtyExit,
@@ -244,10 +246,25 @@ export function Terminal({ sessionKey }: Props) {
         // into this terminal.
         useWorkspace.getState().setTabPtyId(sessionKey, ptyId);
 
+        // Our best-effort view of the shell's CWD, used to resolve relative
+        // `cd` targets when the shell doesn't emit OSC 7. OSC 7 (below) is
+        // authoritative when present. When we didn't pass an explicit cwd to
+        // `pty_spawn`, the Rust side falls back to $HOME / %USERPROFILE%
+        // (see rust/pty/src/lib.rs) — `fsDefaultRoot` returns the same path,
+        // so seeding from it keeps us in sync from the very first command.
+        let shellCwd: string | null = initialCwd.current ?? null;
+        if (!shellCwd) {
+          try {
+            shellCwd = await fsDefaultRoot();
+          } catch {
+            /* leave null — only absolute cd targets will resolve */
+          }
+        }
+
         // OSC 7 — modern shells emit `\e]7;file://host/path\e\\` whenever
         // their CWD changes. We sync the file tree root to it so the tree
         // follows the shell. Shells that don't emit it (default cmd.exe,
-        // unmodified PowerShell) are a no-op.
+        // unmodified PowerShell) fall back to the cd-sniffer below.
         term.parser.registerOscHandler(7, (data) => {
           const url = data.trim();
           if (!url.startsWith('file://')) return false;
@@ -257,9 +274,85 @@ export function Terminal({ sessionKey }: Props) {
           if (slash >= 0) path = path.slice(slash);
           // Windows: `/C:/Users/...` → `C:/Users/...`
           if (/^\/[a-zA-Z]:/.test(path)) path = path.slice(1);
-          if (path) useFiles.getState().setRoot(path);
+          if (path) {
+            shellCwd = path;
+            useFiles.getState().setRoot(path);
+          }
           return true; // we handled the OSC
         });
+
+        // Pull the target argument out of a `cd`-style command line. Returns
+        // null when the line isn't a directory change, or has no resolvable
+        // argument (bare `cd`, `cd -`, `cd ~`).
+        const parseCdTarget = (line: string): string | null => {
+          const m = line.match(/^\s*(cd|chdir|pushd|Set-Location|sl)\b\s*(.*)$/i);
+          if (!m) return null;
+          let rest = m[2]!.trim();
+          // cmd.exe: `cd /d <path>` switches drive too. Strip the flag.
+          rest = rest.replace(/^\/d\b\s*/i, '');
+          // PowerShell: `-Path` / `-LiteralPath` named parameter.
+          rest = rest.replace(/^-(LiteralPath|Path)\b\s*/i, '').trim();
+          if (!rest) return null;
+          if (
+            (rest.startsWith('"') && rest.endsWith('"')) ||
+            (rest.startsWith("'") && rest.endsWith("'"))
+          ) {
+            rest = rest.slice(1, -1);
+          }
+          if (rest === '-' || rest === '~' || rest.startsWith('~/') || rest.startsWith('~\\')) {
+            return null;
+          }
+          return rest;
+        };
+
+        // Resolve `target` against `base`, collapsing `.`/`..`. Picks the
+        // separator from whichever side looks Windows-ish.
+        const joinAndNormalize = (base: string | null, target: string): string | null => {
+          const winLike =
+            /^[A-Za-z]:[\\/]/.test(target) ||
+            (base !== null && (/\\/.test(base) || /^[A-Za-z]:/.test(base)));
+          const sep = winLike ? '\\' : '/';
+          const isAbs =
+            /^[A-Za-z]:[\\/]/.test(target) ||
+            target.startsWith('/') ||
+            target.startsWith('\\');
+          const abs = isAbs ? target : base ? `${base}${sep}${target}` : null;
+          if (!abs) return null;
+          let prefix = '';
+          let rest = abs;
+          const drive = /^([A-Za-z]:)[\\/](.*)$/.exec(abs);
+          if (drive) {
+            prefix = `${drive[1]}${sep}`;
+            rest = drive[2]!;
+          } else if (abs.startsWith('/') || abs.startsWith('\\')) {
+            prefix = sep;
+            rest = abs.slice(1);
+          }
+          const parts = rest.split(/[\\/]+/).filter((p) => p && p !== '.');
+          const out: string[] = [];
+          for (const p of parts) {
+            if (p === '..') out.pop();
+            else out.push(p);
+          }
+          return prefix + out.join(sep);
+        };
+
+        // Fallback CWD sync for shells without OSC 7: sniff `cd <path>` from
+        // the typed line and adopt the target only if it resolves to a real
+        // directory (mirrors what the shell will do).
+        const syncRootFromCd = async (line: string) => {
+          const target = parseCdTarget(line);
+          if (!target) return;
+          const resolved = joinAndNormalize(shellCwd, target);
+          if (!resolved) return;
+          try {
+            await fsReadDir(resolved);
+            shellCwd = resolved;
+            useFiles.getState().setRoot(resolved);
+          } catch {
+            /* path didn't exist or wasn't a dir — shell will have errored too */
+          }
+        };
 
         // Command capture: best-effort. If the shell emits OSC 133, the
         // `D` handler above attaches the exit code; otherwise we still
@@ -299,6 +392,7 @@ export function Terminal({ sessionKey }: Props) {
                   lastCommandId = id;
                 })
                 .catch(() => {});
+              void syncRootFromCd(trimmed);
             } else if (code === 0x7f || code === 0x08) {
               // DEL / BS — back over a char (or no-op if buffer empty).
               if (cmdBuffer.length > 0) cmdBuffer = cmdBuffer.slice(0, -1);
