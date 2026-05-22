@@ -22,10 +22,10 @@ import {
 import { cn } from '../lib/cn';
 import {
   PROVIDER_PRESETS,
-  TINT_CLASSES,
   getPreset,
   type ProviderPreset,
 } from '../state/providers';
+import { ProviderIcon } from './ProviderIcon';
 import { useSettings } from '../state/settings';
 import {
   collectEnabledModels,
@@ -331,7 +331,6 @@ function Group({
   onPick: (r: FlatModelRow) => void;
   onFocus: (i: number) => void;
 }) {
-  const tint = TINT_CLASSES[preset.tint];
   const entries = useModels((s) => s.entries);
   const fetchModels = useModels((s) => s.fetch);
   const entry = entries[preset.id];
@@ -342,17 +341,7 @@ function Group({
     <section className="px-1.5 pb-1">
       <div className="flex items-center justify-between px-2 pb-0.5 pt-1.5">
         <div className="flex items-center gap-1.5">
-          <span
-            className={cn(
-              'inline-flex h-[16px] w-[16px] items-center justify-center rounded-sm font-display text-[9.5px] font-semibold ring-1 ring-inset',
-              tint.bg,
-              tint.fg,
-              tint.ring,
-            )}
-            aria-hidden
-          >
-            {preset.monogram}
-          </span>
+          <ProviderIcon preset={preset} size={16} monogramSize={9.5} className="rounded-sm" />
           <span className="font-display text-[10.5px] font-semibold uppercase tracking-widest2 text-fg-subtle">
             {preset.label}
           </span>

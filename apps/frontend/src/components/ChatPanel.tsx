@@ -30,7 +30,7 @@ import {
   useActiveProviderConfig,
 } from '../state/settings';
 import { ModelPicker, useCurrentModelLabel } from './ModelPicker';
-import { TINT_CLASSES } from '../state/providers';
+import { ProviderIconBare } from './ProviderIcon';
 import {
   AGENT_ICONS,
   AGENT_TINTS,
@@ -1097,7 +1097,6 @@ export function ModelTriggerPill({
   const triggerRef = useRef<HTMLButtonElement>(null);
   const [open, setOpen] = useState(false);
   const { presetLabel, modelLabel, preset } = useCurrentModelLabel();
-  const tint = TINT_CLASSES[preset.tint];
 
   return (
     <>
@@ -1118,17 +1117,7 @@ export function ModelTriggerPill({
             : 'border-border-subtle bg-bg-base/40 text-fg-muted hover:border-border-strong hover:text-fg-base',
         )}
       >
-        <span
-          className={cn(
-            'inline-flex h-[12px] w-[12px] items-center justify-center rounded-sm font-display text-[8.5px] font-semibold ring-1 ring-inset',
-            tint.bg,
-            tint.fg,
-            tint.ring,
-          )}
-          aria-hidden
-        >
-          {preset.monogram}
-        </span>
+        <ProviderIconBare presetId={preset.id} size={11} />
         <span className="truncate font-mono">{modelLabel}</span>
         <ChevronDown
           size={9}

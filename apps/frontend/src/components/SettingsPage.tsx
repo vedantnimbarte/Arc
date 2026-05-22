@@ -33,11 +33,11 @@ import {
 import { useSettings } from '../state/settings';
 import {
   PROVIDER_PRESETS,
-  TINT_CLASSES,
   presetOrDefault,
   type ProviderPreset,
 } from '../state/providers';
 import { resolveModelsFor, useModels } from '../state/models';
+import { ProviderIcon } from './ProviderIcon';
 import { useFiles } from '../state/files';
 import { isTauri, ptyListShells, type ShellInfo } from '../lib/tauri';
 import { cn } from '../lib/cn';
@@ -977,21 +977,16 @@ function Monogram({
   small?: boolean;
   dimmed?: boolean;
 }) {
-  const tint = TINT_CLASSES[preset.tint];
+  // Delegates to the brand-aware ProviderIcon — it renders a real brand
+  // mark when available and falls back to the preset's monogram letter
+  // otherwise, so callers don't need to know which case applies.
   return (
-    <span
-      className={cn(
-        'inline-flex shrink-0 items-center justify-center rounded-md font-display font-semibold ring-1 ring-inset transition-opacity',
-        tint.bg,
-        tint.fg,
-        tint.ring,
-        small ? 'h-[22px] w-[22px] text-[11px]' : 'h-[34px] w-[34px] text-[15px]',
-        dimmed && 'opacity-50',
-      )}
-      aria-hidden
-    >
-      {preset.monogram}
-    </span>
+    <ProviderIcon
+      preset={preset}
+      size={small ? 22 : 34}
+      monogramSize={small ? 11 : 15}
+      dimmed={dimmed}
+    />
   );
 }
 
@@ -1174,66 +1169,88 @@ function ProviderDetail({
           </div>
         </div>
 
-        {errored && entry?.error && (
-          <div className="flex items-center gap-1.5 rounded-md border border-status-warn/30 bg-status-warn/10 px-2.5 py-1 font-display text-[11px] text-status-warn">
-            <AlertTriangle size={10} strokeWidth={2.1} />
-            {entry.error.startsWith('no api key')
-              ? 'Set an API key above to fetch models.'
-              : `Could not fetch models — ${entry.error.slice(0, 80)}`}
-          </div>
-        )}
-
-        {liveModels.length > 0 ? (
-          <div className="flex flex-wrap gap-1.5">
-            {liveModels.map((m) => {
-              const selectedModel = m.id === cfg.model;
-              return (
-                <button
-                  key={m.id}
-                  onClick={() => onUpdate({ model: m.id })}
-                  className={cn(
-                    'rounded-md border px-2.5 py-1 font-mono text-[11px] transition-all duration-150 ease-apple',
-                    selectedModel
-                      ? 'border-accent/50 bg-accent-soft text-fg-base shadow-glow-sm'
-                      : 'border-border-subtle bg-bg-base/40 text-fg-muted hover:border-border-strong hover:text-fg-base',
-                  )}
-                  title={m.label ?? m.id}
-                >
-                  {m.label ?? m.id}
-                </button>
-              );
-            })}
-          </div>
-        ) : !loading && !errored ? (
-          <p className="font-display text-[11px] text-fg-subtle">
-            No models cached yet. Click Refresh once a key is in place.
-          </p>
-        ) : null}
-
-        {showFreeForm && (
-          <div className="mt-2">
-            <div className="font-display text-[10px] font-semibold uppercase tracking-widest2 text-fg-subtle">
-              {liveModels.length > 0 ? 'Custom model' : 'Model name'}
+        {preset.needsApiKey && !cfg.apiKey ? (
+          // No key yet → hide the chip row entirely. Showing the preset's
+          // hard-coded defaults here was misleading: those models can't
+          // actually be called until the key arrives, and the user reads
+          // them as "ready to go". Keep the empty state focused on the
+          // one action they need to take.
+          <div className="flex items-start gap-2 rounded-lg border border-border-subtle bg-bg-base/40 px-3 py-2.5">
+            <Key size={11} strokeWidth={2.1} className="mt-[2px] shrink-0 text-fg-subtle" />
+            <div className="min-w-0 flex-1">
+              <p className="font-display text-[11.5px] font-medium text-fg-base">
+                Add an API key to fetch models
+              </p>
+              <p className="mt-0.5 font-display text-[11px] leading-relaxed text-fg-subtle">
+                Paste your {preset.label} key above. The model catalog is
+                fetched live from the provider once a key is in place.
+              </p>
             </div>
-            <input
-              value={modelInKnown ? customModel : cfg.model}
-              onChange={(e) => {
-                const v = e.target.value;
-                setCustomModel(v);
-                onUpdate({ model: v });
-              }}
-              placeholder={
-                preset.id === 'ollama'
-                  ? 'llama3.2:1b'
-                  : preset.id === 'lmstudio'
-                    ? 'whatever-you-loaded'
-                    : 'provider/model-id'
-              }
-              className="mt-1 w-full rounded-lg border border-border-subtle bg-bg-base/60 px-3 py-1.5 font-mono text-[12px] text-fg-base placeholder:text-fg-subtle focus:border-accent/45 focus:bg-bg-base/80 focus:shadow-focus focus:outline-none"
-              autoComplete="off"
-              spellCheck={false}
-            />
           </div>
+        ) : (
+          <>
+            {errored && entry?.error && (
+              <div className="flex items-center gap-1.5 rounded-md border border-status-warn/30 bg-status-warn/10 px-2.5 py-1 font-display text-[11px] text-status-warn">
+                <AlertTriangle size={10} strokeWidth={2.1} />
+                {entry.error.startsWith('no api key')
+                  ? 'Set an API key above to fetch models.'
+                  : `Could not fetch models — ${entry.error.slice(0, 80)}`}
+              </div>
+            )}
+
+            {liveModels.length > 0 ? (
+              <div className="flex flex-wrap gap-1.5">
+                {liveModels.map((m) => {
+                  const selectedModel = m.id === cfg.model;
+                  return (
+                    <button
+                      key={m.id}
+                      onClick={() => onUpdate({ model: m.id })}
+                      className={cn(
+                        'rounded-md border px-2.5 py-1 font-mono text-[11px] transition-all duration-150 ease-apple',
+                        selectedModel
+                          ? 'border-accent/50 bg-accent-soft text-fg-base shadow-glow-sm'
+                          : 'border-border-subtle bg-bg-base/40 text-fg-muted hover:border-border-strong hover:text-fg-base',
+                      )}
+                      title={m.label ?? m.id}
+                    >
+                      {m.label ?? m.id}
+                    </button>
+                  );
+                })}
+              </div>
+            ) : !loading && !errored ? (
+              <p className="font-display text-[11px] text-fg-subtle">
+                No models cached yet. Click Refresh to fetch the catalog.
+              </p>
+            ) : null}
+
+            {showFreeForm && (
+              <div className="mt-2">
+                <div className="font-display text-[10px] font-semibold uppercase tracking-widest2 text-fg-subtle">
+                  {liveModels.length > 0 ? 'Custom model' : 'Model name'}
+                </div>
+                <input
+                  value={modelInKnown ? customModel : cfg.model}
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    setCustomModel(v);
+                    onUpdate({ model: v });
+                  }}
+                  placeholder={
+                    preset.id === 'ollama'
+                      ? 'llama3.2:1b'
+                      : preset.id === 'lmstudio'
+                        ? 'whatever-you-loaded'
+                        : 'provider/model-id'
+                  }
+                  className="mt-1 w-full rounded-lg border border-border-subtle bg-bg-base/60 px-3 py-1.5 font-mono text-[12px] text-fg-base placeholder:text-fg-subtle focus:border-accent/45 focus:bg-bg-base/80 focus:shadow-focus focus:outline-none"
+                  autoComplete="off"
+                  spellCheck={false}
+                />
+              </div>
+            )}
+          </>
         )}
       </FieldSection>
 

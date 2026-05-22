@@ -131,6 +131,9 @@ importers:
       react-dom:
         specifier: ^18.3.1
         version: 18.3.1(react@18.3.1)
+      simple-icons:
+        specifier: ^16.20.0
+        version: 16.20.0
       tailwind-merge:
         specifier: ^2.5.4
         version: 2.6.1
@@ -1311,6 +1314,10 @@ packages:
   signal-exit@4.1.0:
     resolution: {integrity: sha512-bzyZ1e88w9O1iNJbKnOlvYTrWPDl46O1bG0D3XInv+9tkPrxrN8jUUTiFlDkkmKWgn1M6CfIA13SuGqOa9Korw==}
     engines: {node: '>=14'}
+
+  simple-icons@16.20.0:
+    resolution: {integrity: sha512-2b7Xu+Zy+iwLiuLSAcWuxnM1ETNFy7JmxWSjh0Y/A8P3KGjFFcokbpWbUf/IivMNbR9WuZ/QQlirh5bGh3Q2vA==}
+    engines: {node: '>=0.12.18'}
 
   source-map-js@1.2.1:
     resolution: {integrity: sha512-UXWMKhLOwVKb728IUtQPXxfYU+usdybtUrK/8uGE8CQMvrhOpwvzDBwj0QhSL7MQc7vIsISBG8VQ8+IDQxpfQA==}
@@ -2558,6 +2565,8 @@ snapshots:
   shebang-regex@3.0.0: {}
 
   signal-exit@4.1.0: {}
+
+  simple-icons@16.20.0: {}
 
   source-map-js@1.2.1: {}
 
