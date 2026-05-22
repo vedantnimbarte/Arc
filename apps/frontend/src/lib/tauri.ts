@@ -198,15 +198,18 @@ export async function fsCreateDir(path: string): Promise<void> {
 
 // ----- Secrets (OS credential vault) ------------------------------------
 
-export async function secretsSetApiKey(provider: LlmProvider, key: string): Promise<void> {
+// Provider id here is a preset id (e.g. `'openai'`, `'deepseek'`, `'lmstudio'`)
+// — the Rust side stores per arbitrary string under the same keyring service,
+// so the typing stays loose on purpose.
+export async function secretsSetApiKey(provider: string, key: string): Promise<void> {
   await invoke('secrets_set_api_key', { provider, key });
 }
 
-export async function secretsGetApiKey(provider: LlmProvider): Promise<string | null> {
+export async function secretsGetApiKey(provider: string): Promise<string | null> {
   return invoke<string | null>('secrets_get_api_key', { provider });
 }
 
-export async function secretsDeleteApiKey(provider: LlmProvider): Promise<void> {
+export async function secretsDeleteApiKey(provider: string): Promise<void> {
   await invoke('secrets_delete_api_key', { provider });
 }
 
@@ -349,6 +352,28 @@ export interface LlmStreamReq {
 export interface LlmChunk {
   text: string;
   done: boolean;
+}
+
+/** One row from the provider's model catalog. `id` is what's sent back in
+ *  chat requests; `label` is a friendlier name when available. */
+export interface ModelInfo {
+  id: string;
+  label?: string;
+  context_window?: number;
+  kind?: string;
+}
+
+/** Live-fetch the model catalog for a provider kind. */
+export async function llmListModels(
+  provider: LlmProvider,
+  apiKey?: string,
+  baseUrl?: string,
+): Promise<ModelInfo[]> {
+  return invoke<ModelInfo[]>('llm_list_models', {
+    provider,
+    apiKey: apiKey ?? null,
+    baseUrl: baseUrl ?? null,
+  });
 }
 
 export interface LlmDoneEvent {
@@ -523,10 +548,23 @@ export async function sessionChatClear(conversationId: string): Promise<void> {
 
 // App settings (non-secret; persisted to SQLite)
 
-/** Shape stored in the `app_settings` table under key `"user_settings"`. */
+/** Shape stored in the `app_settings` table under key `"user_settings"`.
+ *
+ *  Provider entries are keyed by preset id (a string — see
+ *  `state/providers.ts`), not by the backend `LlmProvider` kind. The legacy
+ *  `activeProvider` field is still written for forward-compat with older
+ *  binaries opening the same DB; new code reads `activePresetId`. */
 export interface PersistedSettings {
-  activeProvider: LlmProvider;
-  providers: Record<LlmProvider, { model: string; baseUrl?: string }>;
+  /** Current preset id (e.g. `'openai'`, `'deepseek'`, `'lmstudio'`). */
+  activePresetId?: string;
+  /** Model id paired with the active preset. */
+  currentModel?: string;
+  /** Preset ids the user has enabled — listed in the model picker. */
+  enabledPresetIds?: string[];
+  /** Backend kind mirror — kept so older builds don't end up with an
+   *  undefined provider when they read the same blob. */
+  activeProvider?: LlmProvider;
+  providers: Record<string, { model: string; baseUrl?: string }>;
   systemPrompt: string;
   defaultShell: string | null;
   /** Appearance preference: 'dark' | 'light' | 'system'. */

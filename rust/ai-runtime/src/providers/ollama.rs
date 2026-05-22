@@ -7,7 +7,7 @@ use futures_util::stream::{self, BoxStream, StreamExt};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 
-use crate::{ChatRequest, Chunk, Provider, ProviderError, Role};
+use crate::{ChatRequest, Chunk, ModelInfo, Provider, ProviderError, Role};
 
 const DEFAULT_BASE: &str = "http://localhost:11434";
 
@@ -156,6 +156,40 @@ fn jsonl_chunks(
         },
     )
     .boxed()
+}
+
+#[derive(Deserialize)]
+struct OllamaTagsEnvelope {
+    #[serde(default)]
+    models: Vec<OllamaTagRow>,
+}
+
+#[derive(Deserialize)]
+struct OllamaTagRow {
+    name: String,
+}
+
+pub async fn list_models(base_url: Option<String>) -> Result<Vec<ModelInfo>, ProviderError> {
+    let base = base_url.unwrap_or_else(|| DEFAULT_BASE.to_string());
+    let url = format!("{}/api/tags", base.trim_end_matches('/'));
+    let client = reqwest::Client::new();
+    let resp = client.get(&url).send().await?;
+    if !resp.status().is_success() {
+        let status = resp.status().as_u16();
+        let body = resp.text().await.unwrap_or_default();
+        return Err(ProviderError::Status { status, body });
+    }
+    let env: OllamaTagsEnvelope = resp.json().await.map_err(ProviderError::Http)?;
+    Ok(env
+        .models
+        .into_iter()
+        .map(|m| ModelInfo {
+            id: m.name,
+            label: None,
+            context_window: None,
+            kind: None,
+        })
+        .collect())
 }
 
 fn trim_line(raw: &[u8]) -> &[u8] {

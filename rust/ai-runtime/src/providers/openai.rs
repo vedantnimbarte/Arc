@@ -6,7 +6,7 @@ use futures_util::stream::{BoxStream, StreamExt};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 
-use crate::{ChatRequest, Chunk, Provider, ProviderError, Role};
+use crate::{ChatRequest, Chunk, ModelInfo, Provider, ProviderError, Role};
 
 const DEFAULT_BASE: &str = "https://api.openai.com";
 
@@ -22,6 +22,34 @@ impl OpenAiProvider {
             api_key,
             base_url: base_url.unwrap_or_else(|| DEFAULT_BASE.to_string()),
             client: reqwest::Client::new(),
+        }
+    }
+
+    /// Resolve the chat-completions URL from a user-supplied base.
+    ///
+    /// Users hand us bases in three shapes:
+    ///   `https://api.openai.com`                   → host only, append /v1/chat/completions
+    ///   `https://api.openai.com/v1`                → has a path, append /chat/completions
+    ///   `https://api.openai.com/v1/chat/completions` → already the endpoint, use as-is
+    ///
+    /// The path-aware case is what lets non-standard OpenAI-compatible
+    /// endpoints work — notably Gemini's `/v1beta/openai/...` route.
+    fn chat_endpoint(&self) -> String {
+        let trimmed = self.base_url.trim_end_matches('/');
+        if trimmed.ends_with("/chat/completions") {
+            return trimmed.to_string();
+        }
+        // Anything after the host (i.e. with a path) gets `/chat/completions`
+        // appended. A bare scheme://host[:port] gets the conventional
+        // `/v1/chat/completions`.
+        let has_path = match trimmed.find("://") {
+            Some(i) => trimmed[i + 3..].contains('/'),
+            None => trimmed.contains('/'),
+        };
+        if has_path {
+            format!("{trimmed}/chat/completions")
+        } else {
+            format!("{trimmed}/v1/chat/completions")
         }
     }
 }
@@ -94,7 +122,7 @@ impl Provider for OpenAiProvider {
 
         let resp = self
             .client
-            .post(format!("{}/v1/chat/completions", self.base_url))
+            .post(self.chat_endpoint())
             .bearer_auth(&self.api_key)
             .json(&body)
             .send()
@@ -148,4 +176,68 @@ impl Provider for OpenAiProvider {
 
         Ok(stream.boxed())
     }
+}
+
+#[derive(Deserialize)]
+struct ModelsEnvelope {
+    #[serde(default)]
+    data: Vec<ModelRow>,
+}
+
+#[derive(Deserialize)]
+struct ModelRow {
+    id: String,
+}
+
+/// Compute the `/models` URL from a user-supplied base. Mirrors the path
+/// awareness in `chat_endpoint`: a base with an existing path gets
+/// `/models` appended; a bare host gets `/v1/models`.
+fn models_endpoint(base: &str) -> String {
+    let trimmed = base.trim_end_matches('/');
+    if trimmed.ends_with("/chat/completions") {
+        // User pasted the full chat endpoint — strip it and re-anchor.
+        let head = trimmed.trim_end_matches("/chat/completions");
+        return format!("{head}/models");
+    }
+    let has_path = match trimmed.find("://") {
+        Some(i) => trimmed[i + 3..].contains('/'),
+        None => trimmed.contains('/'),
+    };
+    if has_path {
+        format!("{trimmed}/models")
+    } else {
+        format!("{trimmed}/v1/models")
+    }
+}
+
+pub async fn list_models(
+    api_key: Option<String>,
+    base_url: Option<String>,
+) -> Result<Vec<ModelInfo>, ProviderError> {
+    let base = base_url.unwrap_or_else(|| DEFAULT_BASE.to_string());
+    let url = models_endpoint(&base);
+    let client = reqwest::Client::new();
+    let mut req = client.get(&url);
+    if let Some(k) = api_key {
+        if !k.is_empty() {
+            req = req.bearer_auth(k);
+        }
+    }
+    let resp = req.send().await?;
+    if !resp.status().is_success() {
+        let status = resp.status().as_u16();
+        let body = resp.text().await.unwrap_or_default();
+        return Err(ProviderError::Status { status, body });
+    }
+    let env: ModelsEnvelope = resp.json().await.map_err(ProviderError::Http)?;
+    Ok(env
+        .data
+        .into_iter()
+        .map(|m| ModelInfo {
+            id: m.id,
+            label: None,
+            context_window: None,
+            kind: None,
+        })
+        .collect())
 }

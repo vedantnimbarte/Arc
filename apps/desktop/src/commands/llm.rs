@@ -144,3 +144,15 @@ pub async fn llm_cancel(state: State<'_, LlmState>, id: String) -> Result<(), St
     }
     Ok(())
 }
+
+/// Live-fetch the model catalog for a provider.
+#[tauri::command]
+pub async fn llm_list_models(
+    provider: String,
+    api_key: Option<String>,
+    base_url: Option<String>,
+) -> Result<Vec<arc_ai_runtime::ModelInfo>, String> {
+    arc_ai_runtime::list_models(&provider, api_key, base_url)
+        .await
+        .map_err(|e| e.to_string())
+}

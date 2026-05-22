@@ -55,6 +55,22 @@ pub struct Chunk {
     pub done: bool,
 }
 
+/// One row returned by `list_models`. `id` is the value sent back in
+/// chat requests; `label` is a friendlier name when the provider supplies
+/// one. `context_window` is the maximum token capacity if advertised.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ModelInfo {
+    pub id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub context_window: Option<u32>,
+    /// Free-form provider-side label ("chat", "embed", "vision", …) used to
+    /// filter out non-chat models in the picker.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub kind: Option<String>,
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum ProviderError {
     #[error("http error: {0}")]
@@ -79,6 +95,21 @@ pub trait Provider: Send + Sync {
         &self,
         req: ChatRequest,
     ) -> Result<BoxStream<'static, Result<Chunk, ProviderError>>, ProviderError>;
+}
+
+/// Fetch the live model catalog from a provider. Each backend has its own
+/// shape; the dispatcher hides that and returns a normalized list.
+pub async fn list_models(
+    id: &str,
+    api_key: Option<String>,
+    base_url: Option<String>,
+) -> Result<Vec<ModelInfo>, ProviderError> {
+    match id {
+        "openai" => providers::openai::list_models(api_key, base_url).await,
+        "anthropic" => providers::anthropic::list_models(api_key, base_url).await,
+        "ollama" => providers::ollama::list_models(base_url).await,
+        other => Err(ProviderError::Other(format!("unknown provider: {other}"))),
+    }
 }
 
 /// Build a provider by id with the given API key and (for Ollama) base URL.

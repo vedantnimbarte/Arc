@@ -3,6 +3,7 @@ import ReactDOM from 'react-dom/client';
 import App from './App';
 import { SettingsPage } from './components/SettingsPage';
 import { rehydrateSettingsFromBroadcast, useSettings } from './state/settings';
+import { useModels } from './state/models';
 import { onSettingsChanged } from './lib/tauri';
 import './index.css';
 
@@ -21,6 +22,8 @@ const view =
 function Root() {
   const hydrateSettings = useSettings((s) => s.hydrateSettings);
   const hydrateSecrets = useSettings((s) => s.hydrateSecrets);
+  const secretsHydrated = useSettings((s) => s.secretsHydrated);
+  const warmUpModels = useModels((s) => s.warmUpEnabled);
 
   // Both windows hydrate from SQLite on boot so themes/fonts apply
   // immediately, and both subscribe to `settings://changed` so a save
@@ -31,6 +34,12 @@ function Root() {
   useEffect(() => {
     void hydrateSecrets();
   }, [hydrateSecrets]);
+  // Warm up the model catalog once keys are loaded so the picker pops open
+  // populated rather than empty. Best-effort — silent on failure.
+  useEffect(() => {
+    if (!secretsHydrated) return;
+    void warmUpModels();
+  }, [secretsHydrated, warmUpModels]);
 
   useEffect(() => {
     let unlisten: (() => void) | undefined;

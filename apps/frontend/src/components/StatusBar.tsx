@@ -13,6 +13,7 @@ import { useFiles } from '../state/files';
 import { cn } from '../lib/cn';
 import { formatBinding, getBinding } from '../state/shortcuts';
 import { BranchPicker } from './BranchPicker';
+import { ModelTriggerPill } from './ChatPanel';
 
 interface Props {
   chatOpen: boolean;
@@ -91,6 +92,8 @@ export function StatusBar({ chatOpen, onToggleChat, onOpenShortcuts }: Props) {
           <span className="max-w-[220px] truncate font-mono text-[10px] text-fg-subtle">
             {active ?? '—'}
           </span>
+          <span className="text-fg-subtle">·</span>
+          <ModelTriggerPill placement="up" align="end" compact />
           <span className="text-fg-subtle">·</span>
 
           {/* Trailing control cluster — all three pills share the same

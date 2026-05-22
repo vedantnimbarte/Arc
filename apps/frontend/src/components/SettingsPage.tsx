@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Cpu,
-  Boxes,
+  Cloud,
+  HardDrive,
   Keyboard,
   SlidersHorizontal,
   Terminal as TerminalIcon,
@@ -14,6 +15,7 @@ import {
   Plus,
   X,
   ChevronDown,
+  ChevronRight,
   Info,
   Sun,
   Moon,
@@ -23,14 +25,21 @@ import {
   AlertTriangle,
   Github,
   ExternalLink,
+  Zap,
+  ClipboardPaste,
+  RefreshCw,
+  PowerOff,
 } from 'lucide-react';
+import { useSettings } from '../state/settings';
 import {
-  PROVIDER_LABELS,
-  PROVIDER_MODELS,
-  useSettings,
-} from '../state/settings';
+  PROVIDER_PRESETS,
+  TINT_CLASSES,
+  presetOrDefault,
+  type ProviderPreset,
+} from '../state/providers';
+import { resolveModelsFor, useModels } from '../state/models';
 import { useFiles } from '../state/files';
-import { isTauri, ptyListShells, type LlmProvider, type ShellInfo } from '../lib/tauri';
+import { isTauri, ptyListShells, type ShellInfo } from '../lib/tauri';
 import { cn } from '../lib/cn';
 import {
   FONT_OPTIONS,
@@ -55,22 +64,17 @@ import { getCurrentWindow } from '@tauri-apps/api/window';
 
 type Pane = 'appearance' | 'shortcuts' | 'terminal' | 'providers' | 'about';
 
-const PROVIDERS: LlmProvider[] = ['openai', 'anthropic', 'ollama'];
-const PROVIDER_ICON: Record<LlmProvider, typeof Cpu> = {
-  openai: Cpu,
-  anthropic: Cpu,
-  ollama: Boxes,
-};
-
 export function SettingsPage() {
   const {
-    activeProvider,
+    activePresetId,
+    enabledPresetIds,
     providers,
     defaultShell,
     appearance,
     fontId,
     fontSize,
-    setActiveProvider,
+    setActivePresetId,
+    setPresetEnabled,
     updateProvider,
     setDefaultShell,
     setAppearance,
@@ -79,7 +83,6 @@ export function SettingsPage() {
   } = useSettings();
 
   const [pane, setPane] = useState<Pane>('appearance');
-  const [showKey, setShowKey] = useState(false);
   const [shells, setShells] = useState<ShellInfo[] | null>(null);
 
   useEffect(() => {
@@ -141,36 +144,35 @@ export function SettingsPage() {
           </div>
         </aside>
 
-        <div className="flex min-w-0 flex-1 flex-col overflow-y-auto p-6">
-          {pane === 'appearance' && (
-            <AppearancePane
-              appearance={appearance}
-              fontId={fontId}
-              fontSize={fontSize}
-              onAppearanceChange={setAppearance}
-              onFontChange={setFontId}
-              onFontSizeChange={setFontSize}
-            />
-          )}
-
-          {pane === 'shortcuts' && <ShortcutsPane />}
-
-          {pane === 'terminal' && (
-            <ShellPicker shells={shells} defaultShell={defaultShell} onPick={setDefaultShell} />
-          )}
-
-          {pane === 'providers' && (
+        <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
+          {pane === 'providers' ? (
             <ProvidersPane
-              activeProvider={activeProvider}
+              activePresetId={activePresetId}
+              enabledPresetIds={enabledPresetIds}
               providers={providers}
-              showKey={showKey}
-              onToggleShowKey={() => setShowKey((v) => !v)}
-              onProviderChange={setActiveProvider}
+              onSetActive={setActivePresetId}
+              onToggleEnabled={setPresetEnabled}
               onUpdateProvider={updateProvider}
             />
+          ) : (
+            <div className="flex flex-1 flex-col overflow-y-auto p-6">
+              {pane === 'appearance' && (
+                <AppearancePane
+                  appearance={appearance}
+                  fontId={fontId}
+                  fontSize={fontSize}
+                  onAppearanceChange={setAppearance}
+                  onFontChange={setFontId}
+                  onFontSizeChange={setFontSize}
+                />
+              )}
+              {pane === 'shortcuts' && <ShortcutsPane />}
+              {pane === 'terminal' && (
+                <ShellPicker shells={shells} defaultShell={defaultShell} onPick={setDefaultShell} />
+              )}
+              {pane === 'about' && <AboutPane />}
+            </div>
           )}
-
-          {pane === 'about' && <AboutPane />}
         </div>
       </div>
     </div>
@@ -694,124 +696,738 @@ function currentBinding(
 
 // ─── Providers ──────────────────────────────────────────────────────────────
 
+interface ProviderConfigRow {
+  apiKey?: string;
+  baseUrl?: string;
+  model: string;
+}
+
 function ProvidersPane({
-  activeProvider,
+  activePresetId,
+  enabledPresetIds,
   providers,
-  showKey,
-  onToggleShowKey,
-  onProviderChange,
+  onSetActive,
+  onToggleEnabled,
   onUpdateProvider,
 }: {
-  activeProvider: LlmProvider;
-  providers: Record<LlmProvider, { apiKey?: string; baseUrl?: string; model: string }>;
-  showKey: boolean;
-  onToggleShowKey: () => void;
-  onProviderChange: (id: LlmProvider) => void;
-  onUpdateProvider: (
-    id: LlmProvider,
-    patch: Partial<{ apiKey: string; baseUrl: string; model: string }>,
-  ) => void;
+  activePresetId: string;
+  enabledPresetIds: string[];
+  providers: Record<string, ProviderConfigRow>;
+  onSetActive: (id: string) => void;
+  onToggleEnabled: (id: string, enabled: boolean) => void;
+  onUpdateProvider: (id: string, patch: Partial<ProviderConfigRow>) => void;
 }) {
-  const cfg = providers[activeProvider];
-  const models = PROVIDER_MODELS[activeProvider];
-  const isOllama = activeProvider === 'ollama';
+  // The row currently shown in the detail panel. Defaults to whatever is
+  // active so the user lands on the preset they actually use.
+  const [selectedId, setSelectedId] = useState(activePresetId);
+  const [query, setQuery] = useState('');
+
+  // Keep selection in sync if `activePresetId` changes from elsewhere
+  // (e.g. cross-window broadcast) — but only if the user hasn't focused a
+  // different row.
+  useEffect(() => {
+    setSelectedId((curr) => (providers[curr] ? curr : activePresetId));
+    // We intentionally don't follow activePresetId on every change — the
+    // user is allowed to inspect a non-active provider without it snapping
+    // back. Only adjust when the current selection vanishes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activePresetId]);
+
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return PROVIDER_PRESETS;
+    return PROVIDER_PRESETS.filter(
+      (p) =>
+        p.label.toLowerCase().includes(q) ||
+        p.id.toLowerCase().includes(q) ||
+        p.description.toLowerCase().includes(q),
+    );
+  }, [query]);
+
+  const cloud = filtered.filter((p) => p.category === 'cloud');
+  const local = filtered.filter((p) => p.category === 'local');
+  const selected = presetOrDefault(selectedId);
+  const selectedCfg = providers[selected.id] ?? { model: selected.defaultModels[0] ?? '' };
 
   return (
-    <div className="space-y-6">
-      <Section title="Service">
-        <div className="inline-flex rounded-lg bg-bg-base/55 p-0.5 ring-1 ring-border-subtle">
-          {PROVIDERS.map((id) => {
-            const Icon = PROVIDER_ICON[id];
-            const isActive = id === activeProvider;
-            return (
+    <div className="flex h-full min-h-0 flex-1 overflow-hidden">
+      {/* Provider directory */}
+      <aside className="flex w-[240px] shrink-0 flex-col border-r border-border-hairline bg-bg-base/30">
+        <div className="border-b border-border-hairline px-3 pb-2 pt-3">
+          <div className="flex items-center gap-2 rounded-md border border-border-subtle bg-bg-base/60 px-2.5 py-1.5 focus-within:border-accent/45 focus-within:shadow-focus">
+            <Search size={11} strokeWidth={2.2} className="text-fg-subtle" />
+            <input
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="filter providers…"
+              className="flex-1 bg-transparent font-display text-[12px] text-fg-base placeholder:text-fg-subtle focus:outline-none"
+              autoComplete="off"
+              spellCheck={false}
+            />
+            {query && (
               <button
-                key={id}
-                onClick={() => onProviderChange(id)}
-                className={cn(
-                  'flex items-center gap-1.5 rounded-[7px] px-3 py-1.5 font-display text-[12px] font-medium tracking-tight transition-all duration-150 ease-apple',
-                  isActive
-                    ? 'bg-bg-subtle text-fg-base shadow-control'
-                    : 'text-fg-muted hover:text-fg-base',
-                )}
+                onClick={() => setQuery('')}
+                className="rounded p-0.5 text-fg-subtle hover:bg-white/[0.08] hover:text-fg-base"
+                aria-label="Clear filter"
               >
-                <Icon size={11} strokeWidth={2.2} className={isActive ? 'text-accent' : ''} />
-                {PROVIDER_LABELS[id]}
+                <X size={9} strokeWidth={2.2} />
               </button>
-            );
-          })}
-        </div>
-      </Section>
-
-      <Section title="Model">
-        {isOllama ? (
-          <input
-            value={cfg.model}
-            onChange={(e) => onUpdateProvider(activeProvider, { model: e.target.value })}
-            placeholder="llama3.2:1b"
-            className="w-full rounded-lg border border-border-subtle bg-bg-base/60 px-3 py-1.5 font-mono text-[12px] text-fg-base placeholder:text-fg-subtle focus:border-accent/45 focus:bg-bg-base/80 focus:shadow-focus"
-          />
-        ) : (
-          <div className="flex flex-wrap gap-1.5">
-            {models.map((m) => {
-              const isActive = m === cfg.model;
-              return (
-                <button
-                  key={m}
-                  onClick={() => onUpdateProvider(activeProvider, { model: m })}
-                  className={cn(
-                    'rounded-md border px-2.5 py-1 font-mono text-[11px] transition-all duration-150 ease-apple',
-                    isActive
-                      ? 'border-accent/50 bg-accent-soft text-fg-base shadow-glow-sm'
-                      : 'border-border-subtle bg-bg-base/40 text-fg-muted hover:border-border-strong hover:text-fg-base',
-                  )}
-                >
-                  {m}
-                </button>
-              );
-            })}
+            )}
           </div>
-        )}
-      </Section>
+        </div>
 
-      {!isOllama && (
-        <Section
+        <div className="flex-1 overflow-y-auto py-2">
+          <ProviderGroup
+            label="Cloud"
+            icon={Cloud}
+            count={cloud.length}
+            items={cloud}
+            providers={providers}
+            enabledPresetIds={enabledPresetIds}
+            activePresetId={activePresetId}
+            selectedId={selected.id}
+            onSelect={setSelectedId}
+          />
+          <ProviderGroup
+            label="Local"
+            icon={HardDrive}
+            count={local.length}
+            items={local}
+            providers={providers}
+            enabledPresetIds={enabledPresetIds}
+            activePresetId={activePresetId}
+            selectedId={selected.id}
+            onSelect={setSelectedId}
+          />
+          {filtered.length === 0 && (
+            <div className="px-4 pt-6 text-center font-display text-[11px] italic text-fg-subtle">
+              no providers match "{query}"
+            </div>
+          )}
+        </div>
+      </aside>
+
+      {/* Detail panel */}
+      <section className="flex min-w-0 flex-1 flex-col overflow-y-auto">
+        <ProviderDetail
+          key={selected.id}
+          preset={selected}
+          cfg={selectedCfg}
+          isActive={selected.id === activePresetId}
+          isEnabled={enabledPresetIds.includes(selected.id)}
+          onSetActive={() => onSetActive(selected.id)}
+          onToggleEnabled={(enabled) => onToggleEnabled(selected.id, enabled)}
+          onUpdate={(patch) => onUpdateProvider(selected.id, patch)}
+        />
+      </section>
+    </div>
+  );
+}
+
+function ProviderGroup({
+  label,
+  icon: Icon,
+  count,
+  items,
+  providers,
+  enabledPresetIds,
+  activePresetId,
+  selectedId,
+  onSelect,
+}: {
+  label: string;
+  icon: typeof Cloud;
+  count: number;
+  items: ProviderPreset[];
+  providers: Record<string, ProviderConfigRow>;
+  enabledPresetIds: string[];
+  activePresetId: string;
+  selectedId: string;
+  onSelect: (id: string) => void;
+}) {
+  if (items.length === 0) return null;
+  return (
+    <div className="mb-3">
+      <div className="flex items-center justify-between px-3 pb-1 pt-1">
+        <div className="flex items-center gap-1.5">
+          <Icon size={9} strokeWidth={2.4} className="text-fg-subtle" />
+          <h4 className="font-display text-[10px] font-semibold uppercase tracking-widest2 text-fg-subtle">
+            {label}
+          </h4>
+        </div>
+        <span className="font-mono text-[9.5px] text-fg-subtle">{count}</span>
+      </div>
+      <div className="flex flex-col">
+        {items.map((p) => (
+          <ProviderRow
+            key={p.id}
+            preset={p}
+            cfg={providers[p.id]}
+            selected={p.id === selectedId}
+            active={p.id === activePresetId}
+            enabled={enabledPresetIds.includes(p.id)}
+            onSelect={() => onSelect(p.id)}
+          />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function ProviderRow({
+  preset,
+  cfg,
+  selected,
+  active,
+  enabled,
+  onSelect,
+}: {
+  preset: ProviderPreset;
+  cfg: ProviderConfigRow | undefined;
+  selected: boolean;
+  active: boolean;
+  enabled: boolean;
+  onSelect: () => void;
+}) {
+  const configured = !preset.needsApiKey || Boolean(cfg?.apiKey);
+  return (
+    <button
+      onClick={onSelect}
+      className={cn(
+        'group relative flex w-full items-center gap-2.5 px-3 py-2 text-left transition-colors duration-100 ease-apple',
+        selected
+          ? 'bg-accent-soft'
+          : 'hover:bg-white/[0.035]',
+      )}
+    >
+      <span
+        aria-hidden
+        className={cn(
+          'absolute left-0 top-1/2 h-5 w-[2px] -translate-y-1/2 rounded-r-full transition-colors',
+          selected ? 'bg-accent' : 'bg-transparent',
+        )}
+      />
+      <StatusDot configured={configured} enabled={enabled} />
+      <Monogram preset={preset} small dimmed={!enabled} />
+      <div className="min-w-0 flex-1">
+        <div className="flex items-center gap-1.5">
+          <span
+            className={cn(
+              'truncate font-display text-[12.5px] font-medium tracking-tight',
+              enabled ? 'text-fg-base' : 'text-fg-muted',
+            )}
+          >
+            {preset.label}
+          </span>
+          {active && <ActivePill label="Current" />}
+          {!active && enabled && <EnabledPill />}
+        </div>
+        <p className="truncate font-mono text-[10px] text-fg-subtle">
+          {cfg?.model || preset.defaultModels[0] || 'no model set'}
+        </p>
+      </div>
+    </button>
+  );
+}
+
+function StatusDot({
+  configured,
+  enabled = true,
+}: {
+  configured: boolean;
+  enabled?: boolean;
+}) {
+  return (
+    <span
+      aria-hidden
+      className={cn(
+        'inline-block h-[5px] w-[5px] shrink-0 rounded-full',
+        configured && enabled
+          ? 'bg-accent shadow-[0_0_4px_0_rgba(220,224,232,0.55)]'
+          : configured
+            ? 'bg-fg-subtle'
+            : 'border border-border-strong',
+      )}
+    />
+  );
+}
+
+function ActivePill({ label = 'Active' }: { label?: string }) {
+  return (
+    <span className="rounded bg-accent-soft px-1 py-0.5 font-display text-[8.5px] font-semibold uppercase tracking-widest2 text-accent-bright ring-1 ring-inset ring-accent/30">
+      {label}
+    </span>
+  );
+}
+
+function EnabledPill() {
+  return (
+    <span className="rounded bg-white/[0.06] px-1 py-0.5 font-display text-[8.5px] font-semibold uppercase tracking-widest2 text-fg-muted ring-1 ring-inset ring-white/10">
+      On
+    </span>
+  );
+}
+
+function Monogram({
+  preset,
+  small,
+  dimmed,
+}: {
+  preset: ProviderPreset;
+  small?: boolean;
+  dimmed?: boolean;
+}) {
+  const tint = TINT_CLASSES[preset.tint];
+  return (
+    <span
+      className={cn(
+        'inline-flex shrink-0 items-center justify-center rounded-md font-display font-semibold ring-1 ring-inset transition-opacity',
+        tint.bg,
+        tint.fg,
+        tint.ring,
+        small ? 'h-[22px] w-[22px] text-[11px]' : 'h-[34px] w-[34px] text-[15px]',
+        dimmed && 'opacity-50',
+      )}
+      aria-hidden
+    >
+      {preset.monogram}
+    </span>
+  );
+}
+
+function ProviderDetail({
+  preset,
+  cfg,
+  isActive,
+  isEnabled,
+  onSetActive,
+  onToggleEnabled,
+  onUpdate,
+}: {
+  preset: ProviderPreset;
+  cfg: ProviderConfigRow;
+  isActive: boolean;
+  isEnabled: boolean;
+  onSetActive: () => void;
+  onToggleEnabled: (enabled: boolean) => void;
+  onUpdate: (patch: Partial<ProviderConfigRow>) => void;
+}) {
+  const [showKey, setShowKey] = useState(false);
+  const [advancedOpen, setAdvancedOpen] = useState(Boolean(preset.advancedDefault));
+  const [customModel, setCustomModel] = useState('');
+  const [testState, setTestState] = useState<'idle' | 'running' | 'ok' | 'fail'>('idle');
+
+  // Live model catalog — pulled the first time this preset is selected.
+  const entry = useModels((s) => s.entries[preset.id]);
+  const fetchModels = useModels((s) => s.fetch);
+  const loading = entry?.status === 'loading';
+  const errored = entry?.status === 'error';
+
+  useEffect(() => {
+    setShowKey(false);
+    setAdvancedOpen(Boolean(preset.advancedDefault));
+    setCustomModel('');
+    setTestState('idle');
+    if (!preset.needsApiKey || cfg.apiKey) {
+      void fetchModels(preset.id).catch(() => {});
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [preset.id]);
+
+  const configured = !preset.needsApiKey || Boolean(cfg.apiKey);
+  const liveModels = resolveModelsFor(preset.id, entry);
+  const knownIds = liveModels.map((m) => m.id);
+  const modelInKnown = knownIds.includes(cfg.model);
+  const showFreeForm = preset.freeFormModel || knownIds.length === 0;
+  const openExternal = (url: string) => window.open(url, '_blank', 'noopener,noreferrer');
+
+  const handlePasteKey = async () => {
+    try {
+      const text = await navigator.clipboard.readText();
+      if (text) onUpdate({ apiKey: text.trim() });
+    } catch {
+      /* clipboard blocked */
+    }
+  };
+
+  // `Test` is a placeholder for a 1-token completion ping. The real wire-up
+  // can land later; for now flash the affordance so the visual story is
+  // complete.
+  const handleTest = () => {
+    setTestState('running');
+    setTimeout(() => setTestState(configured ? 'ok' : 'fail'), 600);
+    setTimeout(() => setTestState('idle'), 2400);
+  };
+
+  return (
+    <div className="flex flex-col gap-6 px-6 py-5 animate-fade-in">
+      {/* Identity */}
+      <header className="flex items-start gap-3">
+        <Monogram preset={preset} />
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-2">
+            <h2 className="truncate font-display text-[15px] font-semibold tracking-tight text-fg-base">
+              {preset.label}
+            </h2>
+            <span className="rounded border border-border-subtle bg-bg-base/40 px-1.5 py-0.5 font-display text-[9.5px] font-medium uppercase tracking-widest2 text-fg-muted">
+              {preset.category}
+            </span>
+            {isActive && <ActivePill />}
+          </div>
+          <p className="mt-0.5 font-display text-[11.5px] text-fg-muted">
+            {preset.description}
+          </p>
+        </div>
+      </header>
+
+      <div className="h-px bg-border-hairline" />
+
+      {/* API key */}
+      {preset.needsApiKey && (
+        <FieldSection
           title="API Key"
-          hint="Stored in the OS credential vault (Keychain on macOS, Credential Manager on Windows, libsecret on Linux). Never written to localStorage."
+          hint="Stored in the OS credential vault — never written to localStorage."
         >
           <div className="group flex items-center gap-2 rounded-lg border border-border-subtle bg-bg-base/60 px-3 py-1.5 focus-within:border-accent/45 focus-within:bg-bg-base/80 focus-within:shadow-focus">
             <Key size={11} className="text-fg-subtle" />
             <input
               type={showKey ? 'text' : 'password'}
               value={cfg.apiKey ?? ''}
-              onChange={(e) => onUpdateProvider(activeProvider, { apiKey: e.target.value })}
-              placeholder={activeProvider === 'openai' ? 'sk-…' : 'sk-ant-…'}
+              onChange={(e) => onUpdate({ apiKey: e.target.value })}
+              placeholder={preset.apiKeyPlaceholder ?? 'paste key here'}
               className="flex-1 bg-transparent font-mono text-[12px] text-fg-base placeholder:text-fg-subtle focus:outline-none"
               autoComplete="off"
               spellCheck={false}
             />
             <button
               type="button"
-              onClick={onToggleShowKey}
-              className="rounded-md p-1 text-fg-subtle hover:bg-white/[0.08] hover:text-fg-base"
+              onClick={handlePasteKey}
+              className="rounded-md p-1 text-fg-subtle transition-colors hover:bg-white/[0.08] hover:text-fg-base"
+              aria-label="Paste from clipboard"
+              title="Paste from clipboard"
+            >
+              <ClipboardPaste size={11} />
+            </button>
+            <button
+              type="button"
+              onClick={() => setShowKey((v) => !v)}
+              className="rounded-md p-1 text-fg-subtle transition-colors hover:bg-white/[0.08] hover:text-fg-base"
               aria-label={showKey ? 'Hide key' : 'Show key'}
             >
               {showKey ? <EyeOff size={11} /> : <Eye size={11} />}
             </button>
           </div>
-        </Section>
+          {preset.signupUrl && (
+            <button
+              onClick={() => openExternal(preset.signupUrl!)}
+              className="mt-1 inline-flex items-center gap-1 font-display text-[10.5px] text-fg-subtle transition-colors hover:text-fg-base"
+            >
+              Get a key
+              <ExternalLink size={9} strokeWidth={2.2} />
+            </button>
+          )}
+        </FieldSection>
       )}
 
-      {isOllama && (
-        <Section title="Base URL">
-          <input
-            value={cfg.baseUrl ?? ''}
-            onChange={(e) => onUpdateProvider(activeProvider, { baseUrl: e.target.value })}
-            placeholder="http://localhost:11434"
-            className="w-full rounded-lg border border-border-subtle bg-bg-base/60 px-3 py-1.5 font-mono text-[12px] text-fg-base placeholder:text-fg-subtle focus:border-accent/45 focus:bg-bg-base/80 focus:shadow-focus"
-          />
-        </Section>
+      {!preset.needsApiKey && preset.signupUrl && (
+        <FieldSection title="Setup" hint={`${preset.label} runs locally — install once, no key required.`}>
+          <button
+            onClick={() => openExternal(preset.signupUrl!)}
+            className="inline-flex items-center gap-1.5 rounded-md border border-border-subtle bg-bg-base/40 px-2.5 py-1.5 font-display text-[11.5px] text-fg-base transition-colors hover:border-border-strong hover:bg-bg-base/60"
+          >
+            Download {preset.label}
+            <ExternalLink size={10} strokeWidth={2.1} className="text-fg-subtle" />
+          </button>
+        </FieldSection>
       )}
+
+      {/* Model — live catalog from the provider API. */}
+      <FieldSection>
+        <div className="flex items-center justify-between">
+          <h3 className="font-display text-[10.5px] font-semibold uppercase tracking-widest2 text-fg-muted">
+            Available models
+          </h3>
+          <div className="flex items-center gap-1.5">
+            {entry?.fetchedAt && (
+              <span className="font-display text-[10px] text-fg-subtle" title={new Date(entry.fetchedAt).toLocaleString()}>
+                fetched {formatAgo(entry.fetchedAt)}
+              </span>
+            )}
+            <button
+              onClick={() => void fetchModels(preset.id, { force: true }).catch(() => {})}
+              disabled={loading || (preset.needsApiKey && !cfg.apiKey)}
+              className={cn(
+                'inline-flex items-center gap-1 rounded-md border px-2 py-0.5 font-display text-[10.5px] transition-colors',
+                loading || (preset.needsApiKey && !cfg.apiKey)
+                  ? 'cursor-not-allowed border-border-subtle text-fg-subtle'
+                  : 'border-border-subtle text-fg-muted hover:border-border-strong hover:text-fg-base',
+              )}
+              title="Refresh from provider API"
+            >
+              <RefreshCw
+                size={9}
+                strokeWidth={2.2}
+                className={cn(loading && 'animate-spin')}
+              />
+              {loading ? 'Loading…' : 'Refresh'}
+            </button>
+          </div>
+        </div>
+
+        {errored && entry?.error && (
+          <div className="flex items-center gap-1.5 rounded-md border border-status-warn/30 bg-status-warn/10 px-2.5 py-1 font-display text-[11px] text-status-warn">
+            <AlertTriangle size={10} strokeWidth={2.1} />
+            {entry.error.startsWith('no api key')
+              ? 'Set an API key above to fetch models.'
+              : `Could not fetch models — ${entry.error.slice(0, 80)}`}
+          </div>
+        )}
+
+        {liveModels.length > 0 ? (
+          <div className="flex flex-wrap gap-1.5">
+            {liveModels.map((m) => {
+              const selectedModel = m.id === cfg.model;
+              return (
+                <button
+                  key={m.id}
+                  onClick={() => onUpdate({ model: m.id })}
+                  className={cn(
+                    'rounded-md border px-2.5 py-1 font-mono text-[11px] transition-all duration-150 ease-apple',
+                    selectedModel
+                      ? 'border-accent/50 bg-accent-soft text-fg-base shadow-glow-sm'
+                      : 'border-border-subtle bg-bg-base/40 text-fg-muted hover:border-border-strong hover:text-fg-base',
+                  )}
+                  title={m.label ?? m.id}
+                >
+                  {m.label ?? m.id}
+                </button>
+              );
+            })}
+          </div>
+        ) : !loading && !errored ? (
+          <p className="font-display text-[11px] text-fg-subtle">
+            No models cached yet. Click Refresh once a key is in place.
+          </p>
+        ) : null}
+
+        {showFreeForm && (
+          <div className="mt-2">
+            <div className="font-display text-[10px] font-semibold uppercase tracking-widest2 text-fg-subtle">
+              {liveModels.length > 0 ? 'Custom model' : 'Model name'}
+            </div>
+            <input
+              value={modelInKnown ? customModel : cfg.model}
+              onChange={(e) => {
+                const v = e.target.value;
+                setCustomModel(v);
+                onUpdate({ model: v });
+              }}
+              placeholder={
+                preset.id === 'ollama'
+                  ? 'llama3.2:1b'
+                  : preset.id === 'lmstudio'
+                    ? 'whatever-you-loaded'
+                    : 'provider/model-id'
+              }
+              className="mt-1 w-full rounded-lg border border-border-subtle bg-bg-base/60 px-3 py-1.5 font-mono text-[12px] text-fg-base placeholder:text-fg-subtle focus:border-accent/45 focus:bg-bg-base/80 focus:shadow-focus focus:outline-none"
+              autoComplete="off"
+              spellCheck={false}
+            />
+          </div>
+        )}
+      </FieldSection>
+
+      {/* Advanced */}
+      <FieldSection>
+        <button
+          onClick={() => setAdvancedOpen((v) => !v)}
+          className="flex items-center gap-1 font-display text-[11px] font-semibold uppercase tracking-widest2 text-fg-muted transition-colors hover:text-fg-base"
+        >
+          {advancedOpen ? <ChevronDown size={10} strokeWidth={2.4} /> : <ChevronRight size={10} strokeWidth={2.4} />}
+          Advanced
+        </button>
+        {advancedOpen && (
+          <div className="mt-2 space-y-3 rounded-lg border border-border-subtle bg-bg-base/30 p-3">
+            <div>
+              <div className="mb-1 font-display text-[10px] font-semibold uppercase tracking-widest2 text-fg-subtle">
+                Base URL
+              </div>
+              <input
+                value={cfg.baseUrl ?? ''}
+                onChange={(e) => onUpdate({ baseUrl: e.target.value })}
+                placeholder={preset.defaultBaseUrl || 'https://your-endpoint/v1'}
+                className="w-full rounded-md border border-border-subtle bg-bg-base/60 px-3 py-1.5 font-mono text-[11.5px] text-fg-base placeholder:text-fg-subtle focus:border-accent/45 focus:bg-bg-base/80 focus:shadow-focus focus:outline-none"
+                autoComplete="off"
+                spellCheck={false}
+              />
+              {preset.defaultBaseUrl && cfg.baseUrl && cfg.baseUrl !== preset.defaultBaseUrl && (
+                <button
+                  onClick={() => onUpdate({ baseUrl: preset.defaultBaseUrl })}
+                  className="mt-1 inline-flex items-center gap-1 font-display text-[10.5px] text-fg-subtle transition-colors hover:text-fg-base"
+                >
+                  <RotateCcw size={9} strokeWidth={2.2} />
+                  reset to default
+                </button>
+              )}
+            </div>
+            <div className="flex items-center justify-between gap-3 font-display text-[10.5px] text-fg-subtle">
+              <span>Backend kind</span>
+              <span className="font-mono text-fg-muted">{preset.kind}</span>
+            </div>
+          </div>
+        )}
+      </FieldSection>
+
+      {/* Action row — Enabled toggle, Make current, Test. */}
+      <div className="flex flex-wrap items-center gap-2 pt-2">
+        <EnabledToggle
+          enabled={isEnabled}
+          disabled={preset.needsApiKey && !cfg.apiKey}
+          onToggle={onToggleEnabled}
+        />
+        {isActive ? (
+          <span className="inline-flex items-center gap-1.5 rounded-md border border-accent/40 bg-accent-soft px-3 py-1.5 font-display text-[12px] font-medium tracking-tight text-fg-base shadow-glow-sm">
+            <Check size={11} strokeWidth={2.2} className="text-accent-bright" />
+            Current selection
+          </span>
+        ) : (
+          <button
+            onClick={onSetActive}
+            disabled={!isEnabled}
+            className={cn(
+              'inline-flex items-center gap-1.5 rounded-md border px-3 py-1.5 font-display text-[12px] font-medium tracking-tight transition-all duration-150 ease-apple',
+              !isEnabled
+                ? 'cursor-not-allowed border-border-subtle bg-bg-base/30 text-fg-subtle'
+                : 'border-accent/45 bg-accent-soft text-fg-base hover:bg-accent/15 hover:shadow-glow-sm',
+            )}
+            title="Use this provider for the next chat turn"
+          >
+            <Zap size={11} strokeWidth={2.2} />
+            Use now
+          </button>
+        )}
+        <button
+          onClick={handleTest}
+          disabled={preset.needsApiKey && !cfg.apiKey}
+          className={cn(
+            'inline-flex items-center gap-1.5 rounded-md border px-3 py-1.5 font-display text-[12px] font-medium tracking-tight transition-colors',
+            preset.needsApiKey && !cfg.apiKey
+              ? 'cursor-not-allowed border-border-subtle bg-bg-base/30 text-fg-subtle'
+              : 'border-border-subtle bg-bg-base/40 text-fg-muted hover:border-border-strong hover:text-fg-base',
+          )}
+          title="Send a 1-token ping (coming soon)"
+        >
+          {testState === 'running' && (
+            <span className="h-2 w-2 animate-pulse-soft rounded-full bg-accent" />
+          )}
+          {testState === 'ok' && <Check size={11} strokeWidth={2.2} className="text-status-ok" />}
+          {testState === 'fail' && (
+            <AlertTriangle size={11} strokeWidth={2.2} className="text-status-warn" />
+          )}
+          {testState === 'idle' && <Cpu size={11} strokeWidth={2.2} />}
+          {testState === 'running'
+            ? 'Testing…'
+            : testState === 'ok'
+              ? 'OK'
+              : testState === 'fail'
+                ? 'Failed'
+                : 'Test'}
+        </button>
+        <span className="ml-auto font-display text-[10.5px] text-fg-subtle">
+          {configured ? 'connected' : preset.needsApiKey ? 'needs key' : 'ready'}
+        </span>
+      </div>
     </div>
+  );
+}
+
+function EnabledToggle({
+  enabled,
+  disabled,
+  onToggle,
+}: {
+  enabled: boolean;
+  disabled: boolean;
+  onToggle: (next: boolean) => void;
+}) {
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={enabled}
+      onClick={() => onToggle(!enabled)}
+      disabled={disabled}
+      className={cn(
+        'inline-flex items-center gap-2 rounded-md border px-3 py-1.5 font-display text-[12px] font-medium tracking-tight transition-colors',
+        disabled
+          ? 'cursor-not-allowed border-border-subtle bg-bg-base/30 text-fg-subtle'
+          : enabled
+            ? 'border-border-strong bg-bg-base/60 text-fg-base hover:bg-bg-base/80'
+            : 'border-border-subtle bg-bg-base/30 text-fg-muted hover:border-border-strong hover:text-fg-base',
+      )}
+      title={enabled ? 'Hide from model picker' : 'Show in model picker'}
+    >
+      <span
+        className={cn(
+          'inline-flex h-[14px] w-[24px] shrink-0 items-center rounded-full transition-colors',
+          enabled ? 'bg-accent/80' : 'bg-bg-base/60 ring-1 ring-inset ring-border-subtle',
+        )}
+      >
+        <span
+          className={cn(
+            'inline-block h-[10px] w-[10px] rounded-full bg-white shadow-sm transition-transform',
+            enabled ? 'translate-x-[12px]' : 'translate-x-[2px]',
+          )}
+        />
+      </span>
+      {enabled ? (
+        <>
+          <Check size={10} strokeWidth={2.4} className="text-accent-bright" />
+          Enabled
+        </>
+      ) : (
+        <>
+          <PowerOff size={10} strokeWidth={2.2} />
+          Disabled
+        </>
+      )}
+    </button>
+  );
+}
+
+function formatAgo(ts: number): string {
+  const diff = Math.max(0, Date.now() - ts);
+  const sec = Math.floor(diff / 1000);
+  if (sec < 60) return `${sec}s ago`;
+  const min = Math.floor(sec / 60);
+  if (min < 60) return `${min}m ago`;
+  const hr = Math.floor(min / 60);
+  if (hr < 24) return `${hr}h ago`;
+  const d = Math.floor(hr / 24);
+  return `${d}d ago`;
+}
+
+function FieldSection({
+  title,
+  hint,
+  children,
+}: {
+  title?: string;
+  hint?: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <section className="space-y-1.5">
+      {title && (
+        <h3 className="font-display text-[10.5px] font-semibold uppercase tracking-widest2 text-fg-muted">
+          {title}
+        </h3>
+      )}
+      {children}
+      {hint && (
+        <p className="font-display text-[10.5px] leading-relaxed text-fg-subtle">{hint}</p>
+      )}
+    </section>
   );
 }
 

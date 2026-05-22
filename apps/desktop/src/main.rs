@@ -40,6 +40,7 @@ fn main() {
             commands::pty::pty_list_ai_clis,
             commands::llm::llm_stream,
             commands::llm::llm_cancel,
+            commands::llm::llm_list_models,
             commands::fs::fs_default_root,
             commands::fs::fs_parent,
             commands::fs::fs_read_dir,

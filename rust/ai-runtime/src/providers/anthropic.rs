@@ -7,7 +7,7 @@ use futures_util::stream::{BoxStream, StreamExt};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 
-use crate::{ChatRequest, Chunk, Provider, ProviderError, Role};
+use crate::{ChatRequest, Chunk, ModelInfo, Provider, ProviderError, Role};
 
 const DEFAULT_BASE: &str = "https://api.anthropic.com";
 const ANTHROPIC_VERSION: &str = "2023-06-01";
@@ -136,4 +136,49 @@ impl Provider for AnthropicProvider {
 
         Ok(stream.boxed())
     }
+}
+
+#[derive(Deserialize)]
+struct AnthropicModelsEnvelope {
+    #[serde(default)]
+    data: Vec<AnthropicModelRow>,
+}
+
+#[derive(Deserialize)]
+struct AnthropicModelRow {
+    id: String,
+    #[serde(default)]
+    display_name: Option<String>,
+}
+
+pub async fn list_models(
+    api_key: Option<String>,
+    base_url: Option<String>,
+) -> Result<Vec<ModelInfo>, ProviderError> {
+    let base = base_url.unwrap_or_else(|| DEFAULT_BASE.to_string());
+    let url = format!("{}/v1/models?limit=1000", base.trim_end_matches('/'));
+    let key = api_key.ok_or(ProviderError::MissingKey)?;
+    let client = reqwest::Client::new();
+    let resp = client
+        .get(&url)
+        .header("x-api-key", &key)
+        .header("anthropic-version", ANTHROPIC_VERSION)
+        .send()
+        .await?;
+    if !resp.status().is_success() {
+        let status = resp.status().as_u16();
+        let body = resp.text().await.unwrap_or_default();
+        return Err(ProviderError::Status { status, body });
+    }
+    let env: AnthropicModelsEnvelope = resp.json().await.map_err(ProviderError::Http)?;
+    Ok(env
+        .data
+        .into_iter()
+        .map(|m| ModelInfo {
+            label: m.display_name,
+            id: m.id,
+            context_window: None,
+            kind: None,
+        })
+        .collect())
 }

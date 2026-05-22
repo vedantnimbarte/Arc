@@ -24,7 +24,13 @@ import {
   type LucideIcon,
 } from 'lucide-react';
 import { useChat } from '../state/chat';
-import { useSettings, PROVIDER_LABELS } from '../state/settings';
+import {
+  useSettings,
+  useActivePreset,
+  useActiveProviderConfig,
+} from '../state/settings';
+import { ModelPicker, useCurrentModelLabel } from './ModelPicker';
+import { TINT_CLASSES } from '../state/providers';
 import {
   AGENT_ICONS,
   AGENT_TINTS,
@@ -90,8 +96,10 @@ export function ChatPanel({ onClose, intent, onIntentConsumed }: ChatPanelProps 
     s.sessions.find((x) => x.id === s.activeSessionId) ?? null,
   );
 
-  const { activeProvider, providers, systemPrompt } = useSettings();
-  const cfg = providers[activeProvider];
+  const providers = useSettings((s) => s.providers);
+  const systemPrompt = useSettings((s) => s.systemPrompt);
+  const activePreset = useActivePreset();
+  const cfg = useActiveProviderConfig();
 
   // Resolve the agent persona for the current session. Falls back to the
   // first built-in agent if the stored agentId is unknown (e.g. a custom
@@ -176,7 +184,7 @@ export function ChatPanel({ onClose, intent, onIntentConsumed }: ChatPanelProps 
       append({ role: 'user', content: text });
       const id = append({ role: 'assistant', content: '' });
       setStreaming(true);
-      const reply = `(stub · run via pnpm tauri:dev for real ${PROVIDER_LABELS[activeProvider]} calls)`;
+      const reply = `(stub · run via pnpm tauri:dev for real ${activePreset.label} calls)`;
       for (const word of reply.split(' ')) {
         await new Promise((r) => setTimeout(r, 30));
         appendChunk(id, word + ' ');
@@ -185,10 +193,10 @@ export function ChatPanel({ onClose, intent, onIntentConsumed }: ChatPanelProps 
       return;
     }
 
-    if ((activeProvider === 'openai' || activeProvider === 'anthropic') && !cfg.apiKey) {
+    if (activePreset.needsApiKey && !cfg.apiKey) {
       append({
         role: 'system',
-        content: `No API key set for ${PROVIDER_LABELS[activeProvider]}. Open settings (⌘,) to add one.`,
+        content: `No API key set for ${activePreset.label}. Open settings (⌘,) to add one.`,
       });
       return;
     }
@@ -208,12 +216,12 @@ export function ChatPanel({ onClose, intent, onIntentConsumed }: ChatPanelProps 
     cancelRef.current = await llmStream(
       {
         id: reqId,
-        provider: activeProvider,
+        provider: activePreset.kind,
         model: cfg.model,
         messages: wire,
         system: effectiveSystemPrompt,
         api_key: cfg.apiKey || undefined,
-        base_url: cfg.baseUrl || undefined,
+        base_url: cfg.baseUrl || activePreset.defaultBaseUrl || undefined,
       },
       (chunk) => {
         if (chunk.text) appendChunk(assistantId, chunk.text);
@@ -246,7 +254,7 @@ export function ChatPanel({ onClose, intent, onIntentConsumed }: ChatPanelProps 
       return;
     }
     const anthropic = providers.anthropic;
-    if (!anthropic.apiKey) {
+    if (!anthropic?.apiKey) {
       append({
         role: 'system',
         content:
@@ -585,7 +593,7 @@ export function ChatPanel({ onClose, intent, onIntentConsumed }: ChatPanelProps 
             onSend={() => void send()}
             onStop={() => void stop()}
             isStreaming={isStreaming}
-            providerLabel={PROVIDER_LABELS[activeProvider]}
+            providerLabel={activePreset.label}
             agentName={activeAgent.name}
           />
         </ViewLayer>
@@ -1056,18 +1064,89 @@ function Composer({
           )}
         </div>
       </div>
-      <div className="mt-1.5 flex items-center justify-between px-1.5 font-display text-[10px] text-fg-subtle">
-        <span className="tracking-tight">
-          <kbd className="font-mono">return</kbd> to send · <kbd className="font-mono">⇧↵</kbd> for newline · <kbd className="font-mono">/</kbd> for commands
-        </span>
+      <div className="mt-1.5 flex items-center justify-between gap-2 px-1.5 font-display text-[10px] text-fg-subtle">
+        <div className="flex min-w-0 items-center gap-2">
+          <ModelTriggerPill placement="up" align="start" />
+          <span className="hidden truncate tracking-tight sm:inline">
+            <kbd className="font-mono">return</kbd> to send · <kbd className="font-mono">/</kbd> for commands
+          </span>
+        </div>
         {isStreaming && (
-          <span className="flex items-center gap-1.5 text-accent">
+          <span className="flex shrink-0 items-center gap-1.5 text-accent">
             <span className="h-1 w-1 animate-pulse-soft rounded-full bg-accent shadow-glow-sm" />
             streaming
           </span>
         )}
       </div>
     </div>
+  );
+}
+
+/** Pill that opens the global ModelPicker. Lives in two places — the chat
+ *  composer (placement='up') and the status bar (placement='up', align='end').
+ *  Owns the open/close state for its associated picker. */
+export function ModelTriggerPill({
+  placement = 'up',
+  align = 'start',
+  compact,
+}: {
+  placement?: 'up' | 'down';
+  align?: 'start' | 'end';
+  compact?: boolean;
+}) {
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const [open, setOpen] = useState(false);
+  const { presetLabel, modelLabel, preset } = useCurrentModelLabel();
+  const tint = TINT_CLASSES[preset.tint];
+
+  return (
+    <>
+      <button
+        ref={triggerRef}
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        aria-haspopup="dialog"
+        aria-expanded={open}
+        title={`${presetLabel} · ${modelLabel} — click to switch`}
+        className={cn(
+          'group inline-flex max-w-[260px] items-center gap-1.5 rounded-full border transition-colors',
+          compact
+            ? 'h-[18px] px-1.5 text-[10px]'
+            : 'h-[20px] px-1.5 text-[10.5px]',
+          open
+            ? 'border-accent/45 bg-accent-soft text-fg-base shadow-glow-sm'
+            : 'border-border-subtle bg-bg-base/40 text-fg-muted hover:border-border-strong hover:text-fg-base',
+        )}
+      >
+        <span
+          className={cn(
+            'inline-flex h-[12px] w-[12px] items-center justify-center rounded-sm font-display text-[8.5px] font-semibold ring-1 ring-inset',
+            tint.bg,
+            tint.fg,
+            tint.ring,
+          )}
+          aria-hidden
+        >
+          {preset.monogram}
+        </span>
+        <span className="truncate font-mono">{modelLabel}</span>
+        <ChevronDown
+          size={9}
+          strokeWidth={2.4}
+          className={cn(
+            'shrink-0 text-fg-subtle transition-transform',
+            open && 'rotate-180 text-fg-base',
+          )}
+        />
+      </button>
+      <ModelPicker
+        open={open}
+        anchorRef={triggerRef}
+        placement={placement}
+        align={align}
+        onClose={() => setOpen(false)}
+      />
+    </>
   );
 }
 
