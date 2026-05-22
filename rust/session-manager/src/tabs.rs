@@ -62,6 +62,11 @@ pub struct Session {
     pub active_tab_id: Option<String>,
     pub created_at: i64,
     pub last_active_at: i64,
+    /// Serialized pane-layout tree describing how this session's tabs are
+    /// arranged into splits. JSON blob — see `migrations/0006_pane_layout.sql`
+    /// for the shape. `None` means "single-leaf layout containing all tabs"
+    /// and the frontend will synthesize one on hydrate.
+    pub pane_layout: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -73,20 +78,21 @@ pub struct SessionState {
 /// Fetch the most-recent session (creating one if the DB is empty) and its
 /// tabs. The frontend calls this on launch to rehydrate the workspace.
 pub async fn current_or_create(pool: &SqlitePool) -> Result<SessionState> {
-    let row = sqlx::query_as::<_, (String, Option<String>, Option<String>, i64, i64)>(
-        "SELECT id, workspace_id, active_tab_id, created_at, last_active_at \
+    let row = sqlx::query_as::<_, (String, Option<String>, Option<String>, i64, i64, Option<String>)>(
+        "SELECT id, workspace_id, active_tab_id, created_at, last_active_at, pane_layout \
          FROM sessions ORDER BY last_active_at DESC LIMIT 1",
     )
     .fetch_optional(pool)
     .await?;
 
     let session = match row {
-        Some((id, workspace_id, active_tab_id, created_at, last_active_at)) => Session {
+        Some((id, workspace_id, active_tab_id, created_at, last_active_at, pane_layout)) => Session {
             id,
             workspace_id,
             active_tab_id,
             created_at,
             last_active_at,
+            pane_layout,
         },
         None => {
             let now = now_ms();
@@ -106,6 +112,7 @@ pub async fn current_or_create(pool: &SqlitePool) -> Result<SessionState> {
                 active_tab_id: None,
                 created_at: now,
                 last_active_at: now,
+                pane_layout: None,
             }
         }
     };
@@ -145,6 +152,7 @@ pub async fn save_tabs(
     session_id: &str,
     inputs: &[TabInput],
     active_tab_id: Option<&str>,
+    pane_layout: Option<&str>,
 ) -> Result<()> {
     let now = now_ms();
     let mut tx = pool.begin().await?;
@@ -170,12 +178,18 @@ pub async fn save_tabs(
         .await?;
     }
 
-    sqlx::query("UPDATE sessions SET active_tab_id = ?, last_active_at = ? WHERE id = ?")
-        .bind(active_tab_id)
-        .bind(now)
-        .bind(session_id)
-        .execute(&mut *tx)
-        .await?;
+    // Persist the pane-layout JSON alongside the active-tab pointer so a
+    // single write keeps tabs + layout coherent. NULL passes through to
+    // mean "no layout known" — the next hydrate will synthesize one.
+    sqlx::query(
+        "UPDATE sessions SET active_tab_id = ?, last_active_at = ?, pane_layout = ? WHERE id = ?",
+    )
+    .bind(active_tab_id)
+    .bind(now)
+    .bind(pane_layout)
+    .bind(session_id)
+    .execute(&mut *tx)
+    .await?;
 
     tx.commit().await?;
     Ok(())

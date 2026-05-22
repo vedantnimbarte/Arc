@@ -3,7 +3,7 @@
 //! Frontend contract (see apps/frontend/src/lib/tauri.ts):
 //!
 //!   invoke("session_load")                                   -> SessionState
-//!   invoke("session_save_tabs", { sessionId, tabs, activeTabId }) -> ()
+//!   invoke("session_save_tabs", { sessionId, tabs, activeTabId, paneLayout }) -> ()
 //!   invoke("session_set_workspace", { sessionId, workspaceId })   -> ()
 //!
 //!   invoke("session_workspaces_list")                        -> Vec<Workspace>
@@ -38,12 +38,14 @@ pub async fn session_save_tabs(
     session_id: String,
     tabs: Vec<TabInput>,
     active_tab_id: Option<String>,
+    pane_layout: Option<String>,
 ) -> Result<(), String> {
     arc_session_manager::tabs::save_tabs(
         store.pool(),
         &session_id,
         &tabs,
         active_tab_id.as_deref(),
+        pane_layout.as_deref(),
     )
     .await
     .map_err(str_err)

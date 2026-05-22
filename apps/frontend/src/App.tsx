@@ -1,4 +1,5 @@
-import { lazy, Suspense, useEffect, useState } from 'react';
+import { lazy, Suspense, useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { Terminal } from './components/Terminal';
 import { TabBar } from './components/TabBar';
 import { ChatPanel } from './components/ChatPanel';
@@ -8,6 +9,7 @@ import { Sidebar } from './components/Sidebar';
 import { ResizeHandle } from './components/ResizeHandle';
 import { SearchPalette } from './components/SearchPalette';
 import { ShortcutsDialog } from './components/ShortcutsDialog';
+import { PaneTreeView } from './components/PaneTreeView';
 import { useWorkspace } from './state/workspace';
 import { useFiles } from './state/files';
 import { useChat } from './state/chat';
@@ -28,6 +30,79 @@ export default function App() {
   const hydrate = useWorkspace((s) => s.hydrate);
   const hydrateChat = useChat((s) => s.hydrate);
   const activeTab = tabs.find((t) => t.id === activeTabId);
+
+  // Host-div registry — one stable DOM node per tab id. The tab's content
+  // (Terminal / Editor) is portaled into its host once and stays there for
+  // the tab's lifetime. The host node is reparented between the offscreen
+  // stage and whichever pane currently displays the tab, but its React
+  // subtree never unmounts. That's what keeps PTYs alive across drag/drop
+  // and pane splits.
+  const hostsRef = useRef<Map<string, HTMLDivElement>>(new Map());
+  const stageRef = useRef<HTMLDivElement>(null);
+  // Bump on tab list changes to force a re-render so `createPortal` calls
+  // line up with the current set of host divs.
+  const [, setHostTick] = useState(0);
+
+  // Lazily create / GC host divs as tabs come and go.
+  useEffect(() => {
+    const ids = new Set(tabs.map((t) => t.id));
+    const map = hostsRef.current;
+    let changed = false;
+    // Create missing
+    for (const t of tabs) {
+      if (!map.has(t.id)) {
+        const div = document.createElement('div');
+        div.dataset.tabHost = t.id;
+        // The host fills its parent (leaf or stage). The stage hides it
+        // via display:none so xterm doesn't try to measure a 0x0 canvas.
+        div.style.position = 'absolute';
+        div.style.inset = '0';
+        if (stageRef.current) stageRef.current.appendChild(div);
+        map.set(t.id, div);
+        changed = true;
+      }
+    }
+    // Drop closed tabs' hosts
+    for (const id of Array.from(map.keys())) {
+      if (!ids.has(id)) {
+        const node = map.get(id);
+        node?.parentElement?.removeChild(node);
+        map.delete(id);
+        changed = true;
+      }
+    }
+    if (changed) setHostTick((n) => n + 1);
+  }, [tabs]);
+
+  // Build the portal list on every render. createPortal is virtual — React
+  // reconciles each portal by its `key={tab.id}` so the underlying Terminal
+  // / Editor components stay mounted across renders, drag/drop, and pane
+  // moves. Not memoized because the host-div registry is populated in a
+  // post-render effect; we want this list to refresh immediately when the
+  // effect bumps `hostTick`.
+  const portals: React.ReactNode[] = [];
+  for (const tab of tabs) {
+    const host = hostsRef.current.get(tab.id);
+    if (!host) continue;
+    const child =
+      tab.kind === 'terminal' ? (
+        <Terminal sessionKey={tab.id} />
+      ) : tab.filePath ? (
+        <Suspense fallback={<EditorFallback />}>
+          <Editor filePath={tab.filePath} tabId={tab.id} />
+        </Suspense>
+      ) : (
+        <div className="flex h-full items-center justify-center text-fg-muted">
+          <span className="font-display text-[13px] tracking-tight">no file</span>
+        </div>
+      );
+    portals.push(
+      <PortalSlot key={tab.id} host={host}>
+        {child}
+      </PortalSlot>,
+    );
+  }
+  void activeTab;
   const [historyOpen, setHistoryOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
@@ -182,34 +257,11 @@ export default function App() {
               />
             )}
 
-            <main className="dot-grid relative min-w-0 flex-1 overflow-hidden">
-              {tabs.map((tab) => {
-                const isActive = tab.id === activeTab?.id;
-                return (
-                <div
-                  key={tab.id}
-                  className="absolute inset-0"
-                  style={{
-                    visibility: isActive ? 'visible' : 'hidden',
-                    pointerEvents: isActive ? 'auto' : 'none',
-                  }}
-                >
-                  {tab.kind === 'terminal' ? (
-                    <Terminal sessionKey={tab.id} />
-                  ) : tab.filePath ? (
-                    <Suspense fallback={<EditorFallback />}>
-                      <Editor filePath={tab.filePath} tabId={tab.id} />
-                    </Suspense>
-                  ) : (
-                    <div className="flex h-full items-center justify-center text-fg-muted">
-                      <span className="font-display text-[13px] tracking-tight">
-                        no file
-                      </span>
-                    </div>
-                  )}
-                </div>
-                );
-              })}
+            <main className="relative min-w-0 flex-1 overflow-hidden">
+              {/* Recursive pane tree — splits become PanelGroups, leaves
+                  get a tab strip plus a content slot that reparents the
+                  active tab's host div in. */}
+              <PaneTreeView hostsRef={hostsRef} stageRef={stageRef} />
             </main>
           </div>
 
@@ -252,8 +304,24 @@ export default function App() {
       <CommandPalette open={historyOpen} onClose={() => setHistoryOpen(false)} />
       <SearchPalette open={searchOpen} onClose={() => setSearchOpen(false)} />
       <ShortcutsDialog open={shortcutsOpen} onClose={() => setShortcutsOpen(false)} />
+
+      {/* Offscreen host stack. Tab content lives here until a leaf claims it
+          via DOM reparenting. `display:none` keeps the size measurer happy
+          (xterm won't try to render to a 0x0 canvas inside a hidden parent)
+          and `aria-hidden` keeps screen readers off it. */}
+      <div ref={stageRef} className="hidden" aria-hidden />
+
+      {/* Portals: render each tab's content into its dedicated host div.
+          The host div is stable across drag/drop and split moves; the React
+          subtree below the portal therefore never unmounts. */}
+      {portals}
     </div>
   );
+}
+
+/** Tiny wrapper so we can use `createPortal` inside the memoized list. */
+function PortalSlot({ host, children }: { host: HTMLDivElement; children: React.ReactNode }) {
+  return createPortal(children, host);
 }
 
 function EditorFallback() {

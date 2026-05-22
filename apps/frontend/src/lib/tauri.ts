@@ -444,6 +444,9 @@ export interface PersistedSession {
   active_tab_id: string | null;
   created_at: number;
   last_active_at: number;
+  /** Serialized pane-layout tree (JSON). Null when the session predates the
+   *  layout feature — hydration synthesizes a single-leaf layout in that case. */
+  pane_layout: string | null;
 }
 
 export interface SessionState {
@@ -494,8 +497,9 @@ export async function sessionSaveTabs(
   sessionId: string,
   tabs: TabInput[],
   activeTabId: string | null,
+  paneLayout: string | null,
 ): Promise<void> {
-  await invoke('session_save_tabs', { sessionId, tabs, activeTabId });
+  await invoke('session_save_tabs', { sessionId, tabs, activeTabId, paneLayout });
 }
 
 export async function sessionSetWorkspace(

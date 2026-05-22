@@ -183,77 +183,10 @@ export function TabBar({
           distinct zones (chrome controls / tabs). */}
       <div className="ml-0.5 h-5 w-px bg-white/[0.06]" aria-hidden />
 
-      <div className="scrollbar-none flex min-w-0 flex-1 items-center gap-1 overflow-x-auto pl-1">
-        {tabs.map((tab) => {
-          const isActive = tab.id === activeTabId;
-          const Icon = tab.kind === 'terminal' ? TerminalIcon : FileCode;
-          const dirty = !!tabDirty[tab.id];
-          const closable = tabs.length > 1;
-          return (
-            <button
-              key={tab.id}
-              onClick={() => setActive(tab.id)}
-              className={cn(
-                'group relative flex h-[26px] shrink-0 items-center gap-1.5 rounded-[7px] px-2 font-display text-[12px] font-medium tracking-tight transition-all duration-150 ease-apple',
-                isActive
-                  ? 'bg-white/[0.09] text-fg-base shadow-[inset_0_1px_0_0_rgba(255,255,255,0.07),0_1px_2px_0_rgba(0,0,0,0.35)]'
-                  : 'text-fg-muted hover:bg-white/[0.04] hover:text-fg-base/90',
-              )}
-            >
-              <Icon
-                size={11}
-                strokeWidth={2.2}
-                className={cn(
-                  'shrink-0 transition-colors',
-                  isActive ? 'text-accent-bright' : 'text-fg-subtle',
-                )}
-              />
-              <span className="max-w-[150px] truncate">{tab.title}</span>
-              {closable ? (
-                <span
-                  role="button"
-                  tabIndex={0}
-                  aria-label={dirty ? 'Close tab (unsaved changes)' : 'Close tab'}
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    requestClose(tab.id, tab.title);
-                  }}
-                  className={cn(
-                    'relative ml-0.5 flex h-3.5 w-3.5 items-center justify-center rounded-full',
-                    'transition-all duration-150 hover:bg-white/15 hover:text-fg-base',
-                    dirty
-                      ? 'text-accent hover:text-fg-base'
-                      : 'text-fg-subtle opacity-0 group-hover:opacity-100',
-                  )}
-                >
-                  {dirty ? (
-                    <>
-                      <span className="absolute inset-0 m-auto h-1.5 w-1.5 rounded-full bg-accent shadow-glow-sm transition-opacity duration-150 group-hover:opacity-0" />
-                      <X size={9} strokeWidth={2.5} className="opacity-0 transition-opacity duration-150 group-hover:opacity-100" />
-                    </>
-                  ) : (
-                    <X size={9} strokeWidth={2.5} />
-                  )}
-                </span>
-              ) : dirty ? (
-                // Last remaining tab can't be closed, but if it has unsaved
-                // changes we still show the accent dot so the user sees
-                // the dirty state.
-                <span
-                  aria-label="Unsaved changes"
-                  title="Unsaved changes"
-                  className="relative ml-0.5 flex h-3.5 w-3.5 items-center justify-center"
-                >
-                  <span className="h-1.5 w-1.5 rounded-full bg-accent shadow-glow-sm" />
-                </span>
-              ) : null}
-            </button>
-          );
-        })}
-
-        {/* New-tab "+" sits inline with the tab strip, like a browser. Opens
-            a popover so the user can pick between a terminal and a new editor
-            file. The popover itself is portaled — see below. */}
+      {/* Per-pane tab strips live inside each leaf now; the toolbar only
+          carries the workspace chrome. The + button stays here as a quick
+          "new tab in the focused pane" affordance. */}
+      <div className="flex min-w-0 flex-1 items-center pl-1">
         <button
           ref={plusRef}
           onClick={() => setMenuOpen((o) => !o)}
