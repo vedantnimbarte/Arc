@@ -6,6 +6,10 @@ import { TabContextMenu } from './TabContextMenu';
 
 interface Props {
   paneId: string;
+  /** Visual variant. `leaf` (default) is the per-pane strip with a border
+   *  and chrome backdrop. `topbar` is a transparent inline strip used when
+   *  the tabs live in the application toolbar. */
+  variant?: 'leaf' | 'topbar';
 }
 
 /**
@@ -15,7 +19,7 @@ interface Props {
  * window-drag region so dragging a tab won't drag the window (foundation
  * for the CP5 HTML5 drag-drop).
  */
-export function PaneTabStrip({ paneId }: Props) {
+export function PaneTabStrip({ paneId, variant = 'leaf' }: Props) {
   const leaf = useWorkspace((s) => findLeaf(s.layout, paneId));
   const tabs = useWorkspace((s) => s.tabs);
   const tabDirty = useWorkspace((s) => s.tabDirty);
@@ -67,11 +71,16 @@ export function PaneTabStrip({ paneId }: Props) {
       data-tauri-drag-region="false"
       onMouseDown={() => setFocusedPane(paneId)}
       className={cn(
-        'scrollbar-none flex h-9 shrink-0 items-center gap-1 overflow-x-auto border-b px-2',
+        'scrollbar-none flex shrink-0 items-center gap-1 overflow-x-auto',
         'transition-colors duration-150',
-        isFocused
-          ? 'border-border-hairline bg-bg-chrome/30'
-          : 'border-border-hairline/60 bg-transparent',
+        variant === 'topbar'
+          ? 'h-[28px] min-w-0'
+          : cn(
+              'h-9 border-b px-2',
+              isFocused
+                ? 'border-border-hairline bg-bg-chrome/30'
+                : 'border-border-hairline/60 bg-transparent',
+            ),
       )}
     >
       {leaf.tabIds.map((tabId) => {

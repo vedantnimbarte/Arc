@@ -17,6 +17,7 @@ import { getCurrentWindow } from '@tauri-apps/api/window';
 import { useWorkspace } from '../state/workspace';
 import { useFiles } from '../state/files';
 import { cn } from '../lib/cn';
+import { PaneTabStrip } from './PaneTabStrip';
 import {
   fsPickFolder,
   fsWriteFile,
@@ -39,6 +40,11 @@ export function TabBar({
 }: Props) {
   const { tabs, activeTabId, setActive, closeTab, openFile, launchAiCli, newTerminal, tabDirty } =
     useWorkspace();
+  // Topbar carries the workspace's tab strip when there are no splits.
+  // With splits, each pane keeps its own header so users can see what's
+  // open in panes that don't hold focus.
+  const layout = useWorkspace((s) => s.layout);
+  const topbarLeafId = layout.kind === 'leaf' ? layout.id : null;
   const sidebarCollapsed = useFiles((s) => s.collapsed);
   const toggleSidebar = useFiles((s) => s.toggleCollapsed);
   const root = useFiles((s) => s.root);
@@ -183,10 +189,13 @@ export function TabBar({
           distinct zones (chrome controls / tabs). */}
       <div className="ml-0.5 h-5 w-px bg-white/[0.06]" aria-hidden />
 
-      {/* Per-pane tab strips live inside each leaf now; the toolbar only
-          carries the workspace chrome. The + button stays here as a quick
-          "new tab in the focused pane" affordance. */}
+      {/* Tab strip (single-leaf workspaces only — split layouts keep their
+          own per-pane strips) sits inline before the + button so the whole
+          chrome lives on one row. */}
       <div className="flex min-w-0 flex-1 items-center pl-1">
+        {topbarLeafId && (
+          <PaneTabStrip paneId={topbarLeafId} variant="topbar" />
+        )}
         <button
           ref={plusRef}
           onClick={() => setMenuOpen((o) => !o)}

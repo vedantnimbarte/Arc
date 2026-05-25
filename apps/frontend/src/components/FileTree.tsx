@@ -3,6 +3,9 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react
 import {
   ArrowUp,
   ChevronRight,
+  ChevronsDownUp,
+  FilePlus,
+  FolderPlus,
   FolderSearch,
   Search,
   AlertCircle,
@@ -234,6 +237,33 @@ export function FileTree() {
     }
   }, [root, setRoot]);
 
+  // VS Code-style "New File" / "New Folder" / "Collapse All" — operate on the
+  // workspace root so the affordance is reachable without first selecting a
+  // node. New-file/folder reuse the same inline-dialog flow the context menu
+  // already uses; collapse-all walks the node cache and clears every
+  // `expanded` flag except for the root (folding the root itself would leave
+  // the tree visually empty, which is never what the user wanted).
+  const newFileAtRoot = useCallback(() => {
+    if (!root) return;
+    setCreating({ parentPath: root, kind: 'file', value: '' });
+  }, [root]);
+
+  const newFolderAtRoot = useCallback(() => {
+    if (!root) return;
+    setCreating({ parentPath: root, kind: 'dir', value: '' });
+  }, [root]);
+
+  const collapseAll = useCallback(() => {
+    if (!root) return;
+    setNodes((prev) => {
+      const next: Record<string, NodeState> = {};
+      for (const [path, state] of Object.entries(prev)) {
+        next[path] = { ...state, expanded: path === root };
+      }
+      return next;
+    });
+  }, [root]);
+
   const toggleSearch = useCallback(() => {
     setSearchOpen((open) => {
       const next = !open;
@@ -357,44 +387,68 @@ export function FileTree() {
   return (
     <div className="flex h-full min-w-0 flex-col">
       {/* Header */}
-      <div className="flex h-11 shrink-0 items-center gap-1 border-b border-border-hairline px-2.5">
+      <div className="flex h-11 shrink-0 items-center gap-0.5 border-b border-border-hairline px-2.5">
         <span
-          className="min-w-0 flex-1 truncate font-display text-[12px] font-medium tracking-tight text-fg-base/90"
+          className="min-w-0 flex-1 truncate pr-1 font-display text-[12px] font-medium tracking-tight text-fg-base/90"
           title={root ?? ''}
         >
           {root ? basename(root) : '—'}
         </span>
 
-        <button
+        <HeaderIconButton
+          onClick={newFileAtRoot}
+          disabled={!root}
+          ariaLabel="New file"
+          title="New File"
+        >
+          <FilePlus size={12} strokeWidth={2.1} />
+        </HeaderIconButton>
+        <HeaderIconButton
+          onClick={newFolderAtRoot}
+          disabled={!root}
+          ariaLabel="New folder"
+          title="New Folder"
+        >
+          <FolderPlus size={12} strokeWidth={2.1} />
+        </HeaderIconButton>
+
+        {/* Slim divider keeps the create-pair visually distinct from the
+            navigation/utility cluster — same trick the topbar uses. */}
+        <span aria-hidden className="mx-1 h-3.5 w-px bg-white/[0.06]" />
+
+        <HeaderIconButton
           onClick={goUp}
           disabled={!root}
-          className="flex h-6 w-6 items-center justify-center rounded-md text-fg-muted transition-colors duration-150 hover:bg-white/[0.08] hover:text-fg-base disabled:opacity-40 disabled:hover:bg-transparent"
-          aria-label="Parent folder"
+          ariaLabel="Parent folder"
           title="Up"
         >
           <ArrowUp size={12} strokeWidth={2.1} />
-        </button>
-        <button
+        </HeaderIconButton>
+        <HeaderIconButton
           onClick={() => void pickFolder()}
           disabled={!isTauri}
-          className="flex h-6 w-6 items-center justify-center rounded-md text-fg-muted transition-colors duration-150 hover:bg-white/[0.08] hover:text-fg-base disabled:opacity-40 disabled:hover:bg-transparent"
-          aria-label="Choose folder"
+          ariaLabel="Choose folder"
           title="Choose folder…"
         >
           <FolderSearch size={12} strokeWidth={2.1} />
-        </button>
-        <button
+        </HeaderIconButton>
+        <HeaderIconButton
           onClick={toggleSearch}
-          className={cn(
-            'flex h-6 w-6 items-center justify-center rounded-md transition-colors duration-150 hover:bg-white/[0.08] hover:text-fg-base',
-            searchOpen ? 'bg-white/[0.08] text-fg-base' : 'text-fg-muted',
-          )}
-          aria-label="Filter files"
-          aria-pressed={searchOpen}
+          ariaLabel="Filter files"
           title="Filter visible files"
+          pressed={searchOpen}
+          active={searchOpen}
         >
           <Search size={12} strokeWidth={2.1} />
-        </button>
+        </HeaderIconButton>
+        <HeaderIconButton
+          onClick={collapseAll}
+          disabled={!root}
+          ariaLabel="Collapse folders in file tree"
+          title="Collapse Folders in File Tree"
+        >
+          <ChevronsDownUp size={12} strokeWidth={2.1} />
+        </HeaderIconButton>
       </div>
 
       {/* Search bar */}
@@ -1008,6 +1062,50 @@ function TreeNode({
         />
       )}
     </li>
+  );
+}
+
+// ── Header controls ───────────────────────────────────────────────────────────
+
+/**
+ * Square icon button used by the FileTree header toolbar. Sizes, hover, and
+ * disabled states are unified here so adding new affordances doesn't drift
+ * from the existing ones visually.
+ */
+function HeaderIconButton({
+  onClick,
+  disabled,
+  ariaLabel,
+  title,
+  pressed,
+  active,
+  children,
+}: {
+  onClick: () => void;
+  disabled?: boolean;
+  ariaLabel: string;
+  title: string;
+  pressed?: boolean;
+  active?: boolean;
+  children: React.ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      aria-label={ariaLabel}
+      aria-pressed={pressed}
+      title={title}
+      className={cn(
+        'flex h-6 w-6 items-center justify-center rounded-md transition-colors duration-150',
+        'hover:bg-white/[0.08] hover:text-fg-base',
+        'disabled:opacity-40 disabled:hover:bg-transparent',
+        active ? 'bg-white/[0.08] text-fg-base' : 'text-fg-muted',
+      )}
+    >
+      {children}
+    </button>
   );
 }
 

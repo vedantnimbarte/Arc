@@ -4,6 +4,16 @@ import { PaneLeafView } from './PaneLeafView';
 import { PaneTabStrip } from './PaneTabStrip';
 import { cn } from '../lib/cn';
 
+/**
+ * In a single-leaf workspace the tab strip lives in the application
+ * toolbar; rendering a second per-pane strip would duplicate it. When the
+ * workspace is split, every leaf carries its own strip again so users can
+ * still see what's in panes that don't hold focus.
+ */
+function shouldShowLeafHeader(layout: PaneNode): boolean {
+  return layout.kind !== 'leaf';
+}
+
 interface Props {
   /** Shared host-div registry held by App.tsx so this tree can hand each
    *  visible leaf the right host node to reparent. */
@@ -18,17 +28,27 @@ interface Props {
  */
 export function PaneTreeView({ hostsRef, stageRef }: Props) {
   const layout = useWorkspace((s) => s.layout);
-  return <PaneNodeView node={layout} hostsRef={hostsRef} stageRef={stageRef} />;
+  const showHeader = shouldShowLeafHeader(layout);
+  return (
+    <PaneNodeView
+      node={layout}
+      hostsRef={hostsRef}
+      stageRef={stageRef}
+      showHeader={showHeader}
+    />
+  );
 }
 
 function PaneNodeView({
   node,
   hostsRef,
   stageRef,
+  showHeader,
 }: {
   node: PaneNode;
   hostsRef: React.MutableRefObject<Map<string, HTMLDivElement>>;
   stageRef: React.RefObject<HTMLDivElement>;
+  showHeader: boolean;
 }) {
   if (node.kind === 'leaf') {
     return (
@@ -36,7 +56,7 @@ function PaneNodeView({
         paneId={node.id}
         hostsRef={hostsRef}
         stageRef={stageRef}
-        header={<PaneTabStrip paneId={node.id} />}
+        header={showHeader ? <PaneTabStrip paneId={node.id} /> : null}
       />
     );
   }
@@ -44,7 +64,12 @@ function PaneNodeView({
   // group when the structure changes (avoids the library's internal panel-
   // id bookkeeping getting confused by mid-tree edits).
   return (
-    <SplitGroupView node={node} hostsRef={hostsRef} stageRef={stageRef} />
+    <SplitGroupView
+      node={node}
+      hostsRef={hostsRef}
+      stageRef={stageRef}
+      showHeader={showHeader}
+    />
   );
 }
 
@@ -52,10 +77,12 @@ function SplitGroupView({
   node,
   hostsRef,
   stageRef,
+  showHeader,
 }: {
   node: PaneSplit;
   hostsRef: React.MutableRefObject<Map<string, HTMLDivElement>>;
   stageRef: React.RefObject<HTMLDivElement>;
+  showHeader: boolean;
 }) {
   const setSplitSizes = useWorkspace((s) => s.setSplitSizes);
   // `Layout` from the library is a `Record<panelId, sizePct>`. We mapped each
@@ -81,6 +108,7 @@ function SplitGroupView({
           defaultSize={node.sizes[idx] ?? 100 / node.children.length}
           hostsRef={hostsRef}
           stageRef={stageRef}
+          showHeader={showHeader}
         />
       ))}
     </Group>
@@ -94,6 +122,7 @@ function SplitChild({
   defaultSize,
   hostsRef,
   stageRef,
+  showHeader,
 }: {
   child: PaneNode;
   direction: 'horizontal' | 'vertical';
@@ -101,11 +130,17 @@ function SplitChild({
   defaultSize: number;
   hostsRef: React.MutableRefObject<Map<string, HTMLDivElement>>;
   stageRef: React.RefObject<HTMLDivElement>;
+  showHeader: boolean;
 }) {
   return (
     <>
       <Panel id={child.id} defaultSize={defaultSize} minSize={10} className="min-h-0 min-w-0">
-        <PaneNodeView node={child} hostsRef={hostsRef} stageRef={stageRef} />
+        <PaneNodeView
+          node={child}
+          hostsRef={hostsRef}
+          stageRef={stageRef}
+          showHeader={showHeader}
+        />
       </Panel>
       {!isLast && (
         <Separator

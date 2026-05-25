@@ -66,12 +66,17 @@ export function StatusBar({ chatOpen, onToggleChat, onOpenShortcuts }: Props) {
     <>
       <footer
         className={cn(
-          'flex h-7 shrink-0 items-center justify-between gap-4 px-4',
-          'border-t border-border-hairline bg-bg-chrome/60 backdrop-blur-md',
-          'font-display text-[10.5px] tracking-tight text-fg-muted',
+          // Taller chrome (32px) gives every pill a real touch target and
+          // lets typography breathe. The inset top hairline is the Apple
+          // signature — a single bright pixel that reads as a light source
+          // above the bar.
+          'relative flex h-8 shrink-0 items-center justify-between gap-6 px-5',
+          'border-t border-border-hairline bg-bg-chrome/65 backdrop-blur-md',
+          'shadow-[inset_0_1px_0_0_rgba(255,255,255,0.045)]',
+          'font-display text-[10.75px] tracking-[-0.005em] text-fg-muted',
         )}
       >
-        <div className="flex min-w-0 items-center gap-4">
+        <div className="flex min-w-0 items-center gap-3.5">
           <ShellPickerPill onSpawn={(shell) => void newTerminal({ shellOverride: shell })} />
           {root && (
             <>
@@ -87,7 +92,7 @@ export function StatusBar({ chatOpen, onToggleChat, onOpenShortcuts }: Props) {
           )}
         </div>
 
-        <div className="flex shrink-0 items-center gap-4">
+        <div className="flex shrink-0 items-center gap-3.5">
           {git?.branch && (
             <>
               <BranchIndicator
@@ -97,23 +102,24 @@ export function StatusBar({ chatOpen, onToggleChat, onOpenShortcuts }: Props) {
               <Dot />
             </>
           )}
-          <span className="tabular-nums">
+          <span className="tabular-nums text-fg-muted/90">
             {tabs.length} {tabs.length === 1 ? 'tab' : 'tabs'}
           </span>
           <Dot />
           <ModelTriggerPill placement="up" align="end" compact />
           <Dot />
 
-          {/* Trailing control cluster — all three pills share the same
-              -my-1 trick so they hug the status bar's 28px chrome without
-              overflowing it, and the same accent-soft "active" tint. */}
-          <div className="flex items-center gap-0.5">
+          {/* Trailing control cluster — the bar is now 32px tall so the
+              pills sit at their natural 22px height with vertical breathing
+              room above and below. Same accent-soft "active" tint across
+              the cluster keeps the rhythm uniform. */}
+          <div className="flex items-center gap-1">
             <StatusIconButton
               onClick={onOpenShortcuts}
               ariaLabel="Keyboard shortcuts"
               title={`Keyboard shortcuts (${formatBinding(getBinding('open-shortcuts'))})`}
             >
-              <Keyboard size={11} strokeWidth={2} />
+              <Keyboard size={11.5} strokeWidth={2} />
             </StatusIconButton>
 
             <AiCliButton onLaunch={launchAiCli} />
@@ -125,21 +131,21 @@ export function StatusBar({ chatOpen, onToggleChat, onOpenShortcuts }: Props) {
               aria-pressed={chatOpen}
               title="Assistant"
               className={cn(
-                'group relative -my-1 flex h-5 items-center gap-1.5 rounded-md px-1.5 transition-colors',
+                'group relative flex h-[22px] items-center gap-1.5 rounded-md px-2 transition-colors',
                 chatOpen
                   ? 'bg-accent-soft text-accent-bright shadow-[inset_0_0_0_1px_rgba(220,224,232,0.18)]'
                   : 'text-fg-muted hover:bg-white/[0.06] hover:text-fg-base/95 focus-visible:bg-white/[0.06] focus:outline-none',
               )}
             >
               <Sparkles
-                size={11}
+                size={11.5}
                 strokeWidth={2}
                 className={cn(
                   'transition-transform duration-300 ease-apple',
                   chatOpen && 'scale-110 drop-shadow-[0_0_6px_rgba(220,224,232,0.6)]',
                 )}
               />
-              <span className="font-display text-[10px] tracking-tight">assistant</span>
+              <span className="font-display text-[10.5px] tracking-tight">assistant</span>
               {chatOpen && (
                 <span
                   className="pointer-events-none absolute -bottom-[3px] left-1/2 h-[2px] w-3 -translate-x-1/2 rounded-full bg-accent-bright/85 shadow-glow-sm"
@@ -150,7 +156,9 @@ export function StatusBar({ chatOpen, onToggleChat, onOpenShortcuts }: Props) {
           </div>
 
           <Dot />
-          <span className="font-mono text-[10px] tabular-nums text-fg-subtle">arc 0.0.1</span>
+          <span className="font-mono text-[10px] tracking-tight tabular-nums text-fg-subtle/85">
+            arc 0.0.1
+          </span>
         </div>
       </footer>
 
@@ -165,13 +173,20 @@ export function StatusBar({ chatOpen, onToggleChat, onOpenShortcuts }: Props) {
 
 // ----- subcomponents -------------------------------------------------------
 
-/** Inter-pill separator. Kept as its own component so the rhythm stays
- *  identical everywhere — change the glyph or weight once. */
+/** Inter-pill separator. A 2px circular glyph reads more deliberately than
+ *  the middle-dot character at this size — the dot stays optically centred
+ *  on the typographic baseline and matches the bar's refined density. */
 function Dot() {
-  return <span className="text-fg-subtle/70 select-none">·</span>;
+  return (
+    <span
+      aria-hidden
+      className="inline-block h-[2px] w-[2px] shrink-0 rounded-full bg-fg-subtle/55 select-none"
+    />
+  );
 }
 
-/** Square icon button sized to fit inside the 28px status bar chrome. */
+/** Square icon button. Sits at the natural 22px height inside the 32px bar
+ *  with ~5px of vertical breathing room above and below. */
 function StatusIconButton({
   children,
   onClick,
@@ -204,7 +219,7 @@ function StatusIconButton({
       aria-haspopup={ariaHaspopup}
       title={title}
       className={cn(
-        'group relative -my-1 flex h-5 w-5 items-center justify-center rounded-md transition-colors focus:outline-none',
+        'group relative flex h-[22px] w-[22px] items-center justify-center rounded-md transition-colors focus:outline-none',
         active
           ? 'bg-accent-soft text-accent-bright shadow-[inset_0_0_0_1px_rgba(220,224,232,0.18)]'
           : dimmed
@@ -433,14 +448,14 @@ function ShellPickerPill({ onSpawn }: { onSpawn: (shellPath: string) => void }) 
             : 'Open terminal'
         }
         className={cn(
-          'group relative -my-1 flex h-5 items-center gap-1.5 rounded-md px-1.5 transition-colors focus:outline-none',
+          'group relative flex h-[22px] items-center gap-1.5 rounded-md px-2 transition-colors focus:outline-none',
           open
             ? 'bg-accent-soft text-accent-bright shadow-[inset_0_0_0_1px_rgba(220,224,232,0.18)]'
             : 'text-fg-muted hover:bg-white/[0.06] hover:text-fg-base/95 focus-visible:bg-white/[0.06]',
         )}
       >
-        <TerminalIcon size={11} strokeWidth={2} />
-        <span className="font-display text-[10px] tracking-tight">terminal</span>
+        <TerminalIcon size={11.5} strokeWidth={2} />
+        <span className="font-display text-[10.5px] tracking-tight">terminal</span>
       </button>
 
       {open && pos && typeof document !== 'undefined' &&
@@ -499,8 +514,8 @@ function BranchIndicator({
       type="button"
       onClick={onClick}
       className={cn(
-        'group flex items-center gap-1.5 rounded-md font-mono text-[10px]',
-        '-mx-1 px-1 py-[1px] transition-colors',
+        'group flex h-[22px] items-center gap-1.5 rounded-md font-mono text-[10px]',
+        'px-1.5 transition-colors',
         'hover:bg-white/[0.06] focus-visible:bg-white/[0.06] focus:outline-none',
       )}
       title={
@@ -657,7 +672,7 @@ function Breadcrumbs({ root }: { root: string | null }) {
 
   return (
     <div
-      className="flex min-w-0 items-center gap-1"
+      className="flex min-w-0 items-center gap-1.5"
       aria-label="folder breadcrumbs"
     >
       {!collapse &&
@@ -735,7 +750,7 @@ function BreadcrumbSegment({
     return (
       <span
         className={cn(
-          'inline-flex max-w-[160px] items-center gap-1 rounded-md px-1.5 py-[1px]',
+          'inline-flex h-[20px] max-w-[160px] items-center gap-1 rounded-md px-2',
           'font-display text-[10.5px] tracking-tight text-fg-base/95',
           'shadow-[inset_0_0_0_1px_rgba(220,224,232,0.07)]',
         )}
@@ -759,7 +774,7 @@ function BreadcrumbSegment({
       onClick={() => onClick(path)}
       title={path}
       className={cn(
-        'group inline-flex max-w-[140px] items-center gap-1 rounded-md px-1.5 py-[1px]',
+        'group inline-flex h-[20px] max-w-[140px] items-center gap-1 rounded-md px-2',
         'font-display text-[10.5px] tracking-tight text-fg-muted',
         'transition-colors hover:bg-white/[0.06] hover:text-fg-base/95',
         'focus-visible:bg-white/[0.06] focus:outline-none',
@@ -850,7 +865,7 @@ function BreadcrumbEllipsis({
         aria-label={`Show ${hidden.length} hidden ${hidden.length === 1 ? 'folder' : 'folders'}`}
         title={`${hidden.length} hidden ${hidden.length === 1 ? 'folder' : 'folders'}`}
         className={cn(
-          'inline-flex h-[18px] min-w-[20px] items-center justify-center rounded-md px-1',
+          'inline-flex h-[20px] min-w-[22px] items-center justify-center rounded-md px-1.5',
           'font-display text-[11px] leading-none tracking-tight transition-colors',
           'focus:outline-none',
           open
