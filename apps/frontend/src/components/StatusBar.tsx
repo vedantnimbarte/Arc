@@ -10,17 +10,18 @@ import {
   Terminal as TerminalIcon,
 } from 'lucide-react';
 import {
-  gitStatus,
   isTauri,
   ptyListAiClis,
   ptyListShells,
   ptyWrite,
   type AiCliInfo,
+  type GitDiffStat,
   type GitInfo,
   type ShellInfo,
 } from '../lib/tauri';
 import { useWorkspace } from '../state/workspace';
 import { useFiles } from '../state/files';
+import { useGit } from '../state/git';
 import { useSettings } from '../state/settings';
 import { cn } from '../lib/cn';
 import { formatBinding, getBinding } from '../state/shortcuts';
@@ -39,28 +40,15 @@ export function StatusBar({ chatOpen, onToggleChat, onOpenShortcuts }: Props) {
   const newTerminal = useWorkspace((s) => s.newTerminal);
   const root = useFiles((s) => s.root);
 
-  const [git, setGit] = useState<GitInfo | null>(null);
-  const [pickerOpen, setPickerOpen] = useState(false);
-
+  // Shared git poller lives on the Sidebar (4s interval). We just subscribe
+  // here so the branch pill + diff-stat badge ride the same cache as the
+  // sidebar source-control view — no duplicate polling.
+  const git = useGit((s) => s.info);
+  const diffStat = useGit((s) => s.diffStat);
   const refreshGit = useCallback(() => {
-    if (!isTauri || !root) {
-      setGit(null);
-      return () => {};
-    }
-    let cancelled = false;
-    void gitStatus(root)
-      .then((info) => {
-        if (!cancelled) setGit(info);
-      })
-      .catch(() => {
-        if (!cancelled) setGit(null);
-      });
-    return () => {
-      cancelled = true;
-    };
+    if (isTauri && root) void useGit.getState().refresh(root);
   }, [root]);
-
-  useEffect(() => refreshGit(), [refreshGit]);
+  const [pickerOpen, setPickerOpen] = useState(false);
 
   return (
     <>
@@ -99,6 +87,9 @@ export function StatusBar({ chatOpen, onToggleChat, onOpenShortcuts }: Props) {
                 info={git}
                 onClick={() => setPickerOpen(true)}
               />
+              {diffStat && (diffStat.files_changed > 0 || diffStat.insertions > 0 || diffStat.deletions > 0) && (
+                <DiffStatBadge stat={diffStat} />
+              )}
               <Dot />
             </>
           )}
@@ -553,6 +544,40 @@ function BranchIndicator({
         <span className="tabular-nums text-fg-subtle">↓{info.behind}</span>
       )}
     </button>
+  );
+}
+
+/**
+ * Compact +ins/−del/files badge that mirrors the `git status --short` summary
+ * line. Insertions render in the diff-add green, deletions in the diff-remove
+ * red, and the file count sits in a muted neutral so the eye lands on the
+ * line counts first. The whole badge is non-interactive — it's a glance
+ * indicator, not a control.
+ */
+function DiffStatBadge({ stat }: { stat: GitDiffStat }) {
+  const { insertions, deletions, files_changed } = stat;
+  const title =
+    `${files_changed} ${files_changed === 1 ? 'file' : 'files'} changed` +
+    (insertions > 0 ? `, ${insertions} insertion${insertions === 1 ? '' : 's'}(+)` : '') +
+    (deletions > 0 ? `, ${deletions} deletion${deletions === 1 ? '' : 's'}(−)` : '');
+  return (
+    <span
+      className="flex h-[22px] items-center gap-1.5 px-1 font-mono text-[10px] tabular-nums"
+      title={title}
+      aria-label={title}
+    >
+      {insertions > 0 && (
+        <span className="text-emerald-400/90">+{insertions}</span>
+      )}
+      {deletions > 0 && (
+        <span className="text-rose-400/90">−{deletions}</span>
+      )}
+      {files_changed > 0 && (
+        <span className="text-fg-subtle/80">
+          {files_changed}f
+        </span>
+      )}
+    </span>
   );
 }
 

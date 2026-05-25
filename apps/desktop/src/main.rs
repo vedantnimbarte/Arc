@@ -127,6 +127,7 @@ fn main() {
             commands::session::session_settings_load,
             commands::session::session_settings_save,
             commands::git::git_status,
+            commands::git::git_diff_stat,
             commands::git::git_changes,
             commands::git::git_log,
             commands::git::git_diff,

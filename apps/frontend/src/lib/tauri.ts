@@ -1153,6 +1153,18 @@ export async function gitStatus(path: string): Promise<GitInfo | null> {
   return invoke<GitInfo | null>('git_status', { path });
 }
 
+export interface GitDiffStat {
+  files_changed: number;
+  insertions: number;
+  deletions: number;
+}
+
+/** Aggregate +/- line counts vs HEAD (staged + unstaged + untracked).
+ *  Returns null when `path` isn't inside a git repo. */
+export async function gitDiffStat(path: string): Promise<GitDiffStat | null> {
+  return invoke<GitDiffStat | null>('git_diff_stat', { path });
+}
+
 export type GitChangeKind = 'staged' | 'unstaged' | 'both' | 'untracked' | 'conflict';
 
 export interface GitChangeEntry {

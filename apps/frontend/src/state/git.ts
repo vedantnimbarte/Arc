@@ -1,8 +1,10 @@
 import { create } from 'zustand';
 import {
   gitChanges,
+  gitDiffStat,
   gitStatus,
   type GitChangeEntry,
+  type GitDiffStat,
   type GitInfo,
 } from '../lib/tauri';
 
@@ -16,6 +18,7 @@ import {
 interface GitStoreState {
   info: GitInfo | null;
   entries: GitChangeEntry[];
+  diffStat: GitDiffStat | null;
   loading: boolean;
   error: string | null;
   refresh: (root: string) => Promise<void>;
@@ -25,19 +28,21 @@ interface GitStoreState {
 export const useGit = create<GitStoreState>((set) => ({
   info: null,
   entries: [],
+  diffStat: null,
   loading: false,
   error: null,
   refresh: async (root: string) => {
     set({ loading: true, error: null });
     try {
-      const [info, entries] = await Promise.all([
+      const [info, entries, diffStat] = await Promise.all([
         gitStatus(root),
         gitChanges(root),
+        gitDiffStat(root).catch(() => null),
       ]);
-      set({ info, entries, loading: false });
+      set({ info, entries, diffStat, loading: false });
     } catch (e) {
-      set({ entries: [], loading: false, error: String(e) });
+      set({ entries: [], diffStat: null, loading: false, error: String(e) });
     }
   },
-  reset: () => set({ info: null, entries: [], loading: false, error: null }),
+  reset: () => set({ info: null, entries: [], diffStat: null, loading: false, error: null }),
 }));

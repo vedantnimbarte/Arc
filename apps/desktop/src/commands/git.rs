@@ -2,6 +2,7 @@
 //!
 //! Frontend contract (see apps/frontend/src/lib/tauri.ts):
 //!   invoke("git_status",   { path })                              -> Option<GitInfo>
+//!   invoke("git_diff_stat",{ path })                              -> Option<DiffStat>
 //!   invoke("git_changes",  { path })                              -> Vec<ChangeEntry>
 //!   invoke("git_log",      { path, limit, options? })             -> Vec<LogEntry>
 //!   invoke("git_diff",     { path, scope, pathFilter? })           -> String
@@ -10,11 +11,16 @@
 //!   invoke("git_checkout", { path, name })                         -> CheckoutResult
 //!   invoke("git_authors",  { path })                               -> Vec<AuthorInfo>
 
-use arc_git::{AuthorInfo, BlameLine, BranchInfo, ChangeEntry, CheckoutResult, CommitResult, DiffScope, GitInfo, LogEntry, LogOptions};
+use arc_git::{AuthorInfo, BlameLine, BranchInfo, ChangeEntry, CheckoutResult, CommitResult, DiffScope, DiffStat, GitInfo, LogEntry, LogOptions};
 
 #[tauri::command]
 pub async fn git_status(path: String) -> Result<Option<GitInfo>, String> {
     arc_git::status(&path).await.map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn git_diff_stat(path: String) -> Result<Option<DiffStat>, String> {
+    arc_git::diff_stat(&path).await.map_err(|e| e.to_string())
 }
 
 #[tauri::command]

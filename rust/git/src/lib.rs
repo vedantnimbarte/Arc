@@ -912,6 +912,120 @@ pub async fn diff<P: AsRef<Path>>(
     Ok(String::from_utf8_lossy(&output.stdout).into_owned())
 }
 
+// ----- diff stat (summary) --------------------------------------------------
+
+/// Aggregate insertion/deletion line counts across all changes vs `HEAD`
+/// (staged + unstaged combined). Untracked files are counted as new files
+/// with their full line count as insertions, so the totals match what the
+/// user would see if they staged everything and ran `git diff --cached`.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct DiffStat {
+    pub files_changed: usize,
+    pub insertions: usize,
+    pub deletions: usize,
+}
+
+/// Run `git diff --numstat HEAD` and sum the per-file counts, then add
+/// untracked files separately. Binary files (where numstat shows `-\t-`)
+/// contribute to `files_changed` but not to line counts.
+///
+/// Returns `Ok(None)` when `path` isn't inside a git repo. Returns a zeroed
+/// `DiffStat` when there are no changes (or no HEAD yet on a fresh repo,
+/// in which case only untracked files contribute).
+pub async fn diff_stat<P: AsRef<Path>>(path: P) -> Result<Option<DiffStat>> {
+    let path = path.as_ref();
+
+    // Cheap repo-membership check — same probe `status` does. Lets us
+    // distinguish "not a repo" (return None) from "repo with no changes".
+    let probe = Command::new("git")
+        .arg("-C")
+        .arg(path)
+        .args(["rev-parse", "--is-inside-work-tree"])
+        .output()
+        .await
+        .map_err(|e| Error::Spawn(e.to_string()))?;
+    if !probe.status.success() {
+        return Ok(None);
+    }
+
+    let mut stat = DiffStat::default();
+
+    // Tracked changes vs HEAD. If there's no HEAD (fresh repo) this fails;
+    // we treat that as "no tracked changes" and fall through to untracked.
+    let numstat = Command::new("git")
+        .arg("-C")
+        .arg(path)
+        .arg("--no-pager")
+        .args(["diff", "--numstat", "HEAD"])
+        .output()
+        .await
+        .map_err(|e| Error::Spawn(e.to_string()))?;
+    if numstat.status.success() {
+        for line in String::from_utf8_lossy(&numstat.stdout).lines() {
+            // Format: "<ins>\t<del>\t<path>"  (binary files use "-\t-")
+            let mut parts = line.splitn(3, '\t');
+            let ins = parts.next().unwrap_or("");
+            let del = parts.next().unwrap_or("");
+            if parts.next().is_none() {
+                continue;
+            }
+            stat.files_changed += 1;
+            stat.insertions += ins.parse::<usize>().unwrap_or(0);
+            stat.deletions += del.parse::<usize>().unwrap_or(0);
+        }
+    }
+
+    // Untracked files — counted as additions of their full line count.
+    let untracked = Command::new("git")
+        .arg("-C")
+        .arg(path)
+        .args(["ls-files", "--others", "--exclude-standard", "-z"])
+        .output()
+        .await
+        .map_err(|e| Error::Spawn(e.to_string()))?;
+    if untracked.status.success() {
+        for raw in untracked.stdout.split(|&b| b == 0) {
+            if raw.is_empty() {
+                continue;
+            }
+            let rel = match std::str::from_utf8(raw) {
+                Ok(s) => s,
+                Err(_) => continue,
+            };
+            stat.files_changed += 1;
+            // Read the file and count lines. Cap at 1 MiB so a stray huge
+            // log file doesn't stall the status bar.
+            let abs = path.join(rel);
+            if let Ok(meta) = tokio::fs::metadata(&abs).await {
+                if meta.is_file() && meta.len() <= 1 << 20 {
+                    if let Ok(bytes) = tokio::fs::read(&abs).await {
+                        // Treat binary-looking files (contains NUL) as zero-line.
+                        if !bytes.contains(&0) {
+                            stat.insertions += bytecount_lines(&bytes);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    Ok(Some(stat))
+}
+
+fn bytecount_lines(bytes: &[u8]) -> usize {
+    if bytes.is_empty() {
+        return 0;
+    }
+    let nl = bytes.iter().filter(|&&b| b == b'\n').count();
+    // Treat a missing trailing newline as one extra line so a 1-line file
+    // without LF still reports as 1 insertion.
+    if bytes.last() == Some(&b'\n') {
+        nl
+    } else {
+        nl + 1
+    }
+}
+
 // ----- blame ----------------------------------------------------------------
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
