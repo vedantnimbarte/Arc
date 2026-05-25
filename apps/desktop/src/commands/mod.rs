@@ -4,6 +4,7 @@ pub mod git;
 pub mod llm;
 pub mod mcp;
 pub mod memory;
+pub mod network;
 pub mod pty;
 pub mod secrets;
 pub mod session;

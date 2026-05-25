@@ -12,6 +12,7 @@ import {
   Search,
   Bot,
   GitBranch,
+  Monitor,
 } from 'lucide-react';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { useWorkspace } from '../state/workspace';
@@ -38,7 +39,7 @@ export function TabBar({
   onOpenSettings,
   onOpenSearch,
 }: Props) {
-  const { tabs, activeTabId, setActive, closeTab, openFile, launchAiCli, newTerminal, tabDirty } =
+  const { tabs, activeTabId, setActive, closeTab, openFile, launchAiCli, newTerminal, openPreview, tabDirty } =
     useWorkspace();
   // Topbar carries the workspace's tab strip when there are no splits.
   // With splits, each pane keeps its own header so users can see what's
@@ -144,6 +145,11 @@ export function TabBar({
   const newEditor = () => {
     setMenuOpen(false);
     setNewFileOpen(true);
+  };
+
+  const handleNewPreview = () => {
+    openPreview();
+    setMenuOpen(false);
   };
 
   const launchCli = (cli: AiCliInfo) => {
@@ -288,6 +294,14 @@ export function TabBar({
           >
             <FileCode size={12} strokeWidth={2} className="text-fg-subtle" />
             <span className="flex-1">Editor (new file)</span>
+          </button>
+          <button
+            role="menuitem"
+            onClick={handleNewPreview}
+            className="flex w-full items-center gap-2 px-3 py-2 text-left font-display text-[12px] text-fg-base/90 transition-colors hover:bg-white/[0.06]"
+          >
+            <Monitor size={12} strokeWidth={2} className="text-fg-subtle" />
+            <span className="flex-1">Preview</span>
           </button>
           {aiClis.length > 0 && (
             <>

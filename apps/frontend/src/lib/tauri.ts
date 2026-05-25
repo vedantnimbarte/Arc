@@ -196,6 +196,21 @@ export async function fsCreateDir(path: string): Promise<void> {
   await invoke('fs_create_dir', { path });
 }
 
+// ----- Network probes ---------------------------------------------------
+
+// Lightweight 127.0.0.1:<port> TCP connect with a 200 ms timeout. Used by the
+// Preview pane's port picker to mark which dev-server ports are live.
+export async function networkProbePort(port: number): Promise<boolean> {
+  return invoke<boolean>('network_probe_port', { port });
+}
+
+// Open a URL in the user's default OS handler (system browser for http/https).
+// Inside a Tauri webview `window.open` does NOT reliably hop to the system
+// browser, so anything that needs to escape the embedded webview routes here.
+export async function shellOpenExternal(url: string): Promise<void> {
+  await invoke('shell_open_external', { url });
+}
+
 // ----- Secrets (OS credential vault) ------------------------------------
 
 // Provider id here is a preset id (e.g. `'openai'`, `'deepseek'`, `'lmstudio'`)
@@ -424,13 +439,14 @@ export async function llmStream(
 // the Rust DTOs serialized via serde defaults. Outer invoke arguments use
 // camelCase — Tauri converts them to snake_case Rust params automatically.
 
-export type TabKind = 'terminal' | 'editor';
+export type TabKind = 'terminal' | 'editor' | 'preview';
 
 export interface TabInput {
   id: string;
   title: string;
   kind: TabKind;
   file_path?: string | null;
+  preview_url?: string | null;
 }
 
 export interface PersistedTab extends TabInput {

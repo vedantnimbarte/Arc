@@ -43,6 +43,7 @@ interface ContextMenuState {
   entry: FsEntry;
   x: number;
   y: number;
+  isRoot?: boolean;
 }
 
 interface CreatingState {
@@ -289,6 +290,20 @@ export function FileTree() {
     setContextMenu({ entry, x: e.clientX, y: e.clientY });
   }, []);
 
+  // Right-click on the empty area of the tree opens a menu scoped to the
+  // workspace root. TreeNode buttons stopPropagation on their own
+  // contextmenu, so this only fires for whitespace.
+  const handleRootContextMenu = useCallback((e: React.MouseEvent) => {
+    if (!root) return;
+    e.preventDefault();
+    setContextMenu({
+      entry: { name: basename(root), path: root, kind: 'dir', hidden: false },
+      x: e.clientX,
+      y: e.clientY,
+      isRoot: true,
+    });
+  }, [root]);
+
   const closeContextMenu = useCallback(() => setContextMenu(null), []);
 
   const ctxOpenInTerminal = useCallback((path: string) => {
@@ -491,7 +506,10 @@ export function FileTree() {
       </div>
 
       {/* Tree */}
-      <div className="selectable flex-1 overflow-auto px-1.5 py-2">
+      <div
+        className="selectable flex-1 overflow-auto px-1.5 py-2"
+        onContextMenu={handleRootContextMenu}
+      >
         {rootError && <ErrorRow message={rootError} />}
         {!isTauri && (
           <div className="px-2 py-1.5 font-display text-[10.5px] leading-relaxed text-fg-subtle">
@@ -521,6 +539,7 @@ export function FileTree() {
           x={contextMenu.x}
           y={contextMenu.y}
           root={root}
+          isRoot={!!contextMenu.isRoot}
           onClose={closeContextMenu}
           onOpenInTerminal={() => { ctxOpenInTerminal(contextMenu.entry.path); }}
           onReveal={() => { void ctxReveal(contextMenu.entry.path); }}
@@ -576,6 +595,7 @@ function ContextMenu({
   x,
   y,
   root,
+  isRoot,
   onClose,
   onOpenInTerminal,
   onReveal,
@@ -592,6 +612,7 @@ function ContextMenu({
   x: number;
   y: number;
   root: string | null;
+  isRoot: boolean;
   onClose: () => void;
   onOpenInTerminal: () => void;
   onReveal: () => void;
@@ -677,12 +698,16 @@ function ContextMenu({
           {item('New Folder', onNewFolder)}
           {sep}
           {item('Copy Path', onCopyPath)}
-          {item('Copy Relative Path', onCopyRelativePath)}
+          {!isRoot && item('Copy Relative Path', onCopyRelativePath)}
           {sep}
           {item('Attach to Agent', onAttachToAgent)}
-          {sep}
-          {item('Rename', onRename)}
-          {item('Delete', onDelete, true)}
+          {!isRoot && (
+            <>
+              {sep}
+              {item('Rename', onRename)}
+              {item('Delete', onDelete, true)}
+            </>
+          )}
         </>
       ) : (
         <>

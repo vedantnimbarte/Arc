@@ -44,6 +44,9 @@ bytes = "1.7"
 # Native file dialogs
 rfd = "0.15"
 
+# Open URLs / paths in the user's default handler (system browser, file manager, …)
+open = "5"
+
 # Filesystem watcher + walker
 notify = "6"
 walkdir = "2"

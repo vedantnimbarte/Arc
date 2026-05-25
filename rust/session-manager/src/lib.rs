@@ -138,12 +138,14 @@ mod tests {
                 title: "shell".into(),
                 kind: TabKind::Terminal,
                 file_path: None,
+                preview_url: None,
             },
             TabInput {
                 id: "t2".into(),
                 title: "main.rs".into(),
                 kind: TabKind::Editor,
                 file_path: Some("/tmp/main.rs".into()),
+                preview_url: None,
             },
         ];
         tabs::save_tabs(store.pool(), &state.session.id, &inputs, Some("t2"))

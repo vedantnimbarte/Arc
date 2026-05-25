@@ -32,6 +32,7 @@ dashmap = { workspace = true }
 eventsource-stream = { workspace = true }
 futures-util = { workspace = true }
 keyring = { workspace = true }
+open = { workspace = true }
 reqwest = { workspace = true }
 rfd = { workspace = true }
 uuid = { workspace = true }

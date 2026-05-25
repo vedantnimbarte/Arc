@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Terminal as TerminalIcon, FileCode, X } from 'lucide-react';
+import { Terminal as TerminalIcon, FileCode, Monitor, X } from 'lucide-react';
 import { findLeaf, useWorkspace } from '../state/workspace';
 import { cn } from '../lib/cn';
 import { TabContextMenu } from './TabContextMenu';
@@ -59,6 +59,10 @@ export function PaneTabStrip({ paneId, variant = 'leaf' }: Props) {
       openFile(tab.filePath, tab.title, { forceNew: true });
       return;
     }
+    if (tab.kind === 'preview') {
+      useWorkspace.getState().openPreview(tab.previewUrl);
+      return;
+    }
     // Terminal: spawn a fresh shell with the same shellOverride. We use
     // `newTerminal` so the new tab inherits the standard setup (root reset,
     // unique id) — losing `shellOverride` would defeat the duplicate, so
@@ -87,7 +91,10 @@ export function PaneTabStrip({ paneId, variant = 'leaf' }: Props) {
         const tab = tabs.find((t) => t.id === tabId);
         if (!tab) return null;
         const isActive = tabId === leaf.activeTabId;
-        const Icon = tab.kind === 'terminal' ? TerminalIcon : FileCode;
+        const Icon =
+          tab.kind === 'terminal' ? TerminalIcon
+          : tab.kind === 'preview' ? Monitor
+          : FileCode;
         const dirty = !!tabDirty[tabId];
         const isRenaming = renamingTabId === tabId;
         return (

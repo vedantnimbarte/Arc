@@ -154,6 +154,8 @@ fn main() {
             commands::memory::memory_search,
             commands::memory::memory_embed_entry,
             commands::memory::memory_vector_search,
+            commands::network::network_probe_port,
+            commands::network::shell_open_external,
             commands::window::settings_window_open,
             commands::window::settings_broadcast_changed,
             commands::window::git_window_open,

@@ -12,11 +12,14 @@ import { useFiles } from './files';
 export interface Tab {
   id: string;
   title: string;
-  kind: 'terminal' | 'editor';
+  kind: 'terminal' | 'editor' | 'preview';
   /** PTY id for terminal tabs. Transient — stripped from persisted state. */
   ptyId?: string;
   /** Absolute path for editor tabs (read on mount). */
   filePath?: string;
+  /** URL loaded by a preview tab. Persisted so the iframe restores on
+   *  relaunch with the last-viewed dev-server URL. */
+  previewUrl?: string;
   /** Override the default shell binary for a terminal tab — used by the
    *  AI CLI launchers (Claude Code / Codex / OpenCode). Transient: not
    *  persisted across restarts (the tab would come back as a regular shell). */
@@ -96,6 +99,11 @@ interface WorkspaceState {
    *  Resets the file-tree root to home first so the spawning PTY inherits
    *  it as CWD and both panes stay in sync. */
   newTerminal: (override?: Partial<Pick<Tab, 'title' | 'shellOverride'>>) => Promise<string>;
+  /** Open a new preview tab. Optional `url` pre-fills the URL bar so deep-
+   *  link callers (e.g. "preview this dev server") can navigate immediately. */
+  openPreview: (url?: string) => string;
+  /** Update the `previewUrl` of a preview tab. Triggers debounced persist. */
+  setPreviewUrl: (id: string, url: string) => void;
   /** Focus a leaf. Mirrors the leaf's `activeTabId` into the global
    *  `activeTabId` for legacy consumers (FileTree paste, ChatPanel). */
   setFocusedPane: (paneId: string) => void;
@@ -493,6 +501,21 @@ export const useWorkspace = create<WorkspaceState>()((set, get) => ({
     get().addTab(tab);
     return id;
   },
+  openPreview: (url) => {
+    const id = `preview-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+    const tab: Tab = {
+      id,
+      title: 'Preview',
+      kind: 'preview',
+      previewUrl: url,
+    };
+    get().addTab(tab);
+    return id;
+  },
+  setPreviewUrl: (id, url) =>
+    set((s) => ({
+      tabs: s.tabs.map((t) => (t.id === id ? { ...t, previewUrl: url } : t)),
+    })),
   setFocusedPane: (paneId) =>
     set((s) => {
       const leaf = findLeaf(s.layout, paneId);
@@ -518,6 +541,15 @@ export const useWorkspace = create<WorkspaceState>()((set, get) => ({
         title: source.title,
         kind: 'editor',
         filePath: source.filePath,
+      };
+      set((s) => ({ tabs: [...s.tabs, newTab] }));
+    } else if (source.kind === 'preview') {
+      newTabId = `preview-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+      const newTab: Tab = {
+        id: newTabId,
+        title: source.title,
+        kind: 'preview',
+        previewUrl: source.previewUrl,
       };
       set((s) => ({ tabs: [...s.tabs, newTab] }));
     } else {
@@ -623,6 +655,7 @@ export const useWorkspace = create<WorkspaceState>()((set, get) => ({
           title: t.title,
           kind: t.kind,
           filePath: t.file_path ?? undefined,
+          previewUrl: t.preview_url ?? undefined,
         }));
         activeTabId =
           loaded.session.active_tab_id && tabs.some((t) => t.id === loaded.session.active_tab_id)
@@ -721,6 +754,7 @@ function toTabInputs(tabs: Tab[]): TabInput[] {
     title: t.title,
     kind: t.kind,
     file_path: t.filePath ?? null,
+    preview_url: t.previewUrl ?? null,
   }));
 }
 
@@ -740,7 +774,7 @@ function tabSliceEqual(a: WorkspaceState, b: WorkspaceState): boolean {
   for (let i = 0; i < a.tabs.length; i++) {
     const x = a.tabs[i]!;
     const y = b.tabs[i]!;
-    if (x.id !== y.id || x.title !== y.title || x.kind !== y.kind || x.filePath !== y.filePath) {
+    if (x.id !== y.id || x.title !== y.title || x.kind !== y.kind || x.filePath !== y.filePath || x.previewUrl !== y.previewUrl) {
       return false;
     }
   }
