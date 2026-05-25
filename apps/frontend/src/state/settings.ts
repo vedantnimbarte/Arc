@@ -127,7 +127,7 @@ const DEFAULTS = {
   fontSize: DEFAULT_FONT_SIZE,
   launchAtLogin: false,
   restoreWindowState: true,
-  terminalWebgl: true,
+  terminalWebgl: false,
 };
 
 const clampFontSize = (n: number): number =>

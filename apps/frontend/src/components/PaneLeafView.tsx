@@ -55,6 +55,12 @@ export function PaneLeafView({ paneId, hostsRef, stageRef, header }: Props) {
     if (host.parentElement === container) return;
 
     container.appendChild(host);
+    // Notify the hosted content (Terminal / Editor) that it's now visible
+    // in a real leaf. xterm in particular needs a kick — ResizeObserver
+    // can miss the display:none→visible transition and leave the canvas
+    // rendered at stale dimensions (looks like only a sliver of the prompt
+    // is visible after switching back to the tab).
+    host.dispatchEvent(new CustomEvent('arc:host-shown'));
 
     return () => {
       // On effect teardown the next activeTab's effect already appendChild'd

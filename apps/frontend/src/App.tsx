@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useRef, useState } from 'react';
+import { Component, lazy, Suspense, useEffect, useRef, useState, type ErrorInfo, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { Terminal } from './components/Terminal';
 import { TabBar } from './components/TabBar';
@@ -39,47 +39,54 @@ export default function App() {
   // and pane splits.
   const hostsRef = useRef<Map<string, HTMLDivElement>>(new Map());
   const stageRef = useRef<HTMLDivElement>(null);
-  // Bump on tab list changes to force a re-render so `createPortal` calls
-  // line up with the current set of host divs.
-  const [, setHostTick] = useState(0);
 
-  // Lazily create / GC host divs as tabs come and go.
+  // Lazily create host divs *during render* so they exist before child
+  // layout effects run. PaneLeafView's `useLayoutEffect` reparents the
+  // active host into its leaf — child layout effects run before parent
+  // effects, so any "create the host in an effect" approach leaves the
+  // first render's PaneLeafView with nothing to reparent. The host stays
+  // stranded in the hidden stage, xterm opens into a 0x0 container, and
+  // RenderService crashes on the next frame.
+  //
+  // Creating DOM nodes in render is a side effect, but it's idempotent
+  // here: the ref-backed cache means Strict Mode's double-render produces
+  // exactly one node per tab id. We don't append to the stage yet — that
+  // happens in the layout effect below so the DOM stays consistent.
+  for (const tab of tabs) {
+    if (!hostsRef.current.has(tab.id)) {
+      const div = document.createElement('div');
+      div.dataset.tabHost = tab.id;
+      div.style.position = 'absolute';
+      div.style.inset = '0';
+      hostsRef.current.set(tab.id, div);
+    }
+  }
+
+  // Stage-parent any orphan hosts and GC closed tabs' hosts. Runs in a
+  // layout effect so the DOM mutation happens before paint and before
+  // PaneLeafView would observe a detached host.
   useEffect(() => {
     const ids = new Set(tabs.map((t) => t.id));
     const map = hostsRef.current;
-    let changed = false;
-    // Create missing
     for (const t of tabs) {
-      if (!map.has(t.id)) {
-        const div = document.createElement('div');
-        div.dataset.tabHost = t.id;
-        // The host fills its parent (leaf or stage). The stage hides it
-        // via display:none so xterm doesn't try to measure a 0x0 canvas.
-        div.style.position = 'absolute';
-        div.style.inset = '0';
-        if (stageRef.current) stageRef.current.appendChild(div);
-        map.set(t.id, div);
-        changed = true;
+      const div = map.get(t.id);
+      if (div && !div.parentElement && stageRef.current) {
+        stageRef.current.appendChild(div);
       }
     }
-    // Drop closed tabs' hosts
     for (const id of Array.from(map.keys())) {
       if (!ids.has(id)) {
         const node = map.get(id);
         node?.parentElement?.removeChild(node);
         map.delete(id);
-        changed = true;
       }
     }
-    if (changed) setHostTick((n) => n + 1);
   }, [tabs]);
 
   // Build the portal list on every render. createPortal is virtual — React
   // reconciles each portal by its `key={tab.id}` so the underlying Terminal
   // / Editor components stay mounted across renders, drag/drop, and pane
-  // moves. Not memoized because the host-div registry is populated in a
-  // post-render effect; we want this list to refresh immediately when the
-  // effect bumps `hostTick`.
+  // moves.
   const portals: React.ReactNode[] = [];
   for (const tab of tabs) {
     const host = hostsRef.current.get(tab.id);
@@ -98,7 +105,7 @@ export default function App() {
       );
     portals.push(
       <PortalSlot key={tab.id} host={host}>
-        {child}
+        <TabErrorBoundary tabId={tab.id}>{child}</TabErrorBoundary>
       </PortalSlot>,
     );
   }
@@ -322,6 +329,49 @@ export default function App() {
 /** Tiny wrapper so we can use `createPortal` inside the memoized list. */
 function PortalSlot({ host, children }: { host: HTMLDivElement; children: React.ReactNode }) {
   return createPortal(children, host);
+}
+
+/**
+ * Catches render-time exceptions from a tab's content (Terminal / Editor) so
+ * one crashing pane can't unmount the whole portal list and blank the app.
+ * xterm.js in particular can throw from its async render loop when the WebGL
+ * renderer is left in a broken state.
+ */
+class TabErrorBoundary extends Component<
+  { tabId: string; children: ReactNode },
+  { error: Error | null }
+> {
+  override state = { error: null as Error | null };
+  static getDerivedStateFromError(error: Error) {
+    return { error };
+  }
+  override componentDidCatch(error: Error, info: ErrorInfo) {
+    console.error(`[tab ${this.props.tabId}] crashed:`, error, info.componentStack);
+  }
+  override render() {
+    if (this.state.error) {
+      return (
+        <div className="flex h-full w-full items-center justify-center px-6 text-center">
+          <div className="max-w-sm space-y-2">
+            <div className="font-display text-[13px] tracking-tight text-fg-base">
+              this tab crashed
+            </div>
+            <div className="text-[11px] text-fg-muted">
+              {this.state.error.message || 'unknown error'}
+            </div>
+            <button
+              type="button"
+              onClick={() => this.setState({ error: null })}
+              className="rounded-md border border-border-subtle px-2.5 py-1 text-[11px] text-fg-base hover:bg-bg-surface"
+            >
+              retry
+            </button>
+          </div>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
 }
 
 function EditorFallback() {
