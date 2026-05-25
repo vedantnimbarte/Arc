@@ -688,28 +688,241 @@ These features leverage existing infrastructure and close gaps in core workflows
 
 ---
 
+## Phase 9: Terminal & Developer Experience Enhancements (6-8 weeks)
+
+### 25. Smart Command Autocomplete
+
+**Description**: AI-powered terminal autocomplete suggesting commands based on context, history, and project files.
+
+**Why it matters**:
+- Reduces typos in frequently-used commands
+- Suggests relevant commands (git, npm, cargo) based on project type
+- Learns from user's own command patterns
+
+**Implementation**:
+- On keystroke in terminal, parse partial command
+- Query against:
+  - Command history (recent + frequent)
+  - Language-specific tools (npm, cargo, etc.)
+  - Custom aliases (from .bashrc/.zshrc)
+- Show dropdown with scores + descriptions
+- Press Tab or arrow keys to select
+
+**Technical approach**:
+- Extend xterm.js input capture to feed into an autocomplete engine
+- Store command frequencies in SQLite
+- Use fuzzy matching (similar to file search)
+- New Tauri command: `shell_autocomplete_suggestions(partial_command)`
+
+**Dependencies**: None
+
+---
+
+### 26. Terminal Output Syntax Highlighting
+
+**Description**: Detect and colorize structured output (JSON, YAML, logs, diffs) inline in the terminal.
+
+**Why it matters**:
+- Easier to scan complex output (API responses, logs)
+- Reduces need to copy/paste into external tools
+- Improves readability without terminal color codes
+
+**Implementation**:
+- Detect output patterns:
+  - JSON: pretty-print + colorize
+  - YAML: key/value highlighting
+  - Diffs: green additions, red deletions
+  - Errors: highlight stack traces, line numbers
+  - URLs: clickable links
+- Apply via xterm.js decorations (non-invasive, overlays on existing output)
+
+**Technical approach**:
+- Extend PTY manager to post-process output chunks
+- Add `detect_output_format(chunk)` helper in Rust
+- Use regex patterns + lightweight parsers
+- Store highlighting rules in `state/outputHighlighting.ts`
+
+**Dependencies**: xterm.js
+
+---
+
+### 27. Project Templates & Quick Start
+
+**Description**: Pre-configured project scaffolding for common stacks (React, FastAPI, Next.js, etc.).
+
+**Why it matters**:
+- Speeds up project initialization
+- Enforces team conventions (linters, test setup, CI)
+- Reduces boilerplate setup time
+
+**Implementation**:
+- Settings → Project Templates tab
+- Options:
+  - Built-in templates (React, Node, Rust, Python)
+  - Custom templates (Git repos or local paths)
+- On `New Project`:
+  - Select template
+  - Enter project name / answers to template prompts
+  - Clone template + run setup script
+  - Open in ARC with pre-configured workspace
+
+**Technical approach**:
+- Store templates in SQLite: `project_templates` table
+- New Tauri command: `fs_scaffold_project(template_id, name, answers)`
+- Templates are Git repos or JSON with prompt definitions
+- Integration with `pty_spawn` to run setup scripts
+
+**Dependencies**: git (for cloning templates)
+
+---
+
+### 28. Process Monitor & Resource Usage
+
+**Description**: Per-tab CPU/memory monitoring with process management UI.
+
+**Why it matters**:
+- Developers need to debug resource hogs (hung processes, memory leaks)
+- Quick kill for unresponsive shells
+- Visual feedback on long-running operations
+
+**Implementation**:
+- Tab header shows mini bar: `[CPU] [Memory]` with color coding
+- Right-click tab → "Process Info" shows:
+  - PID, parent process, uptime
+  - CPU %, memory, open files
+  - Child processes (for spawned agents)
+  - "Kill", "Force Kill" buttons
+- Status bar shows system-wide stats when hovering
+
+**Technical approach**:
+- Query `/proc` (Linux) or Task Manager (Windows) for process info
+- New Rust crate: `arc-process-monitor` (uses `sysinfo` or platform APIs)
+- Tauri commands: `process_info(pid)`, `process_kill(pid)`
+- Zustand store: `state/processes.ts`
+- Render mini bars in Tab component
+
+**Dependencies**: `sysinfo` crate (cross-platform)
+
+---
+
+### 29. Log Aggregator & Tail UI
+
+**Description**: Multi-file log viewer with filtering, searching, and real-time tailing.
+
+**Why it matters**:
+- Development often involves monitoring multiple logs simultaneously
+- Reduces need for external log viewers (tail, less)
+- Searchable UI beats grepping terminal output
+
+**Implementation**:
+- New sidebar pane: "Logs"
+- Features:
+  - Add files to watch (file picker or drag-drop)
+  - Live tail with auto-scroll + pause button
+  - Filtering by severity (ERROR, WARN, INFO)
+  - Search within current view
+  - Timestamp column + color coding by level
+  - Export as CSV/JSON
+- Integration: auto-add `package.json` error logs, git logs, app logs
+
+**Technical approach**:
+- Extend file Watcher to support arbitrary files (not just root directory)
+- Use `tail -f` equivalent in Rust (read last N lines + follow)
+- New component: `apps/frontend/src/components/LogAggregator.tsx`
+- Parse log format (regex patterns for common formats: JSON, Apache, syslog)
+- Zustand store: `state/logs.ts`
+
+**Dependencies**: None
+
+---
+
+### 30. HTTP Inspector / Request Snooper
+
+**Description**: Intercept and inspect HTTP requests/responses from the running app.
+
+**Why it matters**:
+- Debugging API integrations without external tools (Postman, DevTools)
+- Inspect headers, payloads, timing
+- Replay/resend requests
+
+**Implementation**:
+- New sidebar pane: "HTTP"
+- Capture requests from:
+  - Running dev server (via proxy or `NODE_OPTIONS`)
+  - Explicit `/mcp connect` for HTTP servers
+- Display list:
+  - Method, URL, status, latency, size
+- Click request → detail view:
+  - Headers, payload (pretty-printed JSON), response
+  - Timeline (DNS, TLS, TTFB, Download)
+- Actions:
+  - Copy as cURL
+  - Resend with modifications
+  - Export as HAR
+
+**Technical approach**:
+- For Node: inject `http` module wrapper to log requests (with approval gate)
+- Alternative: proxy server listening on localhost, configured via env var
+- New component: `apps/frontend/src/components/HttpInspector.tsx`
+- Zustand store: `state/http.ts`
+- Tauri command: `http_start_proxy()` / `http_stop_proxy()`
+
+**Dependencies**: Optional: HAR format library
+
+---
+
+### 31. Snippet Library & Insertion
+
+**Description**: Language-specific snippet management with insertion into editor.
+
+**Why it matters**:
+- Reduces repetitive typing (boilerplate, common patterns)
+- Team can share snippets (in version control)
+- Faster code writing
+
+**Implementation**:
+- Settings → Snippets tab
+- Organize by language (JavaScript, Python, Rust, etc.)
+- Features:
+  - Create/edit snippets (name, trigger word, content with placeholders)
+  - Search/fuzzy-find snippets (⌘⇧/ or Alt+S)
+  - Insert into editor with cursor jump points
+  - Import/export as JSON
+  - Sync from GitHub repo (for team snippets)
+
+**Technical approach**:
+- Extend `packages/editor` with snippet provider
+- Store in SQLite: `snippets` table with columns (id, language, name, trigger, content)
+- Zustand store: `state/snippets.ts`
+- Integration with CodeMirror 6 completions API
+- Tauri command: `snippets_list(language)`, `snippets_insert(id)`
+
+**Dependencies**: CodeMirror 6 (already used)
+
+---
+
 ## Low-Priority / Exploratory
 
-### 20. Syntax Highlighting Improvements
+### 32. Syntax Highlighting Improvements
 - Better language support (e.g., add Solidity, HCL)
 - Custom themes editor
 - Theme export/sharing
 
-### 21. Plugin/Extension System
+### 33. Plugin/Extension System
 - Allow users to write custom tools
 - Package + distribute plugins
 - Hook system for lifecycle events
 
-### 22. Performance Metrics Dashboard
+### 34. Performance Metrics Dashboard
 - Memory/CPU usage of ARC itself
 - PTY responsiveness stats
 - Agent runtime benchmarks
 
-### 23. AI-Powered Refactoring Assistant
+### 35. AI-Powered Refactoring Assistant
 - Suggest code improvements (style, patterns, modernization)
 - Batch apply suggestions
 
-### 24. Accessibility Improvements
+### 36. Accessibility Improvements
 - Screen reader support
 - High contrast theme
 - Keyboard-only navigation
@@ -730,7 +943,9 @@ These features leverage existing infrastructure and close gaps in core workflows
 3. **Weeks 5-6**: Database browser + quick actions palette
 4. **Weeks 7-8**: Split pane layout + workspace snapshots
 5. **Weeks 9-10**: Agent templates + code review agent
-6. **Weeks 11+**: Recording, dependency scanner, cloud sync
+6. **Weeks 11-12**: Smart command autocomplete + log aggregator
+7. **Weeks 13-14**: Project templates + process monitor + snippet library
+8. **Weeks 15+**: Recording, dependency scanner, HTTP inspector, cloud sync
 
 ### Success Metrics
 - **Reduced friction**: Time to common tasks (git switch, test run, env edit)
