@@ -2,6 +2,8 @@ import { Component, lazy, Suspense, useEffect, useRef, useState, type ErrorInfo,
 import { createPortal } from 'react-dom';
 import { Terminal } from './components/Terminal';
 import { Preview } from './components/Preview';
+import { ApiClient } from './components/ApiClient';
+import { SystemMonitor } from './components/SystemMonitor';
 import { TabBar } from './components/TabBar';
 import { ChatPanel } from './components/ChatPanel';
 import { StatusBar } from './components/StatusBar';
@@ -97,6 +99,10 @@ export default function App() {
         <Terminal sessionKey={tab.id} />
       ) : tab.kind === 'preview' ? (
         <Preview tabId={tab.id} />
+      ) : tab.kind === 'apiclient' ? (
+        <ApiClient tabId={tab.id} />
+      ) : tab.kind === 'sysmonitor' ? (
+        <SystemMonitor tabId={tab.id} />
       ) : tab.filePath ? (
         <Suspense fallback={<EditorFallback />}>
           <Editor filePath={tab.filePath} tabId={tab.id} />

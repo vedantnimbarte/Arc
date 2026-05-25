@@ -10,6 +10,7 @@ use commands::fs::WatchState;
 use commands::llm::LlmState;
 use commands::mcp::McpState;
 use commands::pty::PtyState;
+use commands::system::SystemState;
 use tauri::Manager;
 use tauri_plugin_autostart::MacosLauncher;
 use tauri_plugin_window_state::{Builder as WindowStateBuilder, StateFlags, WindowExt};
@@ -80,6 +81,7 @@ fn main() {
         .manage(WatchState::default())
         .manage(McpState::default())
         .manage(AgentApprovals::new())
+        .manage::<SystemState>(std::sync::Arc::new(arc_system_monitor::Monitor::new()))
         .invoke_handler(tauri::generate_handler![
             commands::pty::pty_spawn,
             commands::pty::pty_write,
@@ -156,6 +158,23 @@ fn main() {
             commands::memory::memory_vector_search,
             commands::network::network_probe_port,
             commands::network::shell_open_external,
+            commands::http::http_request,
+            commands::apiclient::apiclient_list_collections,
+            commands::apiclient::apiclient_upsert_collection,
+            commands::apiclient::apiclient_delete_collection,
+            commands::apiclient::apiclient_list_requests,
+            commands::apiclient::apiclient_upsert_request,
+            commands::apiclient::apiclient_delete_request,
+            commands::apiclient::apiclient_append_history,
+            commands::apiclient::apiclient_history,
+            commands::apiclient::apiclient_clear_history,
+            commands::apiclient::apiclient_envs_list,
+            commands::apiclient::apiclient_envs_upsert,
+            commands::apiclient::apiclient_envs_delete,
+            commands::apiclient::apiclient_envs_set_active,
+            commands::system::system_snapshot,
+            commands::system::system_processes_list,
+            commands::system::system_process_kill,
             commands::window::settings_window_open,
             commands::window::settings_broadcast_changed,
             commands::window::git_window_open,

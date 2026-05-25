@@ -211,6 +211,258 @@ export async function shellOpenExternal(url: string): Promise<void> {
   await invoke('shell_open_external', { url });
 }
 
+// ----- System monitor ---------------------------------------------------
+
+export interface SystemSnapshot {
+  cpu_percent: number;
+  cpu_count: number;
+  ram_used_bytes: number;
+  ram_total_bytes: number;
+  disk_used_bytes: number;
+  disk_total_bytes: number;
+  net_rx_bytes_per_sec: number;
+  net_tx_bytes_per_sec: number;
+  process_count: number;
+}
+
+export interface ProcessInfo {
+  pid: number;
+  name: string;
+  cpu_percent: number;
+  memory_bytes: number;
+  user: string | null;
+}
+
+const EMPTY_SNAPSHOT: SystemSnapshot = {
+  cpu_percent: 0,
+  cpu_count: 0,
+  ram_used_bytes: 0,
+  ram_total_bytes: 0,
+  disk_used_bytes: 0,
+  disk_total_bytes: 0,
+  net_rx_bytes_per_sec: 0,
+  net_tx_bytes_per_sec: 0,
+  process_count: 0,
+};
+
+export async function systemSnapshot(): Promise<SystemSnapshot> {
+  if (!isTauri) return EMPTY_SNAPSHOT;
+  return invoke<SystemSnapshot>('system_snapshot');
+}
+
+export async function systemProcessesList(): Promise<ProcessInfo[]> {
+  if (!isTauri) return [];
+  return invoke<ProcessInfo[]>('system_processes_list');
+}
+
+export async function systemProcessKill(pid: number): Promise<void> {
+  if (!isTauri) return;
+  await invoke('system_process_kill', { pid });
+}
+
+// ----- HTTP client (API Client tab) -------------------------------------
+
+export interface HttpHeaderKV {
+  name: string;
+  value: string;
+}
+
+export type HttpBodyDto =
+  | { kind: 'none' }
+  | { kind: 'raw'; text: string; content_type: string }
+  | { kind: 'formurlencoded'; entries: HttpHeaderKV[] }
+  | { kind: 'multipart'; entries: HttpHeaderKV[] };
+
+export interface HttpRequestDto {
+  method: string;
+  url: string;
+  headers: HttpHeaderKV[];
+  body: HttpBodyDto;
+  timeout_ms?: number;
+}
+
+export interface HttpResponseDto {
+  status: number;
+  status_text: string;
+  headers: HttpHeaderKV[];
+  /** UTF-8 text if the body decoded cleanly, otherwise null. */
+  body_text: string | null;
+  /** Base64-encoded raw bytes. Always present. */
+  body_base64: string;
+  size_bytes: number;
+  time_ms: number;
+  truncated: boolean;
+  final_url: string;
+}
+
+/**
+ * Execute an HTTP request from Rust via reqwest. Bypasses browser CORS, so
+ * the API Client can hit arbitrary endpoints. 10 MiB response cap; bigger
+ * responses get `truncated: true`.
+ */
+export async function httpRequest(req: HttpRequestDto): Promise<HttpResponseDto> {
+  return invoke<HttpResponseDto>('http_request', { req });
+}
+
+// ----- API Client persistence -------------------------------------------
+
+export interface ApiCollection {
+  id: string;
+  session_id: string;
+  parent_id: string | null;
+  name: string;
+  position: number;
+  created_at: number;
+}
+
+export interface ApiSavedRequest {
+  id: string;
+  session_id: string;
+  collection_id: string | null;
+  name: string;
+  method: string;
+  url: string;
+  params_json: string | null;
+  headers_json: string | null;
+  body_json: string | null;
+  auth_json: string | null;
+  position: number;
+  created_at: number;
+  updated_at: number;
+}
+
+export interface ApiSavedRequestInput {
+  id?: string | null;
+  collection_id?: string | null;
+  name: string;
+  method: string;
+  url: string;
+  params_json?: string | null;
+  headers_json?: string | null;
+  body_json?: string | null;
+  auth_json?: string | null;
+  position?: number;
+}
+
+export interface ApiHistoryEntry {
+  id: string;
+  session_id: string;
+  method: string;
+  url: string;
+  request_snapshot_json: string;
+  status: number | null;
+  time_ms: number | null;
+  size_bytes: number | null;
+  response_excerpt: string | null;
+  error: string | null;
+  executed_at: number;
+}
+
+export interface ApiHistoryInput {
+  method: string;
+  url: string;
+  request_snapshot_json: string;
+  status?: number | null;
+  time_ms?: number | null;
+  size_bytes?: number | null;
+  response_excerpt?: string | null;
+  error?: string | null;
+}
+
+export interface ApiEnvironment {
+  id: string;
+  session_id: string;
+  name: string;
+  vars_json: string;
+  is_active: boolean;
+  created_at: number;
+  updated_at: number;
+}
+
+export async function apiclientListCollections(sessionId: string): Promise<ApiCollection[]> {
+  return invoke<ApiCollection[]>('apiclient_list_collections', { sessionId });
+}
+
+export async function apiclientUpsertCollection(
+  sessionId: string,
+  args: { id?: string | null; parentId?: string | null; name: string; position: number },
+): Promise<ApiCollection> {
+  return invoke<ApiCollection>('apiclient_upsert_collection', {
+    sessionId,
+    id: args.id ?? null,
+    parentId: args.parentId ?? null,
+    name: args.name,
+    position: args.position,
+  });
+}
+
+export async function apiclientDeleteCollection(id: string): Promise<void> {
+  await invoke('apiclient_delete_collection', { id });
+}
+
+export async function apiclientListRequests(sessionId: string): Promise<ApiSavedRequest[]> {
+  return invoke<ApiSavedRequest[]>('apiclient_list_requests', { sessionId });
+}
+
+export async function apiclientUpsertRequest(
+  sessionId: string,
+  input: ApiSavedRequestInput,
+): Promise<ApiSavedRequest> {
+  return invoke<ApiSavedRequest>('apiclient_upsert_request', { sessionId, input });
+}
+
+export async function apiclientDeleteRequest(id: string): Promise<void> {
+  await invoke('apiclient_delete_request', { id });
+}
+
+export async function apiclientAppendHistory(
+  sessionId: string,
+  input: ApiHistoryInput,
+): Promise<ApiHistoryEntry> {
+  return invoke<ApiHistoryEntry>('apiclient_append_history', { sessionId, input });
+}
+
+export async function apiclientHistory(
+  sessionId: string,
+  limit?: number,
+): Promise<ApiHistoryEntry[]> {
+  return invoke<ApiHistoryEntry[]>('apiclient_history', {
+    sessionId,
+    limit: limit ?? 100,
+  });
+}
+
+export async function apiclientClearHistory(sessionId: string): Promise<void> {
+  await invoke('apiclient_clear_history', { sessionId });
+}
+
+export async function apiclientEnvsList(sessionId: string): Promise<ApiEnvironment[]> {
+  return invoke<ApiEnvironment[]>('apiclient_envs_list', { sessionId });
+}
+
+export async function apiclientEnvsUpsert(
+  sessionId: string,
+  args: { id?: string | null; name: string; varsJson: string },
+): Promise<ApiEnvironment> {
+  return invoke<ApiEnvironment>('apiclient_envs_upsert', {
+    sessionId,
+    id: args.id ?? null,
+    name: args.name,
+    varsJson: args.varsJson,
+  });
+}
+
+export async function apiclientEnvsDelete(id: string): Promise<void> {
+  await invoke('apiclient_envs_delete', { id });
+}
+
+export async function apiclientEnvsSetActive(
+  sessionId: string,
+  id: string | null,
+): Promise<void> {
+  await invoke('apiclient_envs_set_active', { sessionId, id });
+}
+
 // ----- Secrets (OS credential vault) ------------------------------------
 
 // Provider id here is a preset id (e.g. `'openai'`, `'deepseek'`, `'lmstudio'`)
@@ -439,7 +691,7 @@ export async function llmStream(
 // the Rust DTOs serialized via serde defaults. Outer invoke arguments use
 // camelCase — Tauri converts them to snake_case Rust params automatically.
 
-export type TabKind = 'terminal' | 'editor' | 'preview';
+export type TabKind = 'terminal' | 'editor' | 'preview' | 'apiclient' | 'sysmonitor';
 
 export interface TabInput {
   id: string;
@@ -447,6 +699,9 @@ export interface TabInput {
   kind: TabKind;
   file_path?: string | null;
   preview_url?: string | null;
+  /** Opaque JSON blob owned by the frontend for API Client tabs — holds
+   *  open sub-tabs, drafts, left-rail collapsed flag, etc. */
+  apiclient_state_json?: string | null;
 }
 
 export interface PersistedTab extends TabInput {

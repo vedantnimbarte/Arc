@@ -1,0 +1,17 @@
+[package]
+name = "arc-http-client"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+description = "Stateless HTTP request executor for ARC's built-in API client."
+
+[dependencies]
+anyhow = { workspace = true }
+reqwest = { workspace = true, features = ["multipart"] }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+base64 = "0.22"

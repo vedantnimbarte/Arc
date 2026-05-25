@@ -17,6 +17,7 @@ use sqlx::sqlite::{
 use thiserror::Error;
 
 pub mod agent;
+pub mod apiclient;
 pub mod chat;
 pub mod commands;
 pub mod memory;
@@ -139,6 +140,7 @@ mod tests {
                 kind: TabKind::Terminal,
                 file_path: None,
                 preview_url: None,
+                apiclient_state_json: None,
             },
             TabInput {
                 id: "t2".into(),
@@ -146,6 +148,7 @@ mod tests {
                 kind: TabKind::Editor,
                 file_path: Some("/tmp/main.rs".into()),
                 preview_url: None,
+                apiclient_state_json: None,
             },
         ];
         tabs::save_tabs(store.pool(), &state.session.id, &inputs, Some("t2"))

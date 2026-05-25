@@ -13,12 +13,14 @@ import {
   Bot,
   GitBranch,
   Monitor,
+  Send,
 } from 'lucide-react';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { useWorkspace } from '../state/workspace';
 import { useFiles } from '../state/files';
 import { cn } from '../lib/cn';
 import { PaneTabStrip } from './PaneTabStrip';
+import { SystemMonitorButton } from './SystemMonitorButton';
 import {
   fsPickFolder,
   fsWriteFile,
@@ -39,8 +41,18 @@ export function TabBar({
   onOpenSettings,
   onOpenSearch,
 }: Props) {
-  const { tabs, activeTabId, setActive, closeTab, openFile, launchAiCli, newTerminal, openPreview, tabDirty } =
-    useWorkspace();
+  const {
+    tabs,
+    activeTabId,
+    setActive,
+    closeTab,
+    openFile,
+    launchAiCli,
+    newTerminal,
+    openPreview,
+    openApiClient,
+    tabDirty,
+  } = useWorkspace();
   // Topbar carries the workspace's tab strip when there are no splits.
   // With splits, each pane keeps its own header so users can see what's
   // open in panes that don't hold focus.
@@ -152,6 +164,11 @@ export function TabBar({
     setMenuOpen(false);
   };
 
+  const handleNewApiClient = () => {
+    openApiClient();
+    setMenuOpen(false);
+  };
+
   const launchCli = (cli: AiCliInfo) => {
     void launchAiCli(cli);
     setMenuOpen(false);
@@ -254,6 +271,7 @@ export function TabBar({
             <GitBranch size={13} strokeWidth={1.9} />
           </button>
         )}
+        <SystemMonitorButton />
         <button
           onClick={onOpenSettings}
           className="group flex h-7 w-7 items-center justify-center rounded-md text-fg-muted transition-all duration-200 ease-apple hover:bg-white/[0.08] hover:text-fg-base active:bg-white/[0.12]"
@@ -302,6 +320,14 @@ export function TabBar({
           >
             <Monitor size={12} strokeWidth={2} className="text-fg-subtle" />
             <span className="flex-1">Preview</span>
+          </button>
+          <button
+            role="menuitem"
+            onClick={handleNewApiClient}
+            className="flex w-full items-center gap-2 px-3 py-2 text-left font-display text-[12px] text-fg-base/90 transition-colors hover:bg-white/[0.06]"
+          >
+            <Send size={12} strokeWidth={2} className="text-fg-subtle" />
+            <span className="flex-1">API Client</span>
           </button>
           {aiClis.length > 0 && (
             <>

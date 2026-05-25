@@ -27,6 +27,8 @@ arc-agent-runtime = { workspace = true }
 arc-ai-runtime = { workspace = true }
 arc-filesystem = { workspace = true }
 arc-git = { workspace = true }
+arc-http-client = { workspace = true }
+arc-system-monitor = { workspace = true }
 async-trait = { workspace = true }
 dashmap = { workspace = true }
 eventsource-stream = { workspace = true }

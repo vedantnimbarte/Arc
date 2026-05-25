@@ -16,6 +16,7 @@ import {
   ChevronRight,
   Copy,
   FileText,
+  Files,
   GitBranch,
   GitCompare,
   Minus,
@@ -187,6 +188,7 @@ function pathSegments(p: string): string[] {
 
 export function SourceControl() {
   const root = useFiles((s) => s.root);
+  const setSidebarView = useFiles((s) => s.setSidebarView);
   const openFile = useWorkspace((s) => s.openFile);
 
   // Single shared poller lives in `Sidebar`; we just subscribe to the cache.
@@ -440,6 +442,18 @@ export function SourceControl() {
             strokeWidth={2.1}
             className={loading ? 'animate-spin-slow' : ''}
           />
+        </button>
+        <button
+          onClick={() => setSidebarView('files')}
+          className={cn(
+            'flex h-6 w-6 items-center justify-center rounded-md text-fg-muted transition-all duration-150 ease-apple',
+            'hover:bg-white/[0.08] hover:text-fg-base hover:shadow-[inset_0_0_0_1px_rgba(255,255,255,0.05)]',
+            'active:scale-[0.92]',
+          )}
+          aria-label="Show file tree"
+          title="Files"
+        >
+          <Files size={12} strokeWidth={2.1} />
         </button>
       </div>
 

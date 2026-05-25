@@ -15,6 +15,8 @@ pub enum TabKind {
     Terminal,
     Editor,
     Preview,
+    Apiclient,
+    Sysmonitor,
 }
 
 impl TabKind {
@@ -23,6 +25,8 @@ impl TabKind {
             TabKind::Terminal => "terminal",
             TabKind::Editor => "editor",
             TabKind::Preview => "preview",
+            TabKind::Apiclient => "apiclient",
+            TabKind::Sysmonitor => "sysmonitor",
         }
     }
 
@@ -30,6 +34,8 @@ impl TabKind {
         match s {
             "editor" => TabKind::Editor,
             "preview" => TabKind::Preview,
+            "apiclient" => TabKind::Apiclient,
+            "sysmonitor" => TabKind::Sysmonitor,
             // Anything else (including stray data) defaults to terminal —
             // the schema CHECK prevents storage of other values, so this
             // branch only runs if the DB has been hand-edited.
@@ -46,6 +52,10 @@ pub struct Tab {
     pub kind: TabKind,
     pub file_path: Option<String>,
     pub preview_url: Option<String>,
+    /// Per-tab opaque JSON blob for API Client tabs — sub-tab list, drafts,
+    /// left-rail collapsed flag, etc. Owned by the frontend; the Rust layer
+    /// only stores and round-trips it.
+    pub apiclient_state_json: Option<String>,
     pub position: i64,
 }
 
@@ -59,6 +69,8 @@ pub struct TabInput {
     pub file_path: Option<String>,
     #[serde(default)]
     pub preview_url: Option<String>,
+    #[serde(default)]
+    pub apiclient_state_json: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -123,8 +135,8 @@ pub async fn current_or_create(pool: &SqlitePool) -> Result<SessionState> {
         }
     };
 
-    let tab_rows = sqlx::query_as::<_, (String, String, String, String, Option<String>, Option<String>, i64)>(
-        "SELECT id, session_id, title, kind, file_path, preview_url, position \
+    let tab_rows = sqlx::query_as::<_, (String, String, String, String, Option<String>, Option<String>, Option<String>, i64)>(
+        "SELECT id, session_id, title, kind, file_path, preview_url, apiclient_state_json, position \
          FROM tabs WHERE session_id = ? ORDER BY position ASC",
     )
     .bind(&session.id)
@@ -133,13 +145,14 @@ pub async fn current_or_create(pool: &SqlitePool) -> Result<SessionState> {
 
     let tabs = tab_rows
         .into_iter()
-        .map(|(id, session_id, title, kind, file_path, preview_url, position)| Tab {
+        .map(|(id, session_id, title, kind, file_path, preview_url, apiclient_state_json, position)| Tab {
             id,
             session_id,
             title,
             kind: TabKind::parse(&kind),
             file_path,
             preview_url,
+            apiclient_state_json,
             position,
         })
         .collect();
@@ -171,8 +184,8 @@ pub async fn save_tabs(
 
     for (idx, t) in inputs.iter().enumerate() {
         sqlx::query(
-            "INSERT INTO tabs (id, session_id, title, kind, file_path, preview_url, position, created_at) \
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            "INSERT INTO tabs (id, session_id, title, kind, file_path, preview_url, apiclient_state_json, position, created_at) \
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
         )
         .bind(&t.id)
         .bind(session_id)
@@ -180,6 +193,7 @@ pub async fn save_tabs(
         .bind(t.kind.as_str())
         .bind(&t.file_path)
         .bind(&t.preview_url)
+        .bind(&t.apiclient_state_json)
         .bind(idx as i64)
         .bind(now)
         .execute(&mut *tx)

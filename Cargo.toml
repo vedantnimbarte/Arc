@@ -8,6 +8,8 @@ members = [
     "rust/ai-runtime",
     "rust/filesystem",
     "rust/git",
+    "rust/http-client",
+    "rust/system-monitor",
 ]
 
 [workspace.package]
@@ -86,6 +88,8 @@ arc-agent-runtime = { path = "rust/agent-runtime" }
 arc-ai-runtime = { path = "rust/ai-runtime" }
 arc-filesystem = { path = "rust/filesystem" }
 arc-git = { path = "rust/git" }
+arc-http-client = { path = "rust/http-client" }
+arc-system-monitor = { path = "rust/system-monitor" }
 
 [profile.dev]
 opt-level = 0

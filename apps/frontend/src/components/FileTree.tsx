@@ -1,20 +1,17 @@
 import { createPortal } from 'react-dom';
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import {
-  ArrowUp,
   ChevronRight,
   ChevronsDownUp,
   FilePlus,
   FolderPlus,
-  FolderSearch,
+  GitBranch,
   Search,
   AlertCircle,
   X,
 } from 'lucide-react';
 import {
   fsDefaultRoot,
-  fsParent,
-  fsPickFolder,
   fsReadDir,
   fsWatchStart,
   fsWatchStop,
@@ -29,6 +26,7 @@ import {
 } from '../lib/tauri';
 import { fileIcon, folderIcon, MOCHA } from '../lib/fileIcons';
 import { useFiles } from '../state/files';
+import { useGit } from '../state/git';
 import { useWorkspace } from '../state/workspace';
 import { cn } from '../lib/cn';
 
@@ -71,6 +69,11 @@ function parentDir(p: string): string {
 
 export function FileTree() {
   const { root, setRoot, showHidden } = useFiles();
+  const setSidebarView = useFiles((s) => s.setSidebarView);
+  const gitChangeCount = useGit((s) => s.entries.length);
+  const gitConflictCount = useGit((s) =>
+    s.entries.reduce((n, e) => (e.kind === 'conflict' ? n + 1 : n), 0),
+  );
   const addTab = useWorkspace((s) => s.addTab);
   const openFile = useWorkspace((s) => s.openFile);
 
@@ -217,26 +220,6 @@ export function FileTree() {
     },
     [ensureLoaded],
   );
-
-  const goUp = useCallback(async () => {
-    if (!root) return;
-    try {
-      const parent = await fsParent(root);
-      if (parent) setRoot(parent);
-    } catch {
-      /* top of volume — ignore */
-    }
-  }, [root, setRoot]);
-
-  const pickFolder = useCallback(async () => {
-    if (!isTauri) return;
-    try {
-      const picked = await fsPickFolder(root);
-      if (picked) setRoot(picked);
-    } catch (e) {
-      setRootError(String(e));
-    }
-  }, [root, setRoot]);
 
   // VS Code-style "New File" / "New Folder" / "Collapse All" — operate on the
   // workspace root so the affordance is reachable without first selecting a
@@ -432,20 +415,36 @@ export function FileTree() {
         <span aria-hidden className="mx-1 h-3.5 w-px bg-white/[0.06]" />
 
         <HeaderIconButton
-          onClick={goUp}
-          disabled={!root}
-          ariaLabel="Parent folder"
-          title="Up"
+          onClick={() => setSidebarView('source-control')}
+          ariaLabel="Open source control"
+          title={
+            gitChangeCount > 0
+              ? gitConflictCount > 0
+                ? `Source Control — ${gitChangeCount} change${
+                    gitChangeCount === 1 ? '' : 's'
+                  } · ${gitConflictCount} conflict${
+                    gitConflictCount === 1 ? '' : 's'
+                  }`
+                : `Source Control — ${gitChangeCount} change${
+                    gitChangeCount === 1 ? '' : 's'
+                  }`
+              : 'Source Control'
+          }
         >
-          <ArrowUp size={12} strokeWidth={2.1} />
-        </HeaderIconButton>
-        <HeaderIconButton
-          onClick={() => void pickFolder()}
-          disabled={!isTauri}
-          ariaLabel="Choose folder"
-          title="Choose folder…"
-        >
-          <FolderSearch size={12} strokeWidth={2.1} />
+          <span className="relative flex h-3 w-3 items-center justify-center">
+            <GitBranch size={12} strokeWidth={2.1} />
+            {gitChangeCount > 0 && (
+              <span
+                aria-hidden
+                className={cn(
+                  'pointer-events-none absolute -right-1 -top-1 h-[6px] w-[6px] rounded-full ring-1 ring-bg-chrome',
+                  gitConflictCount > 0
+                    ? 'bg-status-err animate-pulse-soft'
+                    : 'bg-accent-bright',
+                )}
+              />
+            )}
+          </span>
         </HeaderIconButton>
         <HeaderIconButton
           onClick={toggleSearch}

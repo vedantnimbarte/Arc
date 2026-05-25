@@ -12,7 +12,7 @@ import { useFiles } from './files';
 export interface Tab {
   id: string;
   title: string;
-  kind: 'terminal' | 'editor' | 'preview';
+  kind: 'terminal' | 'editor' | 'preview' | 'apiclient' | 'sysmonitor';
   /** PTY id for terminal tabs. Transient — stripped from persisted state. */
   ptyId?: string;
   /** Absolute path for editor tabs (read on mount). */
@@ -20,6 +20,10 @@ export interface Tab {
   /** URL loaded by a preview tab. Persisted so the iframe restores on
    *  relaunch with the last-viewed dev-server URL. */
   previewUrl?: string;
+  /** Opaque JSON blob owned by the ApiClient component — sub-tab list,
+   *  drafts, left-rail collapsed flag, last-seen response. Persisted as
+   *  TEXT so this row survives schema additions inside the blob. */
+  apiClientState?: string;
   /** Override the default shell binary for a terminal tab — used by the
    *  AI CLI launchers (Claude Code / Codex / OpenCode). Transient: not
    *  persisted across restarts (the tab would come back as a regular shell). */
@@ -104,6 +108,14 @@ interface WorkspaceState {
   openPreview: (url?: string) => string;
   /** Update the `previewUrl` of a preview tab. Triggers debounced persist. */
   setPreviewUrl: (id: string, url: string) => void;
+  /** Open a new API Client tab. */
+  openApiClient: () => string;
+  /** Open a new System Resources tab (or focus the existing one — only one
+   *  makes sense at a time). */
+  openSystemMonitor: () => string;
+  /** Update the persisted JSON blob backing an API Client tab. Triggers
+   *  the debounced persist subscriber. */
+  setApiClientState: (id: string, state: string) => void;
   /** Focus a leaf. Mirrors the leaf's `activeTabId` into the global
    *  `activeTabId` for legacy consumers (FileTree paste, ChatPanel). */
   setFocusedPane: (paneId: string) => void;
@@ -516,6 +528,37 @@ export const useWorkspace = create<WorkspaceState>()((set, get) => ({
     set((s) => ({
       tabs: s.tabs.map((t) => (t.id === id ? { ...t, previewUrl: url } : t)),
     })),
+  openApiClient: () => {
+    const id = `apiclient-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+    const tab: Tab = {
+      id,
+      title: 'API Client',
+      kind: 'apiclient',
+    };
+    get().addTab(tab);
+    return id;
+  },
+  openSystemMonitor: () => {
+    // Single-instance semantics: if a System Resources tab already exists,
+    // just focus it instead of spawning a duplicate.
+    const existing = get().tabs.find((t) => t.kind === 'sysmonitor');
+    if (existing) {
+      get().setActive(existing.id);
+      return existing.id;
+    }
+    const id = `sysmon-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+    const tab: Tab = {
+      id,
+      title: 'System Resources',
+      kind: 'sysmonitor',
+    };
+    get().addTab(tab);
+    return id;
+  },
+  setApiClientState: (id, stateJson) =>
+    set((s) => ({
+      tabs: s.tabs.map((t) => (t.id === id ? { ...t, apiClientState: stateJson } : t)),
+    })),
   setFocusedPane: (paneId) =>
     set((s) => {
       const leaf = findLeaf(s.layout, paneId);
@@ -550,6 +593,17 @@ export const useWorkspace = create<WorkspaceState>()((set, get) => ({
         title: source.title,
         kind: 'preview',
         previewUrl: source.previewUrl,
+      };
+      set((s) => ({ tabs: [...s.tabs, newTab] }));
+    } else if (source.kind === 'apiclient') {
+      // Duplicating an API Client tab opens a fresh workbench — copying
+      // the live drafts/responses across would be surprising. The user
+      // can re-open saved requests inside the new tab manually.
+      newTabId = `apiclient-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+      const newTab: Tab = {
+        id: newTabId,
+        title: source.title,
+        kind: 'apiclient',
       };
       set((s) => ({ tabs: [...s.tabs, newTab] }));
     } else {
@@ -656,6 +710,7 @@ export const useWorkspace = create<WorkspaceState>()((set, get) => ({
           kind: t.kind,
           filePath: t.file_path ?? undefined,
           previewUrl: t.preview_url ?? undefined,
+          apiClientState: t.apiclient_state_json ?? undefined,
         }));
         activeTabId =
           loaded.session.active_tab_id && tabs.some((t) => t.id === loaded.session.active_tab_id)
@@ -755,6 +810,7 @@ function toTabInputs(tabs: Tab[]): TabInput[] {
     kind: t.kind,
     file_path: t.filePath ?? null,
     preview_url: t.previewUrl ?? null,
+    apiclient_state_json: t.apiClientState ?? null,
   }));
 }
 
@@ -774,7 +830,14 @@ function tabSliceEqual(a: WorkspaceState, b: WorkspaceState): boolean {
   for (let i = 0; i < a.tabs.length; i++) {
     const x = a.tabs[i]!;
     const y = b.tabs[i]!;
-    if (x.id !== y.id || x.title !== y.title || x.kind !== y.kind || x.filePath !== y.filePath || x.previewUrl !== y.previewUrl) {
+    if (
+      x.id !== y.id ||
+      x.title !== y.title ||
+      x.kind !== y.kind ||
+      x.filePath !== y.filePath ||
+      x.previewUrl !== y.previewUrl ||
+      x.apiClientState !== y.apiClientState
+    ) {
       return false;
     }
   }
