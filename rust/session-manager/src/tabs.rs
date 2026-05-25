@@ -17,6 +17,7 @@ pub enum TabKind {
     Preview,
     Apiclient,
     Sysmonitor,
+    Ssh,
 }
 
 impl TabKind {
@@ -27,6 +28,7 @@ impl TabKind {
             TabKind::Preview => "preview",
             TabKind::Apiclient => "apiclient",
             TabKind::Sysmonitor => "sysmonitor",
+            TabKind::Ssh => "ssh",
         }
     }
 
@@ -36,6 +38,7 @@ impl TabKind {
             "preview" => TabKind::Preview,
             "apiclient" => TabKind::Apiclient,
             "sysmonitor" => TabKind::Sysmonitor,
+            "ssh" => TabKind::Ssh,
             // Anything else (including stray data) defaults to terminal —
             // the schema CHECK prevents storage of other values, so this
             // branch only runs if the DB has been hand-edited.

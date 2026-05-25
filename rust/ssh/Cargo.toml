@@ -1,0 +1,27 @@
+[package]
+name = "arc-ssh"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+anyhow.workspace = true
+async-trait.workspace = true
+base64.workspace = true
+chrono = { workspace = true }
+dashmap.workspace = true
+parking_lot.workspace = true
+rand_core.workspace = true
+russh.workspace = true
+russh-keys.workspace = true
+serde.workspace = true
+ssh-key.workspace = true
+thiserror.workspace = true
+tokio = { workspace = true, features = ["sync", "rt", "net", "macros", "io-util", "time"] }
+tracing.workspace = true
+uuid.workspace = true

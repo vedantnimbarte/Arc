@@ -5,6 +5,7 @@ import {
   sessionLoad,
   sessionSaveTabs,
   type AiCliInfo,
+  type SshHost,
   type TabInput,
 } from '../lib/tauri';
 import { useFiles } from './files';
@@ -12,7 +13,7 @@ import { useFiles } from './files';
 export interface Tab {
   id: string;
   title: string;
-  kind: 'terminal' | 'editor' | 'preview' | 'apiclient' | 'sysmonitor';
+  kind: 'terminal' | 'editor' | 'preview' | 'apiclient' | 'sysmonitor' | 'ssh';
   /** PTY id for terminal tabs. Transient — stripped from persisted state. */
   ptyId?: string;
   /** Absolute path for editor tabs (read on mount). */
@@ -28,6 +29,13 @@ export interface Tab {
    *  AI CLI launchers (Claude Code / Codex / OpenCode). Transient: not
    *  persisted across restarts (the tab would come back as a regular shell). */
   shellOverride?: string;
+  /** SSH host id for `kind: 'ssh'` tabs. Persisted so an SSH tab restores
+   *  after relaunch — the tab opens in `idle` state and the user clicks
+   *  Reconnect to redial. */
+  sshHostId?: string;
+  /** Live SSH session id, set by SshTab after `sshConnect` resolves.
+   *  Transient — never persisted (the session is gone after a relaunch). */
+  sshSessionId?: string;
 }
 
 // ─── Pane layout tree ─────────────────────────────────────────────────────
@@ -113,6 +121,13 @@ interface WorkspaceState {
   /** Open a new System Resources tab (or focus the existing one — only one
    *  makes sense at a time). */
   openSystemMonitor: () => string;
+  /** Open a new SSH tab for `host`. The tab spawns an xterm and dials via
+   *  the SSH store on mount. Sets `sshHostId` on the tab; `sshSessionId`
+   *  is filled once the connect resolves. */
+  openSshTab: (host: SshHost) => string;
+  /** Record the live SSH session id against a tab. Transient — wiped on
+   *  reload. */
+  setTabSshSessionId: (tabId: string, sessionId: string | undefined) => void;
   /** Update the persisted JSON blob backing an API Client tab. Triggers
    *  the debounced persist subscriber. */
   setApiClientState: (id: string, state: string) => void;
@@ -559,6 +574,28 @@ export const useWorkspace = create<WorkspaceState>()((set, get) => ({
     set((s) => ({
       tabs: s.tabs.map((t) => (t.id === id ? { ...t, apiClientState: stateJson } : t)),
     })),
+  openSshTab: (host) => {
+    // If an SSH tab for this host already exists, focus it instead of
+    // spawning a second connection — matches the System Monitor pattern.
+    const existing = get().tabs.find((t) => t.kind === 'ssh' && t.sshHostId === host.id);
+    if (existing) {
+      get().setActive(existing.id);
+      return existing.id;
+    }
+    const id = `ssh-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+    const tab: Tab = {
+      id,
+      title: host.name,
+      kind: 'ssh',
+      sshHostId: host.id,
+    };
+    get().addTab(tab);
+    return id;
+  },
+  setTabSshSessionId: (tabId, sessionId) =>
+    set((s) => ({
+      tabs: s.tabs.map((t) => (t.id === tabId ? { ...t, sshSessionId: sessionId } : t)),
+    })),
   setFocusedPane: (paneId) =>
     set((s) => {
       const leaf = findLeaf(s.layout, paneId);
@@ -704,14 +741,30 @@ export const useWorkspace = create<WorkspaceState>()((set, get) => ({
       let activeTabId: string | null;
 
       if (loaded.tabs.length > 0) {
-        tabs = loaded.tabs.map((t) => ({
-          id: t.id,
-          title: t.title,
-          kind: t.kind,
-          filePath: t.file_path ?? undefined,
-          previewUrl: t.preview_url ?? undefined,
-          apiClientState: t.apiclient_state_json ?? undefined,
-        }));
+        tabs = loaded.tabs.map((t) => {
+          // The opaque per-tab JSON blob is reused for SSH tabs to hold
+          // `sshHostId` — keeps schema migrations untouched and the API
+          // client's state survives unchanged for its own tabs.
+          let sshHostId: string | undefined;
+          if (t.kind === 'ssh' && t.apiclient_state_json) {
+            try {
+              const parsed = JSON.parse(t.apiclient_state_json) as { sshHostId?: string };
+              sshHostId = parsed.sshHostId;
+            } catch {
+              /* corrupt blob — treat as no host (user can edit) */
+            }
+          }
+          return {
+            id: t.id,
+            title: t.title,
+            kind: t.kind,
+            filePath: t.file_path ?? undefined,
+            previewUrl: t.preview_url ?? undefined,
+            apiClientState:
+              t.kind === 'apiclient' ? t.apiclient_state_json ?? undefined : undefined,
+            sshHostId,
+          };
+        });
         activeTabId =
           loaded.session.active_tab_id && tabs.some((t) => t.id === loaded.session.active_tab_id)
             ? loaded.session.active_tab_id
@@ -810,7 +863,14 @@ function toTabInputs(tabs: Tab[]): TabInput[] {
     kind: t.kind,
     file_path: t.filePath ?? null,
     preview_url: t.previewUrl ?? null,
-    apiclient_state_json: t.apiClientState ?? null,
+    // The opaque JSON column is shared between API Client and SSH tabs;
+    // each kind stores its own shape. PTY/editor/preview tabs leave it null.
+    apiclient_state_json:
+      t.kind === 'apiclient'
+        ? t.apiClientState ?? null
+        : t.kind === 'ssh' && t.sshHostId
+          ? JSON.stringify({ sshHostId: t.sshHostId })
+          : null,
   }));
 }
 
@@ -836,7 +896,8 @@ function tabSliceEqual(a: WorkspaceState, b: WorkspaceState): boolean {
       x.kind !== y.kind ||
       x.filePath !== y.filePath ||
       x.previewUrl !== y.previewUrl ||
-      x.apiClientState !== y.apiClientState
+      x.apiClientState !== y.apiClientState ||
+      x.sshHostId !== y.sshHostId
     ) {
       return false;
     }

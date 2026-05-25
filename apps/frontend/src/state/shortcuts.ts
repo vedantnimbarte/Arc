@@ -15,11 +15,12 @@ export type ActionId =
   | 'toggle-agent-picker'
   | 'open-chat-sessions'
   | 'open-shortcuts'
+  | 'toggle-ssh-panel'
   | 'launch-claude-cli'
   | 'launch-codex-cli'
   | 'launch-opencode-cli';
 
-export type ActionCategory = 'Workspace' | 'Terminal' | 'Assistant' | 'AI CLIs' | 'Help';
+export type ActionCategory = 'Workspace' | 'Terminal' | 'Assistant' | 'SSH' | 'AI CLIs' | 'Help';
 
 export interface ActionMeta {
   id: ActionId;
@@ -99,6 +100,12 @@ export const ACTION_META: Record<ActionId, ActionMeta> = {
     description: 'Browse past chat sessions.',
     category: 'Assistant',
   },
+  'toggle-ssh-panel': {
+    id: 'toggle-ssh-panel',
+    label: 'Toggle SSH Panel',
+    description: 'Open or close the SSH host & key manager.',
+    category: 'SSH',
+  },
   'launch-claude-cli': {
     id: 'launch-claude-cli',
     label: 'Launch Claude Code',
@@ -130,6 +137,7 @@ export const ACTION_ORDER: ActionId[] = [
   'toggle-agent-picker',
   'open-chat-sessions',
   'open-shortcuts',
+  'toggle-ssh-panel',
   'launch-claude-cli',
   'launch-codex-cli',
   'launch-opencode-cli',
@@ -152,6 +160,7 @@ export const DEFAULT_BINDINGS: Record<ActionId, KeyBinding | null> = {
   'new-chat': { code: 'KeyN', shift: true, alt: false, ...mod() },
   'toggle-agent-picker': { code: 'Slash', shift: false, alt: false, ...mod() },
   'open-chat-sessions': { code: 'KeyL', shift: true, alt: false, ...mod() },
+  'toggle-ssh-panel': { code: 'KeyS', shift: true, alt: false, ...mod() },
   // AI CLI launchers ship unbound by default — users can assign keys via the
   // shortcuts dialog, and they're discoverable through the TabBar dropdown
   // and the new-tab popover regardless.

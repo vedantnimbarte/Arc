@@ -29,6 +29,7 @@ arc-filesystem = { workspace = true }
 arc-git = { workspace = true }
 arc-http-client = { workspace = true }
 arc-system-monitor = { workspace = true }
+arc-ssh = { workspace = true }
 async-trait = { workspace = true }
 dashmap = { workspace = true }
 eventsource-stream = { workspace = true }

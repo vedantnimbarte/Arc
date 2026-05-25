@@ -4,6 +4,10 @@ import { Terminal } from './components/Terminal';
 import { Preview } from './components/Preview';
 import { ApiClient } from './components/ApiClient';
 import { SystemMonitor } from './components/SystemMonitor';
+import { SshTab } from './components/ssh/SshTab';
+import { SshPanel } from './components/ssh/SshPanel';
+import { SshSessionLogPanel } from './components/ssh/SshSessionLogDrawer';
+import { useSsh } from './state/ssh';
 import { TabBar } from './components/TabBar';
 import { ChatPanel } from './components/ChatPanel';
 import { StatusBar } from './components/StatusBar';
@@ -103,6 +107,8 @@ export default function App() {
         <ApiClient tabId={tab.id} />
       ) : tab.kind === 'sysmonitor' ? (
         <SystemMonitor tabId={tab.id} />
+      ) : tab.kind === 'ssh' && tab.sshHostId ? (
+        <SshTab sessionKey={tab.id} hostId={tab.sshHostId} />
       ) : tab.filePath ? (
         <Suspense fallback={<EditorFallback />}>
           <Editor filePath={tab.filePath} tabId={tab.id} />
@@ -143,6 +149,16 @@ export default function App() {
   useEffect(() => {
     void hydrateChat();
   }, [hydrateChat]);
+
+  // Restore saved SSH hosts + keys. Idempotent — store guards on `hydrated`.
+  useEffect(() => {
+    void useSsh.getState().hydrate();
+  }, []);
+
+  const sshPanelOpen = useSsh((s) => s.panelOpen);
+  const sshLogPanelOpen = useSsh((s) => s.logPanelOpen);
+  const setSshPanelOpen = useSsh((s) => s.setPanelOpen);
+  const setSshLogPanelOpen = useSsh((s) => s.setLogPanelOpen);
 
   // Settings + secrets are hydrated by Root in main.tsx (shared across
   // the main and Settings windows).
@@ -185,6 +201,9 @@ export default function App() {
         case 'open-chat-sessions':
           setChatOpen(true);
           setChatIntent({ type: 'toggle-sessions', at: Date.now() });
+          return;
+        case 'toggle-ssh-panel':
+          useSsh.getState().togglePanel();
           return;
         case 'launch-claude-cli':
           void launchCli('claude-cli');
@@ -308,6 +327,9 @@ export default function App() {
               </div>
             </div>
           )}
+
+          {sshPanelOpen && <SshPanel onClose={() => setSshPanelOpen(false)} />}
+          {sshLogPanelOpen && <SshSessionLogPanel onClose={() => setSshLogPanelOpen(false)} />}
         </div>
 
         <StatusBar

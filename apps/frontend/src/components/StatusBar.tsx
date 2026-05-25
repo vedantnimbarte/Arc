@@ -6,9 +6,11 @@ import {
   Folder,
   GitBranch,
   Keyboard,
+  Server,
   Sparkles,
   Terminal as TerminalIcon,
 } from 'lucide-react';
+import { useSsh } from '../state/ssh';
 import {
   isTauri,
   ptyListAiClis,
@@ -115,6 +117,8 @@ export function StatusBar({ chatOpen, onToggleChat, onOpenShortcuts }: Props) {
 
             <AiCliButton onLaunch={launchAiCli} />
 
+            <SshStatusButton />
+
             <button
               type="button"
               onClick={onToggleChat}
@@ -163,6 +167,42 @@ export function StatusBar({ chatOpen, onToggleChat, onOpenShortcuts }: Props) {
 }
 
 // ----- subcomponents -------------------------------------------------------
+
+/** Compact icon button that opens the SSH panel and badges the count of
+ *  currently-live SSH sessions. Hidden when no hosts are saved AND no
+ *  session is live — keeps the bar quiet for users who don't use SSH. */
+function SshStatusButton() {
+  const open = useSsh((s) => s.panelOpen);
+  const toggle = useSsh((s) => s.togglePanel);
+  const liveCount = useSsh((s) => Object.keys(s.liveByHost).length);
+  const hostCount = useSsh((s) => s.hosts.length);
+
+  if (hostCount === 0 && liveCount === 0) return null;
+
+  return (
+    <button
+      type="button"
+      onClick={toggle}
+      aria-label={open ? 'Close SSH panel' : 'Open SSH panel'}
+      aria-pressed={open}
+      title={`SSH (${formatBinding(getBinding('toggle-ssh-panel'))})`}
+      className={cn(
+        'group relative flex h-[22px] items-center gap-1.5 rounded-md px-2 transition-colors',
+        open
+          ? 'bg-accent-soft text-accent-bright shadow-[inset_0_0_0_1px_rgba(220,224,232,0.18)]'
+          : 'text-fg-muted hover:bg-white/[0.06] hover:text-fg-base/95 focus-visible:bg-white/[0.06] focus:outline-none',
+      )}
+    >
+      <Server size={11.5} strokeWidth={2} />
+      <span className="font-display text-[10.5px] tracking-tight">ssh</span>
+      {liveCount > 0 && (
+        <span className="font-mono text-[9px] tabular-nums text-status-ok">
+          {liveCount}
+        </span>
+      )}
+    </button>
+  );
+}
 
 /** Inter-pill separator. A 2px circular glyph reads more deliberately than
  *  the middle-dot character at this size — the dot stays optically centred

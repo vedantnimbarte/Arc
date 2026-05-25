@@ -10,6 +10,7 @@ use commands::fs::WatchState;
 use commands::llm::LlmState;
 use commands::mcp::McpState;
 use commands::pty::PtyState;
+use commands::ssh::SshState;
 use commands::system::SystemState;
 use tauri::Manager;
 use tauri_plugin_autostart::MacosLauncher;
@@ -77,6 +78,7 @@ fn main() {
                 .build(),
         )
         .manage(PtyState::default())
+        .manage(SshState::default())
         .manage(LlmState::default())
         .manage(WatchState::default())
         .manage(McpState::default())
@@ -142,6 +144,18 @@ fn main() {
             commands::secrets::secrets_set_api_key,
             commands::secrets::secrets_get_api_key,
             commands::secrets::secrets_delete_api_key,
+            commands::ssh::ssh_connect,
+            commands::ssh::ssh_write,
+            commands::ssh::ssh_resize,
+            commands::ssh::ssh_close,
+            commands::ssh::ssh_host_list,
+            commands::ssh::ssh_host_upsert,
+            commands::ssh::ssh_host_delete,
+            commands::ssh::ssh_key_list,
+            commands::ssh::ssh_key_generate,
+            commands::ssh::ssh_key_import,
+            commands::ssh::ssh_key_delete,
+            commands::ssh::ssh_session_logs,
             commands::agent::agent_run,
             commands::agent::agent_decide,
             commands::mcp::mcp_connect,

@@ -691,7 +691,7 @@ export async function llmStream(
 // the Rust DTOs serialized via serde defaults. Outer invoke arguments use
 // camelCase — Tauri converts them to snake_case Rust params automatically.
 
-export type TabKind = 'terminal' | 'editor' | 'preview' | 'apiclient' | 'sysmonitor';
+export type TabKind = 'terminal' | 'editor' | 'preview' | 'apiclient' | 'sysmonitor' | 'ssh';
 
 export interface TabInput {
   id: string;
@@ -1371,5 +1371,183 @@ export async function gitDiscard(
     path,
     trackedPaths,
     untrackedPaths,
+  });
+}
+
+// ----- SSH ----------------------------------------------------------------
+
+export type SshId = string;
+
+export interface SshHost {
+  id: string;
+  workspace_id: string | null;
+  name: string;
+  host: string;
+  port: number;
+  username: string;
+  identity_id: string | null;
+  keepalive_secs: number;
+  startup_cmd: string | null;
+  created_at: number;
+  last_used_at: number | null;
+}
+
+export interface SshHostInput {
+  id?: string;
+  workspace_id?: string | null;
+  name: string;
+  host: string;
+  port?: number;
+  username: string;
+  identity_id?: string | null;
+  keepalive_secs?: number;
+  startup_cmd?: string | null;
+}
+
+export interface SshKey {
+  id: string;
+  name: string;
+  path: string;
+  kind: string;
+  fingerprint: string;
+  has_passphrase: boolean;
+  created_at: number;
+}
+
+export interface SshKeyWithPublic extends SshKey {
+  public_openssh: string;
+}
+
+/** One handshake-step or lifecycle event surfaced by the SSH driver. */
+export interface SshLogEvent {
+  at: number;
+  level: string;
+  msg: string;
+}
+
+export interface SshLogEventPayload {
+  id: SshId;
+  entry: SshLogEvent;
+}
+
+export interface SshDataEvent {
+  id: SshId;
+  bytes: number[];
+}
+
+export interface SshExitEvent {
+  id: SshId;
+  code: number | null;
+}
+
+export interface SshSessionLogRow {
+  id: number;
+  host_id: string;
+  session_uuid: string;
+  at: number;
+  level: string;
+  msg: string;
+}
+
+export interface SshConnectInvoke {
+  hostId: string;
+  cols: number;
+  rows: number;
+}
+
+export interface SshGenerateKeyOpts {
+  name: string;
+  algorithm: 'ed25519' | 'rsa';
+  comment?: string;
+  passphrase?: string;
+}
+
+export interface SshImportKeyOpts {
+  name: string;
+  path: string;
+  passphrase?: string;
+}
+
+/** Open an SSH session against a previously-saved host. Returns the session
+ *  id used to subscribe to `ssh://data/<id>`, `ssh://log/<id>`,
+ *  `ssh://exit/<id>`. */
+export async function sshConnect(payload: SshConnectInvoke): Promise<SshId> {
+  return invoke<SshId>('ssh_connect', { payload });
+}
+
+export async function sshWrite(id: SshId, data: string): Promise<void> {
+  await invoke('ssh_write', { id, data });
+}
+
+export async function sshResize(id: SshId, cols: number, rows: number): Promise<void> {
+  await invoke('ssh_resize', { id, cols, rows });
+}
+
+export async function sshClose(id: SshId): Promise<void> {
+  await invoke('ssh_close', { id });
+}
+
+export async function onSshData(
+  id: SshId,
+  handler: (chunk: Uint8Array) => void,
+): Promise<UnlistenFn> {
+  return listen<SshDataEvent>(`ssh://data/${id}`, (event) => {
+    handler(new Uint8Array(event.payload.bytes));
+  });
+}
+
+export async function onSshLog(
+  id: SshId,
+  handler: (entry: SshLogEvent) => void,
+): Promise<UnlistenFn> {
+  return listen<SshLogEventPayload>(`ssh://log/${id}`, (event) => {
+    handler(event.payload.entry);
+  });
+}
+
+export async function onSshExit(
+  id: SshId,
+  handler: (code: number | null) => void,
+): Promise<UnlistenFn> {
+  return listen<SshExitEvent>(`ssh://exit/${id}`, (event) => {
+    handler(event.payload.code);
+  });
+}
+
+export async function sshHostList(workspaceId?: string | null): Promise<SshHost[]> {
+  return invoke<SshHost[]>('ssh_host_list', { workspaceId: workspaceId ?? null });
+}
+
+export async function sshHostUpsert(input: SshHostInput): Promise<SshHost> {
+  return invoke<SshHost>('ssh_host_upsert', { input });
+}
+
+export async function sshHostDelete(id: string): Promise<void> {
+  await invoke('ssh_host_delete', { id });
+}
+
+export async function sshKeyList(): Promise<SshKey[]> {
+  return invoke<SshKey[]>('ssh_key_list');
+}
+
+export async function sshKeyGenerate(opts: SshGenerateKeyOpts): Promise<SshKeyWithPublic> {
+  return invoke<SshKeyWithPublic>('ssh_key_generate', { opts });
+}
+
+export async function sshKeyImport(opts: SshImportKeyOpts): Promise<SshKey> {
+  return invoke<SshKey>('ssh_key_import', { opts });
+}
+
+export async function sshKeyDelete(id: string, deleteFiles = false): Promise<void> {
+  await invoke('ssh_key_delete', { id, deleteFiles });
+}
+
+export async function sshSessionLogs(
+  hostId: string,
+  limit?: number,
+): Promise<SshSessionLogRow[]> {
+  return invoke<SshSessionLogRow[]>('ssh_session_logs', {
+    hostId,
+    limit: limit ?? null,
   });
 }

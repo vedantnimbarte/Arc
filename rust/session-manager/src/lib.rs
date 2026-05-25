@@ -22,12 +22,14 @@ pub mod chat;
 pub mod commands;
 pub mod memory;
 pub mod settings;
+pub mod ssh;
 pub mod tabs;
 pub mod workspaces;
 
 pub use chat::{ChatConversation, ChatMessage, ChatRole};
 pub use commands::CommandRecord;
 pub use memory::{MemoryEntry, MemoryHit};
+pub use ssh::{SshHost, SshHostInput, SshKey, SshSessionLogEntry};
 // Re-export so downstream crates (e.g. apps/desktop) that hold a
 // `&SessionStore` can name the pool type without taking a direct sqlx dep.
 pub use sqlx::SqlitePool;

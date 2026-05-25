@@ -10,6 +10,7 @@ members = [
     "rust/git",
     "rust/http-client",
     "rust/system-monitor",
+    "rust/ssh",
 ]
 
 [workspace.package]
@@ -42,6 +43,14 @@ dashmap = "6"
 # Terminal
 portable-pty = "0.9"
 bytes = "1.7"
+
+# SSH client (pure-Rust) + key generation. russh handles the wire protocol;
+# ssh-key gives us a stable API for generating + serialising OpenSSH keys.
+russh = "0.45"
+russh-keys = "0.45"
+ssh-key = { version = "0.6", features = ["ed25519", "rsa", "encryption"] }
+rand_core = { version = "0.6", features = ["std"] }
+base64 = "0.22"
 
 # Native file dialogs
 rfd = "0.15"
@@ -90,6 +99,7 @@ arc-filesystem = { path = "rust/filesystem" }
 arc-git = { path = "rust/git" }
 arc-http-client = { path = "rust/http-client" }
 arc-system-monitor = { path = "rust/system-monitor" }
+arc-ssh = { path = "rust/ssh" }
 
 [profile.dev]
 opt-level = 0

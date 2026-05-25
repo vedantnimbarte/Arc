@@ -10,5 +10,6 @@ pub mod network;
 pub mod pty;
 pub mod secrets;
 pub mod session;
+pub mod ssh;
 pub mod system;
 pub mod window;
