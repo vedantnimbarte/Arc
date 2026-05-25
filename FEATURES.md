@@ -599,8 +599,48 @@ For repos > 100K files:
 
 ---
 
+## Planned Features (Roadmap)
+
+ARC is actively developed with new features planned for upcoming phases. Here's what's coming:
+
+### Phase 2: Git & Environment (Weeks 1-6)
+- **Git UI:** Visual branch switcher, interactive staging, merge conflict resolver, commit templates
+- **Environment Manager:** `.env` file editor with validation and autocomplete
+- **Test Integration:** Inline test results, output parsing, auto-rerun on file change
+
+### Phase 3: Database Tools (Weeks 6-8)
+- **SQLite Browser:** Built-in database explorer with query editor and export/import
+- **External Database Support:** Connect to PostgreSQL/MySQL via MCP
+
+### Phase 4: Agent & Automation (Weeks 8-12)
+- **Custom Agent Templates:** Create agents with pre-configured tools and prompts
+- **Code Review Agent:** Specialized agent for reviewing code changes
+- **Documentation Generator:** Auto-generate docs from source code
+- **Performance Analyzer:** Profile code and suggest optimizations
+
+### Phase 5: UI & Layout (Weeks 6-10)
+- **Split Pane Editor:** Side-by-side editing with draggable dividers
+- **Workspace Snapshots:** Save and restore entire workspace state
+
+### Phase 6: Terminal & Recording (Weeks 8-12)
+- **Terminal Recording:** Record sessions, replay at variable speed, export as video or markdown
+- **Quick Actions Palette:** ⌘K command palette combining files, commands, agents, and actions
+
+### Phase 7: Developer Tools (Weeks 10-14)
+- **Dependency Scanner:** Automated vulnerability scanning with fix suggestions
+- **Dependency Graph:** Visualize project dependencies as an interactive graph
+
+### Phase 8: Cloud & Collaboration (Weeks 12+)
+- **Workspace Sharing:** Save to GitHub/S3 and share snapshots
+- **Real-time Collaboration:** Shared editor and terminal sessions (like Live Share)
+
+For detailed implementation notes and prioritization, see [PLANNED_FEATURES.md](../PLANNED_FEATURES.md).
+
+---
+
 ## See Also
 
 - [API_REFERENCE.md](API_REFERENCE.md) — Detailed command signatures
 - [AGENTS.md](AGENTS.md) — Deep dive into the agent system
 - [MCP_INTEGRATION.md](MCP_INTEGRATION.md) — Connecting custom tools via MCP
+- [PLANNED_FEATURES.md](../PLANNED_FEATURES.md) — Full roadmap with technical details

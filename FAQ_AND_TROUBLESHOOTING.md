@@ -16,7 +16,7 @@ Common questions and solutions beyond basic setup.
 **A:** Currently, ARC is desktop-only (Tauri app). Server/Docker deployment is planned for Phase 2. For now, use locally.
 
 ### Q: Is ARC open source?
-**A:** License is TBD. Check [LICENSE](LICENSE) or GitHub for current status.
+**A:** Yes! ARC is licensed under the MIT License. See [LICENSE](LICENSE) for details. Contributions welcome—read [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ### Q: Can I customize keybindings?
 **A:** Yes! Settings → Keyboard Shortcuts. All defaults are customizable.
