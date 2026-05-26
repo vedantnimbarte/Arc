@@ -26,7 +26,6 @@ export function PaneTabStrip({ paneId, variant = 'leaf' }: Props) {
   const setActive = useWorkspace((s) => s.setActive);
   const closeTab = useWorkspace((s) => s.closeTab);
   const renameTab = useWorkspace((s) => s.renameTab);
-  const splitPane = useWorkspace((s) => s.splitPane);
   const openFile = useWorkspace((s) => s.openFile);
   const newTerminal = useWorkspace((s) => s.newTerminal);
   const setFocusedPane = useWorkspace((s) => s.setFocusedPane);
@@ -215,7 +214,6 @@ export function PaneTabStrip({ paneId, variant = 'leaf' }: Props) {
           onClose={() => setContextMenu(null)}
           onRename={() => setRenamingTabId(contextMenu.tabId)}
           onDuplicate={() => duplicate(contextMenu.tabId)}
-          onSplit={(direction) => void splitPane(contextMenu.tabId, direction)}
           onCloseTab={() => {
             const tab = tabs.find((t) => t.id === contextMenu.tabId);
             if (tab) requestClose(tab.id, tab.title);
