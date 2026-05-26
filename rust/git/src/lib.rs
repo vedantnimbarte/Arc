@@ -1621,6 +1621,346 @@ pub async fn cherry_pick<P: AsRef<Path>>(path: P, oid: &str) -> Result<()> {
     Ok(())
 }
 
+// ─── Interactive rebase ───────────────────────────────────────────────────
+
+/// One row of a `git rebase -i` TODO list. V1 omits `edit` and `reword`
+/// because both require interactive user input mid-rebase; the UI nudges
+/// users toward `git commit --amend` after the rebase instead.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum RebaseAction {
+    /// Keep the commit as-is.
+    Pick,
+    /// Drop the commit entirely.
+    Drop,
+    /// Combine with the previous commit, keep both messages.
+    Squash,
+    /// Combine with the previous commit, discard this commit's message.
+    Fixup,
+}
+
+impl RebaseAction {
+    fn keyword(self) -> &'static str {
+        match self {
+            RebaseAction::Pick => "pick",
+            RebaseAction::Drop => "drop",
+            RebaseAction::Squash => "squash",
+            RebaseAction::Fixup => "fixup",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RebaseTodoEntry {
+    pub oid: String,
+    pub action: RebaseAction,
+}
+
+/// Run `git rebase -i <base>` with a pre-built TODO list.
+///
+/// `entries` is the TODO in the order the user wants the final history to
+/// have (top-down, oldest first — matches what `git rebase -i` writes into
+/// the editor). Unlike interactive rebase from the shell, this never opens
+/// an editor: a helper script copies the prepared TODO into the sequence
+/// editor's slot, and `GIT_EDITOR` is set to a no-op so squash/fixup
+/// combined-message prompts accept their defaults.
+///
+/// Callers should ensure the working tree is clean before invoking — git
+/// itself refuses an interactive rebase on a dirty tree, but the error
+/// message is opaque. The caller can stash + restore around this if needed.
+///
+/// Conflicts during rebase surface as `Err`; the repo is left mid-rebase
+/// and the caller is expected to drive the user through resolution (or
+/// call [`rebase_abort`]).
+pub async fn rebase_interactive<P: AsRef<Path>>(
+    repo_path: P,
+    base: &str,
+    entries: &[RebaseTodoEntry],
+) -> Result<()> {
+    let repo_path = repo_path.as_ref();
+    if entries.is_empty() {
+        return Err(Error::Failed("empty rebase todo list".into()));
+    }
+
+    // Build the TODO file content. Each line is `<action> <oid>`.
+    let mut todo = String::new();
+    for entry in entries {
+        todo.push_str(entry.action.keyword());
+        todo.push(' ');
+        todo.push_str(&entry.oid);
+        todo.push('\n');
+    }
+
+    // Drop everything into a unique tempdir so we can clean up reliably.
+    let stamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    let pid = std::process::id();
+    let dir = std::env::temp_dir().join(format!("arc-rebase-{stamp}-{pid}"));
+    std::fs::create_dir_all(&dir).map_err(|e| Error::Spawn(format!("tempdir: {e}")))?;
+    let todo_path = dir.join("todo.txt");
+    std::fs::write(&todo_path, todo).map_err(|e| Error::Spawn(format!("write todo: {e}")))?;
+
+    // Helper script — overwrites git's TODO file with our prepared one.
+    // We use ARC_REBASE_TODO to avoid quoting the path through the editor
+    // env var (which git tokenises by whitespace).
+    let (seq_editor_path, no_op_editor) = write_helpers(&dir, &todo_path)?;
+
+    let output = Command::new("git")
+        .arg("-C")
+        .arg(repo_path)
+        .args(["rebase", "-i", base])
+        .env("GIT_SEQUENCE_EDITOR", &seq_editor_path)
+        .env("GIT_EDITOR", &no_op_editor)
+        .env("ARC_REBASE_TODO", &todo_path)
+        .output()
+        .await
+        .map_err(|e| Error::Spawn(e.to_string()))?;
+
+    // Best-effort cleanup. If the rebase succeeded we're done; if it
+    // failed mid-flight, git's reflog + ORIG_HEAD already cover recovery.
+    let _ = std::fs::remove_dir_all(&dir);
+
+    if !output.status.success() {
+        let err = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        let out = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        return Err(Error::Failed(if !err.is_empty() {
+            err
+        } else if !out.is_empty() {
+            out
+        } else {
+            "rebase failed".into()
+        }));
+    }
+    Ok(())
+}
+
+/// `git rebase --abort`. Restores the pre-rebase HEAD and working tree.
+pub async fn rebase_abort<P: AsRef<Path>>(repo_path: P) -> Result<()> {
+    let repo_path = repo_path.as_ref();
+    let output = Command::new("git")
+        .arg("-C")
+        .arg(repo_path)
+        .args(["rebase", "--abort"])
+        .output()
+        .await
+        .map_err(|e| Error::Spawn(e.to_string()))?;
+    if !output.status.success() {
+        let err = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        return Err(Error::Failed(err));
+    }
+    Ok(())
+}
+
+/// `git rebase --continue`. Used after the user finishes resolving a
+/// conflict in the worktree.
+pub async fn rebase_continue<P: AsRef<Path>>(repo_path: P) -> Result<()> {
+    let repo_path = repo_path.as_ref();
+    let output = Command::new("git")
+        .arg("-C")
+        .arg(repo_path)
+        .args(["rebase", "--continue"])
+        // Same no-op editor so the post-resolve commit-message dialog
+        // accepts the default.
+        .env("GIT_EDITOR", no_op_editor_command())
+        .output()
+        .await
+        .map_err(|e| Error::Spawn(e.to_string()))?;
+    if !output.status.success() {
+        let err = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        return Err(Error::Failed(err));
+    }
+    Ok(())
+}
+
+#[cfg(windows)]
+fn write_helpers(dir: &Path, _todo: &Path) -> Result<(std::path::PathBuf, String)> {
+    let seq = dir.join("arc-seq-editor.cmd");
+    // `>NUL 2>&1` swallows copy's chatter so it doesn't poison git's stderr.
+    std::fs::write(&seq, "@echo off\r\ncopy /Y \"%ARC_REBASE_TODO%\" \"%1\" >NUL 2>&1\r\n")
+        .map_err(|e| Error::Spawn(format!("write helper: {e}")))?;
+    Ok((seq, no_op_editor_command()))
+}
+
+#[cfg(not(windows))]
+fn write_helpers(dir: &Path, _todo: &Path) -> Result<(std::path::PathBuf, String)> {
+    use std::os::unix::fs::PermissionsExt;
+    let seq = dir.join("arc-seq-editor.sh");
+    std::fs::write(&seq, "#!/bin/sh\ncp \"$ARC_REBASE_TODO\" \"$1\"\n")
+        .map_err(|e| Error::Spawn(format!("write helper: {e}")))?;
+    std::fs::set_permissions(&seq, std::fs::Permissions::from_mode(0o755))
+        .map_err(|e| Error::Spawn(format!("chmod helper: {e}")))?;
+    Ok((seq, no_op_editor_command()))
+}
+
+/// Command that does nothing and exits 0 — used as `GIT_EDITOR` to accept
+/// the default contents of squash combined-message + post-conflict commit
+/// message buffers. `true` is available on every POSIX shell; on Windows
+/// the equivalent is `cmd /c exit 0`.
+fn no_op_editor_command() -> String {
+    if cfg!(windows) {
+        // Quoting is awkward — git invokes the value as a command with the
+        // file path appended. `rem` is the cmd built-in for a no-op.
+        "cmd /c rem".to_string()
+    } else {
+        "true".to_string()
+    }
+}
+
+// ─── Worktree management ───────────────────────────────────────────────────
+
+/// One entry of `git worktree list --porcelain`. The fields map 1:1 to the
+/// porcelain output; `branch` is `None` for a detached worktree.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WorktreeEntry {
+    /// Absolute path to the worktree's root.
+    pub path: String,
+    /// Short HEAD oid (7 chars). `None` only for very unusual broken states.
+    pub head_short: Option<String>,
+    /// Local branch name (`refs/heads/<name>` stripped), or `None` when
+    /// detached.
+    pub branch: Option<String>,
+    /// True for the main worktree — the one inside `.git/`. Removing it
+    /// requires removing the whole repo, which we refuse.
+    pub is_main: bool,
+    /// `git worktree lock` was used. Removal needs `force`.
+    pub locked: bool,
+    /// `git worktree list` flagged this entry as prunable (its directory
+    /// was deleted out-of-band).
+    pub prunable: bool,
+}
+
+/// List every worktree of the repository containing `path`. Returns an
+/// empty vec when `path` isn't inside a repo (consistent with `status`).
+pub async fn worktree_list<P: AsRef<Path>>(path: P) -> Result<Vec<WorktreeEntry>> {
+    let path = path.as_ref();
+    let output = Command::new("git")
+        .arg("-C")
+        .arg(path)
+        .args(["worktree", "list", "--porcelain"])
+        .output()
+        .await
+        .map_err(|e| Error::Spawn(e.to_string()))?;
+    if !output.status.success() {
+        return Ok(Vec::new());
+    }
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    Ok(parse_worktree_porcelain(&stdout))
+}
+
+fn parse_worktree_porcelain(out: &str) -> Vec<WorktreeEntry> {
+    let mut entries = Vec::new();
+    let mut cur: Option<WorktreeEntry> = None;
+    let mut first = true;
+
+    let push = |entries: &mut Vec<WorktreeEntry>, cur: &mut Option<WorktreeEntry>, first: &mut bool| {
+        if let Some(mut e) = cur.take() {
+            if *first {
+                e.is_main = true;
+                *first = false;
+            }
+            entries.push(e);
+        }
+    };
+
+    for line in out.lines() {
+        // A blank line separates entries in porcelain format.
+        if line.is_empty() {
+            push(&mut entries, &mut cur, &mut first);
+            continue;
+        }
+        if let Some(rest) = line.strip_prefix("worktree ") {
+            // Should be impossible to see a second `worktree` before a
+            // blank line, but tolerate it: emit the in-flight entry first.
+            push(&mut entries, &mut cur, &mut first);
+            cur = Some(WorktreeEntry {
+                path: rest.to_string(),
+                head_short: None,
+                branch: None,
+                is_main: false,
+                locked: false,
+                prunable: false,
+            });
+        } else if let Some(entry) = cur.as_mut() {
+            if let Some(oid) = line.strip_prefix("HEAD ") {
+                entry.head_short = Some(oid.chars().take(7).collect());
+            } else if let Some(b) = line.strip_prefix("branch ") {
+                entry.branch = Some(b.trim_start_matches("refs/heads/").to_string());
+            } else if line == "detached" {
+                entry.branch = None;
+            } else if line == "locked" || line.starts_with("locked ") {
+                entry.locked = true;
+            } else if line == "prunable" || line.starts_with("prunable ") {
+                entry.prunable = true;
+            }
+            // Unknown keys (`bare`, etc.) — ignore for V1.
+        }
+    }
+    push(&mut entries, &mut cur, &mut first);
+    entries
+}
+
+/// Add a new worktree at `new_path`. When `create_branch` is true, `branch`
+/// names a NEW branch to create starting at `start_point` (defaulting to
+/// HEAD). When false, `branch` checks out an existing ref. Empty `branch`
+/// with `create_branch=false` creates a detached worktree at HEAD.
+pub async fn worktree_add<P: AsRef<Path>>(
+    repo_path: P,
+    new_path: &str,
+    branch: Option<&str>,
+    create_branch: bool,
+    start_point: Option<&str>,
+) -> Result<()> {
+    let repo_path = repo_path.as_ref();
+    let mut cmd = Command::new("git");
+    cmd.arg("-C").arg(repo_path).args(["worktree", "add"]);
+    if create_branch {
+        let name = branch
+            .ok_or_else(|| Error::Failed("branch name required when create_branch=true".into()))?;
+        cmd.arg("-b").arg(name);
+    }
+    cmd.arg(new_path);
+    if let Some(start) = start_point {
+        cmd.arg(start);
+    } else if !create_branch {
+        if let Some(b) = branch {
+            cmd.arg(b);
+        }
+    }
+    let output = cmd.output().await.map_err(|e| Error::Spawn(e.to_string()))?;
+    if !output.status.success() {
+        let err = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        let out = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        return Err(Error::Failed(if !err.is_empty() { err } else { out }));
+    }
+    Ok(())
+}
+
+/// Remove the worktree rooted at `target_path`. When `force` is true, runs
+/// `git worktree remove --force`, which deletes a worktree even if it has
+/// modified or untracked files.
+pub async fn worktree_remove<P: AsRef<Path>>(
+    repo_path: P,
+    target_path: &str,
+    force: bool,
+) -> Result<()> {
+    let repo_path = repo_path.as_ref();
+    let mut cmd = Command::new("git");
+    cmd.arg("-C").arg(repo_path).args(["worktree", "remove"]);
+    if force {
+        cmd.arg("--force");
+    }
+    cmd.arg(target_path);
+    let output = cmd.output().await.map_err(|e| Error::Spawn(e.to_string()))?;
+    if !output.status.success() {
+        let err = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        let out = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        return Err(Error::Failed(if !err.is_empty() { err } else { out }));
+    }
+    Ok(())
+}
+
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum ResetMode {
@@ -1806,6 +2146,20 @@ u UU N... 100644 100644 100644 100644 eee fff ggg conflict.rs
         assert_eq!(blame[1].content, "second line");
         assert_eq!(blame[2].author, "Bob");
         assert_eq!(blame[2].time, 1700000100);
+    }
+
+    #[test]
+    fn parses_worktree_porcelain() {
+        let raw = "worktree /repo\nHEAD abcdef1234567890\nbranch refs/heads/main\n\nworktree /tmp/feature\nHEAD 1234567890abcdef\nbranch refs/heads/feature\n\nworktree /tmp/detached\nHEAD deadbeefdeadbeef\ndetached\n\nworktree /tmp/locked\nHEAD cafebabecafebabe\nbranch refs/heads/old\nlocked\n";
+        let parsed = parse_worktree_porcelain(raw);
+        assert_eq!(parsed.len(), 4);
+        assert!(parsed[0].is_main);
+        assert_eq!(parsed[0].branch.as_deref(), Some("main"));
+        assert_eq!(parsed[0].head_short.as_deref(), Some("abcdef1"));
+        assert!(!parsed[1].is_main);
+        assert_eq!(parsed[1].branch.as_deref(), Some("feature"));
+        assert!(parsed[2].branch.is_none());
+        assert!(parsed[3].locked);
     }
 
     #[tokio::test]

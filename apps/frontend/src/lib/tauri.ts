@@ -1454,6 +1454,177 @@ export async function gitCheckoutTheirs(path: string, paths: string[]): Promise<
   return invoke<void>('git_checkout_theirs', { path, paths });
 }
 
+/** Mirrors `arc_git::WorktreeEntry`. */
+export interface GitWorktreeEntry {
+  path: string;
+  head_short: string | null;
+  branch: string | null;
+  is_main: boolean;
+  locked: boolean;
+  prunable: boolean;
+}
+
+export async function gitWorktreeList(path: string): Promise<GitWorktreeEntry[]> {
+  return invoke<GitWorktreeEntry[]>('git_worktree_list', { path });
+}
+
+/** Add a new worktree.
+ *  - `createBranch=true` + `branch` → create that NEW branch at `startPoint`
+ *    (defaults to HEAD).
+ *  - `createBranch=false` + `branch` → check out an existing branch/ref.
+ *  - `createBranch=false` + `branch=null` → detached HEAD at `startPoint`. */
+export async function gitWorktreeAdd(
+  path: string,
+  newPath: string,
+  branch: string | null,
+  createBranch: boolean,
+  startPoint?: string | null,
+): Promise<void> {
+  await invoke('git_worktree_add', {
+    path,
+    newPath,
+    branch,
+    createBranch,
+    startPoint: startPoint ?? null,
+  });
+}
+
+export async function gitWorktreeRemove(
+  path: string,
+  targetPath: string,
+  force: boolean,
+): Promise<void> {
+  await invoke('git_worktree_remove', { path, targetPath, force });
+}
+
+/** Mirrors `arc_git::RebaseAction`. */
+export type GitRebaseAction = 'pick' | 'drop' | 'squash' | 'fixup';
+
+export interface GitRebaseTodoEntry {
+  /** Full commit oid — order in the array = new history order (oldest first). */
+  oid: string;
+  action: GitRebaseAction;
+}
+
+/** Run `git rebase -i <base>` with a pre-built TODO. Never opens an editor;
+ *  squash/fixup combined-message dialogs auto-accept their defaults. Throws
+ *  on conflict — the repo is left mid-rebase and the caller must drive the
+ *  user to either `gitRebaseContinue` or `gitRebaseAbort`. */
+export async function gitRebaseInteractive(
+  path: string,
+  base: string,
+  entries: GitRebaseTodoEntry[],
+): Promise<void> {
+  await invoke('git_rebase_interactive', { path, base, entries });
+}
+
+export async function gitRebaseAbort(path: string): Promise<void> {
+  await invoke('git_rebase_abort', { path });
+}
+
+export async function gitRebaseContinue(path: string): Promise<void> {
+  await invoke('git_rebase_continue', { path });
+}
+
+// ─── Git host (GitHub PRs) ────────────────────────────────────────────────
+
+export interface GitHostRepoSlug {
+  owner: string;
+  name: string;
+}
+
+export type GitHostPrState = 'open' | 'closed' | 'merged';
+export type GitHostPrListFilter = 'open' | 'closed' | 'all';
+
+export interface GitHostPrSummary {
+  number: number;
+  title: string;
+  state: GitHostPrState;
+  author: string;
+  author_avatar: string;
+  head: string;
+  base: string;
+  html_url: string;
+  draft: boolean;
+  updated_at: string;
+}
+
+export interface GitHostPrCommit {
+  oid: string;
+  short: string;
+  message: string;
+  author: string;
+}
+
+export interface GitHostPrFile {
+  path: string;
+  status: string;
+  additions: number;
+  deletions: number;
+  patch: string | null;
+}
+
+export interface GitHostPrDetail {
+  number: number;
+  title: string;
+  body: string;
+  state: GitHostPrState;
+  author: string;
+  author_avatar: string;
+  head: string;
+  base: string;
+  html_url: string;
+  draft: boolean;
+  commits: GitHostPrCommit[];
+  files: GitHostPrFile[];
+  mergeable: boolean | null;
+}
+
+export interface GitHostCreatePrRequest {
+  title: string;
+  body: string;
+  head: string;
+  base: string;
+  draft: boolean;
+}
+
+/** Detect `owner/name` from `origin` remote. `null` when not a GitHub repo. */
+export async function gitHostDetect(path: string): Promise<GitHostRepoSlug | null> {
+  if (!isTauri) return null;
+  return invoke<GitHostRepoSlug | null>('git_host_detect', { path });
+}
+
+export async function gitHostTokenSet(provider: string, token: string): Promise<void> {
+  await invoke('git_host_token_set', { provider, token });
+}
+
+export async function gitHostTokenGet(provider: string): Promise<string | null> {
+  if (!isTauri) return null;
+  return invoke<string | null>('git_host_token_get', { provider });
+}
+
+export async function gitHostTokenDelete(provider: string): Promise<void> {
+  await invoke('git_host_token_delete', { provider });
+}
+
+export async function gitHostPrList(
+  path: string,
+  filter: GitHostPrListFilter,
+): Promise<GitHostPrSummary[]> {
+  return invoke<GitHostPrSummary[]>('git_host_pr_list', { path, filter });
+}
+
+export async function gitHostPrGet(path: string, number: number): Promise<GitHostPrDetail> {
+  return invoke<GitHostPrDetail>('git_host_pr_get', { path, number });
+}
+
+export async function gitHostPrCreate(
+  path: string,
+  req: GitHostCreatePrRequest,
+): Promise<GitHostPrSummary> {
+  return invoke<GitHostPrSummary>('git_host_pr_create', { path, req });
+}
+
 export interface GitBlameLine {
   line_number: number;
   oid: string;

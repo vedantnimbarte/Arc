@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { GitBranch, RefreshCw, X } from 'lucide-react';
+import { GitBranch, GitPullRequest, ListOrdered, RefreshCw, X } from 'lucide-react';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { cn } from '../lib/cn';
 import {
@@ -13,7 +13,11 @@ import {
   type GitResetMode,
 } from '../lib/tauri';
 import { useFiles } from '../state/files';
+import { useGitUi } from '../state/gitUi';
 import { AuthorsSidebar, authorKey } from './git/AuthorsSidebar';
+import { CherryPickDialog } from './git/CherryPickDialog';
+import { PrPanel } from './git/PrPanel';
+import { RebasePanel } from './git/RebasePanel';
 import {
   FilterBar,
   type DateRange,
@@ -147,6 +151,18 @@ export function GitPage() {
     }
   }, [root, fetchCommits]);
 
+  // "Cherry-pick to…" — open the target-branch dialog. The dialog handles
+  // the checkout + pick itself; we just push the snapshot in.
+  const handleCherryPickTo = useCallback((commit: GitLogEntry) => {
+    void import('../state/gitUi').then(({ useGitUi }) => {
+      useGitUi.getState().openCherryPick({
+        oid: commit.oid,
+        shortOid: commit.short,
+        subject: commit.subject,
+      });
+    });
+  }, []);
+
   const handleRevert = useCallback(async (oid: string) => {
     if (!root) return;
     setCommitsError(null);
@@ -240,6 +256,7 @@ export function GitPage() {
               <CommitList
                 commits={commits}
                 onCherryPick={handleCherryPick}
+                onCherryPickTo={handleCherryPickTo}
                 onRevert={handleRevert}
                 onReset={handleReset}
               />
@@ -249,6 +266,10 @@ export function GitPage() {
           </div>
         </div>
       )}
+
+      <CherryPickDialog />
+      <RebasePanel />
+      <PrPanel />
     </div>
   );
 }
@@ -303,6 +324,24 @@ function TitleBar({
         )}
       </div>
       <div className="absolute right-2.5 top-1/2 flex -translate-y-1/2 items-center gap-1">
+        <button
+          onClick={() => useGitUi.getState().openPrList()}
+          className="group flex h-6 items-center gap-1 rounded-full px-2 text-fg-subtle transition-all duration-200 ease-out hover:bg-white/[0.08] hover:text-fg-base active:scale-95"
+          aria-label="Pull requests"
+          title="Pull requests"
+        >
+          <GitPullRequest size={11} strokeWidth={2.1} />
+          <span className="font-display text-[10.5px]">PRs</span>
+        </button>
+        <button
+          onClick={() => useGitUi.getState().setRebasePanelOpen(true)}
+          className="group flex h-6 items-center gap-1 rounded-full px-2 text-fg-subtle transition-all duration-200 ease-out hover:bg-white/[0.08] hover:text-fg-base active:scale-95"
+          aria-label="Interactive rebase"
+          title="Interactive rebase"
+        >
+          <ListOrdered size={11} strokeWidth={2.1} />
+          <span className="font-display text-[10.5px]">rebase</span>
+        </button>
         <button
           onClick={onRefresh}
           className="group flex h-6 w-6 items-center justify-center rounded-full text-fg-subtle transition-all duration-200 ease-out hover:bg-white/[0.08] hover:text-fg-base active:scale-90"

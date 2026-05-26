@@ -12,6 +12,7 @@ members = [
     "rust/system-monitor",
     "rust/ssh",
     "rust/project-config",
+    "rust/git-host",
 ]
 
 [workspace.package]
@@ -105,6 +106,7 @@ arc-http-client = { path = "rust/http-client" }
 arc-system-monitor = { path = "rust/system-monitor" }
 arc-ssh = { path = "rust/ssh" }
 arc-project-config = { path = "rust/project-config" }
+arc-git-host = { path = "rust/git-host" }
 
 [profile.dev]
 opt-level = 0

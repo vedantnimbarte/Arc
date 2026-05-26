@@ -2,6 +2,7 @@ pub mod agent;
 pub mod apiclient;
 pub mod fs;
 pub mod git;
+pub mod git_host;
 pub mod http;
 pub mod llm;
 pub mod mcp;
