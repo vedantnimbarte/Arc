@@ -18,10 +18,9 @@ import { SearchPalette } from './components/SearchPalette';
 import { ShortcutsDialog } from './components/ShortcutsDialog';
 import { PaneTreeView } from './components/PaneTreeView';
 import { useWorkspace } from './state/workspace';
-import { useFiles } from './state/files';
+import { useFiles, CHAT_DEFAULT } from './state/files';
 import { useChat } from './state/chat';
 import { actionFor, type ActionId } from './state/shortcuts';
-import { cn } from './lib/cn';
 import { ptyListAiClis, settingsWindowOpen, type AiCliId } from './lib/tauri';
 import type { ChatIntent } from './components/ChatPanel';
 
@@ -137,6 +136,8 @@ export default function App() {
   const sidebarWidth = useFiles((s) => s.sidebarWidth);
   const toggleSidebar = useFiles((s) => s.toggleCollapsed);
   const setSidebarWidth = useFiles((s) => s.setSidebarWidth);
+  const chatWidth = useFiles((s) => s.chatWidth);
+  const setChatWidth = useFiles((s) => s.setChatWidth);
 
   // Load persisted tabs + active tab from SQLite (or legacy localStorage)
   // before the renderer settles. hydrate() is idempotent.
@@ -267,8 +268,7 @@ export default function App() {
           onOpenSearch={() => setSearchOpen(true)}
         />
 
-        {/* Two-pane layout (file tree · main). The assistant lives in a
-            floating popover that overlays the main pane from the right. */}
+        {/* Layout: file-tree | main | chat sidebar | SSH sidebar */}
         <div className="relative flex min-h-0 flex-1 px-3 pb-3 pt-1">
           <div className="material-content flex min-h-0 w-full overflow-hidden rounded-window shadow-panel ring-1 ring-border-subtle">
             {/* File-tree wrapper — animates width to 0 on collapse. */}
@@ -300,6 +300,32 @@ export default function App() {
               <PaneTreeView hostsRef={hostsRef} stageRef={stageRef} />
             </main>
 
+            {/* AI chat secondary sidebar — same pattern as SSH sidebar. */}
+            {chatOpen && (
+              <ResizeHandle
+                edge="right"
+                getWidth={() => useFiles.getState().chatWidth}
+                onResize={setChatWidth}
+                resetWidth={CHAT_DEFAULT}
+              />
+            )}
+            <aside
+              className="shrink-0 overflow-hidden transition-[width] duration-300 ease-apple"
+              style={{ width: chatOpen ? chatWidth : 0 }}
+              aria-hidden={!chatOpen}
+            >
+              <div
+                className="material-sidebar h-full border-l border-border-hairline"
+                style={{ width: chatWidth }}
+              >
+                <ChatPanel
+                  onClose={() => setChatOpen(false)}
+                  intent={chatIntent}
+                  onIntentConsumed={() => setChatIntent(null)}
+                />
+              </div>
+            </aside>
+
             {/* SSH secondary sidebar — opens from the right, mirrors the
                 file-tree pattern: aside collapses to 0 width while the inner
                 div holds its full width so the content slides out cleanly. */}
@@ -324,34 +350,6 @@ export default function App() {
               </div>
             </aside>
           </div>
-
-          {/* Floating assistant popover — anchored to the top-right of the
-              content frame, slides in from the right edge. The frame uses
-              `material-sheet` for the heaviest blur in the system. */}
-          {chatOpen && (
-            <div
-              className={cn(
-                'absolute bottom-2 right-5 z-30',
-                'h-[min(calc(100%-1rem),640px)] w-[400px]',
-                'animate-popover-in',
-              )}
-              role="dialog"
-              aria-label="Assistant"
-            >
-              <div
-                className={cn(
-                  'material-sheet flex h-full w-full flex-col overflow-hidden rounded-window',
-                  'ring-1 ring-white/[0.06] shadow-sheet',
-                )}
-              >
-                <ChatPanel
-                  onClose={() => setChatOpen(false)}
-                  intent={chatIntent}
-                  onIntentConsumed={() => setChatIntent(null)}
-                />
-              </div>
-            </div>
-          )}
 
           {sshLogPanelOpen && <SshSessionLogPanel onClose={() => setSshLogPanelOpen(false)} />}
         </div>
