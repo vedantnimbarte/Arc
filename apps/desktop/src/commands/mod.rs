@@ -7,6 +7,7 @@ pub mod llm;
 pub mod mcp;
 pub mod memory;
 pub mod network;
+pub mod project_config;
 pub mod pty;
 pub mod secrets;
 pub mod session;

@@ -17,11 +17,13 @@ import {
   sessionCommandLog,
   type PtyId,
 } from '../lib/tauri';
+import { useBlocks } from '../state/blocks';
 import { useFiles } from '../state/files';
 import { useSelection } from '../state/selection';
 import { useSettings } from '../state/settings';
 import { useWorkspace } from '../state/workspace';
-import { getFont, resolveTheme } from '../themes';
+import { BlocksDrawer } from './BlocksDrawer';
+import { getFont, resolveActiveTheme } from '../themes';
 
 interface Props {
   /** Stable id for the terminal (tab id). Also serves as the React-effect
@@ -64,7 +66,7 @@ export function Terminal({ sessionKey }: Props) {
 
     const initialSettings = useSettings.getState();
     const initialFont = getFont(initialSettings.fontId);
-    const initialTheme = resolveTheme(initialSettings.appearance);
+    const initialTheme = resolveActiveTheme(initialSettings.appearance, initialSettings.themeId);
 
     const term = new XTerm({
       fontFamily: initialFont.stack,
@@ -137,7 +139,7 @@ export function Terminal({ sessionKey }: Props) {
         try {
           term.options.fontFamily = getFont(s.fontId).stack;
           term.options.fontSize = s.fontSize;
-          term.options.theme = resolveTheme(s.appearance).xterm;
+          term.options.theme = resolveActiveTheme(s.appearance, s.themeId).xterm;
           safeFit();
         } catch {
           /* term may be disposed */
@@ -243,6 +245,12 @@ export function Terminal({ sessionKey }: Props) {
         // row on `D`) and the keystroke loop (which sets it on `\r`)
         // share the same reference.
         let lastCommandId: number | null = null;
+        // Block tracking — mirrors lastCommandId but keyed off the new
+        // `useBlocks` store. `pendingCommand` holds the most recently
+        // Enter-flushed line so the block created on the next OSC 133 `C`
+        // can attach its command text.
+        let currentBlockId: string | null = null;
+        let pendingCommand = '';
         const handleChunkText = (text: string) => {
           if (!text.includes('\x1b]133;')) {
             if (osc.capturing) {
@@ -265,6 +273,15 @@ export function Terminal({ sessionKey }: Props) {
             if (verb === 'C') {
               osc.capturing = true;
               osc.buf = '';
+              // Open a fresh block for the just-started command. Attach the
+              // command text the keystroke loop already captured on Enter.
+              currentBlockId = useBlocks.getState().start(sessionKey);
+              if (pendingCommand) {
+                useBlocks
+                  .getState()
+                  .setCommand(sessionKey, currentBlockId, pendingCommand);
+                pendingCommand = '';
+              }
             } else if (verb === 'D') {
               osc.capturing = false;
               const exitStr = fields[1];
@@ -278,6 +295,10 @@ export function Terminal({ sessionKey }: Props) {
                 void sessionCommandFinish(id, code, excerpt.length > 0 ? excerpt : null).catch(
                   () => {},
                 );
+              }
+              if (currentBlockId) {
+                useBlocks.getState().finish(sessionKey, currentBlockId, code, excerpt);
+                currentBlockId = null;
               }
             }
             lastIdx = m.index + m[0].length;
@@ -460,6 +481,10 @@ export function Terminal({ sessionKey }: Props) {
               const trimmed = cmdBuffer.trim();
               cmdBuffer = '';
               if (trimmed.length === 0) continue;
+              // Stash for the next OSC 133 `C` so the block carries the
+              // command text the user actually typed. Cheap fallback path
+              // when shell integration doesn't include the command in `B`.
+              pendingCommand = trimmed;
               const { activeTabId } = useWorkspace.getState();
               const { sessionId } = useWorkspace.getState();
               const cwd = useFiles.getState().root;
@@ -552,6 +577,9 @@ export function Terminal({ sessionKey }: Props) {
       unlistens.forEach((u) => u());
       if (ptyId) void ptyKill(ptyId).catch(() => {});
       useWorkspace.getState().setTabPtyId(sessionKey, undefined);
+      // Drop captured blocks for this session. Cheap; the drawer goes
+      // away with the tab anyway.
+      useBlocks.getState().clearSession(sessionKey);
       // Tear the WebGL addon down ourselves first; otherwise xterm's
       // AddonManager runs it after the canvas is gone and throws.
       disposeWebgl();
@@ -565,10 +593,15 @@ export function Terminal({ sessionKey }: Props) {
   }, [sessionKey]);
 
   return (
-    <div
-      ref={containerRef}
-      className="selectable h-full w-full"
-      data-session={sessionKey}
-    />
+    <div className="relative h-full w-full">
+      <div
+        ref={containerRef}
+        className="selectable h-full w-full"
+        data-session={sessionKey}
+      />
+      {/* Bottom drawer + chevron toggle. Both float over the xterm canvas;
+          the canvas owns its own scrollback and the drawer is overlaid. */}
+      <BlocksDrawer sessionKey={sessionKey} />
+    </div>
   );
 }

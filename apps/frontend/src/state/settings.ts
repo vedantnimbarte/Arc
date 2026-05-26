@@ -17,7 +17,7 @@ import {
   MAX_FONT_SIZE,
   MIN_FONT_SIZE,
   onSystemAppearanceChange,
-  resolveTheme,
+  resolveActiveTheme,
   type Appearance,
 } from '../themes';
 import {
@@ -54,6 +54,9 @@ export interface Settings {
   defaultShell: string | null;
   /** User's appearance preference. `'system'` follows the OS color scheme. */
   appearance: Appearance;
+  /** Specific theme id (e.g. 'catppuccin-mocha'). When set + registered, it
+   *  overrides the dark/light resolution from `appearance`. */
+  themeId: string | null;
   /** Mono font id from `FONT_OPTIONS`. */
   fontId: string;
   /** Terminal / editor font size in px. */
@@ -79,6 +82,9 @@ export interface Settings {
   setSystemPrompt: (s: string) => void;
   setDefaultShell: (shell: string | null) => void;
   setAppearance: (a: Appearance) => void;
+  /** Pick a specific theme id, or pass `null` to fall back to the dark/light
+   *  pair from `appearance`. */
+  setThemeId: (id: string | null) => void;
   setFontId: (id: string) => void;
   setFontSize: (size: number) => void;
   /** Toggle autostart at login. Also syncs the OS-level registration via
@@ -123,6 +129,7 @@ const DEFAULTS = {
     'You are ARC, a helpful AI assistant embedded in a terminal. Keep answers tight, prefer code over prose, and assume the user is a developer.',
   defaultShell: null as string | null,
   appearance: DEFAULT_APPEARANCE,
+  themeId: null as string | null,
   fontId: DEFAULT_FONT_ID,
   fontSize: DEFAULT_FONT_SIZE,
   launchAtLogin: false,
@@ -232,13 +239,19 @@ export const useSettings = create<Settings>()((set, get) => ({
 
   setAppearance: (a) => {
     set({ appearance: a });
-    applyTheme(resolveTheme(a));
+    applyTheme(resolveActiveTheme(a, get().themeId));
     if (isTauri) {
       const snapshot = toPersistedSettings(get());
       void sessionSettingsSave(snapshot)
         .then(() => settingsBroadcastChanged().catch(() => {}))
         .catch((err) => console.error('[settings] appearance save failed:', err));
     }
+  },
+  setThemeId: (id) => {
+    set({ themeId: id });
+    applyTheme(resolveActiveTheme(get().appearance, id));
+    // Persist + broadcast via the debounced subscribe handler — no need to
+    // fire a save here ourselves.
   },
   setFontId: (id) => set({ fontId: id }),
   setFontSize: (size) => set({ fontSize: clampFontSize(size) }),
@@ -263,7 +276,7 @@ export const useSettings = create<Settings>()((set, get) => ({
     if (get().settingsHydrated) return;
     set({ settingsHydrated: true });
 
-    applyTheme(resolveTheme(get().appearance));
+    applyTheme(resolveActiveTheme(get().appearance, get().themeId));
     if (!isTauri) return;
 
     // Reconcile launchAtLogin with the OS: the user may have disabled
@@ -289,7 +302,7 @@ export const useSettings = create<Settings>()((set, get) => ({
       if (stored) {
         suppressSave = true;
         set((s) => applyStored(s, stored));
-        applyTheme(resolveTheme(get().appearance));
+        applyTheme(resolveActiveTheme(get().appearance, get().themeId));
         queueMicrotask(() => {
           suppressSave = false;
         });
@@ -307,7 +320,7 @@ export const useSettings = create<Settings>()((set, get) => ({
         const legacy = parsed.state ?? {};
         suppressSave = true;
         set((s) => applyStored(s, legacy));
-        applyTheme(resolveTheme(get().appearance));
+        applyTheme(resolveActiveTheme(get().appearance, get().themeId));
         queueMicrotask(() => {
           suppressSave = false;
         });
@@ -454,6 +467,12 @@ function applyStored(
     defaultShell: stored.defaultShell ?? current.defaultShell,
     providers: nextProviders,
     appearance: isAppearance(stored.appearance) ? stored.appearance : current.appearance,
+    themeId:
+      stored.themeId === null
+        ? null
+        : typeof stored.themeId === 'string'
+          ? stored.themeId
+          : current.themeId,
     fontId: stored.fontId ?? current.fontId,
     fontSize:
       typeof stored.fontSize === 'number'
@@ -492,6 +511,7 @@ function toPersistedSettings(s: Settings): PersistedSettings {
     systemPrompt: s.systemPrompt,
     defaultShell: s.defaultShell,
     appearance: s.appearance,
+    themeId: s.themeId,
     fontId: s.fontId,
     fontSize: s.fontSize,
     launchAtLogin: s.launchAtLogin,
@@ -531,6 +551,13 @@ export async function rehydrateSettingsFromBroadcast(): Promise<void> {
     const sameAppearance =
       (isAppearance(stored.appearance) ? stored.appearance : current.appearance) ===
       current.appearance;
+    const incomingThemeId =
+      stored.themeId === null
+        ? null
+        : typeof stored.themeId === 'string'
+          ? stored.themeId
+          : current.themeId;
+    const sameTheme = incomingThemeId === current.themeId;
     const sameFont =
       (stored.fontId ?? current.fontId) === current.fontId &&
       (typeof stored.fontSize === 'number'
@@ -541,11 +568,12 @@ export async function rehydrateSettingsFromBroadcast(): Promise<void> {
       (stored.launchAtLogin ?? current.launchAtLogin) === current.launchAtLogin &&
       (stored.restoreWindowState ?? current.restoreWindowState) === current.restoreWindowState &&
       (stored.terminalWebgl ?? current.terminalWebgl) === current.terminalWebgl;
-    if (samePreset && sameAppearance && sameFont && sameShell && sameStartup) return;
+    if (samePreset && sameAppearance && sameTheme && sameFont && sameShell && sameStartup) return;
 
     suppressSave = true;
     useSettings.setState((s) => applyStored(s, stored));
-    applyTheme(resolveTheme(useSettings.getState().appearance));
+    const next = useSettings.getState();
+    applyTheme(resolveActiveTheme(next.appearance, next.themeId));
     queueMicrotask(() => {
       suppressSave = false;
     });
@@ -558,8 +586,12 @@ export async function rehydrateSettingsFromBroadcast(): Promise<void> {
 // picked `'system'`.
 if (typeof window !== 'undefined') {
   onSystemAppearanceChange(() => {
-    if (useSettings.getState().appearance === 'system') {
-      applyTheme(resolveTheme('system'));
+    const s = useSettings.getState();
+    // Only repaint when nothing else has nailed the theme down. A specific
+    // themeId means the user explicitly picked that look — OS color-scheme
+    // flips shouldn't override it.
+    if (s.appearance === 'system' && !s.themeId) {
+      applyTheme(resolveActiveTheme('system', null));
     }
   });
 }

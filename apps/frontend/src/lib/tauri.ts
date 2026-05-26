@@ -97,6 +97,34 @@ export async function onPtyExit(
 
 // ----- Filesystem (file tree panel) --------------------------------------
 
+// ─── Per-project .arc/ config ──────────────────────────────────────────────
+
+/** Mirrors `arc_project_config::ProjectConfig`. Every field is optional or
+ *  has a sensible default so an empty `.arc/config.toml` still parses. */
+export interface ProjectConfig {
+  schema: number;
+  workspace?: { name?: string };
+  env: Record<string, string>;
+  agents: Array<{ id: string; label: string; prompt: string; model?: string }>;
+  mcp_servers: Array<{
+    id: string;
+    command?: string[];
+    url?: string;
+    env: Record<string, string>;
+    headers: Record<string, string>;
+  }>;
+  terminal?: { default_shell?: string };
+  theme?: { id?: string };
+}
+
+/** Load `<workspaceRoot>/.arc/config.toml`. Resolves to `null` when the file
+ *  is absent — that's not an error, just the common case. Throws when the
+ *  file exists but is malformed or declares an unsupported schema. */
+export async function projectConfigLoad(workspaceRoot: string): Promise<ProjectConfig | null> {
+  if (!isTauri) return null;
+  return await invoke<ProjectConfig | null>('project_config_load', { workspaceRoot });
+}
+
 export type FsKind = 'dir' | 'file' | 'symlink';
 
 export interface FsEntry {
@@ -866,6 +894,10 @@ export interface PersistedSettings {
   defaultShell: string | null;
   /** Appearance preference: 'dark' | 'light' | 'system'. */
   appearance?: 'dark' | 'light' | 'system';
+  /** Active theme id (e.g. 'catppuccin-mocha'). When set + registered,
+   *  overrides the dark/light pair from `appearance`. `null` (or missing)
+   *  means "follow appearance" — the legacy behavior. */
+  themeId?: string | null;
   /** Mono font id from `FONT_OPTIONS`. */
   fontId?: string;
   /** Terminal / editor font size in px. */

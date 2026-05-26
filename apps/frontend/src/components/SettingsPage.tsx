@@ -54,9 +54,11 @@ import { cn } from '../lib/cn';
 import {
   FONT_OPTIONS,
   getFont,
+  listThemes,
   MAX_FONT_SIZE,
   MIN_FONT_SIZE,
   type Appearance,
+  type ThemeDef,
 } from '../themes';
 import {
   ACTION_META,
@@ -81,6 +83,7 @@ export function SettingsPage() {
     providers,
     defaultShell,
     appearance,
+    themeId,
     fontId,
     fontSize,
     launchAtLogin,
@@ -91,6 +94,7 @@ export function SettingsPage() {
     updateProvider,
     setDefaultShell,
     setAppearance,
+    setThemeId,
     setFontId,
     setFontSize,
     setLaunchAtLogin,
@@ -178,11 +182,13 @@ export function SettingsPage() {
               {pane === 'appearance' && (
                 <AppearancePane
                   appearance={appearance}
+                  themeId={themeId}
                   fontId={fontId}
                   fontSize={fontSize}
                   launchAtLogin={launchAtLogin}
                   restoreWindowState={restoreWindowState}
                   onAppearanceChange={setAppearance}
+                  onThemeChange={setThemeId}
                   onFontChange={setFontId}
                   onFontSizeChange={setFontSize}
                   onLaunchAtLoginChange={setLaunchAtLogin}
@@ -212,27 +218,32 @@ export function SettingsPage() {
 
 function AppearancePane({
   appearance,
+  themeId,
   fontId,
   fontSize,
   launchAtLogin,
   restoreWindowState,
   onAppearanceChange,
+  onThemeChange,
   onFontChange,
   onFontSizeChange,
   onLaunchAtLoginChange,
   onRestoreWindowStateChange,
 }: {
   appearance: Appearance;
+  themeId: string | null;
   fontId: string;
   fontSize: number;
   launchAtLogin: boolean;
   restoreWindowState: boolean;
   onAppearanceChange: (a: Appearance) => void;
+  onThemeChange: (id: string | null) => void;
   onFontChange: (id: string) => void;
   onFontSizeChange: (size: number) => void;
   onLaunchAtLoginChange: (on: boolean) => void;
   onRestoreWindowStateChange: (on: boolean) => void;
 }) {
+  const themes = listThemes();
   const showHidden = useFiles((s) => s.showHidden);
   const toggleHidden = useFiles((s) => s.toggleHidden);
 
@@ -261,6 +272,35 @@ function AppearancePane({
             onPick={() => onAppearanceChange('system')}
             preview="system"
           />
+        </div>
+      </Section>
+
+      <Section
+        title="Theme"
+        hint="Pick a specific palette, or stick with the default dark/light pair from the mode above."
+      >
+        <div className="grid grid-cols-2 gap-3">
+          <ThemeCard
+            label="Default"
+            description="Follow the appearance mode."
+            active={themeId === null}
+            onPick={() => onThemeChange(null)}
+            swatches={['var(--bg-base)', 'var(--bg-panel)', 'var(--accent)']}
+          />
+          {themes.map((t) => (
+            <ThemeCard
+              key={t.id}
+              label={t.name}
+              description={t.author ? `by ${t.author}` : t.mode}
+              active={themeId === t.id}
+              onPick={() => onThemeChange(t.id)}
+              swatches={[
+                `rgb(${t.tokens.bgBase})`,
+                `rgb(${t.tokens.bgPanel})`,
+                `rgb(${t.tokens.accent})`,
+              ]}
+            />
+          ))}
         </div>
       </Section>
 
@@ -442,6 +482,49 @@ function AppearanceCard({
         </div>
         {active && <Check size={11} className="text-accent" />}
       </div>
+    </button>
+  );
+}
+
+function ThemeCard({
+  label,
+  description,
+  active,
+  onPick,
+  swatches,
+}: {
+  label: string;
+  description: string;
+  active: boolean;
+  onPick: () => void;
+  swatches: [string, string, string];
+}) {
+  return (
+    <button
+      onClick={onPick}
+      className={cn(
+        'group flex items-center gap-3 rounded-lg border px-3 py-2.5 text-left transition-all duration-150 ease-apple',
+        active
+          ? 'border-accent/60 shadow-glow-sm ring-1 ring-accent/40'
+          : 'border-border-subtle hover:border-border-strong',
+      )}
+    >
+      <div className="flex shrink-0 gap-0.5">
+        {swatches.map((color, i) => (
+          <span
+            key={i}
+            className="h-7 w-3 rounded-sm ring-1 ring-black/10"
+            style={{ background: color }}
+          />
+        ))}
+      </div>
+      <div className="min-w-0 flex-1">
+        <div className="truncate font-display text-[12px] font-medium tracking-tight text-fg-base">
+          {label}
+        </div>
+        <div className="truncate font-display text-[10.5px] text-fg-muted">{description}</div>
+      </div>
+      {active && <Check size={11} className="shrink-0 text-accent" />}
     </button>
   );
 }
