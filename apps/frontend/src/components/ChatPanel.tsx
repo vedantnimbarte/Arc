@@ -5,6 +5,7 @@ import {
   Square,
   X,
   ChevronDown,
+  FileCode2,
   FileText,
   FolderTree,
   Search as SearchIcon,
@@ -21,9 +22,13 @@ import {
   PowerOff,
   BookmarkPlus,
   ListOrdered,
+  Plus,
+  Paperclip,
+  AtSign,
+  Eraser,
   type LucideIcon,
 } from 'lucide-react';
-import { useChat } from '../state/chat';
+import { useChat, type ChatContext } from '../state/chat';
 import {
   useSettings,
   useActivePreset,
@@ -40,6 +45,9 @@ import {
 import {
   agentDecide,
   agentRun,
+  fsListFiles,
+  fsPickFiles,
+  fsReadFile,
   isTauri,
   llmStream,
   mcpCallTool,
@@ -50,6 +58,7 @@ import {
   memoryList,
   memorySave,
   memorySearch,
+  type FileItem,
   type LlmMessage,
   type MemoryEntry,
   type MemoryHit,
@@ -92,6 +101,11 @@ export function ChatPanel({ onClose, intent, onIntentConsumed }: ChatPanelProps 
   const setStreaming = useChat((s) => s.setStreaming);
   const clear = useChat((s) => s.clear);
   const newSession = useChat((s) => s.newSession);
+  const pendingContexts = useChat((s) => s.pendingContexts);
+  const removePendingContext = useChat((s) => s.removePendingContext);
+  const clearPendingContexts = useChat((s) => s.clearPendingContexts);
+  const addPendingContext = useChat((s) => s.addPendingContext);
+  const filesRoot = useFiles((s) => s.root);
   const activeSession = useChat((s) =>
     s.sessions.find((x) => x.id === s.activeSessionId) ?? null,
   );
@@ -161,6 +175,27 @@ export function ChatPanel({ onClose, intent, onIntentConsumed }: ChatPanelProps 
     const text = input.trim();
     if (!text || isStreaming) return;
 
+    // `/clear` — wipe the active conversation (skips confirmation since
+    // typing the command is itself an explicit action).
+    if (text === '/clear') {
+      setInput('');
+      await clear();
+      return;
+    }
+
+    // `/file` — open the native multi-file picker; each pick becomes a chip.
+    if (text === '/file' || text === '/files' || text === '/attach') {
+      setInput('');
+      await attachViaPicker();
+      return;
+    }
+
+    // `/mention` — insert `@` so the file-mention popover opens.
+    if (text === '/mention') {
+      setInput('@');
+      return;
+    }
+
     // `/agent <goal>` — drop into the coding-agent runtime. Anthropic-only.
     if (text.startsWith('/agent ') || text === '/agent') {
       await runAgent(text.replace(/^\/agent\s*/, '').trim());
@@ -174,14 +209,22 @@ export function ChatPanel({ onClose, intent, onIntentConsumed }: ChatPanelProps 
     }
 
     // `/memory <subcommand>` — save / search / list / delete workspace notes.
+    // We deliberately keep `pendingContexts` intact for slash commands so
+    // a user mid-task can run a quick `/memory list` without losing their
+    // staged selection.
     if (text === '/memory' || text.startsWith('/memory ')) {
       await runMemory(text);
       return;
     }
 
+    // Compose the outbound text — any staged "Ask ARC AI" snippets become a
+    // fenced prefix above what the user typed.
+    const composed = composeUserMessage(text, pendingContexts);
+
     if (!isTauri) {
       setInput('');
-      append({ role: 'user', content: text });
+      append({ role: 'user', content: composed });
+      clearPendingContexts();
       const id = append({ role: 'assistant', content: '' });
       setStreaming(true);
       const reply = `(stub · run via pnpm tauri:dev for real ${activePreset.label} calls)`;
@@ -202,7 +245,8 @@ export function ChatPanel({ onClose, intent, onIntentConsumed }: ChatPanelProps 
     }
 
     setInput('');
-    append({ role: 'user', content: text });
+    append({ role: 'user', content: composed });
+    clearPendingContexts();
     const assistantId = append({ role: 'assistant', content: '' });
     setStreaming(true);
 
@@ -210,7 +254,7 @@ export function ChatPanel({ onClose, intent, onIntentConsumed }: ChatPanelProps 
       .filter((m) => m.role === 'user' || m.role === 'assistant')
       .filter((m) => m.content.length > 0)
       .map((m) => ({ role: m.role as 'user' | 'assistant', content: m.content }));
-    wire.push({ role: 'user', content: text });
+    wire.push({ role: 'user', content: composed });
 
     const reqId = crypto.randomUUID();
     cancelRef.current = await llmStream(
@@ -264,7 +308,12 @@ export function ChatPanel({ onClose, intent, onIntentConsumed }: ChatPanelProps 
     }
 
     setInput('');
-    append({ role: 'user', content: `/agent ${goal}` });
+    // Bake any staged context into the visible /agent message *and* the
+    // goal we hand to the runtime — both surfaces benefit from it.
+    const composedGoal = composeUserMessage(goal, pendingContexts);
+    const displayGoal = composedGoal === goal ? `/agent ${goal}` : `/agent ${composedGoal}`;
+    append({ role: 'user', content: displayGoal });
+    clearPendingContexts();
     const assistantId = append({ role: 'assistant', content: '' });
     setStreaming(true);
 
@@ -274,7 +323,7 @@ export function ChatPanel({ onClose, intent, onIntentConsumed }: ChatPanelProps 
     await agentRun(
       {
         id: runId,
-        goal,
+        goal: composedGoal,
         api_key: anthropic.apiKey,
         model: anthropic.model,
         workspace_root: root,
@@ -500,6 +549,51 @@ export function ChatPanel({ onClose, intent, onIntentConsumed }: ChatPanelProps 
     }
   }
 
+  /** Read one file and stage it as a `source: 'file'` context chip. Skips
+   *  silently if the same path is already attached. Surfaces read errors
+   *  (binary / too-large / not-found) as a system message so the user can
+   *  see why the chip didn't appear. */
+  async function attachFileByPath(path: string): Promise<boolean> {
+    if (!isTauri) return false;
+    const already = useChat
+      .getState()
+      .pendingContexts.some((c) => c.source === 'file' && c.path === path);
+    if (already) return true;
+    try {
+      const text = await fsReadFile(path);
+      const name = path.split(/[\\/]/).pop() || path;
+      addPendingContext({ source: 'file', label: name, text, path });
+      return true;
+    } catch (err) {
+      append({
+        role: 'system',
+        content: `couldn't attach \`${path}\`: ${String(err)}`,
+      });
+      return false;
+    }
+  }
+
+  /** Open the native multi-file picker. Each chosen file becomes a chip. */
+  async function attachViaPicker() {
+    if (!isTauri) {
+      append({
+        role: 'system',
+        content: 'File attachments need the Tauri shell. Launch via `pnpm tauri:dev`.',
+      });
+      return;
+    }
+    let paths: string[] = [];
+    try {
+      paths = await fsPickFiles(filesRoot);
+    } catch (err) {
+      append({ role: 'system', content: `file picker error: ${String(err)}` });
+      return;
+    }
+    for (const p of paths) {
+      await attachFileByPath(p);
+    }
+  }
+
   return (
     <div className="flex h-full flex-col">
       <ChatHeader
@@ -595,6 +689,15 @@ export function ChatPanel({ onClose, intent, onIntentConsumed }: ChatPanelProps 
             isStreaming={isStreaming}
             providerLabel={activePreset.label}
             agentName={activeAgent.name}
+            contexts={pendingContexts}
+            onRemoveContext={removePendingContext}
+            onAttachFiles={() => void attachViaPicker()}
+            onAttachFileByPath={(p) => attachFileByPath(p)}
+            onClearConversation={() => {
+              if (messages.length === 0) return;
+              void clear();
+            }}
+            workspaceRoot={filesRoot}
           />
         </ViewLayer>
 
@@ -927,6 +1030,22 @@ function summarizeApprovalInput(name: string, input: unknown): string {
 
 // --- Composer --------------------------------------------------------------
 
+/** Build the final user-facing message from the raw textarea content and
+ *  any pending contexts (selection snippets or attached files). Each
+ *  context becomes a labeled fenced code block above the user's prose.
+ *  Returns the raw text unchanged when there are no contexts. */
+export function composeUserMessage(text: string, contexts: ChatContext[]): string {
+  if (contexts.length === 0) return text;
+  const blocks = contexts.map((c) => {
+    const heading =
+      c.source === 'file'
+        ? `File ${c.path ?? c.label}:`
+        : `Selected from ${c.label}:`;
+    return `${heading}\n\`\`\`\n${c.text}\n\`\`\``;
+  });
+  return [...blocks, text].filter(Boolean).join('\n\n');
+}
+
 function Composer({
   input,
   onChange,
@@ -935,6 +1054,12 @@ function Composer({
   isStreaming,
   providerLabel,
   agentName,
+  contexts,
+  onRemoveContext,
+  onAttachFiles,
+  onAttachFileByPath,
+  onClearConversation,
+  workspaceRoot,
 }: {
   input: string;
   onChange: (v: string) => void;
@@ -943,12 +1068,40 @@ function Composer({
   isStreaming: boolean;
   providerLabel: string;
   agentName: string;
+  contexts: ChatContext[];
+  onRemoveContext: (id: string) => void;
+  onAttachFiles: () => void;
+  onAttachFileByPath: (path: string) => Promise<boolean>;
+  onClearConversation: () => void;
+  workspaceRoot: string | null;
 }) {
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const [cursorPos, setCursorPos] = useState(0);
   // Slash-command popover: derived from the input. We use a "dismissedAt"
   // value rather than a boolean so pressing Escape suppresses the popover
   // for the current input but re-arms naturally as the user keeps typing.
   const [dismissedAt, setDismissedAt] = useState<string | null>(null);
   const [selected, setSelected] = useState(0);
+
+  // Slash-command actions need to invoke parent handlers. Build the static
+  // command list once, then resolve actions per-render through this map so
+  // the SLASH_COMMANDS array can stay declarative.
+  const commandActions: Partial<Record<string, () => void>> = {
+    '/file': onAttachFiles,
+    '/clear': () => {
+      onChange('');
+      onClearConversation();
+    },
+    '/mention': () => {
+      onChange('@');
+      // Defer focus so the cursor lands after the freshly inserted '@'.
+      queueMicrotask(() => {
+        textareaRef.current?.focus();
+        const len = textareaRef.current?.value.length ?? 1;
+        textareaRef.current?.setSelectionRange(len, len);
+      });
+    },
+  };
 
   const visibleCommands = useMemo(() => {
     if (isStreaming || !input.startsWith('/')) return [];
@@ -956,12 +1109,58 @@ function Composer({
     return SLASH_COMMANDS.filter((c) => c.command.toLowerCase().startsWith(q));
   }, [input, isStreaming]);
 
-  const popoverOpen =
-    visibleCommands.length > 0 && input !== dismissedAt;
+  // ─── @ mention popover ───────────────────────────────────────────────
+  // Detect a live `@partial` token immediately before the cursor. To open
+  // the popover, `@` must either start the input or follow whitespace, and
+  // the token may not contain whitespace itself.
+  const mention = useMemo(() => detectMention(input, cursorPos), [input, cursorPos]);
+  const [mentionItems, setMentionItems] = useState<FileItem[]>([]);
+  const [mentionSelected, setMentionSelected] = useState(0);
+  const [mentionDismissedAt, setMentionDismissedAt] = useState<string | null>(null);
+  const mentionQuery = mention?.query ?? null;
+  const mentionActive =
+    !isStreaming &&
+    mention !== null &&
+    workspaceRoot !== null &&
+    mentionDismissedAt !== mentionKey(mention);
 
   useEffect(() => {
-    // Clamp selection when the visible set shrinks; reset to top when the
-    // first match changes (so filtering feels responsive rather than sticky).
+    if (!mentionActive || workspaceRoot === null || mentionQuery === null) {
+      setMentionItems([]);
+      return;
+    }
+    let cancelled = false;
+    const handle = window.setTimeout(() => {
+      void fsListFiles(workspaceRoot, mentionQuery, 8)
+        .then((items) => {
+          if (!cancelled) setMentionItems(items);
+        })
+        .catch((err) => {
+          if (!cancelled) {
+            console.error('[chat] mention list failed:', err);
+            setMentionItems([]);
+          }
+        });
+    }, 80);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(handle);
+    };
+  }, [mentionActive, mentionQuery, workspaceRoot]);
+
+  useEffect(() => {
+    setMentionSelected((s) => Math.min(s, Math.max(0, mentionItems.length - 1)));
+  }, [mentionItems.length]);
+
+  useEffect(() => {
+    setMentionSelected(0);
+  }, [mentionQuery]);
+
+  const mentionPopoverOpen = mentionActive && mentionItems.length > 0;
+  const popoverOpen =
+    !mentionActive && visibleCommands.length > 0 && input !== dismissedAt;
+
+  useEffect(() => {
     setSelected((s) => Math.min(s, Math.max(0, visibleCommands.length - 1)));
   }, [visibleCommands.length]);
 
@@ -972,31 +1171,120 @@ function Composer({
   const pickCommand = (idx: number) => {
     const c = visibleCommands[idx];
     if (!c) return;
+    const action = commandActions[c.command];
+    if (action) {
+      // Inline-action commands fire immediately and clear the input — they
+      // don't take arguments so leaving `/clear ` typed would be confusing.
+      onChange('');
+      action();
+      return;
+    }
     onChange(c.command + ' ');
+  };
+
+  const pickMention = async (idx: number) => {
+    const item = mentionItems[idx];
+    if (!item || !mention) return;
+    // Replace `@partial` with `@basename ` and stage the file as a context
+    // chip. We preserve the rest of the input so the user can keep typing.
+    const before = input.slice(0, mention.at);
+    const after = input.slice(mention.at + 1 + mention.query.length);
+    const replaced = `${before}@${item.name} ${after}`;
+    onChange(replaced);
+    // Restore the cursor after the inserted name + space.
+    const nextPos = before.length + 1 + item.name.length + 1;
+    queueMicrotask(() => {
+      textareaRef.current?.focus();
+      textareaRef.current?.setSelectionRange(nextPos, nextPos);
+    });
+    await onAttachFileByPath(item.path);
+  };
+
+  const syncCursor = () => {
+    const el = textareaRef.current;
+    if (el) setCursorPos(el.selectionStart ?? el.value.length);
   };
 
   return (
     <div className="shrink-0 px-3 pb-3 pt-1">
       <div className="relative">
-        {popoverOpen && (
+        {mentionPopoverOpen ? (
+          <MentionPopover
+            items={mentionItems}
+            selected={mentionSelected}
+            onHover={setMentionSelected}
+            onPick={(i) => void pickMention(i)}
+          />
+        ) : popoverOpen ? (
           <SlashCommandsPopover
             commands={visibleCommands}
             selected={selected}
             onHover={setSelected}
             onPick={pickCommand}
           />
+        ) : null}
+        {contexts.length > 0 && (
+          <ContextChipStack contexts={contexts} onRemove={onRemoveContext} />
         )}
         <div
           className={cn(
-            'group flex items-end gap-2 rounded-[20px] border border-border-subtle bg-bg-base/55 px-3 py-2 backdrop-blur-md',
+            'group flex items-end gap-2 rounded-[20px] border border-border-subtle bg-bg-base/55 px-2 py-2 backdrop-blur-md',
             'transition-all duration-150 ease-apple',
             'focus-within:border-accent/45 focus-within:bg-bg-base/75 focus-within:shadow-focus',
           )}
         >
+          <button
+            type="button"
+            onClick={onAttachFiles}
+            disabled={isStreaming}
+            title="Attach files"
+            aria-label="Attach files"
+            className={cn(
+              'flex h-[26px] w-[26px] shrink-0 items-center justify-center self-end rounded-full',
+              'border border-border-subtle bg-white/[0.04] text-fg-muted',
+              'transition-all duration-150 ease-apple',
+              'enabled:hover:border-accent/40 enabled:hover:bg-accent-soft enabled:hover:text-accent-bright',
+              'enabled:active:scale-[0.94]',
+              'disabled:opacity-50',
+            )}
+          >
+            <Plus size={13} strokeWidth={2.4} />
+          </button>
           <textarea
+            ref={textareaRef}
             value={input}
-            onChange={(e) => onChange(e.target.value)}
+            onChange={(e) => {
+              onChange(e.target.value);
+              setCursorPos(e.target.selectionStart ?? e.target.value.length);
+            }}
+            onSelect={syncCursor}
+            onClick={syncCursor}
+            onKeyUp={syncCursor}
             onKeyDown={(e) => {
+              if (mentionPopoverOpen) {
+                if (e.key === 'ArrowDown') {
+                  e.preventDefault();
+                  setMentionSelected((s) => (s + 1) % mentionItems.length);
+                  return;
+                }
+                if (e.key === 'ArrowUp') {
+                  e.preventDefault();
+                  setMentionSelected(
+                    (s) => (s - 1 + mentionItems.length) % mentionItems.length,
+                  );
+                  return;
+                }
+                if (e.key === 'Tab' || (e.key === 'Enter' && !e.shiftKey)) {
+                  e.preventDefault();
+                  void pickMention(mentionSelected);
+                  return;
+                }
+                if (e.key === 'Escape') {
+                  e.preventDefault();
+                  if (mention) setMentionDismissedAt(mentionKey(mention));
+                  return;
+                }
+              }
               if (popoverOpen) {
                 if (e.key === 'ArrowDown') {
                   e.preventDefault();
@@ -1068,7 +1356,7 @@ function Composer({
         <div className="flex min-w-0 items-center gap-2">
           <ModelTriggerPill placement="up" align="start" />
           <span className="hidden truncate tracking-tight sm:inline">
-            <kbd className="font-mono">return</kbd> to send · <kbd className="font-mono">/</kbd> for commands
+            <kbd className="font-mono">return</kbd> to send · <kbd className="font-mono">/</kbd> for commands · <kbd className="font-mono">@</kbd> for files
           </span>
         </div>
         {isStreaming && (
@@ -1080,6 +1368,139 @@ function Composer({
       </div>
     </div>
   );
+}
+
+// ─── @ mention detection helpers ─────────────────────────────────────────
+
+interface MentionContext {
+  /** Index of the `@` character in the input string. */
+  at: number;
+  /** Substring between the `@` and the cursor (no whitespace). */
+  query: string;
+}
+
+/** Look at the input + cursor position and return the live `@partial` token
+ *  the user is typing, or null if the cursor isn't in one. The `@` must be
+ *  at the start of the input or immediately follow whitespace. */
+function detectMention(input: string, cursor: number): MentionContext | null {
+  if (cursor === 0) return null;
+  const before = input.slice(0, cursor);
+  const at = before.lastIndexOf('@');
+  if (at === -1) return null;
+  if (at > 0 && !/\s/.test(before.charAt(at - 1))) return null;
+  const query = before.slice(at + 1);
+  if (/\s/.test(query)) return null;
+  return { at, query };
+}
+
+function mentionKey(m: MentionContext): string {
+  return `${m.at}:${m.query}`;
+}
+
+// --- Context chip stack ----------------------------------------------------
+
+/** Row of dismissible chips above the composer textarea — one per pending
+ *  selection snippet captured by "Ask ARC AI". Each chip shows the source
+ *  label and a two-line preview; the full text is included verbatim when
+ *  the user sends. */
+function ContextChipStack({
+  contexts,
+  onRemove,
+}: {
+  contexts: ChatContext[];
+  onRemove: (id: string) => void;
+}) {
+  return (
+    <div className="mb-1.5 flex flex-wrap gap-1.5">
+      {contexts.map((c) => {
+        const Icon =
+          c.source === 'terminal'
+            ? TerminalIcon
+            : c.source === 'file'
+              ? FileText
+              : FileCode2;
+        // For file attachments, surface the path under the basename instead
+        // of dumping the contents — files are typically long and the chip
+        // would otherwise turn into an opaque block.
+        const subtitle =
+          c.source === 'file'
+            ? prettyRelPath(c.path ?? c.label)
+            : c.text
+                .split('\n')
+                .slice(0, 2)
+                .join('\n')
+                .replace(/\s+$/g, '') || '(empty selection)';
+        const sizeBadge =
+          c.source === 'file' ? `${formatBytes(c.text.length)}` : null;
+        return (
+          <div
+            key={c.id}
+            className={cn(
+              'group flex max-w-[260px] animate-fade-in items-start gap-2',
+              'rounded-xl border border-border-subtle bg-bg-base/55 px-2.5 py-1.5',
+              'backdrop-blur-md transition-colors duration-150 ease-apple',
+              'hover:border-accent/35',
+            )}
+          >
+            <span
+              className={cn(
+                'mt-[2px] flex h-[16px] w-[16px] shrink-0 items-center justify-center rounded-md',
+                c.source === 'file'
+                  ? 'bg-accent-soft text-accent-bright'
+                  : 'bg-white/[0.06] text-fg-muted',
+              )}
+            >
+              <Icon size={10} strokeWidth={2.2} />
+            </span>
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center gap-1">
+                <span className="truncate font-display text-[10.5px] font-semibold tracking-tight text-fg-base">
+                  {c.label}
+                </span>
+                {sizeBadge && (
+                  <span className="shrink-0 rounded bg-white/[0.05] px-1 font-mono text-[9px] tracking-tight text-fg-subtle">
+                    {sizeBadge}
+                  </span>
+                )}
+              </div>
+              <p className="mt-0.5 line-clamp-2 break-all font-mono text-[10.5px] leading-snug text-fg-muted">
+                {subtitle}
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => onRemove(c.id)}
+              className={cn(
+                'mt-[1px] flex h-[16px] w-[16px] shrink-0 items-center justify-center',
+                'rounded-md text-fg-subtle opacity-0 transition-all duration-150',
+                'hover:bg-status-err/15 hover:text-status-err',
+                'group-hover:opacity-100 focus-visible:opacity-100',
+              )}
+              aria-label={`Remove ${c.label} context`}
+              title="Remove context"
+            >
+              <X size={11} strokeWidth={2.4} />
+            </button>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+/** Shorten a long absolute path for chip display: keep the last 2-3
+ *  segments so the user sees the meaningful suffix. */
+function prettyRelPath(path: string): string {
+  const norm = path.replace(/\\/g, '/');
+  const parts = norm.split('/').filter(Boolean);
+  if (parts.length <= 3) return norm;
+  return '…/' + parts.slice(-3).join('/');
+}
+
+function formatBytes(n: number): string {
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+  return `${(n / (1024 * 1024)).toFixed(1)} MB`;
 }
 
 /** Pill that opens the global ModelPicker. Lives in two places — the chat
@@ -1141,7 +1562,7 @@ export function ModelTriggerPill({
 
 // --- Slash commands popover -----------------------------------------------
 
-type SlashCommandGroup = 'agent' | 'mcp' | 'memory';
+type SlashCommandGroup = 'context' | 'agent' | 'mcp' | 'memory';
 
 interface SlashCommand {
   command: string;
@@ -1152,6 +1573,24 @@ interface SlashCommand {
 }
 
 const SLASH_COMMANDS: SlashCommand[] = [
+  {
+    command: '/file',
+    description: 'Attach file(s) from your computer via a native picker',
+    group: 'context',
+    icon: Paperclip,
+  },
+  {
+    command: '/mention',
+    description: 'Open the @-picker for files in the current folder',
+    group: 'context',
+    icon: AtSign,
+  },
+  {
+    command: '/clear',
+    description: 'Clear the active conversation',
+    group: 'context',
+    icon: Eraser,
+  },
   {
     command: '/agent',
     args: '<goal>',
@@ -1218,6 +1657,7 @@ const SLASH_COMMANDS: SlashCommand[] = [
 ];
 
 const GROUP_LABELS: Record<SlashCommandGroup, string> = {
+  context: 'Context',
   agent: 'Agent',
   mcp: 'MCP',
   memory: 'Memory',
@@ -1407,6 +1847,146 @@ function KeyHint({ k, label }: { k: string; label: string }) {
       </kbd>
       <span className="tracking-tight">{label}</span>
     </span>
+  );
+}
+
+// ─── @ mention popover ────────────────────────────────────────────────────
+
+function MentionPopover({
+  items,
+  selected,
+  onHover,
+  onPick,
+}: {
+  items: FileItem[];
+  selected: number;
+  onHover: (i: number) => void;
+  onPick: (i: number) => void;
+}) {
+  const listRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const el = listRef.current?.querySelector<HTMLElement>(
+      `[data-mention-idx="${selected}"]`,
+    );
+    el?.scrollIntoView({ block: 'nearest' });
+  }, [selected]);
+
+  return (
+    <div
+      role="listbox"
+      aria-label="Attach file"
+      className={cn(
+        'absolute inset-x-0 bottom-full z-30 mb-2',
+        'overflow-hidden rounded-[18px] border border-border-subtle',
+        'bg-bg-panel/85 backdrop-blur-xl backdrop-saturate-180',
+        'shadow-sheet',
+        'animate-popover-in',
+      )}
+    >
+      <div className="pointer-events-none absolute inset-x-3 top-0 h-px bg-gradient-to-r from-transparent via-white/[0.10] to-transparent" />
+      <div className="flex items-center gap-2 px-3.5 pb-1 pt-2">
+        <AtSign size={10} strokeWidth={2.4} className="text-fg-subtle" />
+        <span className="font-mono text-[9.5px] uppercase tracking-widest2 text-fg-subtle">
+          Files
+        </span>
+        <span className="h-px flex-1 bg-white/[0.03]" />
+      </div>
+      <div ref={listRef} className="max-h-[264px] overflow-y-auto py-1">
+        {items.map((item, i) => (
+          <MentionRow
+            key={item.path}
+            item={item}
+            idx={i}
+            selected={selected === i}
+            onHover={() => onHover(i)}
+            onPick={() => onPick(i)}
+          />
+        ))}
+      </div>
+      <div className="flex items-center justify-between border-t border-white/[0.05] bg-black/[0.22] px-3 py-1.5 font-display text-[10px] text-fg-subtle">
+        <span className="flex items-center gap-3">
+          <KeyHint k="↑↓" label="navigate" />
+          <KeyHint k="↵" label="attach" />
+          <KeyHint k="esc" label="dismiss" />
+        </span>
+        <span className="font-mono tracking-tight text-fg-subtle/70">
+          {items.length} {items.length === 1 ? 'file' : 'files'}
+        </span>
+      </div>
+    </div>
+  );
+}
+
+function MentionRow({
+  item,
+  idx,
+  selected,
+  onHover,
+  onPick,
+}: {
+  item: FileItem;
+  idx: number;
+  selected: boolean;
+  onHover: () => void;
+  onPick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      role="option"
+      aria-selected={selected}
+      data-mention-idx={idx}
+      onMouseEnter={onHover}
+      onMouseDown={(e) => {
+        e.preventDefault();
+        onPick();
+      }}
+      className={cn(
+        'group relative flex w-full items-center gap-2.5 px-3 py-1.5 text-left',
+        'transition-colors duration-100',
+        selected ? 'bg-white/[0.05]' : 'hover:bg-white/[0.025]',
+      )}
+    >
+      {selected && (
+        <span className="pointer-events-none absolute inset-y-1.5 left-0 w-[2px] rounded-r-full bg-gradient-to-b from-accent-bright via-accent to-accent/30" />
+      )}
+      <span
+        className={cn(
+          'flex h-[22px] w-[22px] shrink-0 items-center justify-center rounded-md ring-1 transition-all duration-150 ease-apple',
+          selected
+            ? 'bg-white/[0.10] text-accent-bright ring-white/[0.12] shadow-glow-sm'
+            : 'bg-white/[0.035] text-fg-muted ring-white/[0.04]',
+        )}
+      >
+        <FileText size={11} strokeWidth={2.2} />
+      </span>
+      <div className="min-w-0 flex-1">
+        <div
+          className={cn(
+            'truncate font-mono text-[11.5px] font-semibold tracking-tight',
+            selected ? 'text-fg-base' : 'text-fg-base/90',
+          )}
+        >
+          {item.name}
+        </div>
+        <div
+          className={cn(
+            'truncate font-mono text-[10px] leading-snug',
+            selected ? 'text-fg-muted' : 'text-fg-subtle',
+          )}
+        >
+          {item.rel}
+        </div>
+      </div>
+      {selected && (
+        <span
+          className="self-center font-mono text-[9.5px] tracking-widest2 text-fg-subtle"
+          aria-hidden
+        >
+          ↵
+        </span>
+      )}
+    </button>
   );
 }
 

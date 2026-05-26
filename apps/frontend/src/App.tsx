@@ -20,9 +20,11 @@ import { PaneTreeView } from './components/PaneTreeView';
 import { useWorkspace } from './state/workspace';
 import { useFiles, CHAT_DEFAULT } from './state/files';
 import { useChat } from './state/chat';
+import { useSelection, type SelectionInfo } from './state/selection';
 import { actionFor, type ActionId } from './state/shortcuts';
 import { ptyListAiClis, settingsWindowOpen, type AiCliId } from './lib/tauri';
 import type { ChatIntent } from './components/ChatPanel';
+import { AskAiFloater } from './components/AskAiFloater';
 
 // CodeMirror is heavy — defer its bundle until a file is actually opened.
 const Editor = lazy(() =>
@@ -176,6 +178,27 @@ export default function App() {
   // Settings + secrets are hydrated by Root in main.tsx (shared across
   // the main and Settings windows).
 
+  // Shared action for the "Ask ARC AI" floating button + ⌘⇧A shortcut.
+  // Reads the current selection from `useSelection`, stages it as a
+  // `pendingContext` for the next chat send, opens the chat popover, and
+  // starts a fresh session if the chat was closed.
+  const askArcAi = useRef<(info?: SelectionInfo) => void>(() => {});
+  askArcAi.current = (info?: SelectionInfo) => {
+    const sel = info ?? useSelection.getState().current;
+    if (!sel || !sel.text.trim()) return;
+    const wasClosed = !chatOpen;
+    setChatOpen(true);
+    if (wasClosed) setChatIntent({ type: 'new-session', at: Date.now() });
+    useChat.getState().addPendingContext({
+      source: sel.source,
+      label: sel.label,
+      text: sel.text,
+    });
+    // The chip now owns the snapshot; clearing the live selection also
+    // hides the floating pill.
+    useSelection.getState().clear();
+  };
+
   useEffect(() => {
     const dispatch = (action: ActionId) => {
       switch (action) {
@@ -217,6 +240,9 @@ export default function App() {
           return;
         case 'toggle-ssh-panel':
           useSsh.getState().togglePanel();
+          return;
+        case 'ask-arc-ai':
+          askArcAi.current();
           return;
         case 'launch-claude-cli':
           void launchCli('claude-cli');
@@ -375,6 +401,7 @@ export default function App() {
       <CommandPalette open={historyOpen} onClose={() => setHistoryOpen(false)} />
       <SearchPalette open={searchOpen} onClose={() => setSearchOpen(false)} />
       <ShortcutsDialog open={shortcutsOpen} onClose={() => setShortcutsOpen(false)} />
+      <AskAiFloater onAsk={() => askArcAi.current()} />
 
       {/* Offscreen host stack. Tab content lives here until a leaf claims it
           via DOM reparenting. `display:none` keeps the size measurer happy

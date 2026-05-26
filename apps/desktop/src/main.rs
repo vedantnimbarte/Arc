@@ -98,6 +98,8 @@ fn main() {
             commands::fs::fs_parent,
             commands::fs::fs_read_dir,
             commands::fs::fs_pick_folder,
+            commands::fs::fs_pick_files,
+            commands::fs::fs_list_files,
             commands::fs::fs_read_file,
             commands::fs::fs_write_file,
             commands::fs::fs_watch_start,

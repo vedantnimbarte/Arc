@@ -17,7 +17,7 @@
 
 use std::sync::Arc;
 
-use arc_filesystem::{DirEntry, SearchHit, Watcher};
+use arc_filesystem::{DirEntry, FileItem, SearchHit, Watcher};
 use dashmap::DashMap;
 use tauri::{AppHandle, Emitter, State};
 use uuid::Uuid;
@@ -59,6 +59,25 @@ pub async fn fs_write_file(path: String, content: String) -> Result<(), String> 
 pub async fn fs_pick_folder(starting: Option<String>) -> Result<Option<String>, String> {
     arc_filesystem::pick_folder(starting)
         .await
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn fs_pick_files(starting: Option<String>) -> Result<Vec<String>, String> {
+    arc_filesystem::pick_files(starting)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn fs_list_files(
+    root: String,
+    query: String,
+    limit: usize,
+) -> Result<Vec<FileItem>, String> {
+    tokio::task::spawn_blocking(move || arc_filesystem::list_files(&root, &query, limit))
+        .await
+        .map_err(|e| format!("list task: {e}"))?
         .map_err(|e| e.to_string())
 }
 

@@ -21,6 +21,7 @@ import {
 } from 'lucide-react';
 import { fileIcon, MOCHA } from '../lib/fileIcons';
 import { fsReadFile, fsWriteFile, isTauri } from '../lib/tauri';
+import { useSelection } from '../state/selection';
 import { useWorkspace } from '../state/workspace';
 import { cn } from '../lib/cn';
 
@@ -164,14 +165,44 @@ export function Editor({ filePath, tabId }: Props) {
               macTheme,
               langCompartment.current.of([]),
               EditorView.updateListener.of((u) => {
-                if (!u.docChanged) return;
-                const current = u.state.doc.toString();
-                currentSourceRef.current = current;
-                const isDirty = current !== lastSavedRef.current;
-                setDirty(isDirty);
-                setTabDirty(tabId, isDirty);
-                // Keep the preview pane live in preview / split modes.
-                if (modeRef.current !== 'code') schedulePreviewRender();
+                if (u.docChanged) {
+                  const current = u.state.doc.toString();
+                  currentSourceRef.current = current;
+                  const isDirty = current !== lastSavedRef.current;
+                  setDirty(isDirty);
+                  setTabDirty(tabId, isDirty);
+                  // Keep the preview pane live in preview / split modes.
+                  if (modeRef.current !== 'code') schedulePreviewRender();
+                }
+                if (u.selectionSet || u.docChanged) {
+                  const sel = u.state.selection.main;
+                  if (sel.empty) {
+                    useSelection.getState().clear('editor', tabId);
+                  } else {
+                    const text = u.state.sliceDoc(sel.from, sel.to);
+                    // Anchor the floating pill to the selection head — that's
+                    // where the cursor lives after a drag-select, so it
+                    // matches the user's gaze.
+                    const coords = u.view.coordsAtPos(sel.head);
+                    const rect = coords
+                      ? {
+                          left: coords.left,
+                          top: coords.top,
+                          width: 0,
+                          height: Math.max(0, coords.bottom - coords.top),
+                        }
+                      : null;
+                    const fileName =
+                      filePath.split(/[\\/]/).pop() || filePath;
+                    useSelection.getState().set({
+                      source: 'editor',
+                      sourceId: tabId,
+                      label: `Editor · ${fileName}`,
+                      text,
+                      rect,
+                    });
+                  }
+                }
               }),
             ],
           }),
@@ -198,6 +229,7 @@ export function Editor({ filePath, tabId }: Props) {
       disposed = true;
       viewRef.current?.destroy();
       viewRef.current = null;
+      useSelection.getState().clear('editor', tabId);
     };
   }, [filePath, tabId, setTabDirty]);
 

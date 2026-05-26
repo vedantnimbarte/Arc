@@ -16,6 +16,7 @@ export type ActionId =
   | 'open-chat-sessions'
   | 'open-shortcuts'
   | 'toggle-ssh-panel'
+  | 'ask-arc-ai'
   | 'launch-claude-cli'
   | 'launch-codex-cli'
   | 'launch-opencode-cli';
@@ -106,6 +107,12 @@ export const ACTION_META: Record<ActionId, ActionMeta> = {
     description: 'Open or close the SSH host & key manager.',
     category: 'SSH',
   },
+  'ask-arc-ai': {
+    id: 'ask-arc-ai',
+    label: 'Ask ARC AI',
+    description: 'Send the current selection to ARC AI as context.',
+    category: 'Assistant',
+  },
   'launch-claude-cli': {
     id: 'launch-claude-cli',
     label: 'Launch Claude Code',
@@ -138,6 +145,7 @@ export const ACTION_ORDER: ActionId[] = [
   'open-chat-sessions',
   'open-shortcuts',
   'toggle-ssh-panel',
+  'ask-arc-ai',
   'launch-claude-cli',
   'launch-codex-cli',
   'launch-opencode-cli',
@@ -161,6 +169,7 @@ export const DEFAULT_BINDINGS: Record<ActionId, KeyBinding | null> = {
   'toggle-agent-picker': { code: 'Slash', shift: false, alt: false, ...mod() },
   'open-chat-sessions': { code: 'KeyL', shift: true, alt: false, ...mod() },
   'toggle-ssh-panel': { code: 'KeyS', shift: true, alt: false, ...mod() },
+  'ask-arc-ai': { code: 'KeyA', shift: true, alt: false, ...mod() },
   // AI CLI launchers ship unbound by default — users can assign keys via the
   // shortcuts dialog, and they're discoverable through the TabBar dropdown
   // and the new-tab popover regardless.

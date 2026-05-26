@@ -8,15 +8,17 @@ pub mod dir;
 pub mod dialog;
 pub mod file;
 pub mod index;
+pub mod listing;
 pub mod paths;
 pub mod search;
 pub mod watch;
 
 pub use dir::{read_dir, DirEntry};
-pub use dialog::pick_folder;
+pub use dialog::{pick_files, pick_folder};
 pub use file::{read_file, write_file, MAX_EDITOR_BYTES};
 pub use index::{is_built as index_is_built, rebuild as index_rebuild, search as index_search,
     update_paths as index_update_paths, IndexHit};
+pub use listing::{list_files, FileItem};
 pub use paths::{default_root, parent};
 pub use search::{search as search_files, SearchHit};
 pub use watch::Watcher;

@@ -35,6 +35,20 @@ export interface ChatSession {
   updatedAt: number;
 }
 
+/** A snippet selected from the editor/terminal — or a whole file attached
+ *  via the composer's + / @ / `/file` affordances — that the user has
+ *  staged to send with their next message. Ephemeral: lives only in
+ *  memory and is consumed on send. */
+export interface ChatContext {
+  id: string;
+  source: 'terminal' | 'editor' | 'file';
+  label: string;
+  text: string;
+  /** Absolute path for `source: 'file'`. Used to dedupe attachments and
+   *  render the path under the chip. */
+  path?: string;
+}
+
 interface ChatState {
   sessions: ChatSession[];
   activeSessionId: string | null;
@@ -46,6 +60,9 @@ interface ChatState {
    *  in-memory mode). UI uses this to avoid the "no API key" prompt while
    *  keys + sessions are still loading. */
   hydrated: boolean;
+  /** Snippets staged for the next send (from "Ask ARC AI" on a selection).
+   *  Cleared on successful send; the user can also dismiss individually. */
+  pendingContexts: ChatContext[];
 
   // ─── Sessions ─────────────────────────────────────────────────────────
   newSession: (agentId: string) => Promise<string>;
@@ -64,6 +81,11 @@ interface ChatState {
   /** Clear messages of the active session (keeps the session row). */
   clear: () => Promise<void>;
   setStreaming: (s: boolean) => void;
+
+  // ─── Pending contexts (Ask ARC AI) ────────────────────────────────────
+  addPendingContext: (c: Omit<ChatContext, 'id'> & { id?: string }) => string;
+  removePendingContext: (id: string) => void;
+  clearPendingContexts: () => void;
 
   // ─── Lifecycle ────────────────────────────────────────────────────────
   hydrate: () => Promise<void>;
@@ -108,6 +130,7 @@ export const useChat = create<ChatState>((set, get) => ({
   isStreaming: false,
   messages: [],
   hydrated: false,
+  pendingContexts: [],
 
   // ─── Sessions ─────────────────────────────────────────────────────────
 
@@ -378,6 +401,23 @@ export const useChat = create<ChatState>((set, get) => ({
   },
 
   setStreaming: (isStreaming) => set({ isStreaming }),
+
+  // ─── Pending contexts ────────────────────────────────────────────────
+
+  addPendingContext: (c) => {
+    const id = c.id ?? crypto.randomUUID();
+    set((state) => ({
+      pendingContexts: [...state.pendingContexts, { ...c, id }],
+    }));
+    return id;
+  },
+
+  removePendingContext: (id) =>
+    set((state) => ({
+      pendingContexts: state.pendingContexts.filter((c) => c.id !== id),
+    })),
+
+  clearPendingContexts: () => set({ pendingContexts: [] }),
 
   // ─── Lifecycle ────────────────────────────────────────────────────────
 

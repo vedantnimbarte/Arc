@@ -122,6 +122,28 @@ export async function fsPickFolder(starting?: string | null): Promise<string | n
   return invoke<string | null>('fs_pick_folder', { starting: starting ?? null });
 }
 
+/** Native multi-file picker. Returns an empty array when the user cancels. */
+export async function fsPickFiles(starting?: string | null): Promise<string[]> {
+  return invoke<string[]>('fs_pick_files', { starting: starting ?? null });
+}
+
+export interface FileItem {
+  path: string;
+  name: string;
+  /** Path relative to the listing root, forward slashes. */
+  rel: string;
+}
+
+/** Walks `root` and returns up to `limit` files whose name or relative path
+ *  contains `query` (case-insensitive). Empty query returns shallow files. */
+export async function fsListFiles(
+  root: string,
+  query: string,
+  limit: number,
+): Promise<FileItem[]> {
+  return invoke<FileItem[]>('fs_list_files', { root, query, limit });
+}
+
 export async function fsReadFile(path: string): Promise<string> {
   return invoke<string>('fs_read_file', { path });
 }
