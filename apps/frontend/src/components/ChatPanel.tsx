@@ -1320,7 +1320,9 @@ function Composer({
               }
             }}
             placeholder={
-              isStreaming ? `streaming from ${providerLabel}…` : `Ask ${agentName}…`
+              isStreaming
+                ? `streaming from ${providerLabel}…`
+                : `Ask ${agentName}  ·  @ to mention files  ·  / for commands`
             }
             rows={1}
             disabled={isStreaming}
@@ -1356,7 +1358,7 @@ function Composer({
         <div className="flex min-w-0 items-center gap-2">
           <ModelTriggerPill placement="up" align="start" />
           <span className="hidden truncate tracking-tight sm:inline">
-            <kbd className="font-mono">return</kbd> to send · <kbd className="font-mono">/</kbd> for commands · <kbd className="font-mono">@</kbd> for files
+            <kbd className="font-mono">↵</kbd> send · <kbd className="font-mono">⇧↵</kbd> newline
           </span>
         </div>
         {isStreaming && (
@@ -1411,7 +1413,7 @@ function ContextChipStack({
   onRemove: (id: string) => void;
 }) {
   return (
-    <div className="mb-1.5 flex flex-wrap gap-1.5">
+    <div className="mb-1.5 flex flex-wrap gap-1">
       {contexts.map((c) => {
         const Icon =
           c.source === 'terminal'
@@ -1419,67 +1421,65 @@ function ContextChipStack({
             : c.source === 'file'
               ? FileText
               : FileCode2;
-        // For file attachments, surface the path under the basename instead
-        // of dumping the contents — files are typically long and the chip
-        // would otherwise turn into an opaque block.
-        const subtitle =
+        // Full tooltip carries the long version (file path or selection
+        // preview); the chip body stays compact.
+        const tooltip =
           c.source === 'file'
-            ? prettyRelPath(c.path ?? c.label)
-            : c.text
-                .split('\n')
-                .slice(0, 2)
-                .join('\n')
-                .replace(/\s+$/g, '') || '(empty selection)';
-        const sizeBadge =
-          c.source === 'file' ? `${formatBytes(c.text.length)}` : null;
+            ? c.path ?? c.label
+            : c.text.split('\n').slice(0, 4).join('\n');
+        // Tiny right-side meta. For files we surface size; for selections
+        // the source icon is already enough so we leave it blank.
+        const meta =
+          c.source === 'file' ? formatBytes(c.text.length) : null;
         return (
           <div
             key={c.id}
+            title={tooltip}
             className={cn(
-              'group flex max-w-[260px] animate-fade-in items-start gap-2',
-              'rounded-xl border border-border-subtle bg-bg-base/55 px-2.5 py-1.5',
-              'backdrop-blur-md transition-colors duration-150 ease-apple',
-              'hover:border-accent/35',
+              'group inline-flex h-[22px] max-w-[220px] animate-fade-in items-center',
+              'rounded-full border border-border-subtle/70 bg-bg-base/40 pl-0.5 pr-1',
+              'backdrop-blur-md transition-[background-color,border-color,box-shadow] duration-200 ease-apple',
+              'hover:border-accent/40 hover:bg-bg-base/70 hover:shadow-glow-sm',
             )}
           >
             <span
               className={cn(
-                'mt-[2px] flex h-[16px] w-[16px] shrink-0 items-center justify-center rounded-md',
+                'mr-1.5 flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded-full',
                 c.source === 'file'
                   ? 'bg-accent-soft text-accent-bright'
-                  : 'bg-white/[0.06] text-fg-muted',
+                  : 'bg-white/[0.05] text-fg-muted',
               )}
             >
-              <Icon size={10} strokeWidth={2.2} />
+              <Icon size={9} strokeWidth={2.4} />
             </span>
-            <div className="min-w-0 flex-1">
-              <div className="flex items-center gap-1">
-                <span className="truncate font-display text-[10.5px] font-semibold tracking-tight text-fg-base">
-                  {c.label}
+            <span className="min-w-0 truncate font-display text-[10.5px] font-medium leading-none tracking-tight text-fg-base">
+              {c.label}
+            </span>
+            {meta && (
+              <>
+                <span
+                  aria-hidden
+                  className="mx-1.5 h-[10px] w-px shrink-0 bg-white/[0.08]"
+                />
+                <span className="shrink-0 font-mono text-[9.5px] leading-none tracking-tight text-fg-subtle/85">
+                  {meta}
                 </span>
-                {sizeBadge && (
-                  <span className="shrink-0 rounded bg-white/[0.05] px-1 font-mono text-[9px] tracking-tight text-fg-subtle">
-                    {sizeBadge}
-                  </span>
-                )}
-              </div>
-              <p className="mt-0.5 line-clamp-2 break-all font-mono text-[10.5px] leading-snug text-fg-muted">
-                {subtitle}
-              </p>
-            </div>
+              </>
+            )}
             <button
               type="button"
               onClick={() => onRemove(c.id)}
               className={cn(
-                'mt-[1px] flex h-[16px] w-[16px] shrink-0 items-center justify-center',
-                'rounded-md text-fg-subtle opacity-0 transition-all duration-150',
-                'hover:bg-status-err/15 hover:text-status-err',
+                'ml-1 flex h-[16px] w-[16px] shrink-0 items-center justify-center rounded-full',
+                'text-fg-subtle/80 opacity-0 transition-all duration-150 ease-apple',
+                'hover:bg-status-err/20 hover:text-status-err',
                 'group-hover:opacity-100 focus-visible:opacity-100',
+                '-translate-x-0.5 group-hover:translate-x-0',
               )}
               aria-label={`Remove ${c.label} context`}
               title="Remove context"
             >
-              <X size={11} strokeWidth={2.4} />
+              <X size={9} strokeWidth={2.6} />
             </button>
           </div>
         );
