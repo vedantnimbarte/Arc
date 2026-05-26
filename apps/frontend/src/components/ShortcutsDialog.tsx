@@ -19,7 +19,7 @@ interface Props {
   onClose: () => void;
 }
 
-const CATEGORIES: ActionCategory[] = ['Workspace', 'Terminal', 'Assistant', 'Help'];
+const CATEGORIES: ActionCategory[] = ['Workspace', 'Terminal', 'Assistant', 'SSH', 'AI CLIs', 'Help'];
 
 export function ShortcutsDialog({ open, onClose }: Props) {
   const overrides = useShortcuts((s) => s.overrides);
