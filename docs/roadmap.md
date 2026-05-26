@@ -295,9 +295,9 @@ These don't belong to one tier but get touched repeatedly. Track separately so t
 
 | Tier | Status | PR |
 | ---- | ------ | -- |
-| 0    | ✅ shipped | (commit pending) |
+| 0    | ✅ shipped | tier-0-foundations |
 | 1    | planned | — |
-| 2    | planned | — |
+| 2    | ✅ shipped | tier-2-git |
 | 3    | planned | — |
 | 4    | planned | — |
 | 5    | planned | — |
@@ -310,3 +310,10 @@ Update this table as each tier lands.
 - **0.2 `.arc/` config** — new `rust/project-config` crate (TOML schema v1, 5 unit tests). `project_config_load` Tauri command, `useProjectConfig` store auto-reloads on workspace root change. Consumer wiring (env injection, MCP auto-connect, agent registration) deferred to later tiers — V0 ships the load path.
 - **0.3 Block-based output** — `state/blocks.ts` captures OSC 133 boundaries. `BlocksDrawer.tsx` floats over each terminal pane with per-block copy / rerun / "Ask ARC" actions. Compromise vs. the original plan: xterm renders to canvas/webgl, so blocks live in a drawer rather than inline-collapsible rows. The data model + capture layer is what subsequent Tier 1+ features need anyway. No-shell-integration shells produce no blocks (drawer shows a hint).
 - **0.4 Themes infrastructure** — Catppuccin Mocha + Latte built-in (4 themes total). `THEMES` registry + `registerTheme(theme)` + `validateThemeJson(json)` cover Tier 1.7 marketplace consumption. Settings → Appearance grows a theme picker with swatch previews. `themeId` persisted; `resolveActiveTheme(appearance, themeId)` is the new resolver. The `~/.arc/themes/*.json` disk loader is intentionally part of Tier 1.7 (marketplace) — the infra here makes that a small add.
+
+### Tier 2 — what actually landed
+
+- **2.1 Worktree manager** — `rust/git::worktree_{list,add,remove}` (porcelain parser + 1 unit test). `<WorktreePanel>` lists worktrees with badges (locked/prunable/main/active), supports add (new or existing branch, optional start-point, native folder picker) and remove with force escape hatch. Switch action reroots the file tree.
+- **2.2 Cherry-pick across branches** — `<CherryPickDialog>` filters local branches, runs `git checkout <target>` then `git cherry_pick <oid>`. Conflict path surfaces stderr + nudges to the diff view. Lives next to the existing scissors-onto-HEAD action — adds a branch-icon button per commit row.
+- **2.3 Interactive rebase** — `rust/git::rebase_{interactive,abort,continue}`. Helper script (`.sh` on Unix, `.cmd` on Windows) overwrites git's TODO file via `GIT_SEQUENCE_EDITOR`; `GIT_EDITOR` is `true`/`cmd /c rem` so squash combined-message buffers auto-accept. UI: up/down reorder + per-row action picker (pick/squash/fixup/drop). Reword + edit deferred. Conflict path = abort button surfaced inline.
+- **2.4 Pull requests (GitHub)** — new `rust/git-host` crate (6 unit tests for URL parsing). `GitHost` trait + `GitHubHost` (reqwest, PAT-in-keyring). 3-view `<PrPanel>` (list / detail / create). One-time token-entry pane on first use. Auto-detects `origin` → github.com slug. Comments / reviews / merge button intentionally deferred — they're each a sub-feature. GitLab implementation slot exists in the trait.

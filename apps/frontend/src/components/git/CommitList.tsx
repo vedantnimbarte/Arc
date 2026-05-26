@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { GitMerge, RotateCcw, Scissors } from 'lucide-react';
+import { GitBranch, GitMerge, RotateCcw, Scissors } from 'lucide-react';
 import { cn } from '../../lib/cn';
 import type { GitLogEntry, GitResetMode } from '../../lib/tauri';
 import { colorForAuthor } from './AuthorsSidebar';
@@ -8,11 +8,21 @@ interface Props {
   commits: GitLogEntry[];
   emptyHint?: string;
   onCherryPick?: (oid: string) => void;
+  /** Open the "Cherry-pick to branch…" dialog for this commit. Distinct
+   *  from `onCherryPick`, which lands the commit on the current HEAD. */
+  onCherryPickTo?: (commit: GitLogEntry) => void;
   onRevert?: (oid: string) => void;
   onReset?: (oid: string, mode: GitResetMode) => void;
 }
 
-export function CommitList({ commits, emptyHint, onCherryPick, onRevert, onReset }: Props) {
+export function CommitList({
+  commits,
+  emptyHint,
+  onCherryPick,
+  onCherryPickTo,
+  onRevert,
+  onReset,
+}: Props) {
   if (commits.length === 0) {
     return (
       <div className="flex flex-1 flex-col items-center justify-center px-6 py-10 text-center">
@@ -32,6 +42,7 @@ export function CommitList({ commits, emptyHint, onCherryPick, onRevert, onReset
             key={c.oid}
             commit={c}
             onCherryPick={onCherryPick}
+            onCherryPickTo={onCherryPickTo}
             onRevert={onRevert}
             onReset={onReset}
           />
@@ -44,18 +55,20 @@ export function CommitList({ commits, emptyHint, onCherryPick, onRevert, onReset
 function CommitRow({
   commit,
   onCherryPick,
+  onCherryPickTo,
   onRevert,
   onReset,
 }: {
   commit: GitLogEntry;
   onCherryPick?: (oid: string) => void;
+  onCherryPickTo?: (commit: GitLogEntry) => void;
   onRevert?: (oid: string) => void;
   onReset?: (oid: string, mode: GitResetMode) => void;
 }) {
   const isMerge = commit.parents.length > 1;
   const dotColor = colorForAuthor(commit.author, commit.email);
   const [resetMenuOpen, setResetMenuOpen] = useState(false);
-  const hasActions = onCherryPick || onRevert || onReset;
+  const hasActions = onCherryPick || onCherryPickTo || onRevert || onReset;
 
   return (
     <li
@@ -98,6 +111,14 @@ function CommitRow({
               onClick={() => onCherryPick(commit.oid)}
             >
               <Scissors size={11} strokeWidth={2} />
+            </ActionBtn>
+          )}
+          {onCherryPickTo && (
+            <ActionBtn
+              title="Cherry-pick to a different branch…"
+              onClick={() => onCherryPickTo(commit)}
+            >
+              <GitBranch size={11} strokeWidth={2} />
             </ActionBtn>
           )}
           {onRevert && (

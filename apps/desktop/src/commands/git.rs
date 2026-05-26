@@ -29,11 +29,17 @@
 //!   invoke("git_last_message",   { path })                              -> String
 //!   invoke("git_checkout_ours",  { path, paths })                       -> ()
 //!   invoke("git_checkout_theirs",{ path, paths })                       -> ()
+//!   invoke("git_worktree_list",  { path })                              -> Vec<WorktreeEntry>
+//!   invoke("git_worktree_add",   { path, newPath, branch?, createBranch, startPoint? }) -> ()
+//!   invoke("git_worktree_remove",{ path, targetPath, force })           -> ()
+//!   invoke("git_rebase_interactive", { path, base, entries })           -> ()
+//!   invoke("git_rebase_abort",   { path })                              -> ()
+//!   invoke("git_rebase_continue",{ path })                              -> ()
 
 use arc_git::{
     AuthorInfo, BlameLine, BranchInfo, ChangeEntry, CheckoutResult, CommitResult, DiffScope,
-    DiffStat, GitInfo, LogEntry, LogOptions, MergeResult, RemoteInfo, RemoteOpResult, ResetMode,
-    StashEntry,
+    DiffStat, GitInfo, LogEntry, LogOptions, MergeResult, RebaseTodoEntry, RemoteInfo,
+    RemoteOpResult, ResetMode, StashEntry, WorktreeEntry,
 };
 
 #[tauri::command]
@@ -272,4 +278,62 @@ pub async fn git_checkout_theirs(path: String, paths: Vec<String>) -> Result<(),
     arc_git::checkout_theirs(&path, &paths)
         .await
         .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn git_worktree_list(path: String) -> Result<Vec<WorktreeEntry>, String> {
+    arc_git::worktree_list(&path)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn git_worktree_add(
+    path: String,
+    new_path: String,
+    branch: Option<String>,
+    create_branch: bool,
+    start_point: Option<String>,
+) -> Result<(), String> {
+    arc_git::worktree_add(
+        &path,
+        &new_path,
+        branch.as_deref(),
+        create_branch,
+        start_point.as_deref(),
+    )
+    .await
+    .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn git_worktree_remove(
+    path: String,
+    target_path: String,
+    force: bool,
+) -> Result<(), String> {
+    arc_git::worktree_remove(&path, &target_path, force)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn git_rebase_interactive(
+    path: String,
+    base: String,
+    entries: Vec<RebaseTodoEntry>,
+) -> Result<(), String> {
+    arc_git::rebase_interactive(&path, &base, &entries)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn git_rebase_abort(path: String) -> Result<(), String> {
+    arc_git::rebase_abort(&path).await.map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn git_rebase_continue(path: String) -> Result<(), String> {
+    arc_git::rebase_continue(&path).await.map_err(|e| e.to_string())
 }

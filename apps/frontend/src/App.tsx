@@ -31,7 +31,11 @@ import {
 } from './state/shortcuts';
 import { useCommands, type CommandAction, type CommandGroup } from './state/commands';
 import { useBlocks } from './state/blocks';
-import { Layers } from 'lucide-react';
+import { WorktreePanel } from './components/git/WorktreePanel';
+import { CherryPickDialog } from './components/git/CherryPickDialog';
+import { RebasePanel } from './components/git/RebasePanel';
+import { PrPanel } from './components/git/PrPanel';
+import { FolderTree, GitPullRequest, Layers, ListOrdered } from 'lucide-react';
 // Side-effect import: subscribes to file-tree root changes and keeps the
 // project-config store fresh. Doesn't render anything itself.
 import './state/projectConfig';
@@ -359,6 +363,43 @@ export default function App() {
           if (activeTabId) useBlocks.getState().toggleDrawer(activeTabId);
         },
       },
+      {
+        id: 'git.manage-worktrees',
+        title: 'Manage Worktrees',
+        group: 'Git',
+        keywords: ['worktree', 'git', 'branch', 'switch'],
+        icon: FolderTree,
+        run: () => {
+          // Lazy import to avoid a circular dependency on App-local state.
+          void import('./state/gitUi').then(({ useGitUi }) => {
+            useGitUi.getState().setWorktreePanelOpen(true);
+          });
+        },
+      },
+      {
+        id: 'git.interactive-rebase',
+        title: 'Interactive Rebase',
+        group: 'Git',
+        keywords: ['rebase', 'reorder', 'squash', 'fixup', 'drop', 'history'],
+        icon: ListOrdered,
+        run: () => {
+          void import('./state/gitUi').then(({ useGitUi }) => {
+            useGitUi.getState().setRebasePanelOpen(true);
+          });
+        },
+      },
+      {
+        id: 'git.pull-requests',
+        title: 'Pull Requests',
+        group: 'Git',
+        keywords: ['pr', 'pull', 'request', 'github', 'review', 'merge'],
+        icon: GitPullRequest,
+        run: () => {
+          void import('./state/gitUi').then(({ useGitUi }) => {
+            useGitUi.getState().openPrList();
+          });
+        },
+      },
     ];
     return useCommands.getState().registerMany(extras);
   }, []);
@@ -472,6 +513,10 @@ export default function App() {
 
       <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} />
       <CommandHistoryPalette open={historyOpen} onClose={() => setHistoryOpen(false)} />
+      <WorktreePanel />
+      <CherryPickDialog />
+      <RebasePanel />
+      <PrPanel />
       <SearchPalette open={searchOpen} onClose={() => setSearchOpen(false)} />
       <ShortcutsDialog open={shortcutsOpen} onClose={() => setShortcutsOpen(false)} />
       <AskAiFloater onAsk={() => askArcAi.current()} />
