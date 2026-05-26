@@ -113,3 +113,15 @@ pub async fn git_discard(
         .await
         .map_err(|e| e.to_string())
 }
+
+#[tauri::command]
+pub async fn git_apply(
+    path: String,
+    patch: String,
+    cached: bool,
+    reverse: bool,
+) -> Result<(), String> {
+    arc_git::apply(&path, &patch, cached, reverse)
+        .await
+        .map_err(|e| e.to_string())
+}

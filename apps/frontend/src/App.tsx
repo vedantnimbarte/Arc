@@ -28,6 +28,9 @@ import type { ChatIntent } from './components/ChatPanel';
 const Editor = lazy(() =>
   import('./components/Editor').then((m) => ({ default: m.Editor })),
 );
+const DiffView = lazy(() =>
+  import('./components/DiffView').then((m) => ({ default: m.DiffView })),
+);
 
 export default function App() {
   const { tabs, activeTabId } = useWorkspace();
@@ -108,6 +111,14 @@ export default function App() {
         <SystemMonitor tabId={tab.id} />
       ) : tab.kind === 'ssh' && tab.sshHostId ? (
         <SshTab sessionKey={tab.id} hostId={tab.sshHostId} />
+      ) : tab.kind === 'diff' && tab.filePath && tab.diffRoot ? (
+        <Suspense fallback={<EditorFallback />}>
+          <DiffView
+            filePath={tab.filePath}
+            diffRoot={tab.diffRoot}
+            diffScope={tab.diffScope ?? 'worktree'}
+          />
+        </Suspense>
       ) : tab.filePath ? (
         <Suspense fallback={<EditorFallback />}>
           <Editor filePath={tab.filePath} tabId={tab.id} />

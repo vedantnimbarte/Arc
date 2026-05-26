@@ -706,6 +706,10 @@ pub struct LogEntry {
     pub subject: String,
     /// Full-SHA parent OIDs (empty for the root commit; multiple for merges).
     pub parents: Vec<String>,
+    /// Lines added across all files in this commit (from --numstat).
+    pub additions: i64,
+    /// Lines removed across all files in this commit (from --numstat).
+    pub deletions: i64,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -732,17 +736,19 @@ pub async fn log<P: AsRef<Path>>(
 ) -> Result<Vec<LogEntry>> {
     let path = path.as_ref();
     let limit = limit.clamp(1, 5000);
-    // Custom format with a record separator that survives subjects containing newlines.
-    // Fields: %H<US>%h<US>%an<US>%ae<US>%at<US>%P<US>%s<RS>
-    const US: &str = "\u{1f}";
-    const RS: &str = "\u{1e}";
-    let format = format!("%H{US}%h{US}%an{US}%ae{US}%at{US}%P{US}%s{RS}");
+    // SOH (\x01) prefixes each commit record so we can cleanly separate the
+    // per-commit format line from the --numstat block that follows it.
+    // Fields: <SOH>%H<US>%h<US>%an<US>%ae<US>%at<US>%P<US>%s
+    const US: char = '\u{1f}';
+    const SOH: char = '\u{01}';
+    let format = format!("{SOH}%H{US}%h{US}%an{US}%ae{US}%at{US}%P{US}%s");
 
     let mut cmd = Command::new("git");
     cmd.arg("-C").arg(path).args([
         "log",
         &format!("-n{limit}"),
         &format!("--format={format}"),
+        "--numstat",
     ]);
     if !opts.include_merges {
         cmd.arg("--no-merges");
@@ -769,14 +775,25 @@ pub async fn log<P: AsRef<Path>>(
         return Err(Error::Failed(err));
     }
 
+    // Each block starts with SOH; splitting on it gives one segment per commit.
+    // Segment structure (after trimming outer blank lines):
+    //   Line 0 : commit fields (SOH already consumed by the split)
+    //   Line 1 : blank
+    //   Lines 2+: numstat rows  "<ins>\t<del>\t<path>"
+    //             binary files show "-\t-\t<path>" and are skipped
     let stdout = String::from_utf8_lossy(&output.stdout);
     let mut entries = Vec::new();
-    for rec in stdout.split(RS) {
-        let rec = rec.trim_matches(|c: char| c == '\n' || c == '\r');
-        if rec.is_empty() {
+    for block in stdout.split(SOH) {
+        let block = block.trim_matches(|c: char| c == '\n' || c == '\r');
+        if block.is_empty() {
             continue;
         }
-        let mut fields = rec.splitn(7, US);
+        let mut lines_iter = block.lines();
+        let first = lines_iter.next().unwrap_or("").trim_end_matches('\r');
+        if first.is_empty() {
+            continue;
+        }
+        let mut fields = first.splitn(7, US);
         let oid = fields.next().unwrap_or("").to_string();
         let short = fields.next().unwrap_or("").to_string();
         let author = fields.next().unwrap_or("").to_string();
@@ -787,11 +804,28 @@ pub async fn log<P: AsRef<Path>>(
         if oid.is_empty() {
             continue;
         }
-        let parents = parents_field
+        let parents: Vec<String> = parents_field
             .split_ascii_whitespace()
             .filter(|s| !s.is_empty())
             .map(|s| s.to_string())
             .collect();
+
+        let mut additions = 0i64;
+        let mut deletions = 0i64;
+        for line in lines_iter {
+            let line = line.trim_end_matches('\r');
+            if line.is_empty() {
+                continue;
+            }
+            let mut parts = line.splitn(3, '\t');
+            let ins_s = parts.next().unwrap_or("");
+            let del_s = parts.next().unwrap_or("");
+            if parts.next().is_some() {
+                additions += ins_s.parse::<i64>().unwrap_or(0);
+                deletions += del_s.parse::<i64>().unwrap_or(0);
+            }
+        }
+
         entries.push(LogEntry {
             oid,
             short,
@@ -800,6 +834,8 @@ pub async fn log<P: AsRef<Path>>(
             time,
             subject,
             parents,
+            additions,
+            deletions,
         });
     }
     Ok(entries)
@@ -910,6 +946,56 @@ pub async fn diff<P: AsRef<Path>>(
         return Err(Error::Failed(err));
     }
     Ok(String::from_utf8_lossy(&output.stdout).into_owned())
+}
+
+// ----- apply ----------------------------------------------------------------
+
+/// Apply a unified-diff patch to the repository.
+/// `cached` → apply to the index only (`git apply --cached`).
+/// `reverse` → apply in reverse (`git apply --reverse`).
+/// Pass the patch text (file header + one or more hunks) produced by [`diff`].
+pub async fn apply<P: AsRef<Path>>(
+    path: P,
+    patch: &str,
+    cached: bool,
+    reverse: bool,
+) -> Result<()> {
+    use std::process::Stdio;
+    use tokio::io::AsyncWriteExt;
+
+    let path = path.as_ref();
+    let mut cmd = Command::new("git");
+    cmd.arg("-C").arg(path).arg("apply");
+    if cached {
+        cmd.arg("--cached");
+    }
+    if reverse {
+        cmd.arg("--reverse");
+    }
+    cmd.arg("-") // read patch from stdin
+        .stdin(Stdio::piped())
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped());
+
+    let mut child = cmd.spawn().map_err(|e| Error::Spawn(e.to_string()))?;
+
+    if let Some(mut stdin) = child.stdin.take() {
+        stdin
+            .write_all(patch.as_bytes())
+            .await
+            .map_err(|e| Error::Spawn(e.to_string()))?;
+        // Drop closes the pipe, signalling EOF to git.
+    }
+
+    let output = child
+        .wait_with_output()
+        .await
+        .map_err(|e| Error::Spawn(e.to_string()))?;
+    if !output.status.success() {
+        let err = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        return Err(Error::Failed(err));
+    }
+    Ok(())
 }
 
 // ----- diff stat (summary) --------------------------------------------------

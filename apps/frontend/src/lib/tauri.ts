@@ -691,7 +691,7 @@ export async function llmStream(
 // the Rust DTOs serialized via serde defaults. Outer invoke arguments use
 // camelCase — Tauri converts them to snake_case Rust params automatically.
 
-export type TabKind = 'terminal' | 'editor' | 'preview' | 'apiclient' | 'sysmonitor' | 'ssh';
+export type TabKind = 'terminal' | 'editor' | 'preview' | 'apiclient' | 'sysmonitor' | 'ssh' | 'diff';
 
 export interface TabInput {
   id: string;
@@ -1192,6 +1192,10 @@ export interface GitLogEntry {
   subject: string;
   /** Full-SHA parent OIDs. Empty for the root commit; multiple for merges. */
   parents: string[];
+  /** Lines added across all files in this commit. */
+  additions: number;
+  /** Lines removed across all files in this commit. */
+  deletions: number;
 }
 
 export interface GitLogOptions {
@@ -1243,6 +1247,17 @@ export async function gitDiff(
     scope,
     pathFilter: pathFilter ?? null,
   });
+}
+
+/** Apply a unified-diff patch to the repo.
+ *  `cached` → apply to the index; `reverse` → apply in reverse. */
+export async function gitApply(
+  path: string,
+  patch: string,
+  cached: boolean,
+  reverse: boolean,
+): Promise<void> {
+  return invoke<void>('git_apply', { path, patch, cached, reverse });
 }
 
 export interface GitBlameLine {

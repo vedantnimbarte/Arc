@@ -13,7 +13,7 @@ import { useFiles } from './files';
 export interface Tab {
   id: string;
   title: string;
-  kind: 'terminal' | 'editor' | 'preview' | 'apiclient' | 'sysmonitor' | 'ssh';
+  kind: 'terminal' | 'editor' | 'preview' | 'apiclient' | 'sysmonitor' | 'ssh' | 'diff';
   /** PTY id for terminal tabs. Transient — stripped from persisted state. */
   ptyId?: string;
   /** Absolute path for editor tabs (read on mount). */
@@ -36,6 +36,10 @@ export interface Tab {
   /** Live SSH session id, set by SshTab after `sshConnect` resolves.
    *  Transient — never persisted (the session is gone after a relaunch). */
   sshSessionId?: string;
+  /** Git repository root for `kind: 'diff'` tabs. */
+  diffRoot?: string;
+  /** Diff scope for `kind: 'diff'` tabs. */
+  diffScope?: 'worktree' | 'staged' | 'head';
 }
 
 // ─── Pane layout tree ─────────────────────────────────────────────────────
@@ -103,6 +107,9 @@ interface WorkspaceState {
    *  When `forceNew` is true a new tab is always created (used by the
    *  Duplicate-tab action so the user gets a second view of the file). */
   openFile: (path: string, title?: string, opts?: { forceNew?: boolean }) => string;
+  /** Open a git diff tab for a file. Re-focuses an existing diff tab for the
+   *  same path+scope rather than duplicating it. */
+  openDiff: (absPath: string, root: string, scope: 'worktree' | 'staged' | 'head') => string;
   /** Spawn a new terminal tab that runs an AI CLI (Claude Code / Codex /
    *  OpenCode) directly instead of the default shell. Anchors the new tab
    *  (and the file tree) at the user's home directory. */
@@ -500,6 +507,26 @@ export const useWorkspace = create<WorkspaceState>()((set, get) => ({
       title: title ?? basename(path),
       kind: 'editor',
       filePath: path,
+    };
+    get().addTab(tab);
+    return id;
+  },
+  openDiff: (absPath, root, scope) => {
+    const existing = get().tabs.find(
+      (t) => t.kind === 'diff' && t.filePath === absPath && t.diffScope === scope,
+    );
+    if (existing) {
+      get().setActive(existing.id);
+      return existing.id;
+    }
+    const id = `diff-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+    const tab: Tab = {
+      id,
+      title: basename(absPath),
+      kind: 'diff',
+      filePath: absPath,
+      diffRoot: root,
+      diffScope: scope,
     };
     get().addTab(tab);
     return id;

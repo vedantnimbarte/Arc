@@ -16,7 +16,6 @@ import {
   ChevronRight,
   Copy,
   FileText,
-  Files,
   GitBranch,
   GitCompare,
   Minus,
@@ -190,6 +189,7 @@ export function SourceControl() {
   const root = useFiles((s) => s.root);
   const setSidebarView = useFiles((s) => s.setSidebarView);
   const openFile = useWorkspace((s) => s.openFile);
+  const openDiff = useWorkspace((s) => s.openDiff);
 
   // Single shared poller lives in `Sidebar`; we just subscribe to the cache.
   const info = useGit((s) => s.info);
@@ -262,9 +262,14 @@ export function SourceControl() {
       if (!root) return;
       if (entry.kind === 'conflict') return;
       const abs = joinPath(root, entry.path);
-      openFile(abs);
+      if (entry.kind === 'untracked') {
+        openFile(abs);
+        return;
+      }
+      const scope = entry.kind === 'staged' ? 'staged' : 'worktree';
+      openDiff(abs, root, scope);
     },
-    [openFile, root],
+    [openDiff, openFile, root],
   );
 
   const runWithRefresh = useCallback(
@@ -451,9 +456,9 @@ export function SourceControl() {
             'active:scale-[0.92]',
           )}
           aria-label="Show file tree"
-          title="Files"
+          title="Close"
         >
-          <Files size={12} strokeWidth={2.1} />
+          <X size={12} strokeWidth={2.1} />
         </button>
       </div>
 

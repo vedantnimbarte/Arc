@@ -148,6 +148,7 @@ export function CommitGraph({ commits, emptyHint }: Props) {
                   <span className="italic text-fg-subtle">(no subject)</span>
                 )}
               </span>
+              <DiffStat additions={row.commit.additions} deletions={row.commit.deletions} />
               {row.commit.parents.length > 1 && (
                 <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-white/[0.05] px-2 py-[1px] font-display text-[9.5px] uppercase tracking-widest2 text-fg-subtle ring-1 ring-inset ring-white/[0.04]">
                   <GitMerge size={9} strokeWidth={2.2} />
@@ -180,4 +181,22 @@ function formatRelative(unixSeconds: number): string {
   if (diff < 30 * 86_400) return `${Math.floor(diff / 86_400)}d`;
   if (diff < 365 * 86_400) return `${Math.floor(diff / (30 * 86_400))}mo`;
   return `${Math.floor(diff / (365 * 86_400))}y`;
+}
+
+function DiffStat({ additions, deletions }: { additions: number; deletions: number }) {
+  if (additions === 0 && deletions === 0) return null;
+  return (
+    <span className="flex shrink-0 items-center gap-1 font-mono text-[10.5px] tabular-nums">
+      {additions > 0 && (
+        <span className="rounded px-1 py-[1px] text-[#3ad28a] ring-1 ring-inset ring-[#3ad28a]/20 bg-[#3ad28a]/[0.07]">
+          +{additions}
+        </span>
+      )}
+      {deletions > 0 && (
+        <span className="rounded px-1 py-[1px] text-[#ff5252] ring-1 ring-inset ring-[#ff5252]/20 bg-[#ff5252]/[0.07]">
+          -{deletions}
+        </span>
+      )}
+    </span>
+  );
 }

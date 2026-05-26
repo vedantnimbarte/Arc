@@ -58,6 +58,7 @@ function CommitRow({ commit }: { commit: GitLogEntry }) {
       <span className="min-w-0 flex-1 truncate font-display text-[12.5px] text-fg-base">
         {commit.subject || <span className="italic text-fg-subtle">(no subject)</span>}
       </span>
+      <DiffStat additions={commit.additions} deletions={commit.deletions} />
       {isMerge && (
         <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-white/[0.05] px-2 py-[1px] font-display text-[9.5px] uppercase tracking-widest2 text-fg-subtle ring-1 ring-inset ring-white/[0.04]">
           <GitMerge size={9} strokeWidth={2.2} />
@@ -75,6 +76,24 @@ function CommitRow({ commit }: { commit: GitLogEntry }) {
         {formatRelative(commit.time)}
       </span>
     </li>
+  );
+}
+
+function DiffStat({ additions, deletions }: { additions: number; deletions: number }) {
+  if (additions === 0 && deletions === 0) return null;
+  return (
+    <span className="flex shrink-0 items-center gap-1 font-mono text-[10.5px] tabular-nums">
+      {additions > 0 && (
+        <span className="rounded px-1 py-[1px] text-[#3ad28a] ring-1 ring-inset ring-[#3ad28a]/20 bg-[#3ad28a]/[0.07]">
+          +{additions}
+        </span>
+      )}
+      {deletions > 0 && (
+        <span className="rounded px-1 py-[1px] text-[#ff5252] ring-1 ring-inset ring-[#ff5252]/20 bg-[#ff5252]/[0.07]">
+          -{deletions}
+        </span>
+      )}
+    </span>
   );
 }
 
