@@ -1210,6 +1210,535 @@ fn parse_blame_porcelain(out: &str) -> Vec<BlameLine> {
     out_lines
 }
 
+// ----- remotes --------------------------------------------------------------
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RemoteInfo {
+    pub name: String,
+    pub fetch_url: String,
+    pub push_url: String,
+}
+
+/// List all configured remotes with their fetch + push URLs.
+pub async fn remotes<P: AsRef<Path>>(path: P) -> Result<Vec<RemoteInfo>> {
+    let path = path.as_ref();
+    let output = Command::new("git")
+        .arg("-C")
+        .arg(path)
+        .args(["remote", "-v"])
+        .output()
+        .await
+        .map_err(|e| Error::Spawn(e.to_string()))?;
+    if !output.status.success() {
+        return Ok(Vec::new());
+    }
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let mut map: std::collections::BTreeMap<String, (String, String)> = Default::default();
+    for line in stdout.lines() {
+        // "<name>\t<url> (fetch|push)"
+        let (name, rest) = match line.split_once('\t') {
+            Some(p) => p,
+            None => continue,
+        };
+        if let Some(url) = rest.strip_suffix(" (fetch)") {
+            map.entry(name.to_string()).or_default().0 = url.to_string();
+        } else if let Some(url) = rest.strip_suffix(" (push)") {
+            map.entry(name.to_string()).or_default().1 = url.to_string();
+        }
+    }
+    Ok(map
+        .into_iter()
+        .map(|(name, (fetch_url, push_url))| RemoteInfo {
+            name,
+            fetch_url,
+            push_url,
+        })
+        .collect())
+}
+
+// ----- remote operations (fetch / pull / push) ------------------------------
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RemoteOpResult {
+    /// Human-readable output from git (combined stdout + stderr).
+    pub message: String,
+}
+
+pub async fn fetch<P: AsRef<Path>>(path: P, remote: Option<&str>) -> Result<RemoteOpResult> {
+    let path = path.as_ref();
+    let mut cmd = Command::new("git");
+    cmd.arg("-C").arg(path).arg("fetch");
+    if let Some(r) = remote {
+        cmd.arg(r);
+    }
+    let output = cmd.output().await.map_err(|e| Error::Spawn(e.to_string()))?;
+    let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+    let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    if !output.status.success() {
+        return Err(Error::Failed(if !stderr.is_empty() { stderr } else { stdout }));
+    }
+    let message = if !stderr.is_empty() {
+        stderr
+    } else if !stdout.is_empty() {
+        stdout
+    } else {
+        "Fetch complete.".to_string()
+    };
+    Ok(RemoteOpResult { message })
+}
+
+pub async fn pull<P: AsRef<Path>>(path: P, rebase: bool) -> Result<RemoteOpResult> {
+    let path = path.as_ref();
+    let mut cmd = Command::new("git");
+    cmd.arg("-C").arg(path).arg("pull").arg("--no-edit");
+    if rebase {
+        cmd.arg("--rebase");
+    }
+    let output = cmd.output().await.map_err(|e| Error::Spawn(e.to_string()))?;
+    let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+    let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    if !output.status.success() {
+        return Err(Error::Failed(if !stderr.is_empty() { stderr } else { stdout }));
+    }
+    let message = if !stdout.is_empty() {
+        stdout
+    } else if !stderr.is_empty() {
+        stderr
+    } else {
+        "Pull complete.".to_string()
+    };
+    Ok(RemoteOpResult { message })
+}
+
+pub async fn push<P: AsRef<Path>>(
+    path: P,
+    remote: Option<&str>,
+    branch: Option<&str>,
+    force: bool,
+    set_upstream: bool,
+) -> Result<RemoteOpResult> {
+    let path = path.as_ref();
+    let mut cmd = Command::new("git");
+    cmd.arg("-C").arg(path).arg("push");
+    if force {
+        cmd.arg("--force-with-lease");
+    }
+    if set_upstream {
+        cmd.arg("--set-upstream");
+    }
+    if let Some(r) = remote {
+        cmd.arg(r);
+    }
+    if let Some(b) = branch {
+        cmd.arg(b);
+    }
+    let output = cmd.output().await.map_err(|e| Error::Spawn(e.to_string()))?;
+    let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+    let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    if !output.status.success() {
+        return Err(Error::Failed(if !stderr.is_empty() { stderr } else { stdout }));
+    }
+    let message = if !stderr.is_empty() {
+        stderr
+    } else if !stdout.is_empty() {
+        stdout
+    } else {
+        "Push complete.".to_string()
+    };
+    Ok(RemoteOpResult { message })
+}
+
+// ----- stash ----------------------------------------------------------------
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StashEntry {
+    pub index: usize,
+    pub oid: String,
+    pub message: String,
+}
+
+pub async fn stash_list<P: AsRef<Path>>(path: P) -> Result<Vec<StashEntry>> {
+    let path = path.as_ref();
+    let output = Command::new("git")
+        .arg("-C")
+        .arg(path)
+        .args(["stash", "list", "--format=%gd\t%H\t%gs"])
+        .output()
+        .await
+        .map_err(|e| Error::Spawn(e.to_string()))?;
+    if !output.status.success() {
+        return Ok(Vec::new());
+    }
+    let mut entries = Vec::new();
+    for line in String::from_utf8_lossy(&output.stdout).lines() {
+        let mut parts = line.splitn(3, '\t');
+        let ref_name = parts.next().unwrap_or("");
+        let oid = parts.next().unwrap_or("").to_string();
+        let message = parts.next().unwrap_or("").to_string();
+        let index = ref_name
+            .trim_start_matches("stash@{")
+            .trim_end_matches('}')
+            .parse::<usize>()
+            .unwrap_or(0);
+        entries.push(StashEntry { index, oid, message });
+    }
+    Ok(entries)
+}
+
+pub async fn stash_push<P: AsRef<Path>>(path: P, message: Option<&str>) -> Result<()> {
+    let path = path.as_ref();
+    let mut cmd = Command::new("git");
+    cmd.arg("-C").arg(path).arg("stash").arg("push");
+    if let Some(m) = message {
+        cmd.args(["-m", m]);
+    }
+    let output = cmd.output().await.map_err(|e| Error::Spawn(e.to_string()))?;
+    if !output.status.success() {
+        let err = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        return Err(Error::Failed(err));
+    }
+    Ok(())
+}
+
+pub async fn stash_pop<P: AsRef<Path>>(path: P, index: Option<usize>) -> Result<()> {
+    let path = path.as_ref();
+    let mut cmd = Command::new("git");
+    cmd.arg("-C").arg(path).arg("stash").arg("pop");
+    if let Some(i) = index {
+        cmd.arg(format!("stash@{{{i}}}"));
+    }
+    let output = cmd.output().await.map_err(|e| Error::Spawn(e.to_string()))?;
+    if !output.status.success() {
+        let err = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        return Err(Error::Failed(err));
+    }
+    Ok(())
+}
+
+pub async fn stash_drop<P: AsRef<Path>>(path: P, index: usize) -> Result<()> {
+    let path = path.as_ref();
+    let output = Command::new("git")
+        .arg("-C")
+        .arg(path)
+        .arg("stash")
+        .arg("drop")
+        .arg(format!("stash@{{{index}}}"))
+        .output()
+        .await
+        .map_err(|e| Error::Spawn(e.to_string()))?;
+    if !output.status.success() {
+        let err = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        return Err(Error::Failed(err));
+    }
+    Ok(())
+}
+
+// ----- branch management ---------------------------------------------------
+
+pub async fn branch_create<P: AsRef<Path>>(
+    path: P,
+    name: &str,
+    checkout: bool,
+) -> Result<()> {
+    let path = path.as_ref();
+    let args: &[&str] = if checkout {
+        &["checkout", "-b", name]
+    } else {
+        &["branch", name]
+    };
+    let output = Command::new("git")
+        .arg("-C")
+        .arg(path)
+        .args(args)
+        .output()
+        .await
+        .map_err(|e| Error::Spawn(e.to_string()))?;
+    if !output.status.success() {
+        let err = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        return Err(Error::Failed(err));
+    }
+    Ok(())
+}
+
+pub async fn branch_rename<P: AsRef<Path>>(
+    path: P,
+    old_name: &str,
+    new_name: &str,
+) -> Result<()> {
+    let path = path.as_ref();
+    let output = Command::new("git")
+        .arg("-C")
+        .arg(path)
+        .args(["branch", "-m", old_name, new_name])
+        .output()
+        .await
+        .map_err(|e| Error::Spawn(e.to_string()))?;
+    if !output.status.success() {
+        let err = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        return Err(Error::Failed(err));
+    }
+    Ok(())
+}
+
+pub async fn branch_delete<P: AsRef<Path>>(
+    path: P,
+    name: &str,
+    force: bool,
+) -> Result<()> {
+    let path = path.as_ref();
+    let flag = if force { "-D" } else { "-d" };
+    let output = Command::new("git")
+        .arg("-C")
+        .arg(path)
+        .args(["branch", flag, name])
+        .output()
+        .await
+        .map_err(|e| Error::Spawn(e.to_string()))?;
+    if !output.status.success() {
+        let err = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        return Err(Error::Failed(err));
+    }
+    Ok(())
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MergeResult {
+    pub message: String,
+    pub conflicts: bool,
+}
+
+pub async fn merge<P: AsRef<Path>>(path: P, branch: &str) -> Result<MergeResult> {
+    let path = path.as_ref();
+    let output = Command::new("git")
+        .arg("-C")
+        .arg(path)
+        .args(["merge", "--no-edit", branch])
+        .output()
+        .await
+        .map_err(|e| Error::Spawn(e.to_string()))?;
+    let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+    if !output.status.success() {
+        let conflicts = stdout.contains("CONFLICT") || stderr.contains("CONFLICT");
+        if conflicts {
+            let msg = if !stdout.is_empty() { stdout } else { stderr };
+            return Ok(MergeResult { message: msg, conflicts: true });
+        }
+        return Err(Error::Failed(if !stderr.is_empty() { stderr } else { stdout }));
+    }
+    let msg = if !stdout.is_empty() { stdout } else { "Merge complete.".to_string() };
+    Ok(MergeResult { message: msg, conflicts: false })
+}
+
+// ----- commit operations ---------------------------------------------------
+
+pub async fn commit_amend<P: AsRef<Path>>(path: P, message: &str) -> Result<CommitResult> {
+    let msg = message.trim();
+    if msg.is_empty() {
+        return Err(Error::Failed("empty commit message".into()));
+    }
+    let path = path.as_ref();
+    let output = Command::new("git")
+        .arg("-C")
+        .arg(path)
+        .args(["commit", "--amend", "-m", msg])
+        .output()
+        .await
+        .map_err(|e| Error::Spawn(e.to_string()))?;
+    if !output.status.success() {
+        let err = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        let out = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        return Err(Error::Failed(if !err.is_empty() { err } else { out }));
+    }
+    let probe = Command::new("git")
+        .arg("-C")
+        .arg(path)
+        .args(["log", "-1", "--format=%h%n%s"])
+        .output()
+        .await
+        .map_err(|e| Error::Spawn(e.to_string()))?;
+    let (short, subject) = if probe.status.success() {
+        let s = String::from_utf8_lossy(&probe.stdout);
+        let mut it = s.lines();
+        (
+            it.next().unwrap_or("").to_string(),
+            it.next().unwrap_or("").to_string(),
+        )
+    } else {
+        (String::new(), msg.to_string())
+    };
+    Ok(CommitResult { short, subject })
+}
+
+pub async fn revert<P: AsRef<Path>>(path: P, oid: &str) -> Result<CommitResult> {
+    let path = path.as_ref();
+    let output = Command::new("git")
+        .arg("-C")
+        .arg(path)
+        .args(["revert", "--no-edit", oid])
+        .output()
+        .await
+        .map_err(|e| Error::Spawn(e.to_string()))?;
+    if !output.status.success() {
+        let err = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        let out = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        return Err(Error::Failed(if !err.is_empty() { err } else { out }));
+    }
+    let probe = Command::new("git")
+        .arg("-C")
+        .arg(path)
+        .args(["log", "-1", "--format=%h%n%s"])
+        .output()
+        .await
+        .map_err(|e| Error::Spawn(e.to_string()))?;
+    let (short, subject) = if probe.status.success() {
+        let s = String::from_utf8_lossy(&probe.stdout);
+        let mut it = s.lines();
+        (
+            it.next().unwrap_or("").to_string(),
+            it.next().unwrap_or("").to_string(),
+        )
+    } else {
+        (String::new(), format!("Revert {oid}"))
+    };
+    Ok(CommitResult { short, subject })
+}
+
+pub async fn cherry_pick<P: AsRef<Path>>(path: P, oid: &str) -> Result<()> {
+    let path = path.as_ref();
+    let output = Command::new("git")
+        .arg("-C")
+        .arg(path)
+        .args(["cherry-pick", oid])
+        .output()
+        .await
+        .map_err(|e| Error::Spawn(e.to_string()))?;
+    if !output.status.success() {
+        let err = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        let out = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        return Err(Error::Failed(if !err.is_empty() { err } else { out }));
+    }
+    Ok(())
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum ResetMode {
+    Soft,
+    Mixed,
+    Hard,
+}
+
+pub async fn reset<P: AsRef<Path>>(path: P, oid: &str, mode: ResetMode) -> Result<()> {
+    let path = path.as_ref();
+    let flag = match mode {
+        ResetMode::Soft => "--soft",
+        ResetMode::Mixed => "--mixed",
+        ResetMode::Hard => "--hard",
+    };
+    let output = Command::new("git")
+        .arg("-C")
+        .arg(path)
+        .args(["reset", flag, oid])
+        .output()
+        .await
+        .map_err(|e| Error::Spawn(e.to_string()))?;
+    if !output.status.success() {
+        let err = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        return Err(Error::Failed(err));
+    }
+    Ok(())
+}
+
+/// Return the full message of the most recent commit (for amend pre-fill).
+pub async fn last_commit_message<P: AsRef<Path>>(path: P) -> Result<String> {
+    let path = path.as_ref();
+    let output = Command::new("git")
+        .arg("-C")
+        .arg(path)
+        .args(["log", "-1", "--pretty=%B"])
+        .output()
+        .await
+        .map_err(|e| Error::Spawn(e.to_string()))?;
+    if !output.status.success() {
+        return Ok(String::new());
+    }
+    Ok(String::from_utf8_lossy(&output.stdout).trim_end().to_string())
+}
+
+// ----- conflict resolution -------------------------------------------------
+
+/// Accept the "ours" version of conflicted files and stage them.
+pub async fn checkout_ours<P: AsRef<Path>>(path: P, paths: &[String]) -> Result<()> {
+    if paths.is_empty() {
+        return Ok(());
+    }
+    let path = path.as_ref();
+    let mut args = vec!["checkout", "--ours", "--"];
+    for p in paths {
+        args.push(p.as_str());
+    }
+    let output = Command::new("git")
+        .arg("-C")
+        .arg(path)
+        .args(&args)
+        .output()
+        .await
+        .map_err(|e| Error::Spawn(e.to_string()))?;
+    if !output.status.success() {
+        let err = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        return Err(Error::Failed(err));
+    }
+    // Stage the resolved files.
+    let mut add_args = vec!["add", "--"];
+    for p in paths {
+        add_args.push(p.as_str());
+    }
+    Command::new("git")
+        .arg("-C")
+        .arg(path)
+        .args(&add_args)
+        .output()
+        .await
+        .map_err(|e| Error::Spawn(e.to_string()))?;
+    Ok(())
+}
+
+/// Accept the "theirs" version of conflicted files and stage them.
+pub async fn checkout_theirs<P: AsRef<Path>>(path: P, paths: &[String]) -> Result<()> {
+    if paths.is_empty() {
+        return Ok(());
+    }
+    let path = path.as_ref();
+    let mut args = vec!["checkout", "--theirs", "--"];
+    for p in paths {
+        args.push(p.as_str());
+    }
+    let output = Command::new("git")
+        .arg("-C")
+        .arg(path)
+        .args(&args)
+        .output()
+        .await
+        .map_err(|e| Error::Spawn(e.to_string()))?;
+    if !output.status.success() {
+        let err = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        return Err(Error::Failed(err));
+    }
+    let mut add_args = vec!["add", "--"];
+    for p in paths {
+        add_args.push(p.as_str());
+    }
+    Command::new("git")
+        .arg("-C")
+        .arg(path)
+        .args(&add_args)
+        .output()
+        .await
+        .map_err(|e| Error::Spawn(e.to_string()))?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

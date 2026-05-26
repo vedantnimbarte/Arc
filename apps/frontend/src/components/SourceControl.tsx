@@ -10,31 +10,54 @@ import {
 import { createPortal } from 'react-dom';
 import {
   AlertCircle,
+  Archive,
   ArrowDownToLine,
   ArrowUpFromLine,
   Check,
+  ChevronDown,
   ChevronRight,
   Copy,
+  Download,
   FileText,
   GitBranch,
   GitCompare,
+  GitMerge,
   Minus,
+  Pencil,
   Plus,
   RefreshCw,
   Sparkles,
   Trash2,
+  Upload,
   X,
 } from 'lucide-react';
 import {
   fsReadFile,
+  gitBranchCreate,
+  gitBranchDelete,
+  gitBranchRename,
+  gitCheckoutOurs,
+  gitCheckoutTheirs,
   gitCommit,
+  gitCommitAmend,
   gitDiff,
   gitDiscard,
+  gitFetch,
+  gitLastMessage,
+  gitMerge,
+  gitPull,
+  gitPushRemote,
   gitStage,
+  gitStashDrop,
+  gitStashList,
+  gitStashPop,
+  gitStashPush,
   gitUnstage,
   isTauri,
+  type GitBranchInfo,
   type GitChangeEntry,
   type GitDiffScope,
+  type GitStashEntry,
 } from '../lib/tauri';
 import { useFiles } from '../state/files';
 import { useGit } from '../state/git';
@@ -203,6 +226,26 @@ export function SourceControl() {
   const [busy, setBusy] = useState(false);
   const [flash, setFlash] = useState<string | null>(null);
   const flashTimer = useRef<number | null>(null);
+
+  // Remote ops
+  const [remoteOp, setRemoteOp] = useState<'fetch' | 'pull' | 'push' | null>(null);
+  const [remoteMsg, setRemoteMsg] = useState<string | null>(null);
+
+  // Stash
+  const [stashes, setStashes] = useState<GitStashEntry[]>([]);
+  const [stashOpen, setStashOpen] = useState(false);
+  const [stashBusy, setStashBusy] = useState(false);
+
+  // Amend
+  const [amendMode, setAmendMode] = useState(false);
+
+  // Branch management panel
+  const [branchPanelOpen, setBranchPanelOpen] = useState(false);
+  const [branches, setBranches] = useState<GitBranchInfo[]>([]);
+  const [branchesLoading, setBranchesLoading] = useState(false);
+  const [newBranchName, setNewBranchName] = useState('');
+  const [renamingBranch, setRenamingBranch] = useState<string | null>(null);
+  const [renameValue, setRenameValue] = useState('');
   const [contextMenu, setContextMenu] = useState<{
     entry: GitChangeEntry;
     section: Section;
@@ -237,6 +280,250 @@ export function SourceControl() {
     if (flashTimer.current != null) window.clearTimeout(flashTimer.current);
     flashTimer.current = window.setTimeout(() => setFlash(null), 2400);
   }, []);
+
+  // ── Remote ops ──────────────────────────────────────────────────────────────
+
+  const handleFetch = useCallback(async () => {
+    if (!root || remoteOp) return;
+    setRemoteOp('fetch');
+    setRemoteMsg(null);
+    setOpError(null);
+    try {
+      const res = await gitFetch(root);
+      setRemoteMsg(res.message || 'Fetch complete.');
+      await refreshStore(root);
+    } catch (e) {
+      setOpError(String(e));
+    } finally {
+      setRemoteOp(null);
+    }
+  }, [root, remoteOp, refreshStore]);
+
+  const handlePull = useCallback(async () => {
+    if (!root || remoteOp) return;
+    setRemoteOp('pull');
+    setRemoteMsg(null);
+    setOpError(null);
+    try {
+      const res = await gitPull(root, false);
+      setRemoteMsg(res.message || 'Pull complete.');
+      await refreshStore(root);
+    } catch (e) {
+      setOpError(String(e));
+    } finally {
+      setRemoteOp(null);
+    }
+  }, [root, remoteOp, refreshStore]);
+
+  const handlePush = useCallback(async () => {
+    if (!root || remoteOp) return;
+    setRemoteOp('push');
+    setRemoteMsg(null);
+    setOpError(null);
+    try {
+      const hasUpstream = !!info?.upstream;
+      const res = await gitPushRemote(root, undefined, undefined, false, !hasUpstream);
+      setRemoteMsg(res.message || 'Push complete.');
+      await refreshStore(root);
+    } catch (e) {
+      setOpError(String(e));
+    } finally {
+      setRemoteOp(null);
+    }
+  }, [root, remoteOp, info?.upstream, refreshStore]);
+
+  // ── Stash ────────────────────────────────────────────────────────────────────
+
+  const loadStashes = useCallback(async () => {
+    if (!root) return;
+    try {
+      const list = await gitStashList(root);
+      setStashes(list);
+    } catch {
+      setStashes([]);
+    }
+  }, [root]);
+
+  useEffect(() => {
+    if (stashOpen) void loadStashes();
+  }, [stashOpen, loadStashes]);
+
+  const handleStashPush = useCallback(async () => {
+    if (!root || stashBusy) return;
+    setStashBusy(true);
+    setOpError(null);
+    try {
+      await gitStashPush(root);
+      await refreshStore(root);
+      await loadStashes();
+      showFlash('Stashed');
+    } catch (e) {
+      setOpError(String(e));
+    } finally {
+      setStashBusy(false);
+    }
+  }, [root, stashBusy, refreshStore, loadStashes, showFlash]);
+
+  const handleStashPop = useCallback(async (index?: number) => {
+    if (!root || stashBusy) return;
+    setStashBusy(true);
+    setOpError(null);
+    try {
+      await gitStashPop(root, index);
+      await refreshStore(root);
+      await loadStashes();
+      showFlash('Applied stash');
+    } catch (e) {
+      setOpError(String(e));
+    } finally {
+      setStashBusy(false);
+    }
+  }, [root, stashBusy, refreshStore, loadStashes, showFlash]);
+
+  const handleStashDrop = useCallback(async (index: number) => {
+    if (!root || stashBusy) return;
+    setStashBusy(true);
+    setOpError(null);
+    try {
+      await gitStashDrop(root, index);
+      await loadStashes();
+      showFlash('Dropped stash');
+    } catch (e) {
+      setOpError(String(e));
+    } finally {
+      setStashBusy(false);
+    }
+  }, [root, stashBusy, loadStashes, showFlash]);
+
+  // ── Amend ────────────────────────────────────────────────────────────────────
+
+  const handleToggleAmend = useCallback(async () => {
+    if (!root) return;
+    const next = !amendMode;
+    setAmendMode(next);
+    if (next && !message) {
+      try {
+        const lastMsg = await gitLastMessage(root);
+        if (lastMsg) setMessage(lastMsg);
+      } catch {
+        // ignore
+      }
+    }
+  }, [amendMode, message, root]);
+
+  const handleAmendCommit = useCallback(async () => {
+    if (!root || busy) return;
+    const msg = message.trim();
+    if (!msg) { setOpError('write a commit message'); return; }
+    setBusy(true);
+    setOpError(null);
+    try {
+      const res = await gitCommitAmend(root, msg);
+      setMessage('');
+      setAmendMode(false);
+      showFlash(`✓ ${res.short || 'amended'}`);
+      await refresh();
+    } catch (e) {
+      setOpError(String(e));
+    } finally {
+      setBusy(false);
+    }
+  }, [busy, message, refresh, root, showFlash]);
+
+  // ── Branch management ────────────────────────────────────────────────────────
+
+  const loadBranches = useCallback(async () => {
+    if (!root) return;
+    setBranchesLoading(true);
+    try {
+      const { gitBranches } = await import('../lib/tauri');
+      const list = await gitBranches(root);
+      setBranches(list);
+    } catch {
+      setBranches([]);
+    } finally {
+      setBranchesLoading(false);
+    }
+  }, [root]);
+
+  useEffect(() => {
+    if (branchPanelOpen) void loadBranches();
+  }, [branchPanelOpen, loadBranches]);
+
+  const handleBranchCreate = useCallback(async (checkout: boolean) => {
+    if (!root || !newBranchName.trim()) return;
+    setBusy(true);
+    setOpError(null);
+    try {
+      await gitBranchCreate(root, newBranchName.trim(), checkout);
+      setNewBranchName('');
+      await loadBranches();
+      if (checkout) await refreshStore(root);
+      showFlash(`Branch "${newBranchName.trim()}" created`);
+    } catch (e) {
+      setOpError(String(e));
+    } finally {
+      setBusy(false);
+    }
+  }, [root, newBranchName, loadBranches, refreshStore, showFlash]);
+
+  const handleBranchDelete = useCallback(async (name: string, force = false) => {
+    if (!root) return;
+    setBusy(true);
+    setOpError(null);
+    try {
+      await gitBranchDelete(root, name, force);
+      await loadBranches();
+      showFlash(`Deleted "${name}"`);
+    } catch (e) {
+      if (!force && String(e).includes('not fully merged')) {
+        if (window.confirm(`"${name}" is not fully merged. Force delete?`)) {
+          await handleBranchDelete(name, true);
+        }
+      } else {
+        setOpError(String(e));
+      }
+    } finally {
+      setBusy(false);
+    }
+  }, [root, loadBranches, showFlash]);
+
+  const handleBranchRename = useCallback(async (oldName: string) => {
+    if (!root || !renameValue.trim()) return;
+    setBusy(true);
+    setOpError(null);
+    try {
+      await gitBranchRename(root, oldName, renameValue.trim());
+      setRenamingBranch(null);
+      setRenameValue('');
+      await loadBranches();
+      await refreshStore(root);
+      showFlash('Branch renamed');
+    } catch (e) {
+      setOpError(String(e));
+    } finally {
+      setBusy(false);
+    }
+  }, [root, renameValue, loadBranches, refreshStore, showFlash]);
+
+  const handleMerge = useCallback(async (branchName: string) => {
+    if (!root) return;
+    setBusy(true);
+    setOpError(null);
+    try {
+      const res = await gitMerge(root, branchName);
+      if (res.conflicts) {
+        setOpError(`Merge conflicts — resolve and commit.\n${res.message}`);
+      } else {
+        showFlash(`Merged "${branchName}"`);
+      }
+      await refreshStore(root);
+    } catch (e) {
+      setOpError(String(e));
+    } finally {
+      setBusy(false);
+    }
+  }, [root, refreshStore, showFlash]);
 
   const grouped = useMemo(() => {
     const buckets: Record<Section, GitChangeEntry[]> = {
@@ -288,6 +575,18 @@ export function SourceControl() {
     },
     [busy, refresh, root],
   );
+
+  // ── Conflict resolution ───────────────────────────────────────────────────────
+
+  const handleCheckoutOurs = useCallback((path: string) => {
+    if (!root) return;
+    void runWithRefresh(() => gitCheckoutOurs(root, [path]));
+  }, [root, runWithRefresh]);
+
+  const handleCheckoutTheirs = useCallback((path: string) => {
+    if (!root) return;
+    void runWithRefresh(() => gitCheckoutTheirs(root, [path]));
+  }, [root, runWithRefresh]);
 
   const handleStage = useCallback(
     (paths: string[]) => {
@@ -392,19 +691,24 @@ export function SourceControl() {
           aria-hidden
           className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-white/[0.06] to-transparent"
         />
-        <div className="flex h-5 w-5 shrink-0 items-center justify-center rounded-md bg-accent-soft ring-1 ring-inset ring-accent/15">
+        <button
+          onClick={() => { if (isTauri && root) setBranchPanelOpen((o) => !o); }}
+          className="flex h-5 w-5 shrink-0 items-center justify-center rounded-md bg-accent-soft ring-1 ring-inset ring-accent/15 transition hover:ring-accent/40"
+          title="Branch management"
+        >
           <GitBranch size={10.5} strokeWidth={2.2} className="text-accent-bright/90" />
-        </div>
-        <span
-          className="min-w-0 flex-1 truncate font-display text-[12px] font-medium tracking-tight text-fg-base/95"
+        </button>
+        <button
+          onClick={() => { if (isTauri && root) setBranchPanelOpen((o) => !o); }}
+          className="min-w-0 flex-1 truncate text-left font-display text-[12px] font-medium tracking-tight text-fg-base/95 hover:text-fg-base"
           title={
             info?.branch
-              ? `${info.branch}${info.upstream ? ` → ${info.upstream}` : ''}`
+              ? `${info.branch}${info.upstream ? ` → ${info.upstream}` : ''} — click to manage branches`
               : 'not a git repository'
           }
         >
           {info?.branch ?? '—'}
-        </span>
+        </button>
         {/* Ahead/behind chevrons — only render the side that's non-zero. */}
         {info && (info.ahead > 0 || info.behind > 0) && (
           <div className="flex items-center gap-1 rounded-md bg-white/[0.04] px-1.5 py-[2px] font-mono text-[9.5px] tabular-nums text-fg-muted ring-1 ring-inset ring-white/[0.05]">
@@ -429,6 +733,47 @@ export function SourceControl() {
           >
             {total > 99 ? '99+' : total}
           </span>
+        )}
+        {/* Fetch / Pull / Push */}
+        {isTauri && root && (
+          <>
+            <button
+              onClick={() => void handleFetch()}
+              disabled={!!remoteOp || busy}
+              title="Fetch"
+              className={cn(
+                'flex h-6 w-6 items-center justify-center rounded-md text-fg-muted transition-all duration-150 ease-apple',
+                'hover:bg-white/[0.08] hover:text-fg-base hover:shadow-[inset_0_0_0_1px_rgba(255,255,255,0.05)]',
+                'active:scale-[0.92] disabled:opacity-40',
+              )}
+            >
+              <Download size={11} strokeWidth={2.1} className={remoteOp === 'fetch' ? 'animate-pulse' : ''} />
+            </button>
+            <button
+              onClick={() => void handlePull()}
+              disabled={!!remoteOp || busy}
+              title="Pull"
+              className={cn(
+                'flex h-6 w-6 items-center justify-center rounded-md text-fg-muted transition-all duration-150 ease-apple',
+                'hover:bg-white/[0.08] hover:text-fg-base hover:shadow-[inset_0_0_0_1px_rgba(255,255,255,0.05)]',
+                'active:scale-[0.92] disabled:opacity-40',
+              )}
+            >
+              <ArrowDownToLine size={11} strokeWidth={2.1} className={remoteOp === 'pull' ? 'animate-pulse' : ''} />
+            </button>
+            <button
+              onClick={() => void handlePush()}
+              disabled={!!remoteOp || busy}
+              title="Push"
+              className={cn(
+                'flex h-6 w-6 items-center justify-center rounded-md text-fg-muted transition-all duration-150 ease-apple',
+                'hover:bg-white/[0.08] hover:text-fg-base hover:shadow-[inset_0_0_0_1px_rgba(255,255,255,0.05)]',
+                'active:scale-[0.92] disabled:opacity-40',
+              )}
+            >
+              <Upload size={11} strokeWidth={2.1} className={remoteOp === 'push' ? 'animate-pulse' : ''} />
+            </button>
+          </>
         )}
         <button
           onClick={() => void refresh()}
@@ -461,6 +806,120 @@ export function SourceControl() {
           <X size={12} strokeWidth={2.1} />
         </button>
       </div>
+
+      {/* Remote op result banner */}
+      {remoteMsg && (
+        <div className="flex shrink-0 items-start gap-2 border-b border-border-hairline bg-white/[0.03] px-3 py-1.5 font-mono text-[10.5px] text-fg-muted">
+          <span className="flex-1 break-all">{remoteMsg}</span>
+          <button onClick={() => setRemoteMsg(null)} className="shrink-0 text-fg-subtle hover:text-fg-base"><X size={11} /></button>
+        </div>
+      )}
+
+      {/* Branch management panel */}
+      {branchPanelOpen && (
+        <div className="shrink-0 border-b border-border-hairline bg-white/[0.02] px-2.5 py-2">
+          {/* Create branch */}
+          <div className="mb-2 flex gap-1.5">
+            <input
+              value={newBranchName}
+              onChange={(e) => setNewBranchName(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Enter') void handleBranchCreate(true); }}
+              placeholder="new-branch-name"
+              className="flex-1 rounded-md bg-white/[0.05] px-2 py-1 font-mono text-[11px] text-fg-base placeholder:text-fg-subtle outline-none focus:ring-1 focus:ring-accent/40"
+            />
+            <button
+              onClick={() => void handleBranchCreate(true)}
+              disabled={!newBranchName.trim() || busy}
+              title="Create & switch"
+              className="flex h-6 items-center gap-1 rounded-md bg-accent/10 px-2 font-sans text-[10px] text-accent hover:bg-accent/20 disabled:opacity-40"
+            >
+              <Plus size={10} strokeWidth={2.5} /> Create
+            </button>
+          </div>
+          {/* Branch list */}
+          {branchesLoading ? (
+            <p className="px-1 font-sans text-[10px] text-fg-subtle">Loading…</p>
+          ) : (
+            <ul className="max-h-40 overflow-y-auto space-y-px">
+              {branches.filter((b) => !b.remote).map((b) => (
+                <li key={b.name} className="group flex items-center gap-1.5 rounded px-1 py-[3px] hover:bg-white/[0.04]">
+                  <span className={cn('flex-1 truncate font-mono text-[11px]', b.current ? 'text-accent' : 'text-fg-base')}>
+                    {b.current && <span className="mr-1 text-accent">*</span>}{b.name}
+                  </span>
+                  {renamingBranch === b.name ? (
+                    <>
+                      <input
+                        autoFocus
+                        value={renameValue}
+                        onChange={(e) => setRenameValue(e.target.value)}
+                        onKeyDown={(e) => { if (e.key === 'Enter') void handleBranchRename(b.name); if (e.key === 'Escape') { setRenamingBranch(null); setRenameValue(''); } }}
+                        className="w-28 rounded bg-white/[0.07] px-1.5 py-0.5 font-mono text-[11px] outline-none focus:ring-1 focus:ring-accent/40"
+                      />
+                      <button onClick={() => void handleBranchRename(b.name)} className="text-accent hover:text-accent-bright"><Check size={10} strokeWidth={2.5} /></button>
+                      <button onClick={() => { setRenamingBranch(null); setRenameValue(''); }} className="text-fg-subtle hover:text-fg-base"><X size={10} /></button>
+                    </>
+                  ) : (
+                    <span className="hidden items-center gap-1 group-hover:flex">
+                      {!b.current && (
+                        <button onClick={() => void handleMerge(b.name)} title="Merge into current" className="text-fg-muted hover:text-accent"><GitMerge size={11} strokeWidth={2} /></button>
+                      )}
+                      <button onClick={() => { setRenamingBranch(b.name); setRenameValue(b.name); }} title="Rename" className="text-fg-muted hover:text-fg-base"><Pencil size={10} strokeWidth={2} /></button>
+                      {!b.current && (
+                        <button onClick={() => void handleBranchDelete(b.name)} title="Delete" className="text-fg-muted hover:text-red-400"><Trash2 size={10} strokeWidth={2} /></button>
+                      )}
+                    </span>
+                  )}
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
+
+      {/* Stash section */}
+      {isTauri && root && (
+        <div className="shrink-0 border-b border-border-hairline">
+          <button
+            onClick={() => setStashOpen((o) => !o)}
+            className="flex w-full items-center gap-1.5 px-2.5 py-1.5 text-left hover:bg-white/[0.03]"
+          >
+            {stashOpen ? <ChevronDown size={10} strokeWidth={2} className="text-fg-subtle" /> : <ChevronRight size={10} strokeWidth={2} className="text-fg-subtle" />}
+            <Archive size={11} strokeWidth={2} className="text-fg-muted" />
+            <span className="flex-1 font-sans text-[11px] text-fg-muted">Stash</span>
+            {stashes.length > 0 && (
+              <span className="rounded-full bg-white/[0.06] px-1.5 font-mono text-[9.5px] text-fg-subtle">{stashes.length}</span>
+            )}
+            <button
+              onClick={(e) => { e.stopPropagation(); void handleStashPush(); }}
+              disabled={stashBusy}
+              title="Stash all changes"
+              className="flex h-5 items-center gap-0.5 rounded px-1.5 font-sans text-[10px] text-fg-muted hover:bg-white/[0.08] hover:text-fg-base disabled:opacity-40"
+            >
+              <Plus size={9} strokeWidth={2.5} /> Stash
+            </button>
+          </button>
+          {stashOpen && (
+            <div className="px-2 pb-1.5">
+              {stashes.length === 0 ? (
+                <p className="px-1 font-sans text-[10px] text-fg-subtle/60">No stashes</p>
+              ) : (
+                <ul className="space-y-px">
+                  {stashes.map((s) => (
+                    <li key={s.index} className="group flex items-center gap-1.5 rounded px-1 py-[3px] hover:bg-white/[0.04]">
+                      <span className="w-5 shrink-0 font-mono text-[9.5px] text-fg-subtle/60">{s.index}</span>
+                      <span className="flex-1 truncate font-sans text-[11px] text-fg-base/80">{s.message}</span>
+                      <span className="hidden items-center gap-1 group-hover:flex">
+                        <button onClick={() => void handleStashPop(s.index)} title="Apply & drop" disabled={stashBusy} className="text-fg-muted hover:text-accent disabled:opacity-40"><ArrowDownToLine size={11} strokeWidth={2} /></button>
+                        <button onClick={() => void handleStashDrop(s.index)} title="Drop" disabled={stashBusy} className="text-fg-muted hover:text-red-400 disabled:opacity-40"><Trash2 size={11} strokeWidth={2} /></button>
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Commit composer — card with focus bloom + gradient commit bar */}
       {isTauri && info?.branch && (
@@ -508,13 +967,13 @@ export function SourceControl() {
 
           <div className="mt-2 flex items-center gap-1.5">
             <button
-              onClick={() => void handleCommit()}
-              disabled={!canCommit}
+              onClick={() => void (amendMode ? handleAmendCommit() : handleCommit())}
+              disabled={amendMode ? (!message.trim() || busy) : !canCommit}
               className={cn(
                 'group/btn relative flex h-[28px] flex-1 items-center justify-center gap-1.5 overflow-hidden rounded-lg',
                 'font-display text-[11.5px] font-medium tracking-tight',
                 'transition-all duration-200 ease-apple',
-                canCommit
+                (amendMode ? message.trim() && !busy : canCommit)
                   ? cn(
                       'bg-gradient-to-b from-white/[0.10] to-white/[0.04] text-accent-bright',
                       'ring-1 ring-inset ring-accent/25',
@@ -524,14 +983,9 @@ export function SourceControl() {
                     )
                   : 'bg-white/[0.03] text-fg-subtle ring-1 ring-inset ring-white/[0.04]',
               )}
-              title={
-                stagedCount === 0
-                  ? 'Stage a file first'
-                  : 'Commit (⌘⏎)'
-              }
+              title={amendMode ? 'Amend last commit (⌘⏎)' : (stagedCount === 0 ? 'Stage a file first' : 'Commit (⌘⏎)')}
             >
-              {/* Soft inner sheen — only visible when armed. */}
-              {canCommit && (
+              {(amendMode ? message.trim() && !busy : canCommit) && (
                 <span
                   aria-hidden
                   className="pointer-events-none absolute inset-x-3 top-0 h-px bg-gradient-to-r from-transparent via-white/[0.18] to-transparent"
@@ -539,12 +993,21 @@ export function SourceControl() {
               )}
               <Check size={12} strokeWidth={2.4} />
               <span className="relative">
-                {canCommit
-                  ? `Commit ${stagedCount} ${stagedCount === 1 ? 'file' : 'files'}`
-                  : stagedCount > 0
-                    ? `Commit ${stagedCount} ${stagedCount === 1 ? 'file' : 'files'}`
-                    : 'Commit'}
+                {amendMode ? 'Amend commit' : (canCommit ? `Commit ${stagedCount} ${stagedCount === 1 ? 'file' : 'files'}` : 'Commit')}
               </span>
+            </button>
+            {/* Amend toggle */}
+            <button
+              onClick={() => void handleToggleAmend()}
+              title="Amend last commit"
+              className={cn(
+                'flex h-[28px] items-center gap-1 rounded-lg px-2 font-sans text-[10px] transition-all',
+                amendMode
+                  ? 'bg-accent/15 text-accent ring-1 ring-inset ring-accent/30'
+                  : 'bg-white/[0.03] text-fg-subtle ring-1 ring-inset ring-white/[0.05] hover:text-fg-base hover:bg-white/[0.07]',
+              )}
+            >
+              <Pencil size={9} strokeWidth={2.2} /> Amend
             </button>
             {flash && (
               <span
@@ -621,6 +1084,8 @@ export function SourceControl() {
                   onOpen={handleOpen}
                   onStage={() => handleStage([entry.path])}
                   onUnstage={() => handleUnstage([entry.path])}
+                  onCheckoutOurs={section === 'conflict' ? () => handleCheckoutOurs(entry.path) : undefined}
+                  onCheckoutTheirs={section === 'conflict' ? () => handleCheckoutTheirs(entry.path) : undefined}
                   onContextMenu={(e) => {
                     e.preventDefault();
                     e.stopPropagation();
@@ -848,6 +1313,8 @@ function ChangeRow({
   onOpen,
   onStage,
   onUnstage,
+  onCheckoutOurs,
+  onCheckoutTheirs,
   onContextMenu,
 }: {
   entry: GitChangeEntry;
@@ -856,16 +1323,17 @@ function ChangeRow({
   onOpen: (e: GitChangeEntry) => void;
   onStage: () => void;
   onUnstage: () => void;
+  onCheckoutOurs?: () => void;
+  onCheckoutTheirs?: () => void;
   onContextMenu: (e: React.MouseEvent) => void;
 }) {
   const name = basename(entry.path);
   const folder = dirname(entry.path);
   const { Icon, color } = fileIcon(name);
 
-  // Staged rows expose unstage; everything else exposes stage. Conflicts get
-  // neither (resolution belongs in the editor, not in this rail).
   const canStage = section === 'changes' || section === 'untracked';
   const canUnstage = section === 'staged';
+  const isConflict = section === 'conflict';
 
   const chip = statusChipTone(entry.status);
 
@@ -914,8 +1382,7 @@ function ChangeRow({
         )}
       </button>
 
-      {/* Hover actions — sit to the left of the status pill so the pill stays
-          readable when nothing is hovered. */}
+      {/* Hover actions */}
       <div className="flex shrink-0 items-center gap-0.5 opacity-0 transition-opacity duration-150 group-hover/row:opacity-100 focus-within:opacity-100">
         {canUnstage && (
           <RowAction
@@ -931,6 +1398,22 @@ function ChangeRow({
             label="Stage"
             disabled={busy}
             onClick={onStage}
+          />
+        )}
+        {isConflict && onCheckoutOurs && (
+          <RowAction
+            icon={<span className="font-mono text-[9px] font-bold">O</span>}
+            label="Accept Ours"
+            disabled={busy}
+            onClick={onCheckoutOurs}
+          />
+        )}
+        {isConflict && onCheckoutTheirs && (
+          <RowAction
+            icon={<span className="font-mono text-[9px] font-bold">T</span>}
+            label="Accept Theirs"
+            disabled={busy}
+            onClick={onCheckoutTheirs}
           />
         )}
       </div>

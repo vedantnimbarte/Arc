@@ -4,9 +4,13 @@ import { getCurrentWindow } from '@tauri-apps/api/window';
 import { cn } from '../lib/cn';
 import {
   gitAuthors,
+  gitCherryPick,
   gitLog,
+  gitReset,
+  gitRevert,
   type GitAuthorInfo,
   type GitLogEntry,
+  type GitResetMode,
 } from '../lib/tauri';
 import { useFiles } from '../state/files';
 import { AuthorsSidebar, authorKey } from './git/AuthorsSidebar';
@@ -127,6 +131,51 @@ export function GitPage() {
 
   const clearAuthors = useCallback(() => setSelected(new Set()), []);
 
+  const [actionMsg, setActionMsg] = useState<string | null>(null);
+
+  const handleCherryPick = useCallback(async (oid: string) => {
+    if (!root) return;
+    setCommitsError(null);
+    try {
+      await gitCherryPick(root, oid);
+      setActionMsg(`Cherry-picked ${oid.slice(0, 7)}`);
+      setTimeout(() => setActionMsg(null), 3000);
+      const signal = { cancelled: false };
+      void fetchCommits(signal);
+    } catch (e) {
+      setCommitsError(String(e));
+    }
+  }, [root, fetchCommits]);
+
+  const handleRevert = useCallback(async (oid: string) => {
+    if (!root) return;
+    setCommitsError(null);
+    try {
+      await gitRevert(root, oid);
+      setActionMsg(`Reverted ${oid.slice(0, 7)}`);
+      setTimeout(() => setActionMsg(null), 3000);
+      const signal = { cancelled: false };
+      void fetchCommits(signal);
+    } catch (e) {
+      setCommitsError(String(e));
+    }
+  }, [root, fetchCommits]);
+
+  const handleReset = useCallback(async (oid: string, mode: GitResetMode) => {
+    if (!root) return;
+    if (mode === 'hard' && !window.confirm(`Hard reset to ${oid.slice(0, 7)}? All uncommitted changes will be lost.`)) return;
+    setCommitsError(null);
+    try {
+      await gitReset(root, oid, mode);
+      setActionMsg(`Reset (${mode}) to ${oid.slice(0, 7)}`);
+      setTimeout(() => setActionMsg(null), 3000);
+      const signal = { cancelled: false };
+      void fetchCommits(signal);
+    } catch (e) {
+      setCommitsError(String(e));
+    }
+  }, [root, fetchCommits]);
+
   const refresh = () => {
     if (!root) return;
     setAuthorsLoading(true);
@@ -181,8 +230,19 @@ export function GitPage() {
               <ErrorTray message={commitsError ?? authorsError ?? ''} />
             )}
 
+            {actionMsg && (
+              <div className="mx-3 mb-1 rounded-md bg-accent/10 px-3 py-1.5 font-sans text-[11px] text-accent ring-1 ring-inset ring-accent/20">
+                {actionMsg}
+              </div>
+            )}
+
             {view === 'flat' ? (
-              <CommitList commits={commits} />
+              <CommitList
+                commits={commits}
+                onCherryPick={handleCherryPick}
+                onRevert={handleRevert}
+                onReset={handleReset}
+              />
             ) : (
               <CommitGraph commits={commits} />
             )}

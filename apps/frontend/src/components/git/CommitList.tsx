@@ -1,14 +1,18 @@
-import { GitMerge } from 'lucide-react';
+import { useState } from 'react';
+import { GitMerge, RotateCcw, Scissors } from 'lucide-react';
 import { cn } from '../../lib/cn';
-import type { GitLogEntry } from '../../lib/tauri';
+import type { GitLogEntry, GitResetMode } from '../../lib/tauri';
 import { colorForAuthor } from './AuthorsSidebar';
 
 interface Props {
   commits: GitLogEntry[];
   emptyHint?: string;
+  onCherryPick?: (oid: string) => void;
+  onRevert?: (oid: string) => void;
+  onReset?: (oid: string, mode: GitResetMode) => void;
 }
 
-export function CommitList({ commits, emptyHint }: Props) {
+export function CommitList({ commits, emptyHint, onCherryPick, onRevert, onReset }: Props) {
   if (commits.length === 0) {
     return (
       <div className="flex flex-1 flex-col items-center justify-center px-6 py-10 text-center">
@@ -24,16 +28,35 @@ export function CommitList({ commits, emptyHint }: Props) {
     <div className="flex-1 overflow-y-auto px-2 py-1.5">
       <ul className="flex flex-col gap-px">
         {commits.map((c) => (
-          <CommitRow key={c.oid} commit={c} />
+          <CommitRow
+            key={c.oid}
+            commit={c}
+            onCherryPick={onCherryPick}
+            onRevert={onRevert}
+            onReset={onReset}
+          />
         ))}
       </ul>
     </div>
   );
 }
 
-function CommitRow({ commit }: { commit: GitLogEntry }) {
+function CommitRow({
+  commit,
+  onCherryPick,
+  onRevert,
+  onReset,
+}: {
+  commit: GitLogEntry;
+  onCherryPick?: (oid: string) => void;
+  onRevert?: (oid: string) => void;
+  onReset?: (oid: string, mode: GitResetMode) => void;
+}) {
   const isMerge = commit.parents.length > 1;
   const dotColor = colorForAuthor(commit.author, commit.email);
+  const [resetMenuOpen, setResetMenuOpen] = useState(false);
+  const hasActions = onCherryPick || onRevert || onReset;
+
   return (
     <li
       className={cn(
@@ -65,6 +88,61 @@ function CommitRow({ commit }: { commit: GitLogEntry }) {
           merge
         </span>
       )}
+
+      {/* Commit action buttons — visible on hover */}
+      {hasActions && (
+        <span className="relative flex shrink-0 items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100">
+          {onCherryPick && (
+            <ActionBtn
+              title="Cherry-pick this commit onto HEAD"
+              onClick={() => onCherryPick(commit.oid)}
+            >
+              <Scissors size={11} strokeWidth={2} />
+            </ActionBtn>
+          )}
+          {onRevert && (
+            <ActionBtn
+              title="Revert: create an undo commit"
+              onClick={() => onRevert(commit.oid)}
+            >
+              <RotateCcw size={11} strokeWidth={2} />
+            </ActionBtn>
+          )}
+          {onReset && (
+            <div className="relative">
+              <ActionBtn
+                title="Reset HEAD to this commit"
+                onClick={() => setResetMenuOpen((o) => !o)}
+              >
+                <span className="font-mono text-[9px] font-bold">↩</span>
+              </ActionBtn>
+              {resetMenuOpen && (
+                <div
+                  className="absolute right-0 top-full z-50 mt-1 w-32 rounded-lg border border-border-hairline bg-bg-surface shadow-xl ring-1 ring-white/[0.04]"
+                  onMouseLeave={() => setResetMenuOpen(false)}
+                >
+                  {(['soft', 'mixed', 'hard'] as GitResetMode[]).map((m) => (
+                    <button
+                      key={m}
+                      onClick={() => { onReset(commit.oid, m); setResetMenuOpen(false); }}
+                      className={cn(
+                        'flex w-full items-center gap-2 px-3 py-1.5 font-sans text-[11px] text-fg-base transition hover:bg-white/[0.06]',
+                        m === 'hard' && 'text-red-400 hover:text-red-300',
+                      )}
+                    >
+                      <span className="w-10 font-mono text-[10px] text-fg-subtle">{m}</span>
+                      <span className="text-fg-muted text-[10px]">
+                        {m === 'soft' ? 'keep staged' : m === 'mixed' ? 'keep files' : 'discard all'}
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+        </span>
+      )}
+
       <span
         className="shrink-0 truncate font-display text-[11px] text-fg-muted"
         title={commit.email}
@@ -76,6 +154,19 @@ function CommitRow({ commit }: { commit: GitLogEntry }) {
         {formatRelative(commit.time)}
       </span>
     </li>
+  );
+}
+
+function ActionBtn({ title, onClick, children }: { title: string; onClick: () => void; children: React.ReactNode }) {
+  return (
+    <button
+      type="button"
+      title={title}
+      onClick={(e) => { e.stopPropagation(); onClick(); }}
+      className="flex h-5 w-5 items-center justify-center rounded text-fg-muted transition hover:bg-white/[0.1] hover:text-fg-base"
+    >
+      {children}
+    </button>
   );
 }
 

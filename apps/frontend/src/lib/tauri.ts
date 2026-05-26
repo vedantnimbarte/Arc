@@ -1260,6 +1260,146 @@ export async function gitApply(
   return invoke<void>('git_apply', { path, patch, cached, reverse });
 }
 
+// ── Remotes ──────────────────────────────────────────────────────────────────
+
+export interface GitRemoteInfo {
+  name: string;
+  fetch_url: string;
+  push_url: string;
+}
+
+export async function gitRemotes(path: string): Promise<GitRemoteInfo[]> {
+  return invoke<GitRemoteInfo[]>('git_remotes', { path });
+}
+
+export interface GitRemoteOpResult {
+  message: string;
+}
+
+export async function gitFetch(
+  path: string,
+  remote?: string | null,
+): Promise<GitRemoteOpResult> {
+  return invoke<GitRemoteOpResult>('git_fetch', { path, remote: remote ?? null });
+}
+
+export async function gitPull(path: string, rebase: boolean): Promise<GitRemoteOpResult> {
+  return invoke<GitRemoteOpResult>('git_pull', { path, rebase });
+}
+
+export async function gitPushRemote(
+  path: string,
+  remote?: string | null,
+  branch?: string | null,
+  force?: boolean,
+  setUpstream?: boolean,
+): Promise<GitRemoteOpResult> {
+  return invoke<GitRemoteOpResult>('git_push', {
+    path,
+    remote: remote ?? null,
+    branch: branch ?? null,
+    force: force ?? false,
+    setUpstream: setUpstream ?? false,
+  });
+}
+
+// ── Stash ─────────────────────────────────────────────────────────────────────
+
+export interface GitStashEntry {
+  index: number;
+  oid: string;
+  message: string;
+}
+
+export async function gitStashList(path: string): Promise<GitStashEntry[]> {
+  return invoke<GitStashEntry[]>('git_stash_list', { path });
+}
+
+export async function gitStashPush(path: string, message?: string | null): Promise<void> {
+  return invoke<void>('git_stash_push', { path, message: message ?? null });
+}
+
+export async function gitStashPop(path: string, index?: number | null): Promise<void> {
+  return invoke<void>('git_stash_pop', { path, index: index ?? null });
+}
+
+export async function gitStashDrop(path: string, index: number): Promise<void> {
+  return invoke<void>('git_stash_drop', { path, index });
+}
+
+// ── Branch management ─────────────────────────────────────────────────────────
+
+export async function gitBranchCreate(
+  path: string,
+  name: string,
+  checkout: boolean,
+): Promise<void> {
+  return invoke<void>('git_branch_create', { path, name, checkout });
+}
+
+export async function gitBranchRename(
+  path: string,
+  oldName: string,
+  newName: string,
+): Promise<void> {
+  return invoke<void>('git_branch_rename', { path, oldName, newName });
+}
+
+export async function gitBranchDelete(
+  path: string,
+  name: string,
+  force: boolean,
+): Promise<void> {
+  return invoke<void>('git_branch_delete', { path, name, force });
+}
+
+export interface GitMergeResult {
+  message: string;
+  conflicts: boolean;
+}
+
+export async function gitMerge(path: string, branch: string): Promise<GitMergeResult> {
+  return invoke<GitMergeResult>('git_merge', { path, branch });
+}
+
+// ── Commit operations ─────────────────────────────────────────────────────────
+
+export async function gitCommitAmend(path: string, message: string): Promise<GitCommitResult> {
+  return invoke<GitCommitResult>('git_commit_amend', { path, message });
+}
+
+export async function gitRevert(path: string, oid: string): Promise<GitCommitResult> {
+  return invoke<GitCommitResult>('git_revert', { path, oid });
+}
+
+export async function gitCherryPick(path: string, oid: string): Promise<void> {
+  return invoke<void>('git_cherry_pick', { path, oid });
+}
+
+export type GitResetMode = 'soft' | 'mixed' | 'hard';
+
+export async function gitReset(
+  path: string,
+  oid: string,
+  mode: GitResetMode,
+): Promise<void> {
+  return invoke<void>('git_reset', { path, oid, mode });
+}
+
+export async function gitLastMessage(path: string): Promise<string> {
+  return invoke<string>('git_last_message', { path });
+}
+
+// ── Conflict resolution ───────────────────────────────────────────────────────
+
+export async function gitCheckoutOurs(path: string, paths: string[]): Promise<void> {
+  return invoke<void>('git_checkout_ours', { path, paths });
+}
+
+export async function gitCheckoutTheirs(path: string, paths: string[]): Promise<void> {
+  return invoke<void>('git_checkout_theirs', { path, paths });
+}
+
 export interface GitBlameLine {
   line_number: number;
   oid: string;
