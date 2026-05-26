@@ -13,6 +13,8 @@ interface Props {
    *             dragging right *shrinks* its width.
    */
   edge: 'left' | 'right';
+  /** Width to snap back to on double-click. Overrides the built-in default. */
+  resetWidth?: number;
 }
 
 /**
@@ -20,7 +22,7 @@ interface Props {
  * It captures pointer events on the document during drag so the cursor
  * never reverts to text-select even when the user drags across panes.
  */
-export function ResizeHandle({ getWidth, onResize, edge }: Props) {
+export function ResizeHandle({ getWidth, onResize, edge, resetWidth }: Props) {
   const dragRef = useRef<{ startX: number; startW: number } | null>(null);
 
   const onPointerDown = useCallback(
@@ -53,7 +55,7 @@ export function ResizeHandle({ getWidth, onResize, edge }: Props) {
   return (
     <div
       onPointerDown={onPointerDown}
-      onDoubleClick={() => onResize(edge === 'left' ? 260 : 340)}
+      onDoubleClick={() => onResize(resetWidth ?? (edge === 'left' ? 260 : 340))}
       className="group relative z-10 -mx-[3px] w-[6px] shrink-0 cursor-col-resize select-none"
       role="separator"
       aria-orientation="vertical"

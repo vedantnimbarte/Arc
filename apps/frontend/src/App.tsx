@@ -7,7 +7,7 @@ import { SystemMonitor } from './components/SystemMonitor';
 import { SshTab } from './components/ssh/SshTab';
 import { SshPanel } from './components/ssh/SshPanel';
 import { SshSessionLogPanel } from './components/ssh/SshSessionLogDrawer';
-import { useSsh } from './state/ssh';
+import { useSsh, SSH_PANEL_DEFAULT } from './state/ssh';
 import { TabBar } from './components/TabBar';
 import { ChatPanel } from './components/ChatPanel';
 import { StatusBar } from './components/StatusBar';
@@ -156,8 +156,9 @@ export default function App() {
   }, []);
 
   const sshPanelOpen = useSsh((s) => s.panelOpen);
+  const sshPanelWidth = useSsh((s) => s.panelWidth);
+  const setSshPanelWidth = useSsh((s) => s.setPanelWidth);
   const sshLogPanelOpen = useSsh((s) => s.logPanelOpen);
-  const setSshPanelOpen = useSsh((s) => s.setPanelOpen);
   const setSshLogPanelOpen = useSsh((s) => s.setLogPanelOpen);
 
   // Settings + secrets are hydrated by Root in main.tsx (shared across
@@ -298,6 +299,30 @@ export default function App() {
                   active tab's host div in. */}
               <PaneTreeView hostsRef={hostsRef} stageRef={stageRef} />
             </main>
+
+            {/* SSH secondary sidebar — opens from the right, mirrors the
+                file-tree pattern: aside collapses to 0 width while the inner
+                div holds its full width so the content slides out cleanly. */}
+            {sshPanelOpen && (
+              <ResizeHandle
+                edge="right"
+                getWidth={() => useSsh.getState().panelWidth}
+                onResize={setSshPanelWidth}
+                resetWidth={SSH_PANEL_DEFAULT}
+              />
+            )}
+            <aside
+              className="shrink-0 overflow-hidden transition-[width] duration-300 ease-apple"
+              style={{ width: sshPanelOpen ? sshPanelWidth : 0 }}
+              aria-hidden={!sshPanelOpen}
+            >
+              <div
+                className="material-sidebar h-full border-l border-border-hairline"
+                style={{ width: sshPanelWidth }}
+              >
+                <SshPanel />
+              </div>
+            </aside>
           </div>
 
           {/* Floating assistant popover — anchored to the top-right of the
@@ -328,7 +353,6 @@ export default function App() {
             </div>
           )}
 
-          {sshPanelOpen && <SshPanel onClose={() => setSshPanelOpen(false)} />}
           {sshLogPanelOpen && <SshSessionLogPanel onClose={() => setSshLogPanelOpen(false)} />}
         </div>
 

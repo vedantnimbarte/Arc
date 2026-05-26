@@ -14,10 +14,12 @@ import {
   GitBranch,
   Monitor,
   Send,
+  ServerIcon,
 } from 'lucide-react';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { useWorkspace } from '../state/workspace';
 import { useFiles } from '../state/files';
+import { useSsh } from '../state/ssh';
 import { cn } from '../lib/cn';
 import { PaneTabStrip } from './PaneTabStrip';
 import { SystemMonitorButton } from './SystemMonitorButton';
@@ -61,6 +63,7 @@ export function TabBar({
   const sidebarCollapsed = useFiles((s) => s.collapsed);
   const toggleSidebar = useFiles((s) => s.toggleCollapsed);
   const root = useFiles((s) => s.root);
+  const toggleSshPanel = useSsh((s) => s.togglePanel);
 
   const [menuOpen, setMenuOpen] = useState(false);
   const [menuPos, setMenuPos] = useState<{ top: number; left: number } | null>(null);
@@ -272,6 +275,14 @@ export function TabBar({
           </button>
         )}
         <SystemMonitorButton />
+        <button
+          onClick={toggleSshPanel}
+          className="group flex h-7 w-7 items-center justify-center rounded-md text-fg-muted transition-all duration-200 ease-apple hover:bg-white/[0.08] hover:text-fg-base active:bg-white/[0.12]"
+          aria-label="Toggle SSH panel"
+          title="SSH (⌘⇧S)"
+        >
+          <ServerIcon size={13} strokeWidth={1.9} />
+        </button>
         <button
           onClick={onOpenSettings}
           className="group flex h-7 w-7 items-center justify-center rounded-md text-fg-muted transition-all duration-200 ease-apple hover:bg-white/[0.08] hover:text-fg-base active:bg-white/[0.12]"

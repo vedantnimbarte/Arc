@@ -26,6 +26,10 @@ import {
 
 export type SshStatus = 'idle' | 'connecting' | 'connected' | 'error' | 'closed';
 
+export const SSH_PANEL_MIN = 260;
+export const SSH_PANEL_MAX = 520;
+export const SSH_PANEL_DEFAULT = 300;
+
 /** Ordered list of handshake steps used by `<SshConnectingOverlay>` for its
  *  6-dot progress. Each `level` string emitted by the Rust side maps to
  *  exactly one of these. Anything else is rendered without filling a dot. */
@@ -55,6 +59,8 @@ interface SshUiState {
   detailHostId: string | null;
   /** Standalone log surface (⌘⇧L). */
   logPanelOpen: boolean;
+  /** Width of the SSH sidebar panel in px (clamped to SSH_PANEL_MIN/MAX). */
+  panelWidth: number;
 }
 
 interface SshStateShape extends SshUiState {
@@ -71,6 +77,7 @@ interface SshStateShape extends SshUiState {
   setPanelTab: (tab: 'hosts' | 'keys') => void;
   openHostDetail: (hostId: string | null) => void;
   setLogPanelOpen: (open: boolean) => void;
+  setPanelWidth: (w: number) => void;
 
   // ─── Hosts ───────────────────────────────────────────────────────────
   hostUpsert: (input: SshHostInput) => Promise<SshHost>;
@@ -110,12 +117,14 @@ export const useSsh = create<SshStateShape>((set, get) => ({
   panelTab: 'hosts',
   detailHostId: null,
   logPanelOpen: false,
+  panelWidth: SSH_PANEL_DEFAULT,
 
   setPanelOpen: (open) => set({ panelOpen: open }),
   togglePanel: () => set((s) => ({ panelOpen: !s.panelOpen })),
   setPanelTab: (tab) => set({ panelTab: tab }),
   openHostDetail: (hostId) => set({ detailHostId: hostId }),
   setLogPanelOpen: (open) => set({ logPanelOpen: open }),
+  setPanelWidth: (w) => set({ panelWidth: Math.min(Math.max(w, SSH_PANEL_MIN), SSH_PANEL_MAX) }),
 
   hostUpsert: async (input) => {
     if (!isTauri) {

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
   ChevronRight,
+  Key,
   Plus,
   Search as SearchIcon,
   Server,
@@ -17,14 +18,9 @@ import { ImportKeyDialog } from './ImportKeyDialog';
 import { HostEditDialog } from './HostEditDialog';
 import type { SshHost, SshKey } from '../../lib/tauri';
 
-interface SshPanelProps {
-  onClose: () => void;
-}
-
-/** Main SSH side panel. Two-tab segmented (HOSTS / KEYS) over a slide-out
- *  detail view. Mirrors the visual language of ChatPanel — same backdrop
- *  blur surface, same hairline gradients — with denser, monospace meta. */
-export function SshPanel({ onClose }: SshPanelProps) {
+/** SSH secondary sidebar — fills the right-side layout slot provided by App.tsx.
+ *  No fixed positioning; the material surface + border are owned by the outer aside. */
+export function SshPanel() {
   const hosts = useSsh((s) => s.hosts);
   const keys = useSsh((s) => s.keys);
   const sessions = useSsh((s) => s.sessions);
@@ -34,6 +30,7 @@ export function SshPanel({ onClose }: SshPanelProps) {
   const openDetail = useSsh((s) => s.openHostDetail);
   const hydrate = useSsh((s) => s.hydrate);
   const hydrated = useSsh((s) => s.hydrated);
+  const setPanelOpen = useSsh((s) => s.setPanelOpen);
 
   useEffect(() => {
     void hydrate();
@@ -66,14 +63,12 @@ export function SshPanel({ onClose }: SshPanelProps) {
     );
   }, [keys, query]);
 
-  // Map identity_id → key for the meta line in HostRow.
   const keyById = useMemo(() => {
     const m = new Map<string, SshKey>();
     for (const k of keys) m.set(k.id, k);
     return m;
   }, [keys]);
 
-  // Map hostId → live session (for the LIVE tag).
   const liveByHost = useSsh((s) => s.liveByHost);
 
   const detail = detailHostId
@@ -81,22 +76,11 @@ export function SshPanel({ onClose }: SshPanelProps) {
     : null;
 
   return (
-    <div
-      role="region"
-      aria-label="SSH"
-      className={cn(
-        'fixed right-4 top-12 bottom-4 z-40 flex w-[380px] flex-col',
-        'overflow-hidden rounded-window border border-border-subtle',
-        'bg-bg-panel/85 backdrop-blur-xl backdrop-saturate-180',
-        'shadow-sheet animate-popover-in',
-      )}
-    >
-      <div className="pointer-events-none absolute inset-x-3 top-0 h-px bg-gradient-to-r from-transparent via-white/[0.10] to-transparent" />
-
-      <PanelHeader
+    <div role="region" aria-label="SSH" className="flex h-full flex-col overflow-hidden">
+      <SectionHeader
         tab={tab}
         onTabChange={setTab}
-        onClose={onClose}
+        onClose={() => setPanelOpen(false)}
         onPrimary={() => {
           if (tab === 'hosts') {
             setEditingHost(null);
@@ -120,19 +104,28 @@ export function SshPanel({ onClose }: SshPanelProps) {
         />
       ) : (
         <>
-          <div className="flex items-center gap-2 px-3.5 pt-2">
-            <div className="flex flex-1 items-center gap-2 rounded-squircle border border-border-subtle bg-bg-subtle px-2.5 py-1.5">
-              <SearchIcon className="h-3.5 w-3.5 text-fg-subtle" />
+          <div className="px-4 py-3">
+            <div className="flex items-center gap-2.5 rounded-squircle border border-border-subtle bg-bg-subtle px-3 py-2">
+              <SearchIcon size={13} className="shrink-0 text-fg-subtle" />
               <input
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
-                placeholder={tab === 'hosts' ? 'search hosts' : 'search keys'}
+                placeholder={tab === 'hosts' ? 'search hosts…' : 'search keys…'}
                 className="flex-1 bg-transparent font-mono text-[12px] text-fg-base placeholder:text-fg-subtle focus:outline-none"
               />
+              {query && (
+                <button
+                  type="button"
+                  onClick={() => setQuery('')}
+                  className="text-fg-subtle transition-colors hover:text-fg-muted"
+                >
+                  <X size={11} />
+                </button>
+              )}
             </div>
           </div>
 
-          <div className="flex-1 overflow-y-auto px-3 py-2">
+          <div className="flex-1 overflow-y-auto px-2 pb-4">
             {tab === 'hosts' ? (
               <HostList
                 hosts={filteredHosts}
@@ -153,7 +146,7 @@ export function SshPanel({ onClose }: SshPanelProps) {
             )}
           </div>
 
-          <PanelFooter hostCount={hosts.length} keyCount={keys.length} />
+          <SectionFooter hostCount={hosts.length} keyCount={keys.length} />
         </>
       )}
 
@@ -172,7 +165,9 @@ export function SshPanel({ onClose }: SshPanelProps) {
   );
 }
 
-interface PanelHeaderProps {
+// ─── Section header ───────────────────────────────────────────────────────────
+
+interface SectionHeaderProps {
   tab: 'hosts' | 'keys';
   onTabChange: (t: 'hosts' | 'keys') => void;
   onClose: () => void;
@@ -180,70 +175,76 @@ interface PanelHeaderProps {
   onSecondary?: () => void;
 }
 
-function PanelHeader({
+function SectionHeader({
   tab,
   onTabChange,
   onClose,
   onPrimary,
   onSecondary,
-}: PanelHeaderProps) {
+}: SectionHeaderProps) {
   return (
-    <div className="flex flex-col gap-2 border-b border-border-subtle bg-bg-chrome/40 px-3.5 pt-3 pb-2">
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <Server className="h-3.5 w-3.5 text-accent" strokeWidth={1.6} />
-          <span className="font-display text-[13px] font-medium tracking-wide text-fg-base">
+    <div className="flex flex-col border-b border-border-hairline">
+      {/* Title row */}
+      <div className="flex h-11 items-center justify-between px-4">
+        <div className="flex items-center gap-2.5">
+          <Server size={14} strokeWidth={1.5} className="text-accent" />
+          <span className="select-none font-mono text-[10.5px] uppercase tracking-widest2 text-fg-muted">
             SSH
           </span>
         </div>
-        <div className="flex items-center gap-1">
+        <div className="flex items-center gap-0.5">
           {onSecondary && (
-            <button
-              type="button"
-              onClick={onSecondary}
-              className="rounded-md p-1 text-fg-muted transition hover:bg-bg-hover hover:text-fg-base"
-              title="Import key"
-            >
-              <ArrowDownToLine className="h-3.5 w-3.5" />
-            </button>
+            <IconButton onClick={onSecondary} title="Import key">
+              <ArrowDownToLine size={13} />
+            </IconButton>
           )}
-          <button
-            type="button"
+          <IconButton
             onClick={onPrimary}
-            className="rounded-md p-1 text-fg-muted transition hover:bg-bg-hover hover:text-fg-base"
-            title={tab === 'hosts' ? 'Add host' : 'Generate keypair'}
+            title={tab === 'hosts' ? 'New host' : 'Generate keypair'}
           >
-            {tab === 'hosts' ? (
-              <Plus className="h-3.5 w-3.5" />
-            ) : (
-              <Sparkles className="h-3.5 w-3.5" />
-            )}
-          </button>
-          <button
-            type="button"
-            onClick={onClose}
-            className="rounded-md p-1 text-fg-muted transition hover:bg-bg-hover hover:text-fg-base"
-            title="Close (⌘⇧S)"
-          >
-            <X className="h-3.5 w-3.5" />
-          </button>
+            {tab === 'hosts' ? <Plus size={13} /> : <Sparkles size={13} />}
+          </IconButton>
+          <IconButton onClick={onClose} title="Close (⌘⇧S)">
+            <X size={13} />
+          </IconButton>
         </div>
       </div>
 
-      <div className="flex items-center gap-3 font-mono text-[10px] uppercase tracking-widest2">
-        <SegmentedTab active={tab === 'hosts'} onClick={() => onTabChange('hosts')}>
+      {/* Tab strip with underline active indicator */}
+      <div className="flex px-4">
+        <TabPill active={tab === 'hosts'} onClick={() => onTabChange('hosts')}>
           Hosts
-        </SegmentedTab>
-        <span className="text-fg-subtle">·</span>
-        <SegmentedTab active={tab === 'keys'} onClick={() => onTabChange('keys')}>
+        </TabPill>
+        <TabPill active={tab === 'keys'} onClick={() => onTabChange('keys')}>
           Keys
-        </SegmentedTab>
+        </TabPill>
       </div>
     </div>
   );
 }
 
-function SegmentedTab({
+function IconButton({
+  children,
+  onClick,
+  title,
+}: {
+  children: React.ReactNode;
+  onClick: () => void;
+  title?: string;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      title={title}
+      className="flex h-6 w-6 items-center justify-center rounded-md text-fg-muted transition-colors hover:bg-bg-hover hover:text-fg-base"
+    >
+      {children}
+    </button>
+  );
+}
+
+function TabPill({
   active,
   onClick,
   children,
@@ -257,31 +258,22 @@ function SegmentedTab({
       type="button"
       onClick={onClick}
       className={cn(
-        'transition-colors',
-        active ? 'text-fg-base' : 'text-fg-muted hover:text-fg-base',
+        'relative mr-5 pb-2 pt-1.5 font-mono text-[10.5px] uppercase tracking-widest2 transition-colors',
+        active ? 'text-fg-base' : 'text-fg-subtle hover:text-fg-muted',
       )}
     >
       {children}
+      {active && (
+        <span
+          aria-hidden
+          className="absolute bottom-0 left-0 right-0 h-px rounded-full bg-accent"
+        />
+      )}
     </button>
   );
 }
 
-function PanelFooter({
-  hostCount,
-  keyCount,
-}: {
-  hostCount: number;
-  keyCount: number;
-}) {
-  return (
-    <div className="border-t border-border-subtle bg-bg-chrome/30 px-3.5 py-1.5">
-      <div className="font-mono text-[10px] uppercase tracking-widest2 text-fg-subtle">
-        {hostCount} host{hostCount === 1 ? '' : 's'} · {keyCount} key
-        {keyCount === 1 ? '' : 's'}
-      </div>
-    </div>
-  );
-}
+// ─── Host list ────────────────────────────────────────────────────────────────
 
 interface HostListProps {
   hosts: SshHost[];
@@ -302,25 +294,30 @@ function HostList({
 }: HostListProps) {
   if (!hydrated) {
     return (
-      <div className="px-2 py-8 text-center font-mono text-[11px] text-fg-subtle">
-        loading hosts…
+      <div className="py-10 text-center font-mono text-[11px] text-fg-subtle">
+        loading…
       </div>
     );
   }
   if (hosts.length === 0) {
     return (
-      <div className="flex flex-col items-center gap-2 px-2 py-12 text-center">
-        <Server className="h-5 w-5 text-fg-subtle" strokeWidth={1.4} />
-        <div className="font-display text-[12px] text-fg-base">No hosts yet</div>
-        <div className="max-w-[240px] font-mono text-[10.5px] text-fg-subtle">
-          Add one with the <kbd className="rounded bg-bg-subtle px-1 py-px">+</kbd> in the
-          header. ARC stores the connection params; identity lives in your SSH keys list.
+      <div className="flex flex-col items-center gap-3 px-4 py-14 text-center">
+        <Server size={22} strokeWidth={1.3} className="text-fg-subtle" />
+        <div className="font-display text-[13px] font-medium text-fg-base">
+          No hosts yet
+        </div>
+        <div className="max-w-[200px] font-mono text-[11px] leading-relaxed text-fg-subtle">
+          Add one with the{' '}
+          <kbd className="rounded bg-bg-hover px-1.5 py-px font-mono text-[10px]">
+            +
+          </kbd>{' '}
+          above. ARC stores connection params; auth lives in your keys list.
         </div>
       </div>
     );
   }
   return (
-    <ul className="flex flex-col gap-px">
+    <ul className="flex flex-col gap-px pt-1">
       {hosts.map((h) => {
         const liveId = liveByHost[h.id];
         const liveStatus = liveId ? sessions[liveId]?.status : undefined;
@@ -330,14 +327,14 @@ function HostList({
             <button
               type="button"
               onClick={() => onOpen(h.id)}
-              className="group flex w-full items-center gap-3 rounded-squircle px-2 py-2 text-left transition hover:bg-bg-hover"
+              className="group flex w-full items-center gap-3 rounded-squircle px-3 py-3 text-left transition-colors hover:bg-bg-hover"
             >
               <span
                 className={cn(
-                  'mt-1 inline-block h-2 w-2 shrink-0 rounded-full',
+                  'mt-0.5 inline-block h-2 w-2 shrink-0 rounded-full',
                   statusDotClass(liveStatus as never),
                 )}
-                aria-hidden="true"
+                aria-hidden
               />
               <div className="min-w-0 flex-1">
                 <div className="flex items-center justify-between gap-2">
@@ -345,24 +342,29 @@ function HostList({
                     {h.name}
                   </span>
                   {liveStatus === 'connected' && (
-                    <span className="font-mono text-[9px] uppercase tracking-widest2 text-status-ok">
+                    <span className="shrink-0 font-mono text-[9px] uppercase tracking-widest2 text-status-ok">
                       Live
                     </span>
                   )}
                   {liveStatus === 'connecting' && (
-                    <span className="font-mono text-[9px] uppercase tracking-widest2 text-accent">
+                    <span className="shrink-0 font-mono text-[9px] uppercase tracking-widest2 text-accent">
                       Dialing
                     </span>
                   )}
                 </div>
-                <div className="mt-px truncate font-mono text-[10.5px] text-fg-muted">
+                <div className="mt-1 truncate font-mono text-[11px] text-fg-muted">
                   {h.username}@{h.host}:{h.port}
-                  {identity ? ` · ${identity.kind}` : ''}
+                </div>
+                <div className="mt-0.5 font-mono text-[10px] text-fg-subtle">
+                  {identity ? identity.kind : 'password'}
                   {' · '}
-                  {h.last_used_at ? relTime(h.last_used_at) : 'never'}
+                  {h.last_used_at ? relTime(h.last_used_at) : 'never used'}
                 </div>
               </div>
-              <ChevronRight className="h-3.5 w-3.5 text-fg-subtle opacity-0 transition group-hover:opacity-100" />
+              <ChevronRight
+                size={13}
+                className="shrink-0 text-fg-subtle opacity-0 transition group-hover:opacity-100"
+              />
             </button>
           </li>
         );
@@ -370,6 +372,8 @@ function HostList({
     </ul>
   );
 }
+
+// ─── Key list ─────────────────────────────────────────────────────────────────
 
 interface KeyListProps {
   keys: SshKey[];
@@ -381,6 +385,7 @@ interface KeyListProps {
 
 function KeyList({ keys, hosts, hydrated, onGenerate, onImport }: KeyListProps) {
   const deleteKey = useSsh((s) => s.keyDelete);
+
   const useCounts = useMemo(() => {
     const m = new Map<string, number>();
     for (const h of hosts) {
@@ -391,32 +396,34 @@ function KeyList({ keys, hosts, hydrated, onGenerate, onImport }: KeyListProps) 
 
   if (!hydrated) {
     return (
-      <div className="px-2 py-8 text-center font-mono text-[11px] text-fg-subtle">
-        loading keys…
+      <div className="py-10 text-center font-mono text-[11px] text-fg-subtle">
+        loading…
       </div>
     );
   }
   if (keys.length === 0) {
     return (
-      <div className="flex flex-col items-center gap-3 px-2 py-12 text-center">
-        <Sparkles className="h-5 w-5 text-fg-subtle" strokeWidth={1.4} />
-        <div className="font-display text-[12px] text-fg-base">No keys yet</div>
-        <div className="max-w-[260px] font-mono text-[10.5px] text-fg-subtle">
-          Generate a fresh ed25519 keypair or import an existing one from
-          <span className="font-mono"> ~/.ssh</span>.
+      <div className="flex flex-col items-center gap-3 px-4 py-14 text-center">
+        <Key size={22} strokeWidth={1.3} className="text-fg-subtle" />
+        <div className="font-display text-[13px] font-medium text-fg-base">
+          No keys yet
+        </div>
+        <div className="max-w-[200px] font-mono text-[11px] leading-relaxed text-fg-subtle">
+          Generate a fresh ed25519 keypair or import an existing one from{' '}
+          <code className="font-mono">~/.ssh</code>.
         </div>
         <div className="mt-2 flex items-center gap-2">
           <button
             type="button"
             onClick={onGenerate}
-            className="rounded-squircle bg-accent/90 px-3 py-1 font-display text-[11px] text-bg-base transition hover:bg-accent"
+            className="rounded-squircle bg-accent/90 px-4 py-1.5 font-display text-[11px] font-medium text-bg-base transition hover:bg-accent"
           >
             Generate
           </button>
           <button
             type="button"
             onClick={onImport}
-            className="rounded-squircle border border-border-subtle px-3 py-1 font-display text-[11px] text-fg-base transition hover:bg-bg-hover"
+            className="rounded-squircle border border-border-subtle px-4 py-1.5 font-display text-[11px] font-medium text-fg-base transition hover:bg-bg-hover"
           >
             Import
           </button>
@@ -425,41 +432,41 @@ function KeyList({ keys, hosts, hydrated, onGenerate, onImport }: KeyListProps) 
     );
   }
   return (
-    <ul className="flex flex-col gap-1">
+    <ul className="flex flex-col gap-2 pt-1">
       {keys.map((k) => {
         const uses = useCounts.get(k.id) ?? 0;
         return (
           <li
             key={k.id}
-            className="rounded-squircle border border-border-subtle bg-bg-subtle/40 px-3 py-2"
+            className="rounded-squircle border border-border-subtle bg-bg-subtle/40 px-4 py-3"
           >
-            <div className="flex items-center justify-between gap-2">
-              <span className="truncate font-mono text-[12px] text-fg-base">
+            <div className="flex items-start justify-between gap-2">
+              <span className="font-mono text-[12px] leading-tight text-fg-base">
                 {k.name}
               </span>
-              <span className="font-mono text-[9.5px] uppercase tracking-widest2 text-fg-subtle">
+              <span className="mt-px shrink-0 font-mono text-[9.5px] uppercase tracking-widest2 text-fg-subtle">
                 {k.kind}
               </span>
             </div>
             <div
               title={k.fingerprint}
-              className="mt-1 truncate font-mono text-[10px] text-fg-muted"
+              className="mt-2 break-all font-mono text-[10px] leading-relaxed text-fg-muted"
             >
               {chunkFingerprint(k.fingerprint)}
             </div>
-            <div className="mt-1 flex items-center justify-between font-mono text-[10px] uppercase tracking-widest2 text-fg-subtle">
-              <span>
-                {uses === 0 ? 'unused' : `used by ${uses} host${uses === 1 ? '' : 's'}`}
-                {k.has_passphrase ? ' · passphrase saved' : ''}
+            <div className="mt-2.5 flex items-center justify-between">
+              <span className="font-mono text-[10px] text-fg-subtle">
+                {uses === 0 ? 'unused' : `${uses} host${uses === 1 ? '' : 's'}`}
+                {k.has_passphrase ? ' · secured' : ''}
               </span>
               <button
                 type="button"
                 onClick={() => {
-                  if (confirm(`Remove key "${k.name}" from ARC? The file on disk stays.`)) {
+                  if (confirm(`Remove "${k.name}" from ARC? The file on disk stays.`)) {
                     void deleteKey(k.id, false);
                   }
                 }}
-                className="rounded px-1 text-[10px] tracking-normal text-fg-subtle hover:bg-bg-hover hover:text-status-err"
+                className="rounded px-1.5 py-px font-mono text-[10px] text-fg-subtle transition-colors hover:bg-bg-hover hover:text-status-err"
               >
                 remove
               </button>
@@ -468,5 +475,24 @@ function KeyList({ keys, hosts, hydrated, onGenerate, onImport }: KeyListProps) 
         );
       })}
     </ul>
+  );
+}
+
+// ─── Footer ───────────────────────────────────────────────────────────────────
+
+function SectionFooter({
+  hostCount,
+  keyCount,
+}: {
+  hostCount: number;
+  keyCount: number;
+}) {
+  return (
+    <footer className="border-t border-border-hairline bg-bg-chrome/30 px-4 py-2.5">
+      <span className="font-mono text-[10px] uppercase tracking-widest2 text-fg-subtle">
+        {hostCount} host{hostCount !== 1 ? 's' : ''} · {keyCount} key
+        {keyCount !== 1 ? 's' : ''}
+      </span>
+    </footer>
   );
 }
