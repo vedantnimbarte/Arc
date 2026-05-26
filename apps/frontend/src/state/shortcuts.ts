@@ -8,6 +8,7 @@ export type ActionId =
   | 'new-terminal'
   | 'open-settings'
   | 'toggle-sidebar'
+  | 'open-command-palette'
   | 'open-command-history'
   | 'open-search'
   | 'toggle-chat'
@@ -57,6 +58,12 @@ export const ACTION_META: Record<ActionId, ActionMeta> = {
     id: 'toggle-sidebar',
     label: 'Toggle Sidebar',
     description: 'Show or hide the file-tree sidebar.',
+    category: 'Workspace',
+  },
+  'open-command-palette': {
+    id: 'open-command-palette',
+    label: 'Command Palette',
+    description: 'Open the unified action palette.',
     category: 'Workspace',
   },
   'open-command-history': {
@@ -137,6 +144,7 @@ export const ACTION_ORDER: ActionId[] = [
   'new-terminal',
   'open-settings',
   'toggle-sidebar',
+  'open-command-palette',
   'open-command-history',
   'open-search',
   'toggle-chat',
@@ -161,6 +169,7 @@ export const DEFAULT_BINDINGS: Record<ActionId, KeyBinding | null> = {
   'new-terminal': { code: 'KeyT', shift: false, alt: false, ...mod() },
   'open-settings': { code: 'Comma', shift: false, alt: false, ...mod() },
   'toggle-sidebar': { code: 'KeyB', shift: false, alt: false, ...mod() },
+  'open-command-palette': { code: 'KeyK', shift: false, alt: false, ...mod() },
   'open-command-history': { code: 'KeyR', shift: false, alt: false, ...mod() },
   'open-search': { code: 'KeyP', shift: false, alt: false, ...mod() },
   'open-shortcuts': { code: 'Slash', shift: true, alt: false, ...mod() },

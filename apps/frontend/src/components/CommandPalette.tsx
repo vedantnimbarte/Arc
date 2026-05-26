@@ -1,13 +1,12 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { CornerDownLeft, History, Search } from 'lucide-react';
-import {
-  isTauri,
-  ptyWrite,
-  sessionCommandsRecent,
-  type CommandRecord,
-} from '../lib/tauri';
-import { useWorkspace } from '../state/workspace';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { CornerDownLeft, Command as CommandIcon, Search } from 'lucide-react';
 import { cn } from '../lib/cn';
+import {
+  scoreAction,
+  useCommands,
+  type CommandAction,
+  type CommandGroup,
+} from '../state/commands';
 
 interface Props {
   open: boolean;
@@ -15,48 +14,20 @@ interface Props {
 }
 
 /**
- * Ctrl+R command-history palette. Modeled on bash's reverse-i-search but
- * surfaced as a centered floating panel (closer to VS Code's command
- * palette UX). Selecting a row writes it into the active terminal — no
- * auto-execute, so the user can edit before pressing Enter themselves.
+ * Unified ⌘K command palette. Every feature registers actions into the
+ * `useCommands` store; this component just renders + filters whatever is
+ * currently registered. Different from `CommandHistoryPalette` (⌃R), which
+ * surfaces shell command history.
  */
 export function CommandPalette({ open, onClose }: Props) {
+  const actions = useCommands((s) => s.actions);
   const [query, setQuery] = useState('');
-  const [rows, setRows] = useState<CommandRecord[]>([]);
   const [selected, setSelected] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
+  const listRef = useRef<HTMLDivElement>(null);
 
-  // Refetch on open + on every keystroke. The query is debounced lightly
-  // so a fast typer doesn't slam SQLite.
-  useEffect(() => {
-    if (!open) return;
-    if (!isTauri) {
-      setRows([]);
-      return;
-    }
-    let cancelled = false;
-    const t = setTimeout(() => {
-      void sessionCommandsRecent(60, query.trim() || null)
-        .then((r) => {
-          if (!cancelled) {
-            setRows(r);
-            setSelected(0);
-          }
-        })
-        .catch(() => {
-          if (!cancelled) setRows([]);
-        });
-    }, 80);
-    return () => {
-      cancelled = true;
-      clearTimeout(t);
-    };
-  }, [open, query]);
-
-  // Focus the input when the palette opens.
   useEffect(() => {
     if (open) {
-      // requestAnimationFrame so the input is mounted before focusing.
       requestAnimationFrame(() => inputRef.current?.focus());
     } else {
       setQuery('');
@@ -64,22 +35,45 @@ export function CommandPalette({ open, onClose }: Props) {
     }
   }, [open]);
 
-  const pickInto = useCallback(
-    async (cmd: string) => {
-      const { tabs, activeTabId } = useWorkspace.getState();
-      const active = tabs.find((t) => t.id === activeTabId);
-      onClose();
-      if (!active?.ptyId) return;
-      try {
-        await ptyWrite(active.ptyId, cmd);
-      } catch {
-        /* terminal closing */
-      }
-    },
-    [onClose],
-  );
+  const visible = useMemo(() => {
+    const all = Array.from(actions.values()).filter((a) => !a.when || a.when());
+    if (!query.trim()) {
+      // Sort by group then title when there's no query — gives a stable
+      // browse order on first open.
+      return [...all].sort((a, b) => {
+        if (a.group !== b.group) return GROUP_ORDER.indexOf(a.group) - GROUP_ORDER.indexOf(b.group);
+        return a.title.localeCompare(b.title);
+      });
+    }
+    return all
+      .map((a) => [a, scoreAction(a, query)] as const)
+      .filter(([, s]) => s >= 0)
+      .sort((a, b) => b[1] - a[1])
+      .map(([a]) => a);
+  }, [actions, query]);
 
-  const visible = useMemo(() => rows.slice(0, 60), [rows]);
+  // Clamp the selected index whenever the visible list shrinks.
+  useEffect(() => {
+    if (selected >= visible.length) setSelected(Math.max(0, visible.length - 1));
+  }, [visible.length, selected]);
+
+  // Keep the selected row in view as the user arrow-keys through results.
+  useEffect(() => {
+    const list = listRef.current;
+    if (!list) return;
+    const node = list.querySelector<HTMLElement>(`[data-row="${selected}"]`);
+    node?.scrollIntoView({ block: 'nearest' });
+  }, [selected]);
+
+  const pick = async (action: CommandAction) => {
+    onClose();
+    if (action.when && !action.when()) return;
+    try {
+      await action.run();
+    } catch (err) {
+      console.error(`[commands] ${action.id} failed:`, err);
+    }
+  };
 
   const onKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Escape') {
@@ -87,8 +81,8 @@ export function CommandPalette({ open, onClose }: Props) {
       onClose();
     } else if (e.key === 'Enter') {
       e.preventDefault();
-      const pick = visible[selected];
-      if (pick) void pickInto(pick.command);
+      const action = visible[selected];
+      if (action) void pick(action);
     } else if (e.key === 'ArrowDown') {
       e.preventDefault();
       setSelected((s) => Math.min(s + 1, visible.length - 1));
@@ -100,6 +94,22 @@ export function CommandPalette({ open, onClose }: Props) {
 
   if (!open) return null;
 
+  // Build group headers when no query — when filtering we just show a flat
+  // ranked list, headers would shuffle distractingly.
+  const groupedRows: Array<{ kind: 'header'; group: CommandGroup } | { kind: 'row'; action: CommandAction; index: number }> = [];
+  if (!query.trim()) {
+    let lastGroup: CommandGroup | null = null;
+    visible.forEach((action, index) => {
+      if (action.group !== lastGroup) {
+        groupedRows.push({ kind: 'header', group: action.group });
+        lastGroup = action.group;
+      }
+      groupedRows.push({ kind: 'row', action, index });
+    });
+  } else {
+    visible.forEach((action, index) => groupedRows.push({ kind: 'row', action, index }));
+  }
+
   return (
     <div
       className="fixed inset-0 z-50 flex items-start justify-center bg-black/40 backdrop-blur-sm"
@@ -110,13 +120,16 @@ export function CommandPalette({ open, onClose }: Props) {
         className="material-sheet mt-[14vh] flex w-[640px] max-w-[92vw] animate-sheet-in flex-col overflow-hidden rounded-window shadow-sheet ring-1 ring-white/10"
       >
         <div className="flex items-center gap-2 border-b border-border-hairline px-3.5 py-2.5">
-          <History size={13} strokeWidth={2.1} className="text-fg-subtle" />
+          <CommandIcon size={13} strokeWidth={2.1} className="text-fg-subtle" />
           <input
             ref={inputRef}
             value={query}
-            onChange={(e) => setQuery(e.target.value)}
+            onChange={(e) => {
+              setQuery(e.target.value);
+              setSelected(0);
+            }}
             onKeyDown={onKeyDown}
-            placeholder="search command history…"
+            placeholder="run a command…"
             className="flex-1 bg-transparent font-display text-[13px] text-fg-base placeholder:text-fg-subtle focus:outline-none"
             autoComplete="off"
             spellCheck={false}
@@ -124,47 +137,65 @@ export function CommandPalette({ open, onClose }: Props) {
           <kbd className="font-mono text-[10px] text-fg-subtle">esc</kbd>
         </div>
 
-        <div className="max-h-[420px] overflow-y-auto py-1">
+        <div ref={listRef} className="max-h-[420px] overflow-y-auto py-1">
           {visible.length === 0 && (
             <div className="flex items-center justify-center gap-1.5 px-4 py-6 font-display text-[11.5px] italic text-fg-subtle">
-              {isTauri ? (
-                <>
-                  <Search size={11} strokeWidth={2} />
-                  no commands {query ? `match “${query}”` : 'yet'}
-                </>
-              ) : (
-                'history is empty in web preview'
-              )}
+              <Search size={11} strokeWidth={2} />
+              no commands {query ? `match “${query}”` : 'registered'}
             </div>
           )}
-          {visible.map((row, idx) => (
-            <button
-              key={row.id}
-              onMouseEnter={() => setSelected(idx)}
-              onClick={() => void pickInto(row.command)}
-              className={cn(
-                'flex w-full items-start gap-2.5 px-3.5 py-1.5 text-left transition-colors',
-                idx === selected
-                  ? 'bg-accent-soft ring-1 ring-inset ring-border-strong'
-                  : 'hover:bg-white/[0.045]',
-              )}
-            >
-              <span className="mt-0.5 w-[42px] shrink-0 truncate font-mono text-[10px] text-fg-subtle">
-                {formatAge(row.started_at)}
-              </span>
-              <span className="min-w-0 flex-1 truncate font-mono text-[12px] text-fg-base/90">
-                {row.command}
-              </span>
-              {idx === selected && (
-                <CornerDownLeft size={11} strokeWidth={2.1} className="mt-1 shrink-0 text-fg-muted" />
-              )}
-            </button>
-          ))}
+
+          {groupedRows.map((entry, i) => {
+            if (entry.kind === 'header') {
+              return (
+                <div
+                  key={`h-${entry.group}-${i}`}
+                  className="px-3.5 pb-0.5 pt-1.5 font-display text-[10px] uppercase tracking-wider text-fg-subtle"
+                >
+                  {entry.group}
+                </div>
+              );
+            }
+            const { action, index } = entry;
+            const Icon = action.icon;
+            const isSelected = index === selected;
+            return (
+              <button
+                key={action.id}
+                data-row={index}
+                onMouseEnter={() => setSelected(index)}
+                onClick={() => void pick(action)}
+                className={cn(
+                  'flex w-full items-center gap-2.5 px-3.5 py-1.5 text-left transition-colors',
+                  isSelected
+                    ? 'bg-accent-soft ring-1 ring-inset ring-border-strong'
+                    : 'hover:bg-white/[0.045]',
+                )}
+              >
+                {Icon ? (
+                  <Icon size={12} strokeWidth={2.1} className="shrink-0 text-fg-muted" />
+                ) : (
+                  <span className="w-3 shrink-0" />
+                )}
+                <span className="min-w-0 flex-1 truncate font-display text-[12.5px] text-fg-base/90">
+                  {action.title}
+                </span>
+                {action.shortcut && (
+                  <kbd className="shrink-0 font-mono text-[10px] text-fg-subtle">
+                    {action.shortcut}
+                  </kbd>
+                )}
+                {isSelected && (
+                  <CornerDownLeft size={11} strokeWidth={2.1} className="shrink-0 text-fg-muted" />
+                )}
+              </button>
+            );
+          })}
         </div>
 
         <div className="flex items-center justify-between border-t border-border-hairline px-3.5 py-1.5 font-display text-[10px] text-fg-subtle">
           <span>
-            <kbd className="font-mono">↑↓</kbd> select · <kbd className="font-mono">return</kbd> paste · <kbd className="font-mono">esc</kbd> close
+            <kbd className="font-mono">↑↓</kbd> select · <kbd className="font-mono">return</kbd> run · <kbd className="font-mono">esc</kbd> close
           </span>
           <span className="tabular-nums">{visible.length} commands</span>
         </div>
@@ -173,15 +204,14 @@ export function CommandPalette({ open, onClose }: Props) {
   );
 }
 
-/** "5s", "12m", "3h", "2d" — short relative time markers. */
-function formatAge(unixMs: number): string {
-  const delta = Math.max(0, Date.now() - unixMs);
-  const s = Math.floor(delta / 1000);
-  if (s < 60) return `${s}s`;
-  const m = Math.floor(s / 60);
-  if (m < 60) return `${m}m`;
-  const h = Math.floor(m / 60);
-  if (h < 24) return `${h}h`;
-  const d = Math.floor(h / 24);
-  return `${d}d`;
-}
+const GROUP_ORDER: CommandGroup[] = [
+  'Workspace',
+  'Terminal',
+  'Editor',
+  'View',
+  'Assistant',
+  'Git',
+  'SSH',
+  'AI CLIs',
+  'Help',
+];

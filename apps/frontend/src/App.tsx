@@ -12,6 +12,7 @@ import { TabBar } from './components/TabBar';
 import { ChatPanel } from './components/ChatPanel';
 import { StatusBar } from './components/StatusBar';
 import { CommandPalette } from './components/CommandPalette';
+import { CommandHistoryPalette } from './components/CommandHistoryPalette';
 import { Sidebar } from './components/Sidebar';
 import { ResizeHandle } from './components/ResizeHandle';
 import { SearchPalette } from './components/SearchPalette';
@@ -21,7 +22,19 @@ import { useWorkspace } from './state/workspace';
 import { useFiles, CHAT_DEFAULT } from './state/files';
 import { useChat } from './state/chat';
 import { useSelection, type SelectionInfo } from './state/selection';
-import { actionFor, type ActionId } from './state/shortcuts';
+import {
+  actionFor,
+  ACTION_META,
+  getBinding,
+  formatBinding,
+  type ActionId,
+} from './state/shortcuts';
+import { useCommands, type CommandAction, type CommandGroup } from './state/commands';
+import { useBlocks } from './state/blocks';
+import { Layers } from 'lucide-react';
+// Side-effect import: subscribes to file-tree root changes and keeps the
+// project-config store fresh. Doesn't render anything itself.
+import './state/projectConfig';
 import { ptyListAiClis, settingsWindowOpen, type AiCliId } from './lib/tauri';
 import type { ChatIntent } from './components/ChatPanel';
 import { AskAiFloater } from './components/AskAiFloater';
@@ -137,6 +150,7 @@ export default function App() {
     );
   }
   void activeTab;
+  const [paletteOpen, setPaletteOpen] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
@@ -199,65 +213,13 @@ export default function App() {
     useSelection.getState().clear();
   };
 
-  useEffect(() => {
-    const dispatch = (action: ActionId) => {
-      switch (action) {
-        case 'new-terminal': {
-          void newTerminal();
-          return;
-        }
-        case 'open-settings':
-          void settingsWindowOpen().catch((err) =>
-            console.error('[shortcut] open settings window failed:', err),
-          );
-          return;
-        case 'toggle-sidebar':
-          toggleSidebar();
-          return;
-        case 'open-command-history':
-          setHistoryOpen(true);
-          return;
-        case 'open-search':
-          setSearchOpen(true);
-          return;
-        case 'open-shortcuts':
-          setShortcutsOpen(true);
-          return;
-        case 'toggle-chat':
-          setChatOpen((o) => !o);
-          return;
-        case 'new-chat':
-          setChatOpen(true);
-          setChatIntent({ type: 'new-session', at: Date.now() });
-          return;
-        case 'toggle-agent-picker':
-          setChatOpen(true);
-          setChatIntent({ type: 'toggle-agents', at: Date.now() });
-          return;
-        case 'open-chat-sessions':
-          setChatOpen(true);
-          setChatIntent({ type: 'toggle-sessions', at: Date.now() });
-          return;
-        case 'toggle-ssh-panel':
-          useSsh.getState().togglePanel();
-          return;
-        case 'ask-arc-ai':
-          askArcAi.current();
-          return;
-        case 'launch-claude-cli':
-          void launchCli('claude-cli');
-          return;
-        case 'launch-codex-cli':
-          void launchCli('codex-cli');
-          return;
-        case 'launch-opencode-cli':
-          void launchCli('opencode-cli');
-          return;
-      }
-    };
-
-    /** Resolve a CLI by id and open it as a new terminal tab. No-op (with
-     *  a warning) if the binary isn't on PATH. */
+  // Single dispatch table for ActionId — shared between global keyboard
+  // shortcuts and the ⌘K command palette so adding an action in shortcuts.ts
+  // automatically gives it both a key combo and a palette entry. Lifted to a
+  // ref so the palette-registration effect (which runs once) can call the
+  // latest closure without re-registering on every render.
+  const dispatchActionRef = useRef<(action: ActionId) => void>(() => {});
+  dispatchActionRef.current = (action: ActionId) => {
     const launchCli = async (id: AiCliId) => {
       try {
         const installed = await ptyListAiClis();
@@ -271,7 +233,74 @@ export default function App() {
         console.error(`[shortcut] launch ${id} failed:`, err);
       }
     };
+    switch (action) {
+      case 'new-terminal':
+        void newTerminal();
+        return;
+      case 'open-settings':
+        void settingsWindowOpen().catch((err) =>
+          console.error('[shortcut] open settings window failed:', err),
+        );
+        return;
+      case 'toggle-sidebar':
+        toggleSidebar();
+        return;
+      case 'open-command-palette':
+        setPaletteOpen(true);
+        return;
+      case 'open-command-history':
+        setHistoryOpen(true);
+        return;
+      case 'open-search':
+        setSearchOpen(true);
+        return;
+      case 'open-shortcuts':
+        setShortcutsOpen(true);
+        return;
+      case 'toggle-chat':
+        setChatOpen((o) => !o);
+        return;
+      case 'new-chat':
+        setChatOpen(true);
+        setChatIntent({ type: 'new-session', at: Date.now() });
+        return;
+      case 'toggle-agent-picker':
+        setChatOpen(true);
+        setChatIntent({ type: 'toggle-agents', at: Date.now() });
+        return;
+      case 'open-chat-sessions':
+        setChatOpen(true);
+        setChatIntent({ type: 'toggle-sessions', at: Date.now() });
+        return;
+      case 'toggle-ssh-panel':
+        useSsh.getState().togglePanel();
+        return;
+      case 'ask-arc-ai':
+        askArcAi.current();
+        return;
+      case 'launch-claude-cli':
+        void launchCli('claude-cli');
+        return;
+      case 'launch-codex-cli':
+        void launchCli('codex-cli');
+        return;
+      case 'launch-opencode-cli':
+        void launchCli('opencode-cli');
+        return;
+    }
+  };
 
+  // Listen for `arc:open-chat` from components that aren't passed setChatOpen
+  // — currently the BlocksDrawer when the user hits "Ask ARC" on a block.
+  // They've already staged pendingContext on the chat store; we just open
+  // the panel and let it pick up the context on next render.
+  useEffect(() => {
+    const onOpenChat = () => setChatOpen(true);
+    window.addEventListener('arc:open-chat', onOpenChat);
+    return () => window.removeEventListener('arc:open-chat', onOpenChat);
+  }, []);
+
+  useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       // Esc closes the chat popover when it has focus / is visible
       if (e.key === 'Escape' && chatOpen) {
@@ -285,11 +314,54 @@ export default function App() {
       const action = actionFor(e);
       if (!action) return;
       e.preventDefault();
-      dispatch(action);
+      dispatchActionRef.current(action);
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [newTerminal, toggleSidebar, chatOpen, launchAiCli]);
+  }, [chatOpen]);
+
+  // Seed the command-palette registry with every ActionId. Other features
+  // can register their own ad-hoc actions on top of these.
+  useEffect(() => {
+    const seed: CommandAction[] = (Object.keys(ACTION_META) as ActionId[]).map((id) => {
+      const meta = ACTION_META[id];
+      const binding = getBinding(id);
+      return {
+        id: `shortcut.${id}`,
+        title: meta.label,
+        group: CATEGORY_TO_GROUP[meta.category],
+        keywords: [meta.description, meta.category],
+        shortcut: binding ? formatBinding(binding) : undefined,
+        run: () => dispatchActionRef.current(id),
+      };
+    });
+    return useCommands.getState().registerMany(seed);
+  }, []);
+
+  // Register palette actions that don't have a corresponding ActionId
+  // (no global key binding yet). These can be promoted to first-class
+  // ActionIds later if they earn a shortcut.
+  useEffect(() => {
+    const extras: CommandAction[] = [
+      {
+        id: 'terminal.toggle-blocks',
+        title: 'Toggle Command Blocks',
+        group: 'Terminal',
+        keywords: ['blocks', 'drawer', 'history', 'output'],
+        icon: Layers,
+        when: () => {
+          const { tabs, activeTabId } = useWorkspace.getState();
+          const tab = tabs.find((t) => t.id === activeTabId);
+          return tab?.kind === 'terminal' || tab?.kind === 'ssh';
+        },
+        run: () => {
+          const { activeTabId } = useWorkspace.getState();
+          if (activeTabId) useBlocks.getState().toggleDrawer(activeTabId);
+        },
+      },
+    ];
+    return useCommands.getState().registerMany(extras);
+  }, []);
 
   return (
     <div className="relative flex h-full w-full flex-col overflow-hidden bg-bg-base text-fg-base">
@@ -398,7 +470,8 @@ export default function App() {
         />
       </div>
 
-      <CommandPalette open={historyOpen} onClose={() => setHistoryOpen(false)} />
+      <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} />
+      <CommandHistoryPalette open={historyOpen} onClose={() => setHistoryOpen(false)} />
       <SearchPalette open={searchOpen} onClose={() => setSearchOpen(false)} />
       <ShortcutsDialog open={shortcutsOpen} onClose={() => setShortcutsOpen(false)} />
       <AskAiFloater onAsk={() => askArcAi.current()} />
@@ -464,6 +537,18 @@ class TabErrorBoundary extends Component<
     return this.props.children;
   }
 }
+
+const CATEGORY_TO_GROUP: Record<
+  'Workspace' | 'Terminal' | 'Assistant' | 'SSH' | 'AI CLIs' | 'Help',
+  CommandGroup
+> = {
+  Workspace: 'Workspace',
+  Terminal: 'Terminal',
+  Assistant: 'Assistant',
+  SSH: 'SSH',
+  'AI CLIs': 'AI CLIs',
+  Help: 'Help',
+};
 
 function EditorFallback() {
   return (

@@ -209,6 +209,7 @@ fn main() {
             commands::apiclient::apiclient_envs_upsert,
             commands::apiclient::apiclient_envs_delete,
             commands::apiclient::apiclient_envs_set_active,
+            commands::project_config::project_config_load,
             commands::system::system_snapshot,
             commands::system::system_processes_list,
             commands::system::system_process_kill,

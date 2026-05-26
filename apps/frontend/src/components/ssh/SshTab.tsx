@@ -14,7 +14,7 @@ import {
 import { useSettings } from '../../state/settings';
 import { useSsh } from '../../state/ssh';
 import { useWorkspace } from '../../state/workspace';
-import { getFont, resolveTheme } from '../../themes';
+import { getFont, resolveActiveTheme } from '../../themes';
 import { SshConnectingOverlay } from './SshConnectingOverlay';
 import { SshErrorCard } from './SshErrorCard';
 import { LogDrawerToggle, SshSessionLogDrawer } from './SshSessionLogDrawer';
@@ -69,7 +69,7 @@ export function SshTab({ sessionKey, hostId }: SshTabProps) {
 
     const initialSettings = useSettings.getState();
     const initialFont = getFont(initialSettings.fontId);
-    const initialTheme = resolveTheme(initialSettings.appearance);
+    const initialTheme = resolveActiveTheme(initialSettings.appearance, initialSettings.themeId);
 
     const term = new XTerm({
       fontFamily: initialFont.stack,
@@ -155,7 +155,7 @@ export function SshTab({ sessionKey, hostId }: SshTabProps) {
         try {
           term.options.fontFamily = getFont(s.fontId).stack;
           term.options.fontSize = s.fontSize;
-          term.options.theme = resolveTheme(s.appearance).xterm;
+          term.options.theme = resolveActiveTheme(s.appearance, s.themeId).xterm;
           safeFit();
         } catch {
           /* term may be disposed */
