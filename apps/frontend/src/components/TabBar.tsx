@@ -193,12 +193,12 @@ export function TabBar({
     <>
     <div
       data-tauri-drag-region
-      className="material-toolbar relative flex h-11 shrink-0 items-center gap-2 pl-3"
+      className="material-toolbar relative flex h-12 shrink-0 items-center gap-2 pl-3"
     >
       {/* Sidebar toggle — left rail, mirrors macOS toolbar control */}
       <button
         onClick={toggleSidebar}
-        className="group flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-fg-muted transition-all duration-200 ease-apple hover:bg-white/[0.08] hover:text-fg-base active:bg-white/[0.12]"
+        className="group flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-fg-muted transition-all duration-200 ease-apple hover:bg-white/[0.08] hover:text-fg-base active:bg-white/[0.12]"
         aria-label={sidebarCollapsed ? 'Show sidebar' : 'Hide sidebar'}
         aria-pressed={!sidebarCollapsed}
         title={sidebarCollapsed ? 'Show sidebar (⌘B)' : 'Hide sidebar (⌘B)'}
@@ -225,7 +225,7 @@ export function TabBar({
         <button
           ref={plusRef}
           onClick={() => setMenuOpen((o) => !o)}
-          className="group ml-0.5 flex h-[26px] w-[26px] shrink-0 items-center justify-center rounded-[7px] text-fg-subtle transition-all duration-200 ease-apple hover:bg-white/[0.06] hover:text-fg-base active:bg-white/[0.10]"
+          className="group ml-0.5 flex h-[28px] w-[28px] shrink-0 items-center justify-center rounded-[7px] text-fg-subtle transition-all duration-200 ease-apple hover:bg-white/[0.06] hover:text-fg-base active:bg-white/[0.10]"
           aria-label="New tab"
           aria-expanded={menuOpen}
           aria-haspopup="menu"
@@ -245,7 +245,7 @@ export function TabBar({
       <button
         onClick={onOpenSearch}
         className={cn(
-          'group flex h-[26px] w-[160px] shrink-0 items-center gap-1.5 rounded-[7px] px-2',
+          'group flex h-[28px] w-[160px] shrink-0 items-center gap-1.5 rounded-[7px] px-2',
           'border border-white/[0.04] bg-black/[0.18] text-fg-subtle',
           'transition-all duration-150 ease-apple',
           'hover:border-white/[0.08] hover:bg-black/[0.28] hover:text-fg-muted',
@@ -267,7 +267,7 @@ export function TabBar({
         {isGitRepo && (
           <button
             onClick={() => void gitWindowOpen()}
-            className="group flex h-7 w-7 items-center justify-center rounded-md text-fg-muted transition-all duration-200 ease-apple hover:bg-white/[0.08] hover:text-fg-base active:bg-white/[0.12]"
+            className="group flex h-8 w-8 items-center justify-center rounded-md text-fg-muted transition-all duration-200 ease-apple hover:bg-white/[0.08] hover:text-fg-base active:bg-white/[0.12]"
             aria-label="Open Git history"
             title="Git history"
           >
@@ -277,7 +277,7 @@ export function TabBar({
         <SystemMonitorButton />
         <button
           onClick={toggleSshPanel}
-          className="group flex h-7 w-7 items-center justify-center rounded-md text-fg-muted transition-all duration-200 ease-apple hover:bg-white/[0.08] hover:text-fg-base active:bg-white/[0.12]"
+          className="group flex h-8 w-8 items-center justify-center rounded-md text-fg-muted transition-all duration-200 ease-apple hover:bg-white/[0.08] hover:text-fg-base active:bg-white/[0.12]"
           aria-label="Toggle SSH panel"
           title="SSH (⌘⇧S)"
         >
@@ -285,7 +285,7 @@ export function TabBar({
         </button>
         <button
           onClick={onOpenSettings}
-          className="group flex h-7 w-7 items-center justify-center rounded-md text-fg-muted transition-all duration-200 ease-apple hover:bg-white/[0.08] hover:text-fg-base active:bg-white/[0.12]"
+          className="group flex h-8 w-8 items-center justify-center rounded-md text-fg-muted transition-all duration-200 ease-apple hover:bg-white/[0.08] hover:text-fg-base active:bg-white/[0.12]"
           aria-label="Open settings"
           title="Settings (⌘,)"
         >

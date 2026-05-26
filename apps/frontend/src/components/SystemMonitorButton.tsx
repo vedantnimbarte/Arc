@@ -108,7 +108,7 @@ export function SystemMonitorButton() {
       <button
         ref={btnRef}
         onClick={() => setOpen((o) => !o)}
-        className="group flex h-7 w-7 items-center justify-center rounded-md text-fg-muted transition-all duration-200 ease-apple hover:bg-white/[0.08] hover:text-fg-base active:bg-white/[0.12] aria-expanded:bg-white/[0.08] aria-expanded:text-fg-base"
+        className="group flex h-8 w-8 items-center justify-center rounded-md text-fg-muted transition-all duration-200 ease-apple hover:bg-white/[0.08] hover:text-fg-base active:bg-white/[0.12] aria-expanded:bg-white/[0.08] aria-expanded:text-fg-base"
         aria-label="System resources"
         aria-expanded={open}
         aria-haspopup="dialog"

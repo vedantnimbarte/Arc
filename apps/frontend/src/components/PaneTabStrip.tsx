@@ -75,12 +75,12 @@ export function PaneTabStrip({ paneId, variant = 'leaf' }: Props) {
       data-tauri-drag-region="false"
       onMouseDown={() => setFocusedPane(paneId)}
       className={cn(
-        'scrollbar-none flex shrink-0 items-center gap-1 overflow-x-auto',
+        'scrollbar-none flex shrink-0 items-center gap-0.5 overflow-x-auto',
         'transition-colors duration-150',
         variant === 'topbar'
-          ? 'h-[28px] min-w-0'
+          ? 'h-[32px] min-w-0'
           : cn(
-              'h-9 border-b px-2',
+              'h-10 border-b px-2',
               isFocused
                 ? 'border-border-hairline bg-bg-chrome/30'
                 : 'border-border-hairline/60 bg-transparent',
@@ -145,17 +145,17 @@ export function PaneTabStrip({ paneId, variant = 'leaf' }: Props) {
                 }}
                 onDoubleClick={() => setRenamingTabId(tabId)}
                 className={cn(
-                  'flex h-[24px] items-center gap-1.5 rounded-[6px] px-2 font-display text-[11.5px] font-medium tracking-tight transition-all duration-150 ease-apple',
+                  'flex h-[28px] items-center gap-2 rounded-[7px] px-2.5 font-display text-[12px] font-medium tracking-tight transition-all duration-150 ease-apple',
                   isActive
                     ? isFocused
-                      ? 'bg-white/[0.09] text-fg-base shadow-[inset_0_1px_0_0_rgba(255,255,255,0.06),0_1px_2px_0_rgba(0,0,0,0.35)]'
-                      : 'bg-white/[0.04] text-fg-base/90'
-                    : 'text-fg-muted hover:bg-white/[0.04] hover:text-fg-base/90',
+                      ? 'bg-white/[0.11] text-fg-base shadow-[inset_0_1px_0_0_rgba(255,255,255,0.08),0_1px_3px_0_rgba(0,0,0,0.30)]'
+                      : 'bg-white/[0.05] text-fg-base/90'
+                    : 'text-fg-muted hover:bg-white/[0.05] hover:text-fg-base/90',
                 )}
               >
                 <Icon
-                  size={10}
-                  strokeWidth={2.2}
+                  size={11}
+                  strokeWidth={2.1}
                   className={cn(
                     'shrink-0 transition-colors',
                     isActive && isFocused ? 'text-accent-bright' : 'text-fg-subtle',
@@ -172,7 +172,7 @@ export function PaneTabStrip({ paneId, variant = 'leaf' }: Props) {
                       requestClose(tabId, tab.title);
                     }}
                     className={cn(
-                      'relative ml-0.5 flex h-3.5 w-3.5 items-center justify-center rounded-full',
+                      'relative ml-0.5 flex h-4 w-4 items-center justify-center rounded-full',
                       'transition-all duration-150 hover:bg-white/15 hover:text-fg-base',
                       dirty
                         ? 'text-accent hover:text-fg-base'
@@ -196,7 +196,7 @@ export function PaneTabStrip({ paneId, variant = 'leaf' }: Props) {
                   <span
                     aria-label="Unsaved changes"
                     title="Unsaved changes"
-                    className="relative ml-0.5 flex h-3.5 w-3.5 items-center justify-center"
+                    className="relative ml-0.5 flex h-4 w-4 items-center justify-center"
                   >
                     <span className="h-1.5 w-1.5 rounded-full bg-accent shadow-glow-sm" />
                   </span>
@@ -262,8 +262,8 @@ function RenameInput({
         }
       }}
       className={cn(
-        'h-[24px] w-[150px] rounded-[6px] border border-accent/45 bg-bg-base/80 px-2',
-        'font-display text-[11.5px] font-medium tracking-tight text-fg-base',
+        'h-[28px] w-[160px] rounded-[7px] border border-accent/45 bg-bg-base/80 px-2.5',
+        'font-display text-[12px] font-medium tracking-tight text-fg-base',
         'focus:outline-none focus:shadow-focus',
       )}
     />
