@@ -59,7 +59,7 @@ export async function ptyListShells(): Promise<ShellInfo[]> {
 }
 
 /** Stable id assigned to each AI CLI by the Rust detector. */
-export type AiCliId = 'claude-cli' | 'codex-cli' | 'opencode-cli';
+export type AiCliId = 'claude-cli' | 'codex-cli' | 'opencode-cli' | 'kimi-code-cli';
 
 /** One installed AI coding-agent CLI discovered on PATH. */
 export interface AiCliInfo {

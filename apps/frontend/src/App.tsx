@@ -291,6 +291,9 @@ export default function App() {
       case 'launch-opencode-cli':
         void launchCli('opencode-cli');
         return;
+      case 'launch-kimi-code-cli':
+        void launchCli('kimi-code-cli');
+        return;
     }
   };
 
