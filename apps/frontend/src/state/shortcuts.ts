@@ -20,7 +20,8 @@ export type ActionId =
   | 'ask-arc-ai'
   | 'launch-claude-cli'
   | 'launch-codex-cli'
-  | 'launch-opencode-cli';
+  | 'launch-opencode-cli'
+  | 'launch-kimi-code-cli';
 
 export type ActionCategory = 'Workspace' | 'Terminal' | 'Assistant' | 'SSH' | 'AI CLIs' | 'Help';
 
@@ -138,6 +139,12 @@ export const ACTION_META: Record<ActionId, ActionMeta> = {
     description: 'Open a new terminal tab running the OpenCode CLI.',
     category: 'AI CLIs',
   },
+  'launch-kimi-code-cli': {
+    id: 'launch-kimi-code-cli',
+    label: 'Launch Kimi Code',
+    description: 'Open a new terminal tab running the Kimi Code CLI.',
+    category: 'AI CLIs',
+  },
 };
 
 export const ACTION_ORDER: ActionId[] = [
@@ -157,6 +164,7 @@ export const ACTION_ORDER: ActionId[] = [
   'launch-claude-cli',
   'launch-codex-cli',
   'launch-opencode-cli',
+  'launch-kimi-code-cli',
 ];
 
 const mod = (extra: Partial<KeyBinding> = {}): Pick<KeyBinding, 'ctrl' | 'meta'> => ({
@@ -185,6 +193,7 @@ export const DEFAULT_BINDINGS: Record<ActionId, KeyBinding | null> = {
   'launch-claude-cli': null,
   'launch-codex-cli': null,
   'launch-opencode-cli': null,
+  'launch-kimi-code-cli': null,
 };
 
 interface ShortcutsState {

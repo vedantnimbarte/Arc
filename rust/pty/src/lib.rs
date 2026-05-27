@@ -352,16 +352,16 @@ fn which_in(exe: &str, dirs: &[std::path::PathBuf]) -> Option<std::path::PathBuf
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct AiCliInfo {
     /// Stable id used in settings + provider routing
-    /// (`"claude-cli"`, `"codex-cli"`, `"opencode-cli"`).
+    /// (`"claude-cli"`, `"codex-cli"`, `"opencode-cli"`, `"kimi-code-cli"`).
     pub id: String,
     pub label: String,
     pub path: String,
 }
 
 /// Probe `PATH` for known AI coding-agent CLIs (Claude Code, OpenAI Codex,
-/// OpenCode). Pure read — nothing is spawned, no env is mutated. Each tool
-/// may ship multiple binary names across platforms (e.g. `claude.cmd` vs
-/// `claude.exe` on Windows); the first match wins.
+/// OpenCode, Kimi Code). Pure read — nothing is spawned, no env is mutated.
+/// Each tool may ship multiple binary names across platforms (e.g. `claude.cmd`
+/// vs `claude.exe` on Windows); the first match wins.
 pub fn discover_ai_clis() -> Vec<AiCliInfo> {
     // (stable id, label, [candidate binaries in preference order])
     let candidates: &[(&str, &str, &[&str])] = if cfg!(windows) {
@@ -381,12 +381,27 @@ pub fn discover_ai_clis() -> Vec<AiCliInfo> {
                 "OpenCode",
                 &["opencode.cmd", "opencode.exe", "opencode.bat", "opencode"],
             ),
+            (
+                "kimi-code-cli",
+                "Kimi Code",
+                &[
+                    "kimi.cmd",
+                    "kimi.exe",
+                    "kimi.bat",
+                    "kimi",
+                    "kimicode.cmd",
+                    "kimicode.exe",
+                    "kimicode.bat",
+                    "kimicode",
+                ],
+            ),
         ]
     } else {
         &[
             ("claude-cli", "Claude Code", &["claude"]),
             ("codex-cli", "OpenAI Codex", &["codex"]),
             ("opencode-cli", "OpenCode", &["opencode"]),
+            ("kimi-code-cli", "Kimi Code", &["kimi", "kimicode"]),
         ]
     };
 

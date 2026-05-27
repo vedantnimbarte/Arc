@@ -74,7 +74,7 @@ import {
 } from '../state/shortcuts';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 
-type Pane = 'appearance' | 'shortcuts' | 'terminal' | 'agents' | 'providers' | 'about';
+type Pane = 'appearance' | 'themes' | 'shortcuts' | 'terminal' | 'agents' | 'providers' | 'about';
 
 export function SettingsPage() {
   const {
@@ -152,7 +152,8 @@ export function SettingsPage() {
       <div className="flex min-h-0 flex-1">
         <aside className="material-sidebar flex w-[200px] shrink-0 flex-col border-r border-border-hairline">
           <nav className="flex flex-col gap-0.5 p-2 pt-3">
-            <SidebarRow icon={Palette} label="Appearance" active={pane === 'appearance'} onClick={() => setPane('appearance')} />
+            <SidebarRow icon={Monitor} label="Appearance" active={pane === 'appearance'} onClick={() => setPane('appearance')} />
+            <SidebarRow icon={Palette} label="Themes" active={pane === 'themes'} onClick={() => setPane('themes')} />
             <SidebarRow icon={Keyboard} label="Shortcuts" active={pane === 'shortcuts'} onClick={() => setPane('shortcuts')} />
             <SidebarRow icon={TerminalIcon} label="Terminal" active={pane === 'terminal'} onClick={() => setPane('terminal')} />
             <SidebarRow icon={Bot} label="Agents" active={pane === 'agents'} onClick={() => setPane('agents')} />
@@ -182,18 +183,19 @@ export function SettingsPage() {
               {pane === 'appearance' && (
                 <AppearancePane
                   appearance={appearance}
-                  themeId={themeId}
                   fontId={fontId}
                   fontSize={fontSize}
                   launchAtLogin={launchAtLogin}
                   restoreWindowState={restoreWindowState}
                   onAppearanceChange={setAppearance}
-                  onThemeChange={setThemeId}
                   onFontChange={setFontId}
                   onFontSizeChange={setFontSize}
                   onLaunchAtLoginChange={setLaunchAtLogin}
                   onRestoreWindowStateChange={setRestoreWindowState}
                 />
+              )}
+              {pane === 'themes' && (
+                <ThemesPane themeId={themeId} onThemeChange={setThemeId} />
               )}
               {pane === 'shortcuts' && <ShortcutsPane />}
               {pane === 'terminal' && (
@@ -218,38 +220,33 @@ export function SettingsPage() {
 
 function AppearancePane({
   appearance,
-  themeId,
   fontId,
   fontSize,
   launchAtLogin,
   restoreWindowState,
   onAppearanceChange,
-  onThemeChange,
   onFontChange,
   onFontSizeChange,
   onLaunchAtLoginChange,
   onRestoreWindowStateChange,
 }: {
   appearance: Appearance;
-  themeId: string | null;
   fontId: string;
   fontSize: number;
   launchAtLogin: boolean;
   restoreWindowState: boolean;
   onAppearanceChange: (a: Appearance) => void;
-  onThemeChange: (id: string | null) => void;
   onFontChange: (id: string) => void;
   onFontSizeChange: (size: number) => void;
   onLaunchAtLoginChange: (on: boolean) => void;
   onRestoreWindowStateChange: (on: boolean) => void;
 }) {
-  const themes = listThemes();
   const showHidden = useFiles((s) => s.showHidden);
   const toggleHidden = useFiles((s) => s.toggleHidden);
 
   return (
     <div className="space-y-7">
-      <Section title="Appearance" hint="Choose how ARC looks. 'System' follows your OS color scheme.">
+      <Section title="Color Mode" hint="Choose how ARC looks. 'System' follows your OS color scheme.">
         <div className="grid grid-cols-3 gap-3">
           <AppearanceCard
             label="Light"
@@ -272,35 +269,6 @@ function AppearancePane({
             onPick={() => onAppearanceChange('system')}
             preview="system"
           />
-        </div>
-      </Section>
-
-      <Section
-        title="Theme"
-        hint="Pick a specific palette, or stick with the default dark/light pair from the mode above."
-      >
-        <div className="grid grid-cols-2 gap-3">
-          <ThemeCard
-            label="Default"
-            description="Follow the appearance mode."
-            active={themeId === null}
-            onPick={() => onThemeChange(null)}
-            swatches={['var(--bg-base)', 'var(--bg-panel)', 'var(--accent)']}
-          />
-          {themes.map((t) => (
-            <ThemeCard
-              key={t.id}
-              label={t.name}
-              description={t.author ? `by ${t.author}` : t.mode}
-              active={themeId === t.id}
-              onPick={() => onThemeChange(t.id)}
-              swatches={[
-                `rgb(${t.tokens.bgBase})`,
-                `rgb(${t.tokens.bgPanel})`,
-                `rgb(${t.tokens.accent})`,
-              ]}
-            />
-          ))}
         </div>
       </Section>
 
@@ -373,6 +341,51 @@ function AppearancePane({
             checked={restoreWindowState}
             onChange={() => onRestoreWindowStateChange(!restoreWindowState)}
           />
+        </div>
+      </Section>
+    </div>
+  );
+}
+
+// ─── Themes ─────────────────────────────────────────────────────────────────
+
+function ThemesPane({
+  themeId,
+  onThemeChange,
+}: {
+  themeId: string | null;
+  onThemeChange: (id: string | null) => void;
+}) {
+  const themes = listThemes();
+
+  return (
+    <div className="space-y-7">
+      <Section
+        title="Theme"
+        hint="Pick a specific palette, or stick with the default dark/light pair from the color mode above."
+      >
+        <div className="grid grid-cols-2 gap-3">
+          <ThemeCard
+            label="Default"
+            description="Follow the color mode."
+            active={themeId === null}
+            onPick={() => onThemeChange(null)}
+            swatches={['var(--bg-base)', 'var(--bg-panel)', 'var(--accent)']}
+          />
+          {themes.map((t) => (
+            <ThemeCard
+              key={t.id}
+              label={t.name}
+              description={t.author ? `by ${t.author}` : t.mode}
+              active={themeId === t.id}
+              onPick={() => onThemeChange(t.id)}
+              swatches={[
+                `rgb(${t.tokens.bgBase})`,
+                `rgb(${t.tokens.bgPanel})`,
+                `rgb(${t.tokens.accent})`,
+              ]}
+            />
+          ))}
         </div>
       </Section>
     </div>

@@ -1,5 +1,5 @@
 //! Local CLI provider — wraps an installed coding-agent CLI (Claude Code,
-//! OpenAI Codex, OpenCode) and streams its stdout back as chat chunks.
+//! OpenAI Codex, OpenCode, Kimi Code) and streams its stdout back as chat chunks.
 //!
 //! Trade-offs vs. the HTTP providers:
 //! - No multi-turn API. Each CLI manages its own session state; we collapse
@@ -24,6 +24,7 @@ pub enum LocalCliKind {
     ClaudeCode,
     Codex,
     OpenCode,
+    KimiCode,
 }
 
 impl LocalCliKind {
@@ -32,6 +33,7 @@ impl LocalCliKind {
             "claude-cli" => Some(Self::ClaudeCode),
             "codex-cli" => Some(Self::Codex),
             "opencode-cli" => Some(Self::OpenCode),
+            "kimi-code-cli" => Some(Self::KimiCode),
             _ => None,
         }
     }
@@ -41,6 +43,7 @@ impl LocalCliKind {
             Self::ClaudeCode => "claude-cli",
             Self::Codex => "codex-cli",
             Self::OpenCode => "opencode-cli",
+            Self::KimiCode => "kimi-code-cli",
         }
     }
 
@@ -68,6 +71,13 @@ impl LocalCliKind {
                     "opencode"
                 }
             }
+            Self::KimiCode => {
+                if cfg!(windows) {
+                    "kimi.cmd"
+                } else {
+                    "kimi"
+                }
+            }
         }
     }
 
@@ -82,6 +92,7 @@ impl LocalCliKind {
             ],
             Self::Codex => vec!["exec".into(), prompt.to_string()],
             Self::OpenCode => vec!["run".into(), prompt.to_string()],
+            Self::KimiCode => vec!["run".into(), prompt.to_string()],
         }
     }
 }

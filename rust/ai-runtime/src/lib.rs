@@ -130,7 +130,7 @@ pub fn provider(
         "ollama" => Ok(Box::new(OllamaProvider::new(base_url))),
         // `base_url` doubles as the optional explicit binary path for local
         // CLI providers — the settings UI surfaces it as "Custom binary path".
-        "claude-cli" | "codex-cli" | "opencode-cli" => {
+        "claude-cli" | "codex-cli" | "opencode-cli" | "kimi-code-cli" => {
             Ok(Box::new(LocalCliProvider::new(id, base_url)?))
         }
         other => Err(ProviderError::Other(format!("unknown provider: {other}"))),
