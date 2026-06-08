@@ -161,7 +161,14 @@ export function Editor({ filePath, tabId }: Props) {
               keymap.of(historyKeymap),
               saveKeymap,
               EditorView.lineWrapping,
-              syntaxHighlighting(catppuccinHighlight, { fallback: true }),
+              // Register as the PRIMARY (non-fallback) highlighter. basicSetup
+              // also ships `defaultHighlightStyle` as a fallback; if ours were
+              // also `{ fallback: true }` the two would tie and the
+              // higher-precedence default (light-theme #708/#a11 colors) would
+              // win, rendering dim, unreadable text on our dark background.
+              // A non-fallback highlighter makes CodeMirror ignore every
+              // fallback, so the Mocha palette below is what actually paints.
+              syntaxHighlighting(catppuccinHighlight),
               macTheme,
               langCompartment.current.of([]),
               EditorView.updateListener.of((u) => {
