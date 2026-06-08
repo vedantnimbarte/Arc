@@ -149,6 +149,18 @@ impl PtyManager {
         // the master see EOF when the child exits. On Windows it's a no-op.
         drop(pair.slave);
 
+        // On Windows, enroll the shell in a kill-on-close job object. If
+        // arc.exe goes away *without* running the graceful `kill_all`
+        // (a crash, or a dev-mode Ctrl+C on `tauri:dev`), the OS closes the
+        // job handle on process teardown and force-terminates every member —
+        // so we don't strand shells (and the work they spawned) in Task
+        // Manager. The graceful path additionally reaps each PTY's conhost.exe
+        // host via the master's Drop (ClosePseudoConsole).
+        #[cfg(windows)]
+        if let Some(pid) = child.process_id() {
+            win_job::assign(pid);
+        }
+
         let killer = child.clone_killer();
         let mut reader = pair.master.try_clone_reader().context("clone reader")?;
         let writer = pair.master.take_writer().context("take writer")?;
@@ -245,8 +257,105 @@ impl PtyManager {
         Ok(())
     }
 
+    /// Kill every live session. Called on app shutdown so we don't orphan
+    /// shells and their Windows conhost.exe hosts when the process exits.
+    ///
+    /// Removing each session from the map drops its `Arc<Session>` — and with
+    /// it the PTY master. On Windows the master's Drop runs
+    /// `ClosePseudoConsole`, which is what actually reaps the per-PTY
+    /// conhost.exe. We kill the child first so the shell exits promptly rather
+    /// than lingering until the pseudoconsole teardown notices it.
+    pub fn kill_all(&self) {
+        let ids: Vec<String> = self.sessions.iter().map(|e| e.key().clone()).collect();
+        let n = ids.len();
+        for id in &ids {
+            if let Some((_, session)) = self.sessions.remove(id) {
+                let _ = session.killer.lock().kill();
+                // `session` drops here → master drops → ClosePseudoConsole.
+            }
+        }
+        if n > 0 {
+            tracing::info!(count = n, "killed all pty sessions on shutdown");
+        }
+    }
+
     pub fn count(&self) -> usize {
         self.sessions.len()
+    }
+}
+
+/// Process-wide Windows job object that all PTY shells are enrolled into. The
+/// job is configured with `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`, so when the
+/// last handle to it closes — which the OS does automatically when arc.exe
+/// exits for *any* reason — every member process is terminated. This is the
+/// backstop for non-graceful shutdowns (crash / Ctrl+C) that never reach
+/// [`PtyManager::kill_all`]. Created lazily on first spawn and intentionally
+/// leaked for the process lifetime (we never want the job to close early).
+#[cfg(windows)]
+mod win_job {
+    use std::ffi::c_void;
+    use std::sync::OnceLock;
+
+    use windows_sys::Win32::Foundation::{CloseHandle, HANDLE};
+    use windows_sys::Win32::System::JobObjects::{
+        AssignProcessToJobObject, CreateJobObjectW, JobObjectExtendedLimitInformation,
+        SetInformationJobObject, JOBOBJECT_EXTENDED_LIMIT_INFORMATION,
+        JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
+    };
+    use windows_sys::Win32::System::Threading::{
+        OpenProcess, PROCESS_SET_QUOTA, PROCESS_TERMINATE,
+    };
+
+    struct Job(HANDLE);
+    // The handle is only ever read (passed to AssignProcessToJobObject) and is
+    // never mutated after init, so sharing it across threads is sound.
+    unsafe impl Send for Job {}
+    unsafe impl Sync for Job {}
+
+    static JOB: OnceLock<Option<Job>> = OnceLock::new();
+
+    fn job_handle() -> Option<HANDLE> {
+        JOB.get_or_init(|| unsafe {
+            let handle = CreateJobObjectW(std::ptr::null(), std::ptr::null());
+            if handle.is_null() {
+                tracing::warn!("CreateJobObject failed; pty crash cleanup disabled");
+                return None;
+            }
+            let mut info: JOBOBJECT_EXTENDED_LIMIT_INFORMATION = std::mem::zeroed();
+            info.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+            let ok = SetInformationJobObject(
+                handle,
+                JobObjectExtendedLimitInformation,
+                &info as *const _ as *const c_void,
+                std::mem::size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>() as u32,
+            );
+            if ok == 0 {
+                tracing::warn!("SetInformationJobObject failed; pty crash cleanup disabled");
+                CloseHandle(handle);
+                return None;
+            }
+            Some(Job(handle))
+        })
+        .as_ref()
+        .map(|j| j.0)
+    }
+
+    /// Best-effort: add the process `pid` to the kill-on-close job. Failures
+    /// are logged at debug and otherwise ignored — the graceful `kill_all`
+    /// path still cleans this session up on a normal shutdown.
+    pub fn assign(pid: u32) {
+        let Some(job) = job_handle() else { return };
+        unsafe {
+            let proc = OpenProcess(PROCESS_SET_QUOTA | PROCESS_TERMINATE, 0, pid);
+            if proc.is_null() {
+                tracing::debug!(pid, "OpenProcess for job assignment failed");
+                return;
+            }
+            if AssignProcessToJobObject(job, proc) == 0 {
+                tracing::debug!(pid, "AssignProcessToJobObject failed");
+            }
+            CloseHandle(proc);
+        }
     }
 }
 

@@ -7,7 +7,6 @@ import {
   fsDefaultRoot,
   fsReadDir,
   isTauri,
-  onPtyData,
   onPtyExit,
   ptyKill,
   ptyResize,
@@ -207,6 +206,84 @@ export function Terminal({ sessionKey }: Props) {
         term.write('\r\n\x1b[38;2;212;214;220m›\x1b[0m ');
         return;
       }
+      // ─── OSC 133 shell-integration tracking ────────────────────────────
+      // Declared *before* the spawn so the data callback we hand to
+      // `ptySpawn` can close over them. We sniff the raw decoded stream for
+      // `\e]133;X[;...]ST` markers so we can pair each command with its exit
+      // code + a short output excerpt. xterm doesn't render unknown OSCs, so
+      // leaving the bytes in the chunk we hand to `term.write` is harmless.
+      //
+      // Format:
+      //   A — prompt start
+      //   B — command start (right after the prompt — buffer reset)
+      //   C — pre-execution (output begins)
+      //   D[;<exit>] — command finished, optional decimal exit code
+      const OSC_133 = /\x1b\]133;([^\x07\x1b]*)(?:\x07|\x1b\\)/g;
+      const OUTPUT_CAP = 4 * 1024;
+      const osc = { capturing: false, buf: '' };
+      // Hoisted here so both the OSC chunk parser (which finalizes the
+      // row on `D`) and the keystroke loop (which sets it on `\r`)
+      // share the same reference.
+      let lastCommandId: number | null = null;
+      const handleChunkText = (text: string) => {
+        if (!text.includes('\x1b]133;')) {
+          if (osc.capturing) {
+            osc.buf += text;
+            if (osc.buf.length > OUTPUT_CAP) osc.buf = osc.buf.slice(0, OUTPUT_CAP);
+          }
+          return;
+        }
+        let lastIdx = 0;
+        OSC_133.lastIndex = 0;
+        let m: RegExpExecArray | null;
+        while ((m = OSC_133.exec(text)) !== null) {
+          const between = text.slice(lastIdx, m.index);
+          if (osc.capturing && between) {
+            osc.buf += between;
+            if (osc.buf.length > OUTPUT_CAP) osc.buf = osc.buf.slice(0, OUTPUT_CAP);
+          }
+          const fields = m[1]!.split(';');
+          const verb = fields[0] ?? '';
+          if (verb === 'C') {
+            osc.capturing = true;
+            osc.buf = '';
+          } else if (verb === 'D') {
+            osc.capturing = false;
+            const exitStr = fields[1];
+            const exit = exitStr === undefined ? null : Number.parseInt(exitStr, 10);
+            const code = Number.isFinite(exit as number) ? (exit as number) : null;
+            const id = lastCommandId;
+            const excerpt = osc.buf;
+            osc.buf = '';
+            lastCommandId = null;
+            if (id !== null) {
+              void sessionCommandFinish(id, code, excerpt.length > 0 ? excerpt : null).catch(
+                () => {},
+              );
+            }
+          }
+          lastIdx = m.index + m[0].length;
+        }
+        if (osc.capturing) {
+          const rest = text.slice(lastIdx);
+          if (rest) {
+            osc.buf += rest;
+            if (osc.buf.length > OUTPUT_CAP) osc.buf = osc.buf.slice(0, OUTPUT_CAP);
+          }
+        }
+      };
+
+      // Track whether we ever saw output from the shell. If the PTY exits
+      // with no output at all, the user is left staring at an empty pane and
+      // has no idea what went wrong — surface a clear diagnostic in that case.
+      let sawAnyData = false;
+      const onPtyChunk = (chunk: Uint8Array) => {
+        sawAnyData = true;
+        const text = decoder.decode(chunk, { stream: true });
+        handleChunkText(text);
+        term.write(text);
+      };
+
       try {
         // Snapshot the picker choice at spawn time. `null` = let Rust
         // pick the OS default (COMSPEC / $SHELL). Changing the setting
@@ -216,115 +293,22 @@ export function Terminal({ sessionKey }: Props) {
         // the global default shell.
         const tab = useWorkspace.getState().tabs.find((t) => t.id === sessionKey);
         const chosenShell = tab?.shellOverride ?? useSettings.getState().defaultShell;
-        ptyId = await ptySpawn({
-          shell: chosenShell && chosenShell.length > 0 ? chosenShell : null,
-          cwd: initialCwd.current ?? null,
-          cols: term.cols,
-          rows: term.rows,
-        });
+        // `onPtyChunk` is wired to the output channel *inside* ptySpawn
+        // before the pty_spawn command runs, so no early output is dropped.
+        ptyId = await ptySpawn(
+          {
+            shell: chosenShell && chosenShell.length > 0 ? chosenShell : null,
+            cwd: initialCwd.current ?? null,
+            cols: term.cols,
+            rows: term.rows,
+          },
+          onPtyChunk,
+        );
         if (disposed) {
           if (ptyId) await ptyKill(ptyId).catch(() => {});
           return;
         }
 
-        // OSC 133 shell-integration tracking. We sniff the raw decoded
-        // stream for `\e]133;X[;...]ST` markers so we can pair each command
-        // with its exit code + a short output excerpt. xterm doesn't
-        // render unknown OSCs, so leaving the bytes in the chunk we hand
-        // to `term.write` is harmless.
-        //
-        // Format:
-        //   A — prompt start
-        //   B — command start (right after the prompt — buffer reset)
-        //   C — pre-execution (output begins)
-        //   D[;<exit>] — command finished, optional decimal exit code
-        const OSC_133 = /\x1b\]133;([^\x07\x1b]*)(?:\x07|\x1b\\)/g;
-        const OUTPUT_CAP = 4 * 1024;
-        const osc = { capturing: false, buf: '' };
-        // Hoisted here so both the OSC chunk parser (which finalizes the
-        // row on `D`) and the keystroke loop (which sets it on `\r`)
-        // share the same reference.
-        let lastCommandId: number | null = null;
-        // Block tracking — mirrors lastCommandId but keyed off the new
-        // `useBlocks` store. `pendingCommand` holds the most recently
-        // Enter-flushed line so the block created on the next OSC 133 `C`
-        // can attach its command text.
-        let currentBlockId: string | null = null;
-        let pendingCommand = '';
-        const handleChunkText = (text: string) => {
-          if (!text.includes('\x1b]133;')) {
-            if (osc.capturing) {
-              osc.buf += text;
-              if (osc.buf.length > OUTPUT_CAP) osc.buf = osc.buf.slice(0, OUTPUT_CAP);
-            }
-            return;
-          }
-          let lastIdx = 0;
-          OSC_133.lastIndex = 0;
-          let m: RegExpExecArray | null;
-          while ((m = OSC_133.exec(text)) !== null) {
-            const between = text.slice(lastIdx, m.index);
-            if (osc.capturing && between) {
-              osc.buf += between;
-              if (osc.buf.length > OUTPUT_CAP) osc.buf = osc.buf.slice(0, OUTPUT_CAP);
-            }
-            const fields = m[1]!.split(';');
-            const verb = fields[0] ?? '';
-            if (verb === 'C') {
-              osc.capturing = true;
-              osc.buf = '';
-              // Open a fresh block for the just-started command. Attach the
-              // command text the keystroke loop already captured on Enter.
-              currentBlockId = useBlocks.getState().start(sessionKey);
-              if (pendingCommand) {
-                useBlocks
-                  .getState()
-                  .setCommand(sessionKey, currentBlockId, pendingCommand);
-                pendingCommand = '';
-              }
-            } else if (verb === 'D') {
-              osc.capturing = false;
-              const exitStr = fields[1];
-              const exit = exitStr === undefined ? null : Number.parseInt(exitStr, 10);
-              const code = Number.isFinite(exit as number) ? (exit as number) : null;
-              const id = lastCommandId;
-              const excerpt = osc.buf;
-              osc.buf = '';
-              lastCommandId = null;
-              if (id !== null) {
-                void sessionCommandFinish(id, code, excerpt.length > 0 ? excerpt : null).catch(
-                  () => {},
-                );
-              }
-              if (currentBlockId) {
-                useBlocks.getState().finish(sessionKey, currentBlockId, code, excerpt);
-                currentBlockId = null;
-              }
-            }
-            lastIdx = m.index + m[0].length;
-          }
-          if (osc.capturing) {
-            const rest = text.slice(lastIdx);
-            if (rest) {
-              osc.buf += rest;
-              if (osc.buf.length > OUTPUT_CAP) osc.buf = osc.buf.slice(0, OUTPUT_CAP);
-            }
-          }
-        };
-
-        // Track whether we ever saw output from the shell. If the PTY
-        // exits with no output at all, the user is left staring at an
-        // empty pane and has no idea what went wrong — surface a clear
-        // diagnostic in that case instead.
-        let sawAnyData = false;
-        unlistens.push(
-          await onPtyData(ptyId, (chunk) => {
-            sawAnyData = true;
-            const text = decoder.decode(chunk, { stream: true });
-            handleChunkText(text);
-            term.write(text);
-          }),
-        );
         unlistens.push(
           await onPtyExit(ptyId, (code) => {
             if (!sawAnyData) {

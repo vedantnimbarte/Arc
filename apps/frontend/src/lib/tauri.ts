@@ -1,4 +1,4 @@
-import { invoke } from '@tauri-apps/api/core';
+import { Channel, invoke } from '@tauri-apps/api/core';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import type { McpNotification, McpTool } from '@arc/mcp';
 
@@ -15,18 +15,30 @@ export interface PtySpawnOptions {
   rows: number;
 }
 
-export interface PtyDataEvent {
-  id: PtyId;
-  bytes: number[];
-}
-
 export interface PtyExitEvent {
   id: PtyId;
   code: number | null;
 }
 
-export async function ptySpawn(opts: PtySpawnOptions): Promise<PtyId> {
-  return invoke<PtyId>('pty_spawn', { opts });
+/**
+ * Spawn a PTY and stream its output to `onData`.
+ *
+ * Output flows over a per-spawn `Channel` carrying raw bytes — point-to-point
+ * (not broadcast to every window) and without serializing each byte as a JSON
+ * number. The channel callback is registered synchronously here, before the
+ * `pty_spawn` command runs, so no early output can be dropped.
+ */
+export async function ptySpawn(
+  opts: PtySpawnOptions,
+  onData: (chunk: Uint8Array) => void,
+): Promise<PtyId> {
+  const channel = new Channel<ArrayBuffer>();
+  channel.onmessage = (message) => {
+    // Raw-byte channel messages arrive as an ArrayBuffer regardless of size
+    // (large chunks via the fetch path, small ones via an inline buffer).
+    onData(new Uint8Array(message));
+  };
+  return invoke<PtyId>('pty_spawn', { opts, onData: channel });
 }
 
 export async function ptyWrite(id: PtyId, data: string): Promise<void> {
@@ -75,15 +87,6 @@ export interface AiCliInfo {
  */
 export async function ptyListAiClis(): Promise<AiCliInfo[]> {
   return invoke<AiCliInfo[]>('pty_list_ai_clis');
-}
-
-export async function onPtyData(
-  id: PtyId,
-  handler: (chunk: Uint8Array) => void,
-): Promise<UnlistenFn> {
-  return listen<PtyDataEvent>(`pty://data/${id}`, (event) => {
-    handler(new Uint8Array(event.payload.bytes));
-  });
 }
 
 export async function onPtyExit(

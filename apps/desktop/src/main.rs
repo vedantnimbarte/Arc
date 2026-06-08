@@ -57,7 +57,7 @@ fn main() {
         .with_target(true)
         .init();
 
-    tauri::Builder::default()
+    let app = tauri::Builder::default()
         // Auto-launch at login (toggleable from Settings → Appearance).
         // The plugin only flips OS-level autostart when the frontend calls
         // its `enable()` / `disable()` JS API; registering is otherwise
@@ -253,6 +253,20 @@ fn main() {
             tracing::info!("arc desktop started");
             Ok(())
         })
-        .run(tauri::generate_context!())
-        .expect("error while running ARC");
+        .build(tauri::generate_context!())
+        .expect("error while building ARC");
+
+    // Reap every live PTY before the process exits. Tauri tears the app down
+    // via `process::exit`, which skips Rust destructors — so without this the
+    // PtyManager's masters never drop, `ClosePseudoConsole` never runs, and
+    // each tab's conhost.exe (plus its shell) is orphaned in Task Manager.
+    // `ExitRequested` fires once the last window closes; `Exit` is the final
+    // event before teardown. `kill_all` is idempotent, so covering both is
+    // safe.
+    app.run(|app_handle, event| match event {
+        tauri::RunEvent::ExitRequested { .. } | tauri::RunEvent::Exit => {
+            app_handle.state::<PtyState>().manager.kill_all();
+        }
+        _ => {}
+    });
 }

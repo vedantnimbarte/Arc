@@ -18,3 +18,13 @@ serde.workspace = true
 tokio = { workspace = true, features = ["sync", "rt"] }
 tracing.workspace = true
 uuid.workspace = true
+
+# Windows job objects — used to force-reap orphaned shells + their conhost.exe
+# hosts if arc.exe dies without running the graceful `kill_all` (crash / Ctrl+C).
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.59", features = [
+    "Win32_Foundation",
+    "Win32_Security",
+    "Win32_System_JobObjects",
+    "Win32_System_Threading",
+] }

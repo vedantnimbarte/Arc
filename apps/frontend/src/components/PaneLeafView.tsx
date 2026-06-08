@@ -44,11 +44,21 @@ export function PaneLeafView({ paneId, hostsRef, stageRef, header }: Props) {
   const enterCount = useRef(0);
   const [zone, setZone] = useState<DropZone | null>(null);
 
+  const activeTabId = leaf?.activeTabId ?? null;
+  // Resolve the host node during render so it can be an effect dependency.
+  // App.tsx creates host divs lazily in its render body; on launch the host
+  // for a restored tab lands in the *same* commit that first points this
+  // leaf at it — but the active tab id can be unchanged from the seed layout
+  // (the default first terminal keeps the id `term-1`). Keying the reparent
+  // effect on the host node — not just the tab id — guarantees we re-run once
+  // the host actually exists, instead of stranding it in the hidden stage
+  // forever (a blank, non-interactive pane).
+  const activeHost = activeTabId ? hostsRef.current.get(activeTabId) ?? null : null;
+
   useLayoutEffect(() => {
     const container = contentRef.current;
-    const activeTabId = leaf?.activeTabId;
     if (!container || !activeTabId) return;
-    const host = hostsRef.current.get(activeTabId);
+    const host = activeHost ?? hostsRef.current.get(activeTabId);
     if (!host) return;
 
     // If the host is already inside this leaf, nothing to do.
@@ -73,7 +83,7 @@ export function PaneLeafView({ paneId, hostsRef, stageRef, header }: Props) {
         stage.appendChild(host);
       }
     };
-  }, [leaf?.activeTabId, hostsRef, stageRef]);
+  }, [paneId, activeTabId, activeHost, hostsRef, stageRef]);
 
   const hasTabDrag = (e: React.DragEvent) => e.dataTransfer.types.includes('arc/tab');
 
