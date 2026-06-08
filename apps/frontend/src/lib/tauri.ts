@@ -264,55 +264,6 @@ export async function shellOpenExternal(url: string): Promise<void> {
   await invoke('shell_open_external', { url });
 }
 
-// ----- System monitor ---------------------------------------------------
-
-export interface SystemSnapshot {
-  cpu_percent: number;
-  cpu_count: number;
-  ram_used_bytes: number;
-  ram_total_bytes: number;
-  disk_used_bytes: number;
-  disk_total_bytes: number;
-  net_rx_bytes_per_sec: number;
-  net_tx_bytes_per_sec: number;
-  process_count: number;
-}
-
-export interface ProcessInfo {
-  pid: number;
-  name: string;
-  cpu_percent: number;
-  memory_bytes: number;
-  user: string | null;
-}
-
-const EMPTY_SNAPSHOT: SystemSnapshot = {
-  cpu_percent: 0,
-  cpu_count: 0,
-  ram_used_bytes: 0,
-  ram_total_bytes: 0,
-  disk_used_bytes: 0,
-  disk_total_bytes: 0,
-  net_rx_bytes_per_sec: 0,
-  net_tx_bytes_per_sec: 0,
-  process_count: 0,
-};
-
-export async function systemSnapshot(): Promise<SystemSnapshot> {
-  if (!isTauri) return EMPTY_SNAPSHOT;
-  return invoke<SystemSnapshot>('system_snapshot');
-}
-
-export async function systemProcessesList(): Promise<ProcessInfo[]> {
-  if (!isTauri) return [];
-  return invoke<ProcessInfo[]>('system_processes_list');
-}
-
-export async function systemProcessKill(pid: number): Promise<void> {
-  if (!isTauri) return;
-  await invoke('system_process_kill', { pid });
-}
-
 // ----- HTTP client (API Client tab) -------------------------------------
 
 export interface HttpHeaderKV {
@@ -744,7 +695,7 @@ export async function llmStream(
 // the Rust DTOs serialized via serde defaults. Outer invoke arguments use
 // camelCase — Tauri converts them to snake_case Rust params automatically.
 
-export type TabKind = 'terminal' | 'editor' | 'preview' | 'apiclient' | 'sysmonitor' | 'ssh' | 'diff';
+export type TabKind = 'terminal' | 'editor' | 'preview' | 'apiclient' | 'ssh' | 'diff';
 
 export interface TabInput {
   id: string;

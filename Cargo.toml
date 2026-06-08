@@ -9,7 +9,6 @@ members = [
     "rust/filesystem",
     "rust/git",
     "rust/http-client",
-    "rust/system-monitor",
     "rust/ssh",
     "rust/project-config",
     "rust/git-host",
@@ -103,7 +102,6 @@ arc-ai-runtime = { path = "rust/ai-runtime" }
 arc-filesystem = { path = "rust/filesystem" }
 arc-git = { path = "rust/git" }
 arc-http-client = { path = "rust/http-client" }
-arc-system-monitor = { path = "rust/system-monitor" }
 arc-ssh = { path = "rust/ssh" }
 arc-project-config = { path = "rust/project-config" }
 arc-git-host = { path = "rust/git-host" }

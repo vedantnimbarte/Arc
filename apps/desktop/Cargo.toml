@@ -28,7 +28,6 @@ arc-ai-runtime = { workspace = true }
 arc-filesystem = { workspace = true }
 arc-git = { workspace = true }
 arc-http-client = { workspace = true }
-arc-system-monitor = { workspace = true }
 arc-ssh = { workspace = true }
 arc-project-config = { workspace = true }
 arc-git-host = { workspace = true }

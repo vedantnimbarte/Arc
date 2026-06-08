@@ -3,7 +3,6 @@ import { createPortal } from 'react-dom';
 import { Terminal } from './components/Terminal';
 import { Preview } from './components/Preview';
 import { ApiClient } from './components/ApiClient';
-import { SystemMonitor } from './components/SystemMonitor';
 import { SshTab } from './components/ssh/SshTab';
 import { SshPanel } from './components/ssh/SshPanel';
 import { SshSessionLogPanel } from './components/ssh/SshSessionLogDrawer';
@@ -125,8 +124,6 @@ export default function App() {
         <Preview tabId={tab.id} />
       ) : tab.kind === 'apiclient' ? (
         <ApiClient tabId={tab.id} />
-      ) : tab.kind === 'sysmonitor' ? (
-        <SystemMonitor tabId={tab.id} />
       ) : tab.kind === 'ssh' && tab.sshHostId ? (
         <SshTab sessionKey={tab.id} hostId={tab.sshHostId} />
       ) : tab.kind === 'diff' && tab.filePath && tab.diffRoot ? (

@@ -22,7 +22,6 @@ import { useFiles } from '../state/files';
 import { useSsh } from '../state/ssh';
 import { cn } from '../lib/cn';
 import { PaneTabStrip } from './PaneTabStrip';
-import { SystemMonitorButton } from './SystemMonitorButton';
 import {
   fsPickFolder,
   fsWriteFile,
@@ -274,7 +273,6 @@ export function TabBar({
             <GitBranch size={13} strokeWidth={1.9} />
           </button>
         )}
-        <SystemMonitorButton />
         <button
           onClick={toggleSshPanel}
           className="group flex h-8 w-8 items-center justify-center rounded-md text-fg-muted transition-all duration-200 ease-apple hover:bg-white/[0.08] hover:text-fg-base active:bg-white/[0.12]"

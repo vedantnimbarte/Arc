@@ -13,7 +13,7 @@ import { useFiles } from './files';
 export interface Tab {
   id: string;
   title: string;
-  kind: 'terminal' | 'editor' | 'preview' | 'apiclient' | 'sysmonitor' | 'ssh' | 'diff';
+  kind: 'terminal' | 'editor' | 'preview' | 'apiclient' | 'ssh' | 'diff';
   /** PTY id for terminal tabs. Transient — stripped from persisted state. */
   ptyId?: string;
   /** Absolute path for editor tabs (read on mount). */
@@ -125,9 +125,6 @@ interface WorkspaceState {
   setPreviewUrl: (id: string, url: string) => void;
   /** Open a new API Client tab. */
   openApiClient: () => string;
-  /** Open a new System Resources tab (or focus the existing one — only one
-   *  makes sense at a time). */
-  openSystemMonitor: () => string;
   /** Open a new SSH tab for `host`. The tab spawns an xterm and dials via
    *  the SSH store on mount. Sets `sshHostId` on the tab; `sshSessionId`
    *  is filled once the connect resolves. */
@@ -576,23 +573,6 @@ export const useWorkspace = create<WorkspaceState>()((set, get) => ({
       id,
       title: 'API Client',
       kind: 'apiclient',
-    };
-    get().addTab(tab);
-    return id;
-  },
-  openSystemMonitor: () => {
-    // Single-instance semantics: if a System Resources tab already exists,
-    // just focus it instead of spawning a duplicate.
-    const existing = get().tabs.find((t) => t.kind === 'sysmonitor');
-    if (existing) {
-      get().setActive(existing.id);
-      return existing.id;
-    }
-    const id = `sysmon-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
-    const tab: Tab = {
-      id,
-      title: 'System Resources',
-      kind: 'sysmonitor',
     };
     get().addTab(tab);
     return id;

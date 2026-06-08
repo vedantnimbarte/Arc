@@ -16,7 +16,6 @@ pub enum TabKind {
     Editor,
     Preview,
     Apiclient,
-    Sysmonitor,
     Ssh,
 }
 
@@ -27,7 +26,6 @@ impl TabKind {
             TabKind::Editor => "editor",
             TabKind::Preview => "preview",
             TabKind::Apiclient => "apiclient",
-            TabKind::Sysmonitor => "sysmonitor",
             TabKind::Ssh => "ssh",
         }
     }
@@ -37,7 +35,6 @@ impl TabKind {
             "editor" => TabKind::Editor,
             "preview" => TabKind::Preview,
             "apiclient" => TabKind::Apiclient,
-            "sysmonitor" => TabKind::Sysmonitor,
             "ssh" => TabKind::Ssh,
             // Anything else (including stray data) defaults to terminal —
             // the schema CHECK prevents storage of other values, so this
