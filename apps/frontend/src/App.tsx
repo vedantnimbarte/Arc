@@ -30,12 +30,11 @@ import {
   type ActionId,
 } from './state/shortcuts';
 import { useCommands, type CommandAction, type CommandGroup } from './state/commands';
-import { useBlocks } from './state/blocks';
 import { WorktreePanel } from './components/git/WorktreePanel';
 import { CherryPickDialog } from './components/git/CherryPickDialog';
 import { RebasePanel } from './components/git/RebasePanel';
 import { PrPanel } from './components/git/PrPanel';
-import { FolderTree, GitPullRequest, Layers, ListOrdered } from 'lucide-react';
+import { FolderTree, GitPullRequest, ListOrdered } from 'lucide-react';
 // Side-effect import: subscribes to file-tree root changes and keeps the
 // project-config store fresh. Doesn't render anything itself.
 import './state/projectConfig';
@@ -297,16 +296,6 @@ export default function App() {
     }
   };
 
-  // Listen for `arc:open-chat` from components that aren't passed setChatOpen
-  // — currently the BlocksDrawer when the user hits "Ask ARC" on a block.
-  // They've already staged pendingContext on the chat store; we just open
-  // the panel and let it pick up the context on next render.
-  useEffect(() => {
-    const onOpenChat = () => setChatOpen(true);
-    window.addEventListener('arc:open-chat', onOpenChat);
-    return () => window.removeEventListener('arc:open-chat', onOpenChat);
-  }, []);
-
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       // Esc closes the chat popover when it has focus / is visible
@@ -350,22 +339,6 @@ export default function App() {
   // ActionIds later if they earn a shortcut.
   useEffect(() => {
     const extras: CommandAction[] = [
-      {
-        id: 'terminal.toggle-blocks',
-        title: 'Toggle Command Blocks',
-        group: 'Terminal',
-        keywords: ['blocks', 'drawer', 'history', 'output'],
-        icon: Layers,
-        when: () => {
-          const { tabs, activeTabId } = useWorkspace.getState();
-          const tab = tabs.find((t) => t.id === activeTabId);
-          return tab?.kind === 'terminal' || tab?.kind === 'ssh';
-        },
-        run: () => {
-          const { activeTabId } = useWorkspace.getState();
-          if (activeTabId) useBlocks.getState().toggleDrawer(activeTabId);
-        },
-      },
       {
         id: 'git.manage-worktrees',
         title: 'Manage Worktrees',

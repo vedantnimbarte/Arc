@@ -16,12 +16,10 @@ import {
   sessionCommandLog,
   type PtyId,
 } from '../lib/tauri';
-import { useBlocks } from '../state/blocks';
 import { useFiles } from '../state/files';
 import { useSelection } from '../state/selection';
 import { useSettings } from '../state/settings';
 import { useWorkspace } from '../state/workspace';
-import { BlocksDrawer } from './BlocksDrawer';
 import { getFont, resolveActiveTheme } from '../themes';
 
 interface Props {
@@ -465,10 +463,6 @@ export function Terminal({ sessionKey }: Props) {
               const trimmed = cmdBuffer.trim();
               cmdBuffer = '';
               if (trimmed.length === 0) continue;
-              // Stash for the next OSC 133 `C` so the block carries the
-              // command text the user actually typed. Cheap fallback path
-              // when shell integration doesn't include the command in `B`.
-              pendingCommand = trimmed;
               const { activeTabId } = useWorkspace.getState();
               const { sessionId } = useWorkspace.getState();
               const cwd = useFiles.getState().root;
@@ -561,9 +555,6 @@ export function Terminal({ sessionKey }: Props) {
       unlistens.forEach((u) => u());
       if (ptyId) void ptyKill(ptyId).catch(() => {});
       useWorkspace.getState().setTabPtyId(sessionKey, undefined);
-      // Drop captured blocks for this session. Cheap; the drawer goes
-      // away with the tab anyway.
-      useBlocks.getState().clearSession(sessionKey);
       // Tear the WebGL addon down ourselves first; otherwise xterm's
       // AddonManager runs it after the canvas is gone and throws.
       disposeWebgl();
@@ -583,9 +574,6 @@ export function Terminal({ sessionKey }: Props) {
         className="selectable h-full w-full"
         data-session={sessionKey}
       />
-      {/* Bottom drawer + chevron toggle. Both float over the xterm canvas;
-          the canvas owns its own scrollback and the drawer is overlaid. */}
-      <BlocksDrawer sessionKey={sessionKey} />
     </div>
   );
 }
