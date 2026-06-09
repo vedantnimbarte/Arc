@@ -761,6 +761,22 @@ export const useWorkspace = create<WorkspaceState>()((set, get) => ({
               /* corrupt blob — treat as no host (user can edit) */
             }
           }
+          // Diff tabs reuse the same opaque blob to carry the diff root +
+          // scope so they restore against the right worktree on reopen.
+          let diffRoot: string | undefined;
+          let diffScope: 'worktree' | 'staged' | 'head' | undefined;
+          if (t.kind === 'diff' && t.apiclient_state_json) {
+            try {
+              const parsed = JSON.parse(t.apiclient_state_json) as {
+                diffRoot?: string;
+                diffScope?: 'worktree' | 'staged' | 'head';
+              };
+              diffRoot = parsed.diffRoot;
+              diffScope = parsed.diffScope;
+            } catch {
+              /* corrupt blob — diff tab will be inert until reopened */
+            }
+          }
           return {
             id: t.id,
             title: t.title,
@@ -770,6 +786,8 @@ export const useWorkspace = create<WorkspaceState>()((set, get) => ({
             apiClientState:
               t.kind === 'apiclient' ? t.apiclient_state_json ?? undefined : undefined,
             sshHostId,
+            diffRoot,
+            diffScope,
           };
         });
         activeTabId =
@@ -870,14 +888,17 @@ function toTabInputs(tabs: Tab[]): TabInput[] {
     kind: t.kind,
     file_path: t.filePath ?? null,
     preview_url: t.previewUrl ?? null,
-    // The opaque JSON column is shared between API Client and SSH tabs;
-    // each kind stores its own shape. PTY/editor/preview tabs leave it null.
+    // The opaque JSON column is shared between API Client, SSH, and diff
+    // tabs; each kind stores its own shape. PTY/editor/preview tabs leave
+    // it null.
     apiclient_state_json:
       t.kind === 'apiclient'
         ? t.apiClientState ?? null
         : t.kind === 'ssh' && t.sshHostId
           ? JSON.stringify({ sshHostId: t.sshHostId })
-          : null,
+          : t.kind === 'diff' && t.diffRoot
+            ? JSON.stringify({ diffRoot: t.diffRoot, diffScope: t.diffScope ?? 'worktree' })
+            : null,
   }));
 }
 
