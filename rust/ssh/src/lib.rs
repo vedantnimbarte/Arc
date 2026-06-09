@@ -111,7 +111,10 @@ struct SessionEntry {
 
 #[derive(Default)]
 pub struct SshManager {
-    sessions: DashMap<String, SessionEntry>,
+    // Arc so the per-session driver task can hold a handle and remove its
+    // own entry when the session ends for ANY reason (remote close, network
+    // drop, write error) — not just the explicit `close()` command.
+    sessions: Arc<DashMap<String, SessionEntry>>,
 }
 
 impl SshManager {
@@ -236,8 +239,10 @@ impl SshManager {
         );
 
         let driver_id = id.clone();
+        let sessions = self.sessions.clone();
         tokio::spawn(async move {
-            drive_session(driver_id, handle, channel, cmd_rx, data_tx, log_tx, exit_tx).await;
+            drive_session(driver_id, handle, channel, cmd_rx, data_tx, log_tx, exit_tx, sessions)
+                .await;
         });
 
         Ok(SshConnectResult {
@@ -286,6 +291,7 @@ async fn drive_session(
     data_tx: mpsc::Sender<Vec<u8>>,
     log_tx: mpsc::Sender<SshLogEvent>,
     exit_tx: oneshot::Sender<Option<i32>>,
+    sessions: Arc<DashMap<String, SessionEntry>>,
 ) {
     let mut exit_code: Option<i32> = None;
 
@@ -343,6 +349,10 @@ async fn drive_session(
     let _ = handle
         .disconnect(russh::Disconnect::ByApplication, "bye", "")
         .await;
+    // Drop the manager entry no matter how the loop ended. `close()` may have
+    // already removed it (idempotent); without this, sessions that end by
+    // remote/network disconnect would leak into the map forever.
+    sessions.remove(&id);
     let _ = exit_tx.send(exit_code);
 }
 

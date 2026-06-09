@@ -7,7 +7,6 @@ import {
   isTauri,
   onSshData,
   onSshExit,
-  sshClose,
   sshResize,
   sshWrite,
 } from '../../lib/tauri';
@@ -114,7 +113,7 @@ export function SshTab({ sessionKey, hostId }: SshTabProps) {
       try {
         const id = await connect(hostId, term.cols, term.rows);
         if (disposed) {
-          void sshClose(id).catch(() => {});
+          void useSsh.getState().disconnect(id).catch(() => {});
           return;
         }
         currentSessionId = id;
@@ -187,7 +186,7 @@ export function SshTab({ sessionKey, hostId }: SshTabProps) {
       hostEl?.removeEventListener('arc:host-shown', onHostShown);
       unsubAppearance();
       unlistens.forEach((u) => u());
-      if (currentSessionId) void sshClose(currentSessionId).catch(() => {});
+      if (currentSessionId) void useSsh.getState().disconnect(currentSessionId).catch(() => {});
       setTabSshSessionId(sessionKey, undefined);
       try {
         term.dispose();

@@ -26,6 +26,25 @@ import {
 
 export type SshStatus = 'idle' | 'connecting' | 'connected' | 'error' | 'closed';
 
+/** Per-session Tauri event unlisteners (`ssh://log` + `ssh://exit`). Held in
+ *  a module map rather than store state so they don't serialize, and cleared
+ *  by BOTH `disconnect()` and the `ssh://exit` handler — so the listeners are
+ *  released no matter which path ends the session (user disconnect, tab close,
+ *  remote drop). Idempotent: the map delete makes a second call a no-op. */
+const sessionUnsubs = new Map<SshId, Array<() => void>>();
+function cleanupSessionListeners(id: SshId) {
+  const fns = sessionUnsubs.get(id);
+  if (!fns) return;
+  sessionUnsubs.delete(id);
+  for (const fn of fns) {
+    try {
+      fn();
+    } catch {
+      /* listener already detached */
+    }
+  }
+}
+
 export const SSH_PANEL_MIN = 260;
 export const SSH_PANEL_MAX = 520;
 export const SSH_PANEL_DEFAULT = 300;
@@ -253,14 +272,18 @@ export const useSsh = create<SshStateShape>((set, get) => ({
           liveByHost: removeKey(s.liveByHost, hostId, sessionId),
         }));
       }
-      void logUnsub();
-      void exitUnsub();
+      cleanupSessionListeners(sessionId);
     });
+
+    sessionUnsubs.set(sessionId, [logUnsub, exitUnsub]);
 
     return sessionId;
   },
 
   disconnect: async (sessionId) => {
+    // Release the event listeners up front so they're gone even if the
+    // backend never emits ssh://exit for this id.
+    cleanupSessionListeners(sessionId);
     if (isTauri) {
       try {
         await sshClose(sessionId);
