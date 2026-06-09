@@ -5,7 +5,7 @@
 //! they run — see `requires_approval()` and the `Approver` plumbed through
 //! the runtime in `lib.rs`.
 
-use std::path::PathBuf;
+use std::path::{Component, Path, PathBuf};
 use std::time::Duration;
 
 use async_trait::async_trait;
@@ -84,7 +84,7 @@ impl Tool for FsReadFileTool {
             .get("path")
             .and_then(|v| v.as_str())
             .ok_or_else(|| "missing `path`".to_string())?;
-        let resolved = resolve_path(raw, workspace_root);
+        let resolved = resolve_path(raw, workspace_root)?;
         let path = resolved.clone();
         tokio::task::spawn_blocking(move || arc_filesystem::read_file(&path))
             .await
@@ -200,7 +200,7 @@ impl Tool for FsWriteFileTool {
             .and_then(|v| v.as_str())
             .ok_or_else(|| "missing `content`".to_string())?
             .to_string();
-        let resolved = resolve_path(raw, workspace_root);
+        let resolved = resolve_path(raw, workspace_root)?;
         let path = resolved.clone();
         let len = content.len();
         tokio::task::spawn_blocking(move || arc_filesystem::write_file(&path, &content))
@@ -312,17 +312,55 @@ impl Tool for ShellTool {
     }
 }
 
-/// Resolve a path the model emits: absolute paths pass through; relative
-/// paths are joined onto the workspace root when one is available.
-fn resolve_path(raw: &str, workspace_root: Option<&str>) -> PathBuf {
-    let p = PathBuf::from(raw);
-    if p.is_absolute() {
-        return p;
+/// Resolve and CONFINE a model-supplied path to the workspace root. Relative
+/// paths join onto the root; absolute paths are accepted only when they fall
+/// inside it. `..`/`.` are collapsed lexically (works for not-yet-created
+/// files) and any result that escapes the root is refused — this stops a
+/// prompt-injected agent from reading/writing outside the workspace (e.g.
+/// ~/.ssh, cloud credentials). Symlinks aren't chased; this is
+/// defense-in-depth, not a hard sandbox. Comparison is case-sensitive, so an
+/// absolute path with different drive-letter casing than the root is refused
+/// (the model should prefer workspace-relative paths).
+fn resolve_path(raw: &str, workspace_root: Option<&str>) -> Result<PathBuf, String> {
+    let root = workspace_root.ok_or_else(|| "no workspace root configured".to_string())?;
+    let root = normalize_lexical(Path::new(root));
+    let raw_path = Path::new(raw);
+    let joined = if raw_path.is_absolute() {
+        raw_path.to_path_buf()
+    } else {
+        root.join(raw_path)
+    };
+    let normalized = normalize_lexical(&joined);
+    if !normalized.starts_with(&root) {
+        return Err(format!(
+            "path \"{raw}\" escapes the workspace root and was refused"
+        ));
     }
-    match workspace_root {
-        Some(root) => PathBuf::from(root).join(p),
-        None => p,
+    Ok(normalized)
+}
+
+/// Collapse `.` and `..` components without touching the filesystem. Mirrors
+/// cargo's `normalize_path`; `..` past the root is a harmless no-op pop.
+fn normalize_lexical(path: &Path) -> PathBuf {
+    let mut components = path.components().peekable();
+    let mut ret = if let Some(c @ Component::Prefix(..)) = components.peek().cloned() {
+        components.next();
+        PathBuf::from(c.as_os_str())
+    } else {
+        PathBuf::new()
+    };
+    for component in components {
+        match component {
+            Component::Prefix(..) => {}
+            Component::RootDir => ret.push(component.as_os_str()),
+            Component::CurDir => {}
+            Component::ParentDir => {
+                ret.pop();
+            }
+            Component::Normal(c) => ret.push(c),
+        }
     }
+    ret
 }
 
 // ─── V2 tools (still read-only or scoped writes) ──────────────────────────
@@ -360,7 +398,7 @@ impl Tool for FsListDirTool {
             .get("path")
             .and_then(|v| v.as_str())
             .ok_or_else(|| "missing `path`".to_string())?;
-        let resolved = resolve_path(raw, workspace_root);
+        let resolved = resolve_path(raw, workspace_root)?;
         let path = resolved.clone();
         let entries = tokio::task::spawn_blocking(move || arc_filesystem::read_dir(&path))
             .await
@@ -433,7 +471,7 @@ impl Tool for FsEditTool {
             .and_then(|v| v.as_bool())
             .unwrap_or(false);
 
-        let resolved = resolve_path(raw, workspace_root);
+        let resolved = resolve_path(raw, workspace_root)?;
 
         let path_for_read = resolved.clone();
         let original = tokio::task::spawn_blocking(move || arc_filesystem::read_file(&path_for_read))
