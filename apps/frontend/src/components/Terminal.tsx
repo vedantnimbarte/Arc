@@ -17,6 +17,7 @@ import {
   type PtyId,
 } from '../lib/tauri';
 import { useFiles } from '../state/files';
+import { detectRiskyPaste, usePaste } from '../state/paste';
 import { useSelection } from '../state/selection';
 import { useSettings } from '../state/settings';
 import { useWorkspace } from '../state/workspace';
@@ -197,6 +198,36 @@ export function Terminal({ sessionKey }: Props) {
       });
     };
     const selDisposable = term.onSelectionChange(pushSelection);
+
+    // ─── Smart paste warnings (Tier 1.4) ───────────────────────────────
+    // Intercept paste in the capture phase — before xterm's own textarea
+    // handler — so we can vet the clipboard text. Risky pastes (multi-line,
+    // sudo, rm -rf, curl|sh, …) are parked behind a confirm dialog; safe
+    // pastes fall straight through to xterm untouched. Holding shift while
+    // pasting bypasses the check entirely.
+    let shiftHeld = false;
+    const trackShift = (e: KeyboardEvent) => {
+      shiftHeld = e.shiftKey;
+    };
+    window.addEventListener('keydown', trackShift, true);
+    window.addEventListener('keyup', trackShift, true);
+    const onPaste = (e: ClipboardEvent) => {
+      if (shiftHeld) return; // explicit bypass
+      const text = e.clipboardData?.getData('text') ?? '';
+      if (!text) return;
+      const flags = detectRiskyPaste(text);
+      if (flags.length === 0) return; // nothing to warn about
+      // Stop xterm from pasting now; re-issue via term.paste() on confirm.
+      e.preventDefault();
+      e.stopPropagation();
+      void usePaste
+        .getState()
+        .request(text, flags)
+        .then((ok) => {
+          if (ok && !disposed) term.paste(text);
+        });
+    };
+    container.addEventListener('paste', onPaste, true);
 
     const boot = async () => {
       if (!isTauri) {
@@ -546,6 +577,9 @@ export function Terminal({ sessionKey }: Props) {
       ro.disconnect();
       host?.removeEventListener('arc:host-shown', onHostShown);
       container.removeEventListener('mouseup', onContainerMouseUp);
+      container.removeEventListener('paste', onPaste, true);
+      window.removeEventListener('keydown', trackShift, true);
+      window.removeEventListener('keyup', trackShift, true);
       try {
         selDisposable.dispose();
       } catch {
