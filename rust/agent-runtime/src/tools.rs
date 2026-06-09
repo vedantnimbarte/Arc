@@ -12,6 +12,21 @@ use async_trait::async_trait;
 use serde_json::{json, Value};
 use tokio::process::Command;
 
+/// Largest byte index `<= max` that lands on a UTF-8 char boundary. Slicing
+/// `&s[..floor_char_boundary(s, max)]` therefore never panics, even when a
+/// multibyte character (accents, CJK, emoji — common in command output and
+/// diffs) straddles `max`. Mirrors the unstable `str::floor_char_boundary`.
+fn floor_char_boundary(s: &str, max: usize) -> usize {
+    if max >= s.len() {
+        return s.len();
+    }
+    let mut i = max;
+    while i > 0 && !s.is_char_boundary(i) {
+        i -= 1;
+    }
+    i
+}
+
 /// Default cap on a shell command's wall-clock runtime, in seconds. Kept
 /// conservative — the agent shouldn't be spinning up dev servers.
 const SHELL_DEFAULT_TIMEOUT_S: u64 = 30;
@@ -280,7 +295,7 @@ impl Tool for ShellTool {
         let truncated = if combined.len() > SHELL_OUTPUT_CAP {
             format!(
                 "{}\n… (truncated, {} bytes total)",
-                &combined[..SHELL_OUTPUT_CAP],
+                &combined[..floor_char_boundary(&combined, SHELL_OUTPUT_CAP)],
                 combined.len()
             )
         } else {
@@ -603,7 +618,7 @@ impl Tool for GitDiffTool {
         if out.len() > CAP {
             Ok(format!(
                 "{}\n… (truncated, {} bytes total)",
-                &out[..CAP],
+                &out[..floor_char_boundary(&out, CAP)],
                 out.len()
             ))
         } else {
