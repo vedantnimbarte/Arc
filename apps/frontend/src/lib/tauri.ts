@@ -1199,6 +1199,13 @@ export async function gitChanges(path: string): Promise<GitChangeEntry[]> {
   return invoke<GitChangeEntry[]>('git_changes', { path });
 }
 
+/** Absolute path to the repo root containing `path` (`git rev-parse
+ *  --show-toplevel`). `null` when `path` isn't inside a repo. Used to map the
+ *  repo-relative paths from `gitChanges` to absolute file-tree paths. */
+export async function gitRoot(path: string): Promise<string | null> {
+  return invoke<string | null>('git_root', { path });
+}
+
 export interface GitLogEntry {
   oid: string;
   short: string;

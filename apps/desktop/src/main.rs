@@ -131,6 +131,7 @@ fn main() {
             commands::git::git_status,
             commands::git::git_diff_stat,
             commands::git::git_changes,
+            commands::git::git_root,
             commands::git::git_log,
             commands::git::git_diff,
             commands::git::git_blame,

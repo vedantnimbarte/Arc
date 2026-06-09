@@ -267,6 +267,29 @@ pub async fn changes<P: AsRef<Path>>(path: P) -> Result<Vec<ChangeEntry>> {
     Ok(out)
 }
 
+/// Absolute path to the repository root containing `path`
+/// (`git rev-parse --show-toplevel`). Returns `Ok(None)` when `path` is not
+/// inside a repo or git isn't available. The file tree uses this to map the
+/// repo-relative paths from [`changes`] back to absolute paths.
+pub async fn root<P: AsRef<Path>>(path: P) -> Result<Option<String>> {
+    let output = Command::new("git")
+        .arg("-C")
+        .arg(path.as_ref())
+        .args(["rev-parse", "--show-toplevel"])
+        .output()
+        .await
+        .map_err(|e| Error::Spawn(e.to_string()))?;
+    if !output.status.success() {
+        return Ok(None);
+    }
+    let top = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    if top.is_empty() {
+        Ok(None)
+    } else {
+        Ok(Some(top))
+    }
+}
+
 fn first_two(s: &str) -> (char, char) {
     let mut it = s.chars();
     (it.next().unwrap_or('.'), it.next().unwrap_or('.'))
