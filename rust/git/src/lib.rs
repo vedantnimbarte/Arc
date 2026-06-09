@@ -617,6 +617,20 @@ pub struct CheckoutResult {
     pub created_tracking: bool,
 }
 
+/// Reject a ref / branch / oid / start-point that begins with `-`, which git
+/// would otherwise parse as an option rather than a value (argument injection
+/// — e.g. a remote branch named `--upload-pack=…` or `--exec=…` flowing into
+/// `checkout`/`merge`). Valid git refnames can't start with `-`, so this only
+/// blocks malicious input, never a legitimate ref.
+fn reject_option_like(value: &str, what: &str) -> Result<()> {
+    if value.trim_start().starts_with('-') {
+        return Err(Error::Failed(format!(
+            "refusing {what} that looks like a command-line option: {value:?}"
+        )));
+    }
+    Ok(())
+}
+
 /// Check out an existing branch by name.
 ///
 /// `name` may be a local (`main`) or remote (`origin/feature/x`) short name.
@@ -628,6 +642,7 @@ pub async fn checkout<P: AsRef<Path>>(path: P, name: &str) -> Result<CheckoutRes
     if trimmed.is_empty() {
         return Err(Error::Failed("empty branch name".into()));
     }
+    reject_option_like(trimmed, "branch name")?;
 
     // Heuristic: if the ref looks like `<remote>/<rest>` and there's no local
     // ref of the same name, create a tracking branch.
@@ -1440,6 +1455,7 @@ pub async fn branch_create<P: AsRef<Path>>(
     name: &str,
     checkout: bool,
 ) -> Result<()> {
+    reject_option_like(name, "branch name")?;
     let path = path.as_ref();
     let args: &[&str] = if checkout {
         &["checkout", "-b", name]
@@ -1465,6 +1481,8 @@ pub async fn branch_rename<P: AsRef<Path>>(
     old_name: &str,
     new_name: &str,
 ) -> Result<()> {
+    reject_option_like(old_name, "branch name")?;
+    reject_option_like(new_name, "branch name")?;
     let path = path.as_ref();
     let output = Command::new("git")
         .arg("-C")
@@ -1485,6 +1503,7 @@ pub async fn branch_delete<P: AsRef<Path>>(
     name: &str,
     force: bool,
 ) -> Result<()> {
+    reject_option_like(name, "branch name")?;
     let path = path.as_ref();
     let flag = if force { "-D" } else { "-d" };
     let output = Command::new("git")
@@ -1508,6 +1527,7 @@ pub struct MergeResult {
 }
 
 pub async fn merge<P: AsRef<Path>>(path: P, branch: &str) -> Result<MergeResult> {
+    reject_option_like(branch, "branch")?;
     let path = path.as_ref();
     let output = Command::new("git")
         .arg("-C")
@@ -1571,6 +1591,7 @@ pub async fn commit_amend<P: AsRef<Path>>(path: P, message: &str) -> Result<Comm
 }
 
 pub async fn revert<P: AsRef<Path>>(path: P, oid: &str) -> Result<CommitResult> {
+    reject_option_like(oid, "commit")?;
     let path = path.as_ref();
     let output = Command::new("git")
         .arg("-C")
@@ -1605,6 +1626,7 @@ pub async fn revert<P: AsRef<Path>>(path: P, oid: &str) -> Result<CommitResult> 
 }
 
 pub async fn cherry_pick<P: AsRef<Path>>(path: P, oid: &str) -> Result<()> {
+    reject_option_like(oid, "commit")?;
     let path = path.as_ref();
     let output = Command::new("git")
         .arg("-C")
@@ -1912,6 +1934,12 @@ pub async fn worktree_add<P: AsRef<Path>>(
     create_branch: bool,
     start_point: Option<&str>,
 ) -> Result<()> {
+    if let Some(b) = branch {
+        reject_option_like(b, "branch name")?;
+    }
+    if let Some(sp) = start_point {
+        reject_option_like(sp, "start point")?;
+    }
     let repo_path = repo_path.as_ref();
     let mut cmd = Command::new("git");
     cmd.arg("-C").arg(repo_path).args(["worktree", "add"]);
@@ -1970,6 +1998,7 @@ pub enum ResetMode {
 }
 
 pub async fn reset<P: AsRef<Path>>(path: P, oid: &str, mode: ResetMode) -> Result<()> {
+    reject_option_like(oid, "commit")?;
     let path = path.as_ref();
     let flag = match mode {
         ResetMode::Soft => "--soft",
