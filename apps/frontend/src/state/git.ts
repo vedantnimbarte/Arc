@@ -25,6 +25,11 @@ interface GitStoreState {
   reset: () => void;
 }
 
+// Monotonic token so a slow refresh (e.g. for a root the user just navigated
+// away from) can't overwrite the results of a newer one. Only the latest
+// in-flight refresh is allowed to commit its results.
+let refreshSeq = 0;
+
 export const useGit = create<GitStoreState>((set) => ({
   info: null,
   entries: [],
@@ -32,6 +37,7 @@ export const useGit = create<GitStoreState>((set) => ({
   loading: false,
   error: null,
   refresh: async (root: string) => {
+    const seq = ++refreshSeq;
     set({ loading: true, error: null });
     try {
       const [info, entries, diffStat] = await Promise.all([
@@ -39,8 +45,10 @@ export const useGit = create<GitStoreState>((set) => ({
         gitChanges(root),
         gitDiffStat(root).catch(() => null),
       ]);
+      if (seq !== refreshSeq) return; // superseded by a newer refresh
       set({ info, entries, diffStat, loading: false });
     } catch (e) {
+      if (seq !== refreshSeq) return;
       set({ entries: [], diffStat: null, loading: false, error: String(e) });
     }
   },

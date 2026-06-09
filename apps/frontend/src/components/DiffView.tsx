@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Check, ChevronDown, ChevronRight, RefreshCw, X } from 'lucide-react';
 import { gitApply, gitDiff, type GitDiffScope } from '../lib/tauri';
 import { cn } from '../lib/cn';
@@ -163,16 +163,22 @@ export function DiffView({ filePath, diffRoot, diffScope }: Props) {
 
   const fileName = relativePath.split('/').pop() ?? relativePath;
 
+  // Token so a slow gitDiff for a previous file/scope can't overwrite the
+  // diff of the one the user switched to (or write into an unmounted view).
+  const loadSeq = useRef(0);
   const load = useCallback(async () => {
+    const seq = ++loadSeq.current;
     setLoading(true);
     setError(null);
     try {
       const text = await gitDiff(diffRoot, diffScope, relativePath);
+      if (seq !== loadSeq.current) return;
       setDiffText(text);
     } catch (e) {
+      if (seq !== loadSeq.current) return;
       setError(String(e));
     } finally {
-      setLoading(false);
+      if (seq === loadSeq.current) setLoading(false);
     }
   }, [diffRoot, diffScope, relativePath]);
 
