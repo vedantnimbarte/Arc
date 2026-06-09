@@ -530,7 +530,7 @@ export const useWorkspace = create<WorkspaceState>()((set, get) => ({
   },
   launchAiCli: async (cli) => {
     await resetRootToHome();
-    const id = `${cli.id}-${Date.now()}`;
+    const id = `${cli.id}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
     const tab: Tab = {
       id,
       title: cli.label,
@@ -542,7 +542,7 @@ export const useWorkspace = create<WorkspaceState>()((set, get) => ({
   },
   newTerminal: async (override) => {
     await resetRootToHome();
-    const id = `term-${Date.now()}`;
+    const id = `term-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
     const tab: Tab = {
       id,
       title: override?.title ?? 'shell',
