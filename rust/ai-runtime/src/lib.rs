@@ -48,11 +48,20 @@ pub struct ChatRequest {
 }
 
 /// One delta from the provider. `text` is the incremental content; `done`
-/// indicates the final chunk.
+/// indicates the final chunk. `input_tokens` / `output_tokens` carry usage
+/// when the provider reports it — OpenAI emits a single trailing usage chunk
+/// (with `stream_options.include_usage`), Anthropic reports input on
+/// `message_start` and a running output total on `message_delta`. Both are
+/// cumulative totals, not per-chunk deltas, so consumers should take the
+/// latest non-null value rather than summing.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct Chunk {
     pub text: String,
     pub done: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub input_tokens: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub output_tokens: Option<u32>,
 }
 
 /// One row returned by `list_models`. `id` is the value sent back in

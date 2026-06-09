@@ -37,12 +37,36 @@ struct AnthropicMessage<'a> {
 #[derive(Deserialize)]
 #[serde(tag = "type")]
 enum AnthropicEvent {
+    #[serde(rename = "message_start")]
+    MessageStart { message: AnthropicStartMessage },
     #[serde(rename = "content_block_delta")]
     ContentBlockDelta { delta: AnthropicDelta },
+    #[serde(rename = "message_delta")]
+    MessageDelta {
+        #[serde(default)]
+        usage: Option<AnthropicUsage>,
+    },
     #[serde(rename = "message_stop")]
     MessageStop,
     #[serde(other)]
     Other,
+}
+
+#[derive(Deserialize)]
+struct AnthropicStartMessage {
+    #[serde(default)]
+    usage: Option<AnthropicUsage>,
+}
+
+/// Token usage. `message_start` carries `input_tokens` (and an initial
+/// `output_tokens`); each `message_delta` carries the running `output_tokens`
+/// total. Both are cumulative, not per-event deltas.
+#[derive(Deserialize)]
+struct AnthropicUsage {
+    #[serde(default)]
+    input_tokens: Option<u32>,
+    #[serde(default)]
+    output_tokens: Option<u32>,
 }
 
 #[derive(Deserialize)]
@@ -120,10 +144,36 @@ impl Provider for AnthropicProvider {
                 Ok(ev) => match serde_json::from_str::<AnthropicEvent>(&ev.data) {
                     Ok(AnthropicEvent::ContentBlockDelta {
                         delta: AnthropicDelta::Text { text },
-                    }) => Some(Ok(Chunk { text, done: false })),
+                    }) => Some(Ok(Chunk {
+                        text,
+                        done: false,
+                        ..Default::default()
+                    })),
+                    // Input token count (and a seed output count) arrive here.
+                    Ok(AnthropicEvent::MessageStart { message }) => {
+                        let u = message.usage?;
+                        Some(Ok(Chunk {
+                            text: String::new(),
+                            done: false,
+                            input_tokens: u.input_tokens,
+                            output_tokens: u.output_tokens,
+                        }))
+                    }
+                    // Running output total — the last one before message_stop
+                    // is the final completion token count.
+                    Ok(AnthropicEvent::MessageDelta { usage }) => {
+                        let u = usage?;
+                        Some(Ok(Chunk {
+                            text: String::new(),
+                            done: false,
+                            output_tokens: u.output_tokens,
+                            ..Default::default()
+                        }))
+                    }
                     Ok(AnthropicEvent::MessageStop) => Some(Ok(Chunk {
                         text: String::new(),
                         done: true,
+                        ..Default::default()
                     })),
                     Ok(_) => None,
                     Err(e) => {
