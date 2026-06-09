@@ -87,6 +87,11 @@ trait Transport: Send + Sync {
     async fn request(&self, msg: Value) -> Result<Value, String>;
     async fn notify(&self, msg: Value) -> Result<(), String>;
     async fn shutdown(&self) -> Result<(), String>;
+
+    /// Best-effort, synchronous force-kill for the app shutdown handler,
+    /// which runs outside an async context (so it can't `.await shutdown()`).
+    /// No-op for transports with no child process (HTTP).
+    fn kill_now(&self) {}
 }
 
 // ─── Stdio transport ─────────────────────────────────────────────────────
@@ -192,6 +197,15 @@ impl Transport for StdioTransport {
         let mut child = self.child.lock().await;
         let _ = child.kill().await;
         Ok(())
+    }
+
+    fn kill_now(&self) {
+        // try_lock rather than block: at shutdown there's no contention, and
+        // start_kill only signals the OS (no await needed) — enough to reap
+        // the child since Tauri's process::exit skips kill_on_drop.
+        if let Ok(mut child) = self.child.try_lock() {
+            let _ = child.start_kill();
+        }
     }
 }
 
@@ -413,6 +427,16 @@ impl McpState {
     /// enumerate which tool sets to expose to the model.
     pub fn server_ids(&self) -> Vec<String> {
         self.servers.iter().map(|kv| kv.key().clone()).collect()
+    }
+
+    /// Force-kill every connected stdio child. Called from the app exit
+    /// handler: Tauri exits via process::exit, which skips Drop, so the
+    /// transports' kill_on_drop never fires and the child MCP server
+    /// processes would otherwise be orphaned across runs.
+    pub fn kill_all(&self) {
+        for server in self.servers.iter() {
+            server.value().transport.kill_now();
+        }
     }
 
     pub async fn connect(

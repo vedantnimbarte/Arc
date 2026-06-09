@@ -261,6 +261,10 @@ fn main() {
     app.run(|app_handle, event| match event {
         tauri::RunEvent::ExitRequested { .. } | tauri::RunEvent::Exit => {
             app_handle.state::<PtyState>().manager.kill_all();
+            // Reap MCP stdio children too — they're separate OS processes that
+            // outlive process::exit (kill_on_drop never runs). PTY conhosts are
+            // handled above; SSH sockets die with the process.
+            app_handle.state::<McpState>().kill_all();
         }
         _ => {}
     });
