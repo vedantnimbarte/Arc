@@ -42,6 +42,7 @@ pub struct SshState {
 // ---------- connection ----------------------------------------------------
 
 #[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct SshConnectInvoke {
     pub host_id: String,
     pub cols: u16,
