@@ -150,7 +150,8 @@ export function SshTab({ sessionKey, hostId }: SshTabProps) {
       if (
         s.fontId !== prev.fontId ||
         s.fontSize !== prev.fontSize ||
-        s.appearance !== prev.appearance
+        s.appearance !== prev.appearance ||
+        s.themeId !== prev.themeId
       ) {
         try {
           term.options.fontFamily = getFont(s.fontId).stack;
