@@ -35,6 +35,9 @@ importers:
       '@arc/mcp':
         specifier: workspace:*
         version: link:../../packages/mcp
+      '@arc/shared':
+        specifier: workspace:*
+        version: link:../../packages/shared
       '@arc/terminal':
         specifier: workspace:*
         version: link:../../packages/terminal

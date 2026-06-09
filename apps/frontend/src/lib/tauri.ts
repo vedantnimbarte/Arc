@@ -623,6 +623,13 @@ export interface LlmStreamReq {
 export interface LlmChunk {
   text: string;
   done: boolean;
+  /** Cumulative prompt-token count, present on the chunk(s) where the
+   *  provider reports usage (OpenAI's trailing usage chunk, Anthropic's
+   *  message_start). Absent for providers without usage (Ollama, local CLI). */
+  input_tokens?: number;
+  /** Cumulative completion-token count — OpenAI's usage chunk, or Anthropic's
+   *  latest message_delta. */
+  output_tokens?: number;
 }
 
 /** One row from the provider's model catalog. `id` is what's sent back in

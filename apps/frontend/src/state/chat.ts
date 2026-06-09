@@ -35,6 +35,16 @@ export interface ChatSession {
   updatedAt: number;
 }
 
+/** Running token totals for a chat session, fed by the cost meter (Tier 1.6).
+ *  In-memory only — a fresh count per launch is acceptable for an estimate. */
+export interface ChatUsage {
+  inputTokens: number;
+  outputTokens: number;
+  /** Number of assistant turns that reported usage — lets the UI distinguish
+   *  "0 tokens" from "no usage data yet" (e.g. local models). */
+  turns: number;
+}
+
 /** A snippet selected from the editor/terminal — or a whole file attached
  *  via the composer's + / @ / `/file` affordances — that the user has
  *  staged to send with their next message. Ephemeral: lives only in
@@ -63,6 +73,8 @@ interface ChatState {
   /** Snippets staged for the next send (from "Ask ARC AI" on a selection).
    *  Cleared on successful send; the user can also dismiss individually. */
   pendingContexts: ChatContext[];
+  /** Per-session running token usage, keyed by session id. */
+  usage: Record<string, ChatUsage>;
 
   // ─── Sessions ─────────────────────────────────────────────────────────
   newSession: (agentId: string) => Promise<string>;
@@ -81,6 +93,10 @@ interface ChatState {
   /** Clear messages of the active session (keeps the session row). */
   clear: () => Promise<void>;
   setStreaming: (s: boolean) => void;
+  /** Add a completed turn's token counts to the active session's running
+   *  total. Counts are per-turn totals (not deltas), so callers pass the
+   *  final figures once a stream ends. */
+  recordUsage: (inputTokens: number, outputTokens: number) => void;
 
   // ─── Pending contexts (Ask ARC AI) ────────────────────────────────────
   addPendingContext: (c: Omit<ChatContext, 'id'> & { id?: string }) => string;
@@ -131,6 +147,7 @@ export const useChat = create<ChatState>((set, get) => ({
   messages: [],
   hydrated: false,
   pendingContexts: [],
+  usage: {},
 
   // ─── Sessions ─────────────────────────────────────────────────────────
 
@@ -389,7 +406,9 @@ export const useChat = create<ChatState>((set, get) => ({
           ? { ...s, messages: [], title: NEW_SESSION_TITLE, updatedAt: Date.now() }
           : s,
       );
-      return { sessions, messages: [] };
+      // Drop the running token total alongside the cleared transcript.
+      const { [activeSessionId]: _dropped, ...usage } = state.usage;
+      return { sessions, messages: [], usage };
     });
     if (!isTauri) return;
     try {
@@ -401,6 +420,24 @@ export const useChat = create<ChatState>((set, get) => ({
   },
 
   setStreaming: (isStreaming) => set({ isStreaming }),
+
+  recordUsage: (inputTokens, outputTokens) =>
+    set((state) => {
+      const id = state.activeSessionId;
+      if (!id) return state;
+      if (inputTokens <= 0 && outputTokens <= 0) return state;
+      const prev = state.usage[id] ?? { inputTokens: 0, outputTokens: 0, turns: 0 };
+      return {
+        usage: {
+          ...state.usage,
+          [id]: {
+            inputTokens: prev.inputTokens + inputTokens,
+            outputTokens: prev.outputTokens + outputTokens,
+            turns: prev.turns + 1,
+          },
+        },
+      };
+    }),
 
   // ─── Pending contexts ────────────────────────────────────────────────
 
