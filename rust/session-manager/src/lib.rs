@@ -153,7 +153,7 @@ mod tests {
                 apiclient_state_json: None,
             },
         ];
-        tabs::save_tabs(store.pool(), &state.session.id, &inputs, Some("t2"))
+        tabs::save_tabs(store.pool(), &state.session.id, &inputs, Some("t2"), None)
             .await
             .expect("save");
 
