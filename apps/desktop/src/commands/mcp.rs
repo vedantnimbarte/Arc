@@ -364,15 +364,19 @@ impl Transport for HttpTransport {
             .json()
             .await
             .map_err(|e| format!("decode json: {e}"))?;
-        if v.get("id") != target_id.as_ref() {
-            // Server batched or replied to a different id — still accept
-            // if it's an error result for our call.
-            if let Some(e) = v.get("error") {
-                return Err(format!("mcp error: {e}"));
-            }
-        }
         if let Some(e) = v.get("error") {
             return Err(format!("mcp error: {e}"));
+        }
+        // Reject a body whose id doesn't match our request rather than handing
+        // an out-of-order / batched reply back as this call's result (it would
+        // surface downstream as a confusing "bad shape" error or silently
+        // wrong tool output).
+        if v.get("id") != target_id.as_ref() {
+            return Err(format!(
+                "mcp protocol error: response id {:?} does not match request id {:?}",
+                v.get("id"),
+                target_id
+            ));
         }
         Ok(v)
     }
