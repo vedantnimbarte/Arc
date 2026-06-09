@@ -60,7 +60,14 @@ pub async fn finish(
     Ok(())
 }
 
-/// Append a captured command. Returns the assigned row id.
+/// Upper bound on retained command-history rows. Every shell line is
+/// persisted, so without a cap the table grows unbounded for heavy terminal
+/// users, bloating the DB and slowing the ⌃R palette. We keep the most recent
+/// `HISTORY_CAP` rows.
+const HISTORY_CAP: i64 = 5000;
+
+/// Append a captured command. Returns the assigned row id. Prunes the oldest
+/// rows past `HISTORY_CAP` so the table stays bounded.
 pub async fn append(
     pool: &SqlitePool,
     session_id: Option<&str>,
@@ -83,7 +90,15 @@ pub async fn append(
     .bind(now)
     .execute(pool)
     .await?;
-    Ok(result.last_insert_rowid())
+    let id = result.last_insert_rowid();
+    // Row ids are monotonic (== insertion/time order), so dropping everything
+    // at least `HISTORY_CAP` ids behind the newest keeps the most recent
+    // `HISTORY_CAP` rows. Cheap PK-range delete; no-op early on (negative id).
+    sqlx::query("DELETE FROM command_history WHERE id <= ?")
+        .bind(id - HISTORY_CAP)
+        .execute(pool)
+        .await?;
+    Ok(id)
 }
 
 /// Most-recent commands first, optionally filtered by a substring. Empty
