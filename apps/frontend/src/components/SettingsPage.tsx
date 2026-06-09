@@ -61,6 +61,7 @@ import {
   type Appearance,
   type ThemeDef,
 } from '../themes';
+import { installThemeFromUrl, loadInstalledThemes } from '../lib/themeMarketplace';
 import {
   ACTION_META,
   ACTION_ORDER,
@@ -366,7 +367,35 @@ function ThemesPane({
   themeId: string | null;
   onThemeChange: (id: string | null) => void;
 }) {
-  const themes = listThemes();
+  const [themes, setThemes] = useState<ThemeDef[]>(() => listThemes());
+  const [url, setUrl] = useState('');
+  const [installing, setInstalling] = useState(false);
+  const [msg, setMsg] = useState<{ kind: 'ok' | 'err'; text: string } | null>(null);
+
+  const reload = () => setThemes(listThemes());
+
+  // The Settings window is a separate JS context, so register the user's
+  // installed themes here too (the main window does this on boot).
+  useEffect(() => {
+    void loadInstalledThemes().then(reload).catch(() => {});
+  }, []);
+
+  const onInstall = async () => {
+    const trimmed = url.trim();
+    if (!trimmed || installing) return;
+    setInstalling(true);
+    setMsg(null);
+    const res = await installThemeFromUrl(trimmed);
+    setInstalling(false);
+    if (res.ok) {
+      reload();
+      onThemeChange(res.theme.id);
+      setUrl('');
+      setMsg({ kind: 'ok', text: `Installed “${res.theme.name}”.` });
+    } else {
+      setMsg({ kind: 'err', text: res.error });
+    }
+  };
 
   return (
     <div className="space-y-7">
@@ -397,6 +426,42 @@ function ThemesPane({
             />
           ))}
         </div>
+      </Section>
+
+      <Section
+        title="Install from URL"
+        hint="Paste a link to a theme JSON file (e.g. a GitHub raw URL or gist). It's validated, applied, and saved to ~/.arc/themes so it loads next launch."
+      >
+        <div className="flex items-center gap-2">
+          <input
+            value={url}
+            onChange={(e) => setUrl(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') void onInstall();
+            }}
+            placeholder="https://…/my-theme.json"
+            spellCheck={false}
+            autoComplete="off"
+            className="min-w-0 flex-1 rounded-lg border border-border-subtle bg-bg-base/60 px-3 py-2 font-mono text-[11.5px] text-fg-base placeholder:text-fg-subtle focus:border-accent/45 focus:outline-none"
+          />
+          <button
+            onClick={() => void onInstall()}
+            disabled={installing || !url.trim()}
+            className="shrink-0 rounded-lg bg-accent-soft px-3 py-2 font-display text-[11.5px] font-medium text-fg-base ring-1 ring-accent/45 transition-colors hover:bg-accent/20 disabled:opacity-50"
+          >
+            {installing ? 'installing…' : 'install'}
+          </button>
+        </div>
+        {msg && (
+          <p
+            className={cn(
+              'mt-2 font-display text-[11px] leading-relaxed',
+              msg.kind === 'ok' ? 'text-status-ok' : 'text-status-err',
+            )}
+          >
+            {msg.text}
+          </p>
+        )}
       </Section>
     </div>
   );

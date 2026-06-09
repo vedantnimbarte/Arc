@@ -26,6 +26,7 @@ import {
   presetOrDefault,
   type ProviderPreset,
 } from './providers';
+import { loadInstalledThemes } from '../lib/themeMarketplace';
 
 export interface ProviderConfig {
   apiKey?: string;
@@ -281,6 +282,16 @@ export const useSettings = create<Settings>()((set, get) => ({
   hydrateSettings: async () => {
     if (get().settingsHydrated) return;
     set({ settingsHydrated: true });
+
+    // Register user-installed themes (Tier 1.7) before resolving, so a stored
+    // themeId pointing at one applies on first paint instead of falling back.
+    if (isTauri) {
+      try {
+        await loadInstalledThemes();
+      } catch (err) {
+        console.error('[settings] installed themes load failed:', err);
+      }
+    }
 
     applyTheme(resolveActiveTheme(get().appearance, get().themeId));
     if (!isTauri) return;
