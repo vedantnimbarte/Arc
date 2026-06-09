@@ -293,6 +293,15 @@ export default function App() {
     }
   };
 
+  // Open the chat popover on request from components that don't hold
+  // setChatOpen — e.g. FileTree's "Attach to Agent", which also dispatches
+  // `arc:attach-file` for ChatPanel to stage the file as a context chip.
+  useEffect(() => {
+    const onOpenChat = () => setChatOpen(true);
+    window.addEventListener('arc:open-chat', onOpenChat);
+    return () => window.removeEventListener('arc:open-chat', onOpenChat);
+  }, []);
+
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       // Esc closes the chat popover when it has focus / is visible

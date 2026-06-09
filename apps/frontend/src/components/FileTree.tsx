@@ -317,9 +317,10 @@ export function FileTree() {
   }, [root]);
 
   const ctxAttachToAgent = useCallback((path: string) => {
-    // Broadcast to ChatPanel; also copy path as fallback.
+    // Stage the file as a chat context chip (ChatPanel listens for this) and
+    // open the chat popover (App listens for arc:open-chat).
     window.dispatchEvent(new CustomEvent('arc:attach-file', { detail: { path } }));
-    void navigator.clipboard.writeText(path);
+    window.dispatchEvent(new Event('arc:open-chat'));
   }, []);
 
   const ctxNewFile = useCallback((entry: FsEntry) => {

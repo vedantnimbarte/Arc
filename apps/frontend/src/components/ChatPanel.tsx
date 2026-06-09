@@ -147,6 +147,21 @@ export function ChatPanel({ onClose, intent, onIntentConsumed }: ChatPanelProps 
   const scrollRef = useRef<HTMLDivElement>(null);
   const cancelRef = useRef<null | (() => Promise<void>)>(null);
 
+  // Latest `attachFileByPath` so the window-event listener below always calls
+  // the current closure without re-subscribing on every render.
+  const attachFileRef = useRef<(path: string) => Promise<boolean>>();
+
+  // FileTree's "Attach to Agent" context action dispatches `arc:attach-file`
+  // (and `arc:open-chat`); stage the file as a context chip when it arrives.
+  useEffect(() => {
+    const onAttach = (e: Event) => {
+      const path = (e as CustomEvent<{ path?: string }>).detail?.path;
+      if (path) void attachFileRef.current?.(path);
+    };
+    window.addEventListener('arc:attach-file', onAttach);
+    return () => window.removeEventListener('arc:attach-file', onAttach);
+  }, []);
+
   useEffect(() => {
     if (view !== 'chat') return;
     scrollRef.current?.scrollTo({
@@ -572,6 +587,8 @@ export function ChatPanel({ onClose, intent, onIntentConsumed }: ChatPanelProps 
       return false;
     }
   }
+  // Keep the event-listener ref pointed at the current closure.
+  attachFileRef.current = attachFileByPath;
 
   /** Open the native multi-file picker. Each chosen file becomes a chip. */
   async function attachViaPicker() {
