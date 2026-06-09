@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Terminal as XTerm } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import { WebLinksAddon } from '@xterm/addon-web-links';
@@ -17,6 +17,7 @@ import {
   type PtyId,
 } from '../lib/tauri';
 import { createPathLinkProvider } from '../lib/links';
+import { NewTabSplash } from './NewTabSplash';
 import { useFiles } from '../state/files';
 import { detectRiskyPaste, usePaste } from '../state/paste';
 import { useSelection } from '../state/selection';
@@ -36,6 +37,20 @@ export function Terminal({ sessionKey }: Props) {
   // Snapshot the root at mount — the PTY can only be spawned with one CWD,
   // and we don't restart it when the user reroots the tree.
   const initialCwd = useRef<string | null>(useFiles.getState().root);
+  // New-tab splash (Tier 1.2): shown over a fresh, untouched terminal and
+  // dismissed on the first keystroke / interaction.
+  const [showSplash, setShowSplash] = useState(true);
+
+  const pasteRecentCommand = (command: string) => {
+    const ptyId = useWorkspace.getState().tabs.find((t) => t.id === sessionKey)?.ptyId;
+    if (ptyId) void ptyWrite(ptyId, command).catch(() => {});
+    setShowSplash(false);
+    termRef.current?.focus();
+  };
+  const openRecentFile = (path: string) => {
+    useWorkspace.getState().openFile(path);
+    setShowSplash(false);
+  };
 
   useEffect(() => {
     const container = containerRef.current;
@@ -495,6 +510,8 @@ export function Terminal({ sessionKey }: Props) {
         let cmdBuffer = '';
         term.onData((data) => {
           if (ptyId) ptyWrite(ptyId, data).catch(() => {});
+          // First interaction dismisses the new-tab splash.
+          setShowSplash(false);
 
           // Handle each char in `data` separately so a fast paste of
           // "ls\rgit status\r" splits into two commands.
@@ -624,6 +641,9 @@ export function Terminal({ sessionKey }: Props) {
         className="selectable h-full w-full"
         data-session={sessionKey}
       />
+      {showSplash && (
+        <NewTabSplash onPasteCommand={pasteRecentCommand} onOpenFile={openRecentFile} />
+      )}
     </div>
   );
 }

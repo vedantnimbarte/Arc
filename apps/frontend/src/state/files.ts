@@ -27,7 +27,12 @@ interface FilesState {
   chatWidth: number;
   /** Which panel is mounted in the left sidebar. Persisted. */
   sidebarView: SidebarView;
+  /** Absolute paths of recently-opened editor files, most-recent first.
+   *  Surfaced on the new-tab splash. Capped + persisted. */
+  recentFiles: string[];
   setRoot: (root: string) => void;
+  /** Record a file as recently opened (deduped, moved to front, capped). */
+  pushRecentFile: (path: string) => void;
   toggleHidden: () => void;
   toggleCollapsed: () => void;
   setSidebarWidth: (w: number) => void;
@@ -39,6 +44,7 @@ const clamp = (n: number, min: number, max: number) =>
   Math.min(Math.max(n, min), max);
 
 const STORAGE_KEY = 'arc-files';
+const RECENT_FILES_CAP = 12;
 
 export const useFiles = create<FilesState>()(
   persist(
@@ -49,7 +55,15 @@ export const useFiles = create<FilesState>()(
       sidebarWidth: SIDEBAR_DEFAULT,
       chatWidth: CHAT_DEFAULT,
       sidebarView: 'files',
+      recentFiles: [],
       setRoot: (root) => set({ root }),
+      pushRecentFile: (path) =>
+        set((s) => ({
+          recentFiles: [path, ...s.recentFiles.filter((p) => p !== path)].slice(
+            0,
+            RECENT_FILES_CAP,
+          ),
+        })),
       toggleHidden: () => set((s) => ({ showHidden: !s.showHidden })),
       toggleCollapsed: () => set((s) => ({ collapsed: !s.collapsed })),
       setSidebarWidth: (w) => set({ sidebarWidth: clamp(w, SIDEBAR_MIN, SIDEBAR_MAX) }),

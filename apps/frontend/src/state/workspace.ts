@@ -491,6 +491,8 @@ export const useWorkspace = create<WorkspaceState>()((set, get) => ({
       return { tabDirty: next };
     }),
   openFile: (path, title, opts) => {
+    // Track for the new-tab splash's "recent files" column (Tier 1.2).
+    useFiles.getState().pushRecentFile(path);
     if (!opts?.forceNew) {
       const existing = get().tabs.find((t) => t.kind === 'editor' && t.filePath === path);
       if (existing) {
