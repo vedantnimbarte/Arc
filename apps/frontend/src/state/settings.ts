@@ -72,6 +72,13 @@ export interface Settings {
   /** Enable Vim keybindings in the CodeMirror editor. Multi-cursor is always
    *  on; this gates the modal Vim layer specifically. */
   editorVimMode: boolean;
+  /** Fire a system notification when an OSC133-tracked command runs longer
+   *  than `notifyThresholdSecs` and the window is unfocused (Tier 1.5). */
+  notifyLongCommands: boolean;
+  /** Duration (seconds) a command must exceed to notify. */
+  notifyThresholdSecs: number;
+  /** Play the OS notification sound alongside the toast. */
+  notifySound: boolean;
   /** True once hydrateSecrets() has finished. */
   secretsHydrated: boolean;
   /** True once hydrateSettings() has applied stored values. */
@@ -98,6 +105,9 @@ export interface Settings {
   setRestoreWindowState: (on: boolean) => void;
   setTerminalWebgl: (on: boolean) => void;
   setEditorVimMode: (on: boolean) => void;
+  setNotifyLongCommands: (on: boolean) => void;
+  setNotifyThresholdSecs: (secs: number) => void;
+  setNotifySound: (on: boolean) => void;
   hydrateSettings: () => Promise<void>;
   hydrateSecrets: () => Promise<void>;
 }
@@ -141,7 +151,15 @@ const DEFAULTS = {
   restoreWindowState: true,
   terminalWebgl: false,
   editorVimMode: false,
+  notifyLongCommands: true,
+  notifyThresholdSecs: 30,
+  notifySound: false,
 };
+
+const MIN_NOTIFY_SECS = 5;
+const MAX_NOTIFY_SECS = 3600;
+const clampNotifySecs = (n: number): number =>
+  Math.max(MIN_NOTIFY_SECS, Math.min(MAX_NOTIFY_SECS, Math.round(n)));
 
 const clampFontSize = (n: number): number =>
   Math.max(MIN_FONT_SIZE, Math.min(MAX_FONT_SIZE, Math.round(n)));
@@ -278,6 +296,9 @@ export const useSettings = create<Settings>()((set, get) => ({
   setRestoreWindowState: (on) => set({ restoreWindowState: on }),
   setTerminalWebgl: (on) => set({ terminalWebgl: on }),
   setEditorVimMode: (on) => set({ editorVimMode: on }),
+  setNotifyLongCommands: (on) => set({ notifyLongCommands: on }),
+  setNotifyThresholdSecs: (secs) => set({ notifyThresholdSecs: clampNotifySecs(secs) }),
+  setNotifySound: (on) => set({ notifySound: on }),
 
   hydrateSettings: async () => {
     if (get().settingsHydrated) return;
@@ -511,6 +532,16 @@ function applyStored(
       typeof stored.editorVimMode === 'boolean'
         ? stored.editorVimMode
         : current.editorVimMode,
+    notifyLongCommands:
+      typeof stored.notifyLongCommands === 'boolean'
+        ? stored.notifyLongCommands
+        : current.notifyLongCommands,
+    notifyThresholdSecs:
+      typeof stored.notifyThresholdSecs === 'number'
+        ? clampNotifySecs(stored.notifyThresholdSecs)
+        : current.notifyThresholdSecs,
+    notifySound:
+      typeof stored.notifySound === 'boolean' ? stored.notifySound : current.notifySound,
   };
 }
 
@@ -539,6 +570,9 @@ function toPersistedSettings(s: Settings): PersistedSettings {
     restoreWindowState: s.restoreWindowState,
     terminalWebgl: s.terminalWebgl,
     editorVimMode: s.editorVimMode,
+    notifyLongCommands: s.notifyLongCommands,
+    notifyThresholdSecs: s.notifyThresholdSecs,
+    notifySound: s.notifySound,
   };
 }
 

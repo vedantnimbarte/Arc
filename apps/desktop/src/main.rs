@@ -65,6 +65,9 @@ fn main() {
             MacosLauncher::LaunchAgent,
             None,
         ))
+        // System notifications for long-running commands (Tier 1.5). The
+        // frontend gates delivery on a setting + window focus.
+        .plugin(tauri_plugin_notification::init())
         // Save the main window's geometry on close. Restore is gated by the
         // user's `restoreWindowState` preference, checked in `setup` below.
         // The settings & git popups are excluded — they have their own

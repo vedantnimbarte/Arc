@@ -92,6 +92,9 @@ export function SettingsPage() {
     restoreWindowState,
     terminalWebgl,
     editorVimMode,
+    notifyLongCommands,
+    notifyThresholdSecs,
+    notifySound,
     setActivePresetId,
     setPresetEnabled,
     updateProvider,
@@ -104,6 +107,9 @@ export function SettingsPage() {
     setRestoreWindowState,
     setTerminalWebgl,
     setEditorVimMode,
+    setNotifyLongCommands,
+    setNotifyThresholdSecs,
+    setNotifySound,
   } = useSettings();
 
   const [pane, setPane] = useState<Pane>('appearance');
@@ -210,6 +216,12 @@ export function SettingsPage() {
                   onPickShell={setDefaultShell}
                   terminalWebgl={terminalWebgl}
                   onTerminalWebglChange={setTerminalWebgl}
+                  notifyLongCommands={notifyLongCommands}
+                  notifyThresholdSecs={notifyThresholdSecs}
+                  notifySound={notifySound}
+                  onNotifyLongCommandsChange={setNotifyLongCommands}
+                  onNotifyThresholdChange={setNotifyThresholdSecs}
+                  onNotifySoundChange={setNotifySound}
                 />
               )}
               {pane === 'editor' && (
@@ -1705,12 +1717,24 @@ function TerminalPane({
   onPickShell,
   terminalWebgl,
   onTerminalWebglChange,
+  notifyLongCommands,
+  notifyThresholdSecs,
+  notifySound,
+  onNotifyLongCommandsChange,
+  onNotifyThresholdChange,
+  onNotifySoundChange,
 }: {
   shells: ShellInfo[] | null;
   defaultShell: string | null;
   onPickShell: (shell: string | null) => void;
   terminalWebgl: boolean;
   onTerminalWebglChange: (on: boolean) => void;
+  notifyLongCommands: boolean;
+  notifyThresholdSecs: number;
+  notifySound: boolean;
+  onNotifyLongCommandsChange: (on: boolean) => void;
+  onNotifyThresholdChange: (secs: number) => void;
+  onNotifySoundChange: (on: boolean) => void;
 }) {
   return (
     <div className="space-y-7">
@@ -1726,6 +1750,52 @@ function TerminalPane({
           checked={terminalWebgl}
           onChange={() => onTerminalWebglChange(!terminalWebgl)}
         />
+      </Section>
+
+      <Section
+        title="Notifications"
+        hint="Get a system notification when a long command finishes while ARC isn't focused. Requires shell integration (OSC 133) — most modern shell setups emit it."
+      >
+        <ToggleRow
+          label="Notify on long commands"
+          hint="Fires only when the window is in the background."
+          checked={notifyLongCommands}
+          onChange={() => onNotifyLongCommandsChange(!notifyLongCommands)}
+        />
+        <div
+          className={cn(
+            'mt-2 flex items-center justify-between gap-4 rounded-lg border border-border-subtle bg-bg-base/40 px-3 py-2.5 transition-opacity',
+            !notifyLongCommands && 'pointer-events-none opacity-50',
+          )}
+        >
+          <div className="min-w-0">
+            <p className="font-display text-[12.5px] font-medium tracking-tight text-fg-base">
+              Threshold
+            </p>
+            <p className="mt-0.5 font-display text-[11px] leading-relaxed text-fg-subtle">
+              Minimum duration before notifying.
+            </p>
+          </div>
+          <div className="flex items-center gap-1.5">
+            <input
+              type="number"
+              min={5}
+              max={3600}
+              value={notifyThresholdSecs}
+              onChange={(e) => onNotifyThresholdChange(Number(e.target.value))}
+              className="w-16 rounded-md border border-border-subtle bg-bg-base/60 px-2 py-1 text-right font-mono text-[12px] text-fg-base focus:border-accent/45 focus:outline-none"
+            />
+            <span className="font-display text-[11px] text-fg-subtle">sec</span>
+          </div>
+        </div>
+        <div className={cn('mt-2 transition-opacity', !notifyLongCommands && 'pointer-events-none opacity-50')}>
+          <ToggleRow
+            label="Play sound"
+            hint="Use the OS notification sound."
+            checked={notifySound}
+            onChange={() => onNotifySoundChange(!notifySound)}
+          />
+        </div>
       </Section>
     </div>
   );

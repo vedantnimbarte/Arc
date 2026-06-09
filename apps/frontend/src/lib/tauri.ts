@@ -874,6 +874,12 @@ export interface PersistedSettings {
   terminalWebgl?: boolean;
   /** Enable Vim keybindings in the CodeMirror editor. */
   editorVimMode?: boolean;
+  /** Notify on long-running commands when unfocused (Tier 1.5). */
+  notifyLongCommands?: boolean;
+  /** Seconds a command must exceed before notifying. */
+  notifyThresholdSecs?: number;
+  /** Play the OS notification sound. */
+  notifySound?: boolean;
 }
 
 /** Returns the stored settings blob, or `null` on first launch. */

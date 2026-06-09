@@ -17,6 +17,7 @@ import {
   type PtyId,
 } from '../lib/tauri';
 import { createPathLinkProvider } from '../lib/links';
+import { notifyCommandFinished } from '../lib/notify';
 import { NewTabSplash } from './NewTabSplash';
 import { useFiles } from '../state/files';
 import { detectRiskyPaste, usePaste } from '../state/paste';
@@ -280,6 +281,10 @@ export function Terminal({ sessionKey }: Props) {
       // row on `D`) and the keystroke loop (which sets it on `\r`)
       // share the same reference.
       let lastCommandId: number | null = null;
+      // Long-command notification bookkeeping (Tier 1.5): the command text is
+      // set on Enter, the start time on the `C` (execution begins) marker.
+      let lastCommandText: string | null = null;
+      let cmdStartMs: number | null = null;
       const handleChunkText = (text: string) => {
         if (!text.includes('\x1b]133;')) {
           if (osc.capturing) {
@@ -302,6 +307,7 @@ export function Terminal({ sessionKey }: Props) {
           if (verb === 'C') {
             osc.capturing = true;
             osc.buf = '';
+            cmdStartMs = Date.now();
           } else if (verb === 'D') {
             osc.capturing = false;
             const exitStr = fields[1];
@@ -315,6 +321,21 @@ export function Terminal({ sessionKey }: Props) {
               void sessionCommandFinish(id, code, excerpt.length > 0 ? excerpt : null).catch(
                 () => {},
               );
+            }
+            // Notify on slow commands that finished while we weren't looking.
+            const startedAt = cmdStartMs;
+            cmdStartMs = null;
+            const s = useSettings.getState();
+            if (s.notifyLongCommands && startedAt !== null) {
+              const elapsed = Date.now() - startedAt;
+              if (elapsed >= s.notifyThresholdSecs * 1000 && !document.hasFocus()) {
+                void notifyCommandFinished({
+                  command: lastCommandText ?? '(command)',
+                  exitCode: code,
+                  durationMs: elapsed,
+                  sound: s.notifySound,
+                });
+              }
             }
           }
           lastIdx = m.index + m[0].length;
@@ -522,6 +543,8 @@ export function Terminal({ sessionKey }: Props) {
               const trimmed = cmdBuffer.trim();
               cmdBuffer = '';
               if (trimmed.length === 0) continue;
+              // Remember the text for the long-command notification (Tier 1.5).
+              lastCommandText = trimmed;
               const { activeTabId } = useWorkspace.getState();
               const { sessionId } = useWorkspace.getState();
               const cwd = useFiles.getState().root;

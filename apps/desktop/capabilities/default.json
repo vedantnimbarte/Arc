@@ -12,6 +12,7 @@
     "core:window:allow-close",
     "core:webview:default",
     "core:app:default",
-    "autostart:default"
+    "autostart:default",
+    "notification:default"
   ]
 }
