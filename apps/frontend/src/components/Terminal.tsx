@@ -16,6 +16,7 @@ import {
   sessionCommandLog,
   type PtyId,
 } from '../lib/tauri';
+import { createPathLinkProvider } from '../lib/links';
 import { useFiles } from '../state/files';
 import { detectRiskyPaste, usePaste } from '../state/paste';
 import { useSelection } from '../state/selection';
@@ -87,6 +88,15 @@ export function Terminal({ sessionKey }: Props) {
     const links = new WebLinksAddon();
     term.loadAddon(fit);
     term.loadAddon(links);
+    // File-path links → editor (Tier 1.1). Resolves relative paths against the
+    // tree root (which tracks the shell's CWD) and opens them in an editor tab.
+    const pathLinks = term.registerLinkProvider(
+      createPathLinkProvider(
+        term,
+        () => useFiles.getState().root,
+        (absPath) => useWorkspace.getState().openFile(absPath),
+      ),
+    );
     // Remove orphaned DOM from a previous xterm instance. In React Strict Mode
     // effects run twice (mount→cleanup→remount); dispose() doesn't always
     // remove every child, so the second open() finds a dirty container.
@@ -580,6 +590,11 @@ export function Terminal({ sessionKey }: Props) {
       container.removeEventListener('paste', onPaste, true);
       window.removeEventListener('keydown', trackShift, true);
       window.removeEventListener('keyup', trackShift, true);
+      try {
+        pathLinks.dispose();
+      } catch {
+        /* terminal already disposed */
+      }
       try {
         selDisposable.dispose();
       } catch {
