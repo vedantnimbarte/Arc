@@ -5,7 +5,6 @@ import { WebLinksAddon } from '@xterm/addon-web-links';
 import '@xterm/xterm/css/xterm.css';
 import {
   isTauri,
-  onSshData,
   onSshExit,
   sshResize,
   sshWrite,
@@ -111,7 +110,13 @@ export function SshTab({ sessionKey, hostId }: SshTabProps) {
         return;
       }
       try {
-        const id = await connect(hostId, term.cols, term.rows);
+        // Shell output arrives on a per-connect raw channel wired up inside
+        // `connect` before the command runs (no early-output race). Guard on
+        // `disposed` so a late chunk can't write into a torn-down terminal.
+        const id = await connect(hostId, term.cols, term.rows, (chunk) => {
+          if (disposed) return;
+          term.write(decoder.decode(chunk, { stream: true }));
+        });
         if (disposed) {
           void useSsh.getState().disconnect(id).catch(() => {});
           return;
@@ -119,12 +124,6 @@ export function SshTab({ sessionKey, hostId }: SshTabProps) {
         currentSessionId = id;
         setTabSshSessionId(sessionKey, id);
 
-        unlistens.push(
-          await onSshData(id, (chunk) => {
-            const text = decoder.decode(chunk, { stream: true });
-            term.write(text);
-          }),
-        );
         unlistens.push(
           await onSshExit(id, (code) => {
             term.writeln(`\r\n\x1b[38;2;99;99;102m[session ended · ${code ?? '?'}]\x1b[0m`);

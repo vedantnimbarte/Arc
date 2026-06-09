@@ -15,8 +15,10 @@
 //!   invoke("ssh_key_delete",    { id, deleteFiles? })                 -> ()
 //!   invoke("ssh_session_logs",  { hostId, limit? })                   -> Vec<SshSessionLogEntry>
 //!
-//! Emitted events:
-//!   "ssh://data/<id>"  -> { id, bytes: number[] }
+//! Shell output streams to the frontend over a per-connect `tauri::ipc::Channel`
+//! carrying raw bytes (point-to-point, no JSON-number-array bloat, no fan-out to
+//! other windows) — same shape as the PTY path. Low-frequency events stay on the
+//! global bus:
 //!   "ssh://log/<id>"   -> { id, entry: SshLogEvent }
 //!   "ssh://exit/<id>"  -> { id, code: number | null }
 
@@ -27,6 +29,7 @@ use arc_session_manager::{ssh as ssh_db, SessionStore, SshHost, SshHostInput, Ss
 use arc_ssh::{generate_key, load_key_metadata, GeneratedKey, SshConnectOpts, SshLogEvent, SshManager};
 use keyring::Entry;
 use serde::{Deserialize, Serialize};
+use tauri::ipc::{Channel, InvokeResponseBody};
 use tauri::{AppHandle, Emitter, State};
 
 /// OS-credential-vault service name for SSH passphrases. Distinct from the
@@ -50,12 +53,6 @@ pub struct SshConnectInvoke {
 }
 
 #[derive(Debug, Serialize, Clone)]
-struct SshDataEvent {
-    id: String,
-    bytes: Vec<u8>,
-}
-
-#[derive(Debug, Serialize, Clone)]
 struct SshLogEventOut {
     id: String,
     entry: SshLogEvent,
@@ -73,6 +70,7 @@ pub async fn ssh_connect(
     state: State<'_, SshState>,
     store: State<'_, SessionStore>,
     payload: SshConnectInvoke,
+    on_data: Channel<InvokeResponseBody>,
 ) -> Result<String, String> {
     // Resolve the host record so we know which identity to load.
     let host = ssh_db::host_get(store.pool(), &payload.host_id)
@@ -120,30 +118,22 @@ pub async fn ssh_connect(
         .map_err(|e| format!("{e:#}"))?;
 
     let id = result.id.clone();
-    let data_topic = format!("ssh://data/{id}");
     let log_topic = format!("ssh://log/{id}");
     let exit_topic = format!("ssh://exit/{id}");
 
     // Bump last_used on the host record (fire-and-forget; non-fatal).
     let _ = ssh_db::host_touch(store.pool(), &host.id).await;
 
-    // Forward data → ssh://data/<id>
+    // Drain shell output straight onto the per-connect raw IPC channel — no
+    // JSON-number-array bloat and no fan-out to other windows (the same fix
+    // applied to the PTY path). `on_data` is registered on the JS side before
+    // this command runs, so no early shell output is dropped.
     {
-        let app = app.clone();
         let mut rx = result.data_rx;
         let id_for_data = id.clone();
         tokio::spawn(async move {
             while let Some(bytes) = rx.recv().await {
-                if app
-                    .emit(
-                        &data_topic,
-                        SshDataEvent {
-                            id: id_for_data.clone(),
-                            bytes,
-                        },
-                    )
-                    .is_err()
-                {
+                if on_data.send(InvokeResponseBody::Raw(bytes)).is_err() {
                     break;
                 }
             }

@@ -1764,10 +1764,6 @@ export interface SshLogEventPayload {
   entry: SshLogEvent;
 }
 
-export interface SshDataEvent {
-  id: SshId;
-  bytes: number[];
-}
 
 export interface SshExitEvent {
   id: SshId;
@@ -1802,11 +1798,19 @@ export interface SshImportKeyOpts {
   passphrase?: string;
 }
 
-/** Open an SSH session against a previously-saved host. Returns the session
- *  id used to subscribe to `ssh://data/<id>`, `ssh://log/<id>`,
- *  `ssh://exit/<id>`. */
-export async function sshConnect(payload: SshConnectInvoke): Promise<SshId> {
-  return invoke<SshId>('ssh_connect', { payload });
+/** Open an SSH session against a previously-saved host. Shell output streams
+ *  to `onData` over a per-connect raw `Channel` (registered before the command
+ *  runs, so no early output is dropped); `ssh://log/<id>` and `ssh://exit/<id>`
+ *  stay on the event bus. Returns the session id. */
+export async function sshConnect(
+  payload: SshConnectInvoke,
+  onData: (chunk: Uint8Array) => void,
+): Promise<SshId> {
+  const channel = new Channel<ArrayBuffer>();
+  channel.onmessage = (message) => {
+    onData(new Uint8Array(message));
+  };
+  return invoke<SshId>('ssh_connect', { payload, onData: channel });
 }
 
 export async function sshWrite(id: SshId, data: string): Promise<void> {
@@ -1819,15 +1823,6 @@ export async function sshResize(id: SshId, cols: number, rows: number): Promise<
 
 export async function sshClose(id: SshId): Promise<void> {
   await invoke('ssh_close', { id });
-}
-
-export async function onSshData(
-  id: SshId,
-  handler: (chunk: Uint8Array) => void,
-): Promise<UnlistenFn> {
-  return listen<SshDataEvent>(`ssh://data/${id}`, (event) => {
-    handler(new Uint8Array(event.payload.bytes));
-  });
 }
 
 export async function onSshLog(

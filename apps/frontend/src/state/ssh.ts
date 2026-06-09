@@ -108,9 +108,15 @@ interface SshStateShape extends SshUiState {
   keyDelete: (id: string, deleteFiles?: boolean) => Promise<void>;
 
   // ─── Sessions ────────────────────────────────────────────────────────
-  /** Open a session for `hostId`. The returned session id is also used as
-   *  the SSH tab's identifier. */
-  connect: (hostId: string, cols: number, rows: number) => Promise<SshId>;
+  /** Open a session for `hostId`. Shell output is delivered to `onData` over
+   *  a per-connect raw channel. The returned session id is also used as the
+   *  SSH tab's identifier. */
+  connect: (
+    hostId: string,
+    cols: number,
+    rows: number,
+    onData: (chunk: Uint8Array) => void,
+  ) => Promise<SshId>;
   disconnect: (sessionId: SshId) => Promise<void>;
   loadHostLogs: (hostId: string) => Promise<SshSessionLogRow[]>;
 
@@ -200,11 +206,11 @@ export const useSsh = create<SshStateShape>((set, get) => ({
     set((s) => ({ keys: s.keys.filter((k) => k.id !== id) }));
   },
 
-  connect: async (hostId, cols, rows) => {
+  connect: async (hostId, cols, rows, onData) => {
     if (!isTauri) {
       throw new Error('SSH requires the desktop app.');
     }
-    const sessionId = await sshConnect({ hostId, cols, rows });
+    const sessionId = await sshConnect({ hostId, cols, rows }, onData);
 
     const initial: SshSessionState = {
       id: sessionId,
