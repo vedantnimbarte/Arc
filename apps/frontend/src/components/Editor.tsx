@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Compartment, EditorState, type Extension } from '@codemirror/state';
-import { EditorView, keymap } from '@codemirror/view';
+import { EditorView, keymap, rectangularSelection, crosshairCursor } from '@codemirror/view';
 import { HighlightStyle, syntaxHighlighting } from '@codemirror/language';
 import { history, historyKeymap, redo, undo } from '@codemirror/commands';
 import { tags as t } from '@lezer/highlight';
@@ -22,6 +22,7 @@ import {
 import { fileIcon, MOCHA } from '../lib/fileIcons';
 import { fsReadFile, fsWriteFile, isTauri } from '../lib/tauri';
 import { useSelection } from '../state/selection';
+import { useSettings } from '../state/settings';
 import { useWorkspace } from '../state/workspace';
 import { cn } from '../lib/cn';
 
@@ -45,6 +46,10 @@ export function Editor({ filePath, tabId }: Props) {
   const previewRef = useRef<HTMLDivElement>(null);
   const viewRef = useRef<EditorView | null>(null);
   const langCompartment = useRef(new Compartment());
+  /** Holds the Vim keybinding layer. Reconfigured live when the user toggles
+   *  Vim mode in Settings so the editor doesn't need to remount. */
+  const vimCompartment = useRef(new Compartment());
+  const vimMode = useSettings((s) => s.editorVimMode);
   const lastSavedRef = useRef<string>('');
   /** Live mirror of the file's text. The CodeMirror update listener writes
    *  to it on every doc change; saves and preview renders both read from
@@ -155,11 +160,22 @@ export function Editor({ filePath, tabId }: Props) {
           state: EditorState.create({
             doc: content,
             extensions: [
+              // Vim layer must sit at the highest precedence (first in the
+              // list) so its keymap wins over CodeMirror's defaults. Empty
+              // until the async loader below fills it when Vim mode is on.
+              vimCompartment.current.of([]),
               basicSetup, // includes history (undo/redo), defaultKeymap
               history(),  // explicit — basicSetup already includes it but
                           // being explicit makes intent clear
               keymap.of(historyKeymap),
               saveKeymap,
+              // Multi-cursor: Alt-click drops extra cursors, ⌘D selects the
+              // next occurrence (via basicSetup's search keymap). These three
+              // enable rectangular (Alt-drag) selection + the crosshair
+              // affordance on top of the always-on multiple-selection state.
+              EditorState.allowMultipleSelections.of(true),
+              rectangularSelection(),
+              crosshairCursor(),
               EditorView.lineWrapping,
               // Register as the PRIMARY (non-fallback) highlighter. basicSetup
               // also ships `defaultHighlightStyle` as a fallback; if ours were
@@ -224,6 +240,17 @@ export function Editor({ filePath, tabId }: Props) {
           });
         }
 
+        // Seed the Vim layer from the current setting. The live-toggle effect
+        // below keeps it in sync afterward.
+        if (!disposed && useSettings.getState().editorVimMode) {
+          const ext = await loadVim();
+          if (!disposed && ext && viewRef.current) {
+            viewRef.current.dispatch({
+              effects: vimCompartment.current.reconfigure(ext),
+            });
+          }
+        }
+
         if (!disposed) setStatus({ kind: 'ready' });
       } catch (err) {
         if (!disposed) setStatus({ kind: 'error', message: String(err) });
@@ -248,6 +275,22 @@ export function Editor({ filePath, tabId }: Props) {
       }
     };
   }, []);
+
+  // Live-toggle Vim keybindings without remounting the editor. Reconfigures
+  // the dedicated compartment to the vim() extension (lazy-loaded) or back
+  // to an empty layer.
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      const ext = vimMode ? await loadVim() : [];
+      const view = viewRef.current;
+      if (cancelled || !view) return;
+      view.dispatch({ effects: vimCompartment.current.reconfigure(ext ?? []) });
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [vimMode]);
 
   /** Bidirectional, ratio-based scroll sync between the code and preview
    *  panes while in split mode. We don't try to map markdown lines to
@@ -538,6 +581,22 @@ async function loadLanguage(path: string): Promise<Extension | null> {
       return (await import('@codemirror/lang-php')).php();
     case 'java':
       return (await import('@codemirror/lang-java')).java();
+  }
+}
+
+/**
+ * Lazy-load the Vim keybinding extension so the (sizeable) vim package only
+ * ships in its own Vite chunk, fetched the first time a user enables Vim
+ * mode. Returns `null` if the import fails so the caller can fall back to a
+ * plain editor instead of throwing.
+ */
+async function loadVim(): Promise<Extension | null> {
+  try {
+    const { vim } = await import('@replit/codemirror-vim');
+    return vim();
+  } catch (err) {
+    console.error('[editor] failed to load Vim mode:', err);
+    return null;
   }
 }
 

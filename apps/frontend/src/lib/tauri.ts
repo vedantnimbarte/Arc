@@ -865,6 +865,8 @@ export interface PersistedSettings {
    *  the default canvas/DOM renderer on context-loss or when WebGL is
    *  unsupported. */
   terminalWebgl?: boolean;
+  /** Enable Vim keybindings in the CodeMirror editor. */
+  editorVimMode?: boolean;
 }
 
 /** Returns the stored settings blob, or `null` on first launch. */

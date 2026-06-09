@@ -32,6 +32,7 @@ import {
   Bot,
   Trash2,
   Lock,
+  FileCode2,
 } from 'lucide-react';
 import { useSettings } from '../state/settings';
 import {
@@ -74,7 +75,7 @@ import {
 } from '../state/shortcuts';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 
-type Pane = 'appearance' | 'themes' | 'shortcuts' | 'terminal' | 'agents' | 'providers' | 'about';
+type Pane = 'appearance' | 'themes' | 'shortcuts' | 'terminal' | 'editor' | 'agents' | 'providers' | 'about';
 
 export function SettingsPage() {
   const {
@@ -89,6 +90,7 @@ export function SettingsPage() {
     launchAtLogin,
     restoreWindowState,
     terminalWebgl,
+    editorVimMode,
     setActivePresetId,
     setPresetEnabled,
     updateProvider,
@@ -100,6 +102,7 @@ export function SettingsPage() {
     setLaunchAtLogin,
     setRestoreWindowState,
     setTerminalWebgl,
+    setEditorVimMode,
   } = useSettings();
 
   const [pane, setPane] = useState<Pane>('appearance');
@@ -156,6 +159,7 @@ export function SettingsPage() {
             <SidebarRow icon={Palette} label="Themes" active={pane === 'themes'} onClick={() => setPane('themes')} />
             <SidebarRow icon={Keyboard} label="Shortcuts" active={pane === 'shortcuts'} onClick={() => setPane('shortcuts')} />
             <SidebarRow icon={TerminalIcon} label="Terminal" active={pane === 'terminal'} onClick={() => setPane('terminal')} />
+            <SidebarRow icon={FileCode2} label="Editor" active={pane === 'editor'} onClick={() => setPane('editor')} />
             <SidebarRow icon={Bot} label="Agents" active={pane === 'agents'} onClick={() => setPane('agents')} />
             <SidebarRow icon={SlidersHorizontal} label="Providers" active={pane === 'providers'} onClick={() => setPane('providers')} />
             <SidebarRow icon={Info} label="About" active={pane === 'about'} onClick={() => setPane('about')} />
@@ -205,6 +209,12 @@ export function SettingsPage() {
                   onPickShell={setDefaultShell}
                   terminalWebgl={terminalWebgl}
                   onTerminalWebglChange={setTerminalWebgl}
+                />
+              )}
+              {pane === 'editor' && (
+                <EditorPane
+                  vimMode={editorVimMode}
+                  onVimModeChange={setEditorVimMode}
                 />
               )}
               {pane === 'about' && <AboutPane />}
@@ -1599,6 +1609,30 @@ function FieldSection({
 }
 
 // ─── Shell ──────────────────────────────────────────────────────────────────
+
+function EditorPane({
+  vimMode,
+  onVimModeChange,
+}: {
+  vimMode: boolean;
+  onVimModeChange: (on: boolean) => void;
+}) {
+  return (
+    <div className="space-y-7">
+      <Section
+        title="Editing"
+        hint="Multi-cursor is always on — Alt-click to drop extra cursors, ⌘D to select the next occurrence, Alt-drag for a rectangular selection."
+      >
+        <ToggleRow
+          label="Vim mode"
+          hint="Modal Vim keybindings in the editor. Loads the first time it's enabled."
+          checked={vimMode}
+          onChange={() => onVimModeChange(!vimMode)}
+        />
+      </Section>
+    </div>
+  );
+}
 
 function TerminalPane({
   shells,

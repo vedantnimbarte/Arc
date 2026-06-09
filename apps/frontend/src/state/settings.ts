@@ -68,6 +68,9 @@ export interface Settings {
   restoreWindowState: boolean;
   /** Use the WebGL renderer for newly-opened terminal tabs. */
   terminalWebgl: boolean;
+  /** Enable Vim keybindings in the CodeMirror editor. Multi-cursor is always
+   *  on; this gates the modal Vim layer specifically. */
+  editorVimMode: boolean;
   /** True once hydrateSecrets() has finished. */
   secretsHydrated: boolean;
   /** True once hydrateSettings() has applied stored values. */
@@ -93,6 +96,7 @@ export interface Settings {
   setLaunchAtLogin: (on: boolean) => Promise<void>;
   setRestoreWindowState: (on: boolean) => void;
   setTerminalWebgl: (on: boolean) => void;
+  setEditorVimMode: (on: boolean) => void;
   hydrateSettings: () => Promise<void>;
   hydrateSecrets: () => Promise<void>;
 }
@@ -135,6 +139,7 @@ const DEFAULTS = {
   launchAtLogin: false,
   restoreWindowState: true,
   terminalWebgl: false,
+  editorVimMode: false,
 };
 
 const clampFontSize = (n: number): number =>
@@ -271,6 +276,7 @@ export const useSettings = create<Settings>()((set, get) => ({
   },
   setRestoreWindowState: (on) => set({ restoreWindowState: on }),
   setTerminalWebgl: (on) => set({ terminalWebgl: on }),
+  setEditorVimMode: (on) => set({ editorVimMode: on }),
 
   hydrateSettings: async () => {
     if (get().settingsHydrated) return;
@@ -490,6 +496,10 @@ function applyStored(
       typeof stored.terminalWebgl === 'boolean'
         ? stored.terminalWebgl
         : current.terminalWebgl,
+    editorVimMode:
+      typeof stored.editorVimMode === 'boolean'
+        ? stored.editorVimMode
+        : current.editorVimMode,
   };
 }
 
@@ -517,6 +527,7 @@ function toPersistedSettings(s: Settings): PersistedSettings {
     launchAtLogin: s.launchAtLogin,
     restoreWindowState: s.restoreWindowState,
     terminalWebgl: s.terminalWebgl,
+    editorVimMode: s.editorVimMode,
   };
 }
 
@@ -567,7 +578,8 @@ export async function rehydrateSettingsFromBroadcast(): Promise<void> {
     const sameStartup =
       (stored.launchAtLogin ?? current.launchAtLogin) === current.launchAtLogin &&
       (stored.restoreWindowState ?? current.restoreWindowState) === current.restoreWindowState &&
-      (stored.terminalWebgl ?? current.terminalWebgl) === current.terminalWebgl;
+      (stored.terminalWebgl ?? current.terminalWebgl) === current.terminalWebgl &&
+      (stored.editorVimMode ?? current.editorVimMode) === current.editorVimMode;
     if (samePreset && sameAppearance && sameTheme && sameFont && sameShell && sameStartup) return;
 
     suppressSave = true;
