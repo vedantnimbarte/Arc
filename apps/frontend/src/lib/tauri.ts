@@ -744,6 +744,18 @@ export interface Workspace {
   last_opened_at: number;
 }
 
+export type AgentRunStatus = 'idle' | 'running' | 'paused' | 'completed' | 'failed';
+
+export interface AgentRunRecord {
+  id: string;
+  workspace_id: string | null;
+  agent_id: string;
+  status: AgentRunStatus;
+  started_at: number;
+  finished_at: number | null;
+  summary: string | null;
+}
+
 export type ChatRole = 'system' | 'user' | 'assistant';
 
 export interface ChatConversation {
@@ -795,6 +807,17 @@ export async function sessionSetWorkspace(
 
 export async function sessionWorkspacesList(): Promise<Workspace[]> {
   return invoke<Workspace[]>('session_workspaces_list');
+}
+
+/** List persisted agent runs, most-recent first. */
+export async function sessionAgentRunsList(
+  workspaceId?: string | null,
+  limit?: number,
+): Promise<AgentRunRecord[]> {
+  return invoke<AgentRunRecord[]>('session_agent_runs_list', {
+    workspaceId: workspaceId ?? null,
+    limit: limit ?? null,
+  });
 }
 
 export async function sessionWorkspaceUpsert(

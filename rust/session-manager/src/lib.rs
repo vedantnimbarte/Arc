@@ -26,6 +26,7 @@ pub mod ssh;
 pub mod tabs;
 pub mod workspaces;
 
+pub use agent::AgentRun;
 pub use chat::{ChatConversation, ChatMessage, ChatRole};
 pub use commands::CommandRecord;
 pub use memory::{MemoryEntry, MemoryHit};

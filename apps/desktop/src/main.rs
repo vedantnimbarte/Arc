@@ -118,6 +118,7 @@ fn main() {
             commands::session::session_workspaces_list,
             commands::session::session_workspace_upsert,
             commands::session::session_workspace_delete,
+            commands::session::session_agent_runs_list,
             commands::session::session_chat_load,
             commands::session::session_chat_append,
             commands::session::session_chat_clear,

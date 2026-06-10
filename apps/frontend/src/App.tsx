@@ -17,7 +17,7 @@ import { SearchPalette } from './components/SearchPalette';
 import { ShortcutsDialog } from './components/ShortcutsDialog';
 import { PaneTreeView } from './components/PaneTreeView';
 import { useWorkspace } from './state/workspace';
-import { useFiles, CHAT_DEFAULT, SIDEBAR_RAIL_WIDTH } from './state/files';
+import { useFiles, CHAT_DEFAULT, SIDEBAR_RAIL_WIDTH, defaultWidthForView } from './state/files';
 import { useChat } from './state/chat';
 import { useSelection, type SelectionInfo } from './state/selection';
 import {
@@ -161,6 +161,7 @@ export default function App() {
   const [chatIntent, setChatIntent] = useState<ChatIntent | null>(null);
   const sidebarCollapsed = useFiles((s) => s.collapsed);
   const sidebarWidth = useFiles((s) => s.sidebarWidth);
+  const sidebarView = useFiles((s) => s.sidebarView);
   const toggleSidebar = useFiles((s) => s.toggleCollapsed);
   const setSidebarWidth = useFiles((s) => s.setSidebarWidth);
   const chatWidth = useFiles((s) => s.chatWidth);
@@ -440,6 +441,7 @@ export default function App() {
                 edge="left"
                 getWidth={() => useFiles.getState().sidebarWidth}
                 onResize={setSidebarWidth}
+                resetWidth={defaultWidthForView(sidebarView)}
               />
             )}
 
