@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, useRef, type KeyboardEvent } from 'react';
 import { FileTree } from './FileTree';
 import { SourceControl } from './SourceControl';
 import { SshPanel } from './ssh/SshPanel';
@@ -90,7 +90,13 @@ export function Sidebar() {
           view-in animation replays each time, while absolute positioning keeps
           the swap from reflowing the rail above. */}
       <div className="relative min-h-0 flex-1">
-        <div key={view} className="absolute inset-0 flex min-h-0 flex-col animate-view-in">
+        <div
+          key={view}
+          id={SIDEBAR_PANEL_ID}
+          role="tabpanel"
+          aria-labelledby={tabId(view)}
+          className="absolute inset-0 flex min-h-0 flex-col animate-view-in motion-reduce:animate-none"
+        >
           {view === 'files' ? (
             <FileTree />
           ) : view === 'git' ? (
@@ -106,6 +112,9 @@ export function Sidebar() {
 
 // ── Activity rail ──────────────────────────────────────────────────────────
 
+const SIDEBAR_PANEL_ID = 'sidebar-view-panel';
+const tabId = (view: SidebarView) => `sidebar-tab-${view}`;
+
 function SidebarRail({
   view,
   onSelect,
@@ -117,10 +126,44 @@ function SidebarRail({
   gitCount: number;
   gitConflicts: number;
 }) {
+  const btnRefs = useRef(new Map<SidebarView, HTMLButtonElement | null>());
+
+  // Arrow-key navigation with automatic activation — the standard ARIA tabs
+  // pattern. Left/Up and Right/Down wrap; Home/End jump to the ends.
+  const onKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
+    const len = SIDEBAR_VIEWS.length;
+    const idx = SIDEBAR_VIEWS.findIndex((v) => v.id === view);
+    let next = idx;
+    switch (e.key) {
+      case 'ArrowRight':
+      case 'ArrowDown':
+        next = (idx + 1) % len;
+        break;
+      case 'ArrowLeft':
+      case 'ArrowUp':
+        next = (idx - 1 + len) % len;
+        break;
+      case 'Home':
+        next = 0;
+        break;
+      case 'End':
+        next = len - 1;
+        break;
+      default:
+        return;
+    }
+    const nextView = SIDEBAR_VIEWS[next];
+    if (!nextView) return;
+    e.preventDefault();
+    onSelect(nextView.id);
+    btnRefs.current.get(nextView.id)?.focus();
+  };
+
   return (
     <div
       role="tablist"
       aria-label="Sidebar views"
+      onKeyDown={onKeyDown}
       className="flex h-8 shrink-0 items-center gap-0.5 border-b border-border-hairline px-1.5"
     >
       {SIDEBAR_VIEWS.map(({ id, label, Icon }) => {
@@ -129,15 +172,20 @@ function SidebarRail({
         return (
           <button
             key={id}
+            ref={(el) => btnRefs.current.set(id, el)}
             type="button"
             role="tab"
+            id={tabId(id)}
             aria-selected={active}
+            aria-controls={SIDEBAR_PANEL_ID}
             aria-label={label}
+            tabIndex={active ? 0 : -1}
             title={label}
             onClick={() => onSelect(id)}
             className={cn(
               'group relative flex h-[22px] items-center overflow-hidden rounded-md outline-none',
               'transition-all duration-[260ms] ease-out-soft active:scale-[0.97]',
+              'motion-reduce:transition-none',
               'focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-accent/40',
               active
                 ? 'bg-white/[0.06] px-1.5 text-accent-bright ring-1 ring-inset ring-accent/15 shadow-[inset_0_1px_0_0_rgba(255,255,255,0.05)]'
@@ -156,7 +204,7 @@ function SidebarRail({
                 size={11}
                 strokeWidth={2}
                 className={cn(
-                  'transition-transform duration-[260ms] ease-out-soft',
+                  'transition-transform duration-[260ms] ease-out-soft motion-reduce:transition-none',
                   active && 'scale-[1.05]',
                 )}
               />
@@ -166,7 +214,7 @@ function SidebarRail({
                   className={cn(
                     'pointer-events-none absolute -right-0.5 -top-0.5 h-[5px] w-[5px] rounded-full ring-1 ring-bg-chrome',
                     gitConflicts > 0
-                      ? 'bg-status-err animate-pulse-soft'
+                      ? 'bg-status-err animate-pulse-soft motion-reduce:animate-none'
                       : 'bg-accent-bright',
                   )}
                 />
@@ -176,7 +224,7 @@ function SidebarRail({
                 grows smoothly; the inner span clips the text while it animates. */}
             <span
               className={cn(
-                'grid transition-all duration-[260ms] ease-out-soft',
+                'grid transition-all duration-[260ms] ease-out-soft motion-reduce:transition-none',
                 active ? 'ml-1 grid-cols-[1fr] opacity-100' : 'ml-0 grid-cols-[0fr] opacity-0',
               )}
             >
