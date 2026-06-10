@@ -75,6 +75,9 @@ export interface Settings {
   /** Enable the ⌘K inline AI edit inside the editor. When off, ⌘K falls
    *  through to the global command palette. */
   editorInlineAi: boolean;
+  /** Enable LSP features (diagnostics, hover, completion) in the editor.
+   *  Off by default — requires the relevant language servers on PATH. */
+  editorLsp: boolean;
   /** Fire a system notification when an OSC133-tracked command runs longer
    *  than `notifyThresholdSecs` and the window is unfocused (Tier 1.5). */
   notifyLongCommands: boolean;
@@ -109,6 +112,7 @@ export interface Settings {
   setTerminalWebgl: (on: boolean) => void;
   setEditorVimMode: (on: boolean) => void;
   setEditorInlineAi: (on: boolean) => void;
+  setEditorLsp: (on: boolean) => void;
   setNotifyLongCommands: (on: boolean) => void;
   setNotifyThresholdSecs: (secs: number) => void;
   setNotifySound: (on: boolean) => void;
@@ -156,6 +160,7 @@ const DEFAULTS = {
   terminalWebgl: false,
   editorVimMode: false,
   editorInlineAi: true,
+  editorLsp: false,
   notifyLongCommands: true,
   notifyThresholdSecs: 30,
   notifySound: false,
@@ -302,6 +307,7 @@ export const useSettings = create<Settings>()((set, get) => ({
   setTerminalWebgl: (on) => set({ terminalWebgl: on }),
   setEditorVimMode: (on) => set({ editorVimMode: on }),
   setEditorInlineAi: (on) => set({ editorInlineAi: on }),
+  setEditorLsp: (on) => set({ editorLsp: on }),
   setNotifyLongCommands: (on) => set({ notifyLongCommands: on }),
   setNotifyThresholdSecs: (secs) => set({ notifyThresholdSecs: clampNotifySecs(secs) }),
   setNotifySound: (on) => set({ notifySound: on }),
@@ -542,6 +548,8 @@ function applyStored(
       typeof stored.editorInlineAi === 'boolean'
         ? stored.editorInlineAi
         : current.editorInlineAi,
+    editorLsp:
+      typeof stored.editorLsp === 'boolean' ? stored.editorLsp : current.editorLsp,
     notifyLongCommands:
       typeof stored.notifyLongCommands === 'boolean'
         ? stored.notifyLongCommands
@@ -581,6 +589,7 @@ function toPersistedSettings(s: Settings): PersistedSettings {
     terminalWebgl: s.terminalWebgl,
     editorVimMode: s.editorVimMode,
     editorInlineAi: s.editorInlineAi,
+    editorLsp: s.editorLsp,
     notifyLongCommands: s.notifyLongCommands,
     notifyThresholdSecs: s.notifyThresholdSecs,
     notifySound: s.notifySound,

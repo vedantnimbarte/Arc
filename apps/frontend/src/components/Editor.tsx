@@ -22,6 +22,9 @@ import {
 import { fileIcon, MOCHA } from '../lib/fileIcons';
 import { fsReadFile, fsWriteFile, isTauri } from '../lib/tauri';
 import { InlineEditPanel, type InlineSession } from './InlineEditPanel';
+import { attachLsp, pathToFileUri, type LspAttachment } from '../lib/lspClient';
+import { lspServerFor } from '../lib/lspServers';
+import { useFiles } from '../state/files';
 import { useSelection } from '../state/selection';
 import { useSettings } from '../state/settings';
 import { useWorkspace } from '../state/workspace';
@@ -58,6 +61,13 @@ export function Editor({ filePath, tabId }: Props) {
   const fontCompartment = useRef(new Compartment());
   const fontId = useSettings((s) => s.fontId);
   const fontSize = useSettings((s) => s.fontSize);
+  /** Holds the LSP feature layer (diagnostics/hover/completion), reconfigured
+   *  once a language server attaches. */
+  const lspCompartment = useRef(new Compartment());
+  /** Live LSP attachment for the open document, or null. */
+  const lspCtlRef = useRef<LspAttachment | null>(null);
+  /** Debounces didChange notifications to the language server. */
+  const lspChangeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastSavedRef = useRef<string>('');
   /** Live mirror of the file's text. The CodeMirror update listener writes
    *  to it on every doc change; saves and preview renders both read from
@@ -252,6 +262,7 @@ export function Editor({ filePath, tabId }: Props) {
                 ),
               ),
               langCompartment.current.of([]),
+              lspCompartment.current.of([]),
               EditorView.updateListener.of((u) => {
                 if (u.docChanged) {
                   const current = u.state.doc.toString();
@@ -261,6 +272,14 @@ export function Editor({ filePath, tabId }: Props) {
                   setTabDirty(tabId, isDirty);
                   // Keep the preview pane live in preview / split modes.
                   if (modeRef.current !== 'code') schedulePreviewRender();
+                  // Push the change to the language server (debounced) so
+                  // diagnostics + completion stay in sync with the buffer.
+                  if (lspCtlRef.current) {
+                    if (lspChangeTimer.current) clearTimeout(lspChangeTimer.current);
+                    lspChangeTimer.current = setTimeout(() => {
+                      lspCtlRef.current?.didChange(current);
+                    }, 300);
+                  }
                 }
                 if (u.selectionSet || u.docChanged) {
                   const sel = u.state.selection.main;
@@ -317,6 +336,26 @@ export function Editor({ filePath, tabId }: Props) {
         }
 
         if (!disposed) setStatus({ kind: 'ready' });
+
+        // Attach a language server if LSP is enabled and one is registered for
+        // this file's language. Failures degrade to a plain editor (attachLsp
+        // returns an empty attachment).
+        if (!disposed && isTauri && useSettings.getState().editorLsp) {
+          const server = lspServerFor(pathToLanguageId(filePath));
+          if (server && viewRef.current) {
+            const root = useFiles.getState().root;
+            const rootUri = root ? pathToFileUri(root) : null;
+            const att = await attachLsp(viewRef.current, server, filePath, rootUri);
+            if (disposed || !viewRef.current) {
+              att.dispose();
+            } else {
+              lspCtlRef.current = att;
+              viewRef.current.dispatch({
+                effects: lspCompartment.current.reconfigure(att.extensions),
+              });
+            }
+          }
+        }
       } catch (err) {
         if (!disposed) setStatus({ kind: 'error', message: String(err) });
       }
@@ -326,6 +365,13 @@ export function Editor({ filePath, tabId }: Props) {
 
     return () => {
       disposed = true;
+      // Detach the language server for this document before the view goes.
+      if (lspChangeTimer.current) {
+        clearTimeout(lspChangeTimer.current);
+        lspChangeTimer.current = null;
+      }
+      lspCtlRef.current?.dispose();
+      lspCtlRef.current = null;
       viewRef.current?.destroy();
       viewRef.current = null;
       useSelection.getState().clear('editor', tabId);

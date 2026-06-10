@@ -99,6 +99,7 @@ export function SettingsPage() {
     terminalWebgl,
     editorVimMode,
     editorInlineAi,
+    editorLsp,
     notifyLongCommands,
     notifyThresholdSecs,
     notifySound,
@@ -115,6 +116,7 @@ export function SettingsPage() {
     setTerminalWebgl,
     setEditorVimMode,
     setEditorInlineAi,
+    setEditorLsp,
     setNotifyLongCommands,
     setNotifyThresholdSecs,
     setNotifySound,
@@ -239,6 +241,8 @@ export function SettingsPage() {
                   onVimModeChange={setEditorVimMode}
                   inlineAi={editorInlineAi}
                   onInlineAiChange={setEditorInlineAi}
+                  lsp={editorLsp}
+                  onLspChange={setEditorLsp}
                 />
               )}
               {pane === 'sidebar' && <SidebarSettingsPane />}
@@ -1749,11 +1753,15 @@ function EditorPane({
   onVimModeChange,
   inlineAi,
   onInlineAiChange,
+  lsp,
+  onLspChange,
 }: {
   vimMode: boolean;
   onVimModeChange: (on: boolean) => void;
   inlineAi: boolean;
   onInlineAiChange: (on: boolean) => void;
+  lsp: boolean;
+  onLspChange: (on: boolean) => void;
 }) {
   return (
     <div className="space-y-7">
@@ -1772,6 +1780,17 @@ function EditorPane({
           hint="Press ⌘K in the editor to rewrite the selection with AI — type an instruction, review the diff, accept or discard. Uses the active chat provider. When off, ⌘K opens the command palette."
           checked={inlineAi}
           onChange={() => onInlineAiChange(!inlineAi)}
+        />
+      </Section>
+      <Section
+        title="Language servers (LSP)"
+        hint="Diagnostics, hover docs, and completion from real language servers. Requires the server binaries on your PATH — e.g. typescript-language-server, rust-analyzer, pyright-langserver, gopls, clangd."
+      >
+        <ToggleRow
+          label="Enable LSP"
+          hint="Connects supported files (TypeScript/JavaScript, Rust, Python, Go, C/C++) to their language server. Missing servers degrade gracefully to a plain editor."
+          checked={lsp}
+          onChange={() => onLspChange(!lsp)}
         />
       </Section>
     </div>
