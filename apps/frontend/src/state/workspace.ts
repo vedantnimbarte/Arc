@@ -9,6 +9,7 @@ import {
   type TabInput,
 } from '../lib/tauri';
 import { useFiles } from './files';
+import { useReveal } from './reveal';
 
 export interface Tab {
   id: string;
@@ -105,8 +106,14 @@ interface WorkspaceState {
   setTabDirty: (id: string, dirty: boolean) => void;
   /** Find an existing editor tab for `path`, or create one and focus it.
    *  When `forceNew` is true a new tab is always created (used by the
-   *  Duplicate-tab action so the user gets a second view of the file). */
-  openFile: (path: string, title?: string, opts?: { forceNew?: boolean }) => string;
+   *  Duplicate-tab action so the user gets a second view of the file).
+   *  When `line` (1-based) is set, the opened editor scrolls to and selects
+   *  that line — used by clicked terminal path links carrying `:line`. */
+  openFile: (
+    path: string,
+    title?: string,
+    opts?: { forceNew?: boolean; line?: number },
+  ) => string;
   /** Open a git diff tab for a file. Re-focuses an existing diff tab for the
    *  same path+scope rather than duplicating it. */
   openDiff: (absPath: string, root: string, scope: 'worktree' | 'staged' | 'head') => string;
@@ -497,6 +504,9 @@ export const useWorkspace = create<WorkspaceState>()((set, get) => ({
       const existing = get().tabs.find((t) => t.kind === 'editor' && t.filePath === path);
       if (existing) {
         get().setActive(existing.id);
+        // The editor is already mounted — register the reveal so its
+        // subscriber applies the jump even without a remount.
+        if (opts?.line !== undefined) useReveal.getState().request(existing.id, opts.line);
         return existing.id;
       }
     }
@@ -508,6 +518,9 @@ export const useWorkspace = create<WorkspaceState>()((set, get) => ({
       filePath: path,
     };
     get().addTab(tab);
+    // New tab: the editor mounts shortly; its subscriber applies the reveal
+    // once it reaches the `ready` state.
+    if (opts?.line !== undefined) useReveal.getState().request(id, opts.line);
     return id;
   },
   openDiff: (absPath, root, scope) => {

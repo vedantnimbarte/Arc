@@ -42,9 +42,9 @@ export function StatusBar({ chatOpen, onToggleChat, onOpenShortcuts }: Props) {
   const newTerminal = useWorkspace((s) => s.newTerminal);
   const root = useFiles((s) => s.root);
 
-  // Shared git poller lives on the Sidebar (4s interval). We just subscribe
-  // here so the branch pill + diff-stat badge ride the same cache as the
-  // sidebar source-control view — no duplicate polling.
+  // Shared git refresh driver lives on the Sidebar (fs-watcher + backstop
+  // poll). We just subscribe here so the branch pill + diff-stat badge ride
+  // the same cache as the sidebar source-control view — no duplicate work.
   const git = useGit((s) => s.info);
   const diffStat = useGit((s) => s.diffStat);
   const refreshGit = useCallback(() => {
