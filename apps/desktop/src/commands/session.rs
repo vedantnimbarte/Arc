@@ -15,8 +15,8 @@
 //!   invoke("session_chat_clear",  { conversationId })        -> ()
 
 use arc_session_manager::{
-    chat, commands as cmd_history, settings, tabs, workspaces, ChatConversation, ChatMessage,
-    ChatRole, CommandRecord, SessionState, SessionStore, TabInput, Workspace,
+    agent, chat, commands as cmd_history, settings, tabs, workspaces, AgentRun, ChatConversation,
+    ChatMessage, ChatRole, CommandRecord, SessionState, SessionStore, TabInput, Workspace,
 };
 use serde::{Deserialize, Serialize};
 use tauri::State;
@@ -78,6 +78,17 @@ pub async fn session_workspace_upsert(
     root: String,
 ) -> Result<Workspace, String> {
     workspaces::upsert(store.pool(), &name, &root)
+        .await
+        .map_err(str_err)
+}
+
+#[tauri::command]
+pub async fn session_agent_runs_list(
+    store: State<'_, SessionStore>,
+    workspace_id: Option<String>,
+    limit: Option<i64>,
+) -> Result<Vec<AgentRun>, String> {
+    agent::list(store.pool(), workspace_id.as_deref(), limit.unwrap_or(200))
         .await
         .map_err(str_err)
 }

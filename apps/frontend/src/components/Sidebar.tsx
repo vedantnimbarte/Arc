@@ -12,6 +12,7 @@ import { FileTree } from './FileTree';
 import { SourceControl } from './SourceControl';
 import { SearchView } from './SearchView';
 import { OutlineView } from './OutlineView';
+import { AgentsView } from './AgentsView';
 import { SshPanel } from './ssh/SshPanel';
 import { fsReveal, fsWatchStart, fsWatchStop, isTauri } from '../lib/tauri';
 import { useFiles, type SidebarView } from '../state/files';
@@ -121,6 +122,8 @@ export function Sidebar() {
             <SearchView />
           ) : view === 'outline' ? (
             <OutlineView />
+          ) : view === 'agents' ? (
+            <AgentsView />
           ) : (
             <SshPanel onClose={() => setSidebarView('files')} />
           )}
