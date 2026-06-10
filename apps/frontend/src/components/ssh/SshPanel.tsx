@@ -18,9 +18,10 @@ import { ImportKeyDialog } from './ImportKeyDialog';
 import { HostEditDialog } from './HostEditDialog';
 import type { SshHost, SshKey } from '../../lib/tauri';
 
-/** SSH secondary sidebar — fills the right-side layout slot provided by App.tsx.
- *  No fixed positioning; the material surface + border are owned by the outer aside. */
-export function SshPanel() {
+/** SSH view — rendered inside the left sidebar's SSH tab (the activity rail
+ *  owns view switching). `onClose` lets the host collapse the panel back to
+ *  the Explorer; the material surface + border are owned by the outer aside. */
+export function SshPanel({ onClose }: { onClose?: () => void }) {
   const hosts = useSsh((s) => s.hosts);
   const keys = useSsh((s) => s.keys);
   const sessions = useSsh((s) => s.sessions);
@@ -31,6 +32,7 @@ export function SshPanel() {
   const hydrate = useSsh((s) => s.hydrate);
   const hydrated = useSsh((s) => s.hydrated);
   const setPanelOpen = useSsh((s) => s.setPanelOpen);
+  const handleClose = onClose ?? (() => setPanelOpen(false));
 
   useEffect(() => {
     void hydrate();
@@ -80,7 +82,7 @@ export function SshPanel() {
       <SectionHeader
         tab={tab}
         onTabChange={setTab}
-        onClose={() => setPanelOpen(false)}
+        onClose={handleClose}
         onPrimary={() => {
           if (tab === 'hosts') {
             setEditingHost(null);
