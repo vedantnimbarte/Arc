@@ -568,17 +568,46 @@ pub async fn agent_decide(
     }
 }
 
+/// Resolve the main repository root for a linked worktree. `git worktree
+/// remove` must run from (or against) the *main* repo, not the linked worktree
+/// itself, so we ask git for the shared common dir (`<main>/.git`) and return
+/// its parent. Falls back to `None` for a bare or otherwise-unusual layout.
+async fn main_repo_root(worktree_path: &str) -> Option<String> {
+    let output = tokio::process::Command::new("git")
+        .arg("-C")
+        .arg(worktree_path)
+        .args(["rev-parse", "--path-format=absolute", "--git-common-dir"])
+        .output()
+        .await
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let common = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    // common is typically `<main>/.git`; the repo root is its parent.
+    let path = std::path::Path::new(&common);
+    let root = if path.file_name().map(|n| n == ".git").unwrap_or(false) {
+        path.parent()
+    } else {
+        Some(path)
+    };
+    root.map(|p| p.to_string_lossy().to_string())
+}
+
 /// Discard an isolated run's worktree: force-removes the worktree directory and
-/// best-effort deletes its throwaway branch. `repo_root` is the main repository
-/// (the user's workspace folder); `worktree_path` and `branch` come from the
-/// persisted run record. Branch deletion failures are swallowed — the worktree
-/// removal is what matters; a dangling branch is harmless and user-prunable.
+/// best-effort deletes its throwaway branch. `worktree_path` and `branch` come
+/// from the persisted run record; the main repo root is derived from the
+/// worktree via git so the caller doesn't have to track it. Branch-deletion
+/// failures are swallowed — the worktree removal is what matters; a dangling
+/// branch is harmless and user-prunable.
 #[tauri::command]
 pub async fn agent_worktree_discard(
-    repo_root: String,
     worktree_path: String,
     branch: Option<String>,
 ) -> Result<(), String> {
+    let repo_root = main_repo_root(&worktree_path)
+        .await
+        .ok_or_else(|| "could not resolve the main repository for this worktree".to_string())?;
     arc_git::worktree_remove(&repo_root, &worktree_path, true)
         .await
         .map_err(|e| format!("worktree remove failed: {e}"))?;

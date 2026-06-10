@@ -32,6 +32,7 @@ arc-http-client = { workspace = true }
 arc-ssh = { workspace = true }
 arc-project-config = { workspace = true }
 arc-git-host = { workspace = true }
+arc-lsp = { workspace = true }
 async-trait = { workspace = true }
 dashmap = { workspace = true }
 fontdb = "0.18"

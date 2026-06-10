@@ -8,6 +8,7 @@ use arc_session_manager::SessionStore;
 use commands::agent::AgentApprovals;
 use commands::fs::WatchState;
 use commands::llm::LlmState;
+use commands::lsp::LspState;
 use commands::mcp::McpState;
 use commands::pty::PtyState;
 use commands::ssh::SshState;
@@ -197,6 +198,15 @@ fn main() {
             commands::agent::agent_run,
             commands::agent::agent_decide,
             commands::agent::agent_worktree_discard,
+            commands::lsp::lsp_start,
+            commands::lsp::lsp_did_open,
+            commands::lsp::lsp_did_change,
+            commands::lsp::lsp_did_close,
+            commands::lsp::lsp_hover,
+            commands::lsp::lsp_completion,
+            commands::lsp::lsp_definition,
+            commands::lsp::lsp_stop,
+            commands::lsp::lsp_is_running,
             commands::mcp::mcp_connect,
             commands::mcp::mcp_connect_http,
             commands::mcp::mcp_list_tools,
@@ -252,6 +262,9 @@ fn main() {
             }
 
             app.manage(store);
+            // The LSP manager needs an AppHandle to emit diagnostics events,
+            // so it's built here (not via Default) where the handle is ready.
+            app.manage(LspState::new(app.handle().clone()));
             tracing::info!("arc desktop started");
             Ok(())
         })
