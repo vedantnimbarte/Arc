@@ -19,9 +19,12 @@ import {
   Copy,
   Download,
   FileText,
+  FolderTree,
   GitBranch,
   GitCompare,
   GitMerge,
+  GitPullRequest,
+  ListOrdered,
   Minus,
   Pencil,
   Plus,
@@ -61,6 +64,7 @@ import {
 } from '../lib/tauri';
 import { useFiles } from '../state/files';
 import { useGit } from '../state/git';
+import { useGitUi } from '../state/gitUi';
 import { useWorkspace } from '../state/workspace';
 import { fileIcon } from '../lib/fileIcons';
 import { cn } from '../lib/cn';
@@ -210,7 +214,6 @@ function pathSegments(p: string): string[] {
 
 export function SourceControl() {
   const root = useFiles((s) => s.root);
-  const setSidebarView = useFiles((s) => s.setSidebarView);
   const openFile = useWorkspace((s) => s.openFile);
   const openDiff = useWorkspace((s) => s.openDiff);
 
@@ -793,19 +796,30 @@ export function SourceControl() {
             className={loading ? 'animate-spin-slow' : ''}
           />
         </button>
-        <button
-          onClick={() => setSidebarView('files')}
-          className={cn(
-            'flex h-6 w-6 items-center justify-center rounded-md text-fg-muted transition-all duration-150 ease-apple',
-            'hover:bg-white/[0.08] hover:text-fg-base hover:shadow-[inset_0_0_0_1px_rgba(255,255,255,0.05)]',
-            'active:scale-[0.92]',
-          )}
-          aria-label="Show file tree"
-          title="Close"
-        >
-          <X size={12} strokeWidth={2.1} />
-        </button>
       </div>
+
+      {/* Git launchers — open the heavier panels (PRs / worktrees / rebase)
+          that live as ⌘K overlays, surfaced here so source control is their
+          natural home. */}
+      {isTauri && root && (
+        <div className="flex shrink-0 items-center gap-1 border-b border-border-hairline px-2 py-1.5">
+          <GitLauncher
+            icon={<GitPullRequest size={11.5} strokeWidth={2} />}
+            label="Pull Requests"
+            onClick={() => useGitUi.getState().openPrList()}
+          />
+          <GitLauncher
+            icon={<FolderTree size={11.5} strokeWidth={2} />}
+            label="Worktrees"
+            onClick={() => useGitUi.getState().setWorktreePanelOpen(true)}
+          />
+          <GitLauncher
+            icon={<ListOrdered size={11.5} strokeWidth={2} />}
+            label="Rebase"
+            onClick={() => useGitUi.getState().setRebasePanelOpen(true)}
+          />
+        </div>
+      )}
 
       {/* Remote op result banner */}
       {remoteMsg && (
@@ -1147,6 +1161,38 @@ export function SourceControl() {
         />
       )}
     </div>
+  );
+}
+
+/** Equal-width launcher chip for the heavier git panels (PRs / worktrees /
+ *  rebase). Icon + label, kept quiet until hover. */
+function GitLauncher({
+  icon,
+  label,
+  onClick,
+}: {
+  icon: React.ReactNode;
+  label: string;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      title={label}
+      className={cn(
+        'group/launch flex h-[26px] min-w-0 flex-1 items-center justify-center gap-1.5 rounded-md',
+        'border border-white/[0.05] bg-white/[0.02] font-display text-[10.5px] font-medium tracking-tight text-fg-muted',
+        'transition-all duration-150 ease-apple',
+        'hover:border-accent/25 hover:bg-white/[0.05] hover:text-fg-base hover:shadow-[inset_0_1px_0_0_rgba(255,255,255,0.04)]',
+        'active:scale-[0.97]',
+      )}
+    >
+      <span className="shrink-0 text-fg-subtle transition-colors duration-150 group-hover/launch:text-accent-bright">
+        {icon}
+      </span>
+      <span className="truncate">{label}</span>
+    </button>
   );
 }
 
