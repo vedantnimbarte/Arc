@@ -441,6 +441,23 @@ export const DEFAULT_FONT_SIZE = 13;
 export const MIN_FONT_SIZE = 9;
 export const MAX_FONT_SIZE = 24;
 
+/** Build a CSS font stack for an arbitrary (system-installed) family name,
+ *  quoting the family and falling back to the generic monospace chain. */
+export function systemFontStack(family: string): string {
+  return `"${family.replace(/"/g, '')}", ui-monospace, monospace`;
+}
+
+/** Resolve a stored `fontId` to a usable FontOption.
+ *
+ *  Ids that match a bundled ("Arc supported") font return that option. Any
+ *  other non-empty id is treated as a system-installed family name — the
+ *  picker stores those verbatim — and gets a synthesized option whose stack
+ *  quotes the family. Falls back to the first bundled font otherwise. */
 export function getFont(id: string | null | undefined): FontOption {
-  return FONT_OPTIONS.find((f) => f.id === id) ?? FONT_OPTIONS[0]!;
+  const bundled = FONT_OPTIONS.find((f) => f.id === id);
+  if (bundled) return bundled;
+  if (id && id.trim()) {
+    return { id, label: id, stack: systemFontStack(id) };
+  }
+  return FONT_OPTIONS[0]!;
 }
