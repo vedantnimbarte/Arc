@@ -296,7 +296,7 @@ These don't belong to one tier but get touched repeatedly. Track separately so t
 | Tier | Status | PR |
 | ---- | ------ | -- |
 | 0    | ✅ shipped | tier-0-foundations |
-| 1    | planned | — |
+| 1    | ✅ shipped | tier-1-quick-wins |
 | 2    | ✅ shipped | tier-2-git |
 | 3    | planned | — |
 | 4    | planned | — |
@@ -310,6 +310,17 @@ Update this table as each tier lands.
 - **0.2 `.arc/` config** — new `rust/project-config` crate (TOML schema v1, 5 unit tests). `project_config_load` Tauri command, `useProjectConfig` store auto-reloads on workspace root change. Consumer wiring (env injection, MCP auto-connect, agent registration) deferred to later tiers — V0 ships the load path.
 - **0.3 Block-based output** — `state/blocks.ts` captures OSC 133 boundaries. `BlocksDrawer.tsx` floats over each terminal pane with per-block copy / rerun / "Ask ARC" actions. Compromise vs. the original plan: xterm renders to canvas/webgl, so blocks live in a drawer rather than inline-collapsible rows. The data model + capture layer is what subsequent Tier 1+ features need anyway. No-shell-integration shells produce no blocks (drawer shows a hint).
 - **0.4 Themes infrastructure** — Catppuccin Mocha + Latte built-in (4 themes total). `THEMES` registry + `registerTheme(theme)` + `validateThemeJson(json)` cover Tier 1.7 marketplace consumption. Settings → Appearance grows a theme picker with swatch previews. `themeId` persisted; `resolveActiveTheme(appearance, themeId)` is the new resolver. The `~/.arc/themes/*.json` disk loader is intentionally part of Tier 1.7 (marketplace) — the infra here makes that a small add.
+
+### Tier 1 — what actually landed
+
+- **1.1 OSC 8 / path hyperlinks** — `lib/links.ts` registers an xterm LinkProvider that detects file paths (separator- or extension-bearing tokens, optional `:line:col`) in output and opens them in an editor tab, resolving relative paths against the tree root. URLs stay with the web-links addon. Line-jump on click is deferred (the editor doesn't yet accept a target line).
+- **1.2 Recent commands/files splash** — `<NewTabSplash>` overlays a fresh terminal with recent commands (`session_commands_recent`; click pastes without auto-running) and recent files (new `recentFiles` in the files store, pushed from `openFile`; click opens). Dismisses on first interaction.
+- **1.3 File-tree git decorations** — new `git_root` command maps repo-relative `git_changes` paths to absolute; the git store derives an abs-path → `{status,kind}` map + a dirty-folder set. FileTree paints a colored porcelain letter on changed files (conflicts red) and an amber dot on collapsed dirty folders. Rides the existing 4s poll.
+- **1.4 Smart paste warnings** — `detectRiskyPaste` flags multi-line, `sudo`, `rm -rf`, `curl|sh`, `chmod/chown -R`, `dd`-to-device; the Terminal intercepts paste in the capture phase and parks flagged ones behind a `<PasteWarning>` confirm dialog (`usePaste` store), re-issuing via `term.paste()`. Shift-paste bypasses.
+- **1.5 Long-command notifications** — `tauri-plugin-notification` (+ capability). When an OSC133-tracked command exceeds a configurable threshold and the window is unfocused, a system notification fires (✓/✗ + duration + command). Settings → Terminal → Notifications: enable / threshold / sound.
+- **1.6 Cost / token meter** — `Chunk` now carries `input_tokens`/`output_tokens` (OpenAI `include_usage` trailing chunk; Anthropic `message_start`/`_delta`). `@arc/shared` ships a pricing table (`estimateCostUsd`/`formatUsd`). A `<CostMeter>` in the chat header shows per-session tokens + estimated USD, hidden for local models, dollar figure dropped when the model has no known price.
+- **1.7 Themes marketplace (local)** — `lib/themeMarketplace.ts` loads `~/.arc/themes/*.json` on boot (`registerTheme`) and installs themes from a URL via `http_request` (CORS-free), validated + persisted to disk. Settings → Themes grows an "Install from URL" field.
+- **1.8 Multi-cursor + Vim** — CodeMirror rectangular selection + crosshair on top of always-on multiple selections (Alt-click, ⌘D). New `editorVimMode` setting lazy-loads `@replit/codemirror-vim` into a compartment so the layer toggles live. Settings → Editor hosts the toggle.
 
 ### Tier 2 — what actually landed
 

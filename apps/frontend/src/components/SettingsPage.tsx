@@ -32,6 +32,7 @@ import {
   Bot,
   Trash2,
   Lock,
+  FileCode2,
 } from 'lucide-react';
 import { useSettings } from '../state/settings';
 import {
@@ -60,6 +61,7 @@ import {
   type Appearance,
   type ThemeDef,
 } from '../themes';
+import { installThemeFromUrl, loadInstalledThemes } from '../lib/themeMarketplace';
 import {
   ACTION_META,
   ACTION_ORDER,
@@ -74,7 +76,7 @@ import {
 } from '../state/shortcuts';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 
-type Pane = 'appearance' | 'themes' | 'shortcuts' | 'terminal' | 'agents' | 'providers' | 'about';
+type Pane = 'appearance' | 'themes' | 'shortcuts' | 'terminal' | 'editor' | 'agents' | 'providers' | 'about';
 
 export function SettingsPage() {
   const {
@@ -89,6 +91,10 @@ export function SettingsPage() {
     launchAtLogin,
     restoreWindowState,
     terminalWebgl,
+    editorVimMode,
+    notifyLongCommands,
+    notifyThresholdSecs,
+    notifySound,
     setActivePresetId,
     setPresetEnabled,
     updateProvider,
@@ -100,6 +106,10 @@ export function SettingsPage() {
     setLaunchAtLogin,
     setRestoreWindowState,
     setTerminalWebgl,
+    setEditorVimMode,
+    setNotifyLongCommands,
+    setNotifyThresholdSecs,
+    setNotifySound,
   } = useSettings();
 
   const [pane, setPane] = useState<Pane>('appearance');
@@ -156,6 +166,7 @@ export function SettingsPage() {
             <SidebarRow icon={Palette} label="Themes" active={pane === 'themes'} onClick={() => setPane('themes')} />
             <SidebarRow icon={Keyboard} label="Shortcuts" active={pane === 'shortcuts'} onClick={() => setPane('shortcuts')} />
             <SidebarRow icon={TerminalIcon} label="Terminal" active={pane === 'terminal'} onClick={() => setPane('terminal')} />
+            <SidebarRow icon={FileCode2} label="Editor" active={pane === 'editor'} onClick={() => setPane('editor')} />
             <SidebarRow icon={Bot} label="Agents" active={pane === 'agents'} onClick={() => setPane('agents')} />
             <SidebarRow icon={SlidersHorizontal} label="Providers" active={pane === 'providers'} onClick={() => setPane('providers')} />
             <SidebarRow icon={Info} label="About" active={pane === 'about'} onClick={() => setPane('about')} />
@@ -205,6 +216,18 @@ export function SettingsPage() {
                   onPickShell={setDefaultShell}
                   terminalWebgl={terminalWebgl}
                   onTerminalWebglChange={setTerminalWebgl}
+                  notifyLongCommands={notifyLongCommands}
+                  notifyThresholdSecs={notifyThresholdSecs}
+                  notifySound={notifySound}
+                  onNotifyLongCommandsChange={setNotifyLongCommands}
+                  onNotifyThresholdChange={setNotifyThresholdSecs}
+                  onNotifySoundChange={setNotifySound}
+                />
+              )}
+              {pane === 'editor' && (
+                <EditorPane
+                  vimMode={editorVimMode}
+                  onVimModeChange={setEditorVimMode}
                 />
               )}
               {pane === 'about' && <AboutPane />}
@@ -356,7 +379,35 @@ function ThemesPane({
   themeId: string | null;
   onThemeChange: (id: string | null) => void;
 }) {
-  const themes = listThemes();
+  const [themes, setThemes] = useState<ThemeDef[]>(() => listThemes());
+  const [url, setUrl] = useState('');
+  const [installing, setInstalling] = useState(false);
+  const [msg, setMsg] = useState<{ kind: 'ok' | 'err'; text: string } | null>(null);
+
+  const reload = () => setThemes(listThemes());
+
+  // The Settings window is a separate JS context, so register the user's
+  // installed themes here too (the main window does this on boot).
+  useEffect(() => {
+    void loadInstalledThemes().then(reload).catch(() => {});
+  }, []);
+
+  const onInstall = async () => {
+    const trimmed = url.trim();
+    if (!trimmed || installing) return;
+    setInstalling(true);
+    setMsg(null);
+    const res = await installThemeFromUrl(trimmed);
+    setInstalling(false);
+    if (res.ok) {
+      reload();
+      onThemeChange(res.theme.id);
+      setUrl('');
+      setMsg({ kind: 'ok', text: `Installed “${res.theme.name}”.` });
+    } else {
+      setMsg({ kind: 'err', text: res.error });
+    }
+  };
 
   return (
     <div className="space-y-7">
@@ -387,6 +438,42 @@ function ThemesPane({
             />
           ))}
         </div>
+      </Section>
+
+      <Section
+        title="Install from URL"
+        hint="Paste a link to a theme JSON file (e.g. a GitHub raw URL or gist). It's validated, applied, and saved to ~/.arc/themes so it loads next launch."
+      >
+        <div className="flex items-center gap-2">
+          <input
+            value={url}
+            onChange={(e) => setUrl(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') void onInstall();
+            }}
+            placeholder="https://…/my-theme.json"
+            spellCheck={false}
+            autoComplete="off"
+            className="min-w-0 flex-1 rounded-lg border border-border-subtle bg-bg-base/60 px-3 py-2 font-mono text-[11.5px] text-fg-base placeholder:text-fg-subtle focus:border-accent/45 focus:outline-none"
+          />
+          <button
+            onClick={() => void onInstall()}
+            disabled={installing || !url.trim()}
+            className="shrink-0 rounded-lg bg-accent-soft px-3 py-2 font-display text-[11.5px] font-medium text-fg-base ring-1 ring-accent/45 transition-colors hover:bg-accent/20 disabled:opacity-50"
+          >
+            {installing ? 'installing…' : 'install'}
+          </button>
+        </div>
+        {msg && (
+          <p
+            className={cn(
+              'mt-2 font-display text-[11px] leading-relaxed',
+              msg.kind === 'ok' ? 'text-status-ok' : 'text-status-err',
+            )}
+          >
+            {msg.text}
+          </p>
+        )}
       </Section>
     </div>
   );
@@ -1600,18 +1687,54 @@ function FieldSection({
 
 // ─── Shell ──────────────────────────────────────────────────────────────────
 
+function EditorPane({
+  vimMode,
+  onVimModeChange,
+}: {
+  vimMode: boolean;
+  onVimModeChange: (on: boolean) => void;
+}) {
+  return (
+    <div className="space-y-7">
+      <Section
+        title="Editing"
+        hint="Multi-cursor is always on — Alt-click to drop extra cursors, ⌘D to select the next occurrence, Alt-drag for a rectangular selection."
+      >
+        <ToggleRow
+          label="Vim mode"
+          hint="Modal Vim keybindings in the editor. Loads the first time it's enabled."
+          checked={vimMode}
+          onChange={() => onVimModeChange(!vimMode)}
+        />
+      </Section>
+    </div>
+  );
+}
+
 function TerminalPane({
   shells,
   defaultShell,
   onPickShell,
   terminalWebgl,
   onTerminalWebglChange,
+  notifyLongCommands,
+  notifyThresholdSecs,
+  notifySound,
+  onNotifyLongCommandsChange,
+  onNotifyThresholdChange,
+  onNotifySoundChange,
 }: {
   shells: ShellInfo[] | null;
   defaultShell: string | null;
   onPickShell: (shell: string | null) => void;
   terminalWebgl: boolean;
   onTerminalWebglChange: (on: boolean) => void;
+  notifyLongCommands: boolean;
+  notifyThresholdSecs: number;
+  notifySound: boolean;
+  onNotifyLongCommandsChange: (on: boolean) => void;
+  onNotifyThresholdChange: (secs: number) => void;
+  onNotifySoundChange: (on: boolean) => void;
 }) {
   return (
     <div className="space-y-7">
@@ -1627,6 +1750,52 @@ function TerminalPane({
           checked={terminalWebgl}
           onChange={() => onTerminalWebglChange(!terminalWebgl)}
         />
+      </Section>
+
+      <Section
+        title="Notifications"
+        hint="Get a system notification when a long command finishes while ARC isn't focused. Requires shell integration (OSC 133) — most modern shell setups emit it."
+      >
+        <ToggleRow
+          label="Notify on long commands"
+          hint="Fires only when the window is in the background."
+          checked={notifyLongCommands}
+          onChange={() => onNotifyLongCommandsChange(!notifyLongCommands)}
+        />
+        <div
+          className={cn(
+            'mt-2 flex items-center justify-between gap-4 rounded-lg border border-border-subtle bg-bg-base/40 px-3 py-2.5 transition-opacity',
+            !notifyLongCommands && 'pointer-events-none opacity-50',
+          )}
+        >
+          <div className="min-w-0">
+            <p className="font-display text-[12.5px] font-medium tracking-tight text-fg-base">
+              Threshold
+            </p>
+            <p className="mt-0.5 font-display text-[11px] leading-relaxed text-fg-subtle">
+              Minimum duration before notifying.
+            </p>
+          </div>
+          <div className="flex items-center gap-1.5">
+            <input
+              type="number"
+              min={5}
+              max={3600}
+              value={notifyThresholdSecs}
+              onChange={(e) => onNotifyThresholdChange(Number(e.target.value))}
+              className="w-16 rounded-md border border-border-subtle bg-bg-base/60 px-2 py-1 text-right font-mono text-[12px] text-fg-base focus:border-accent/45 focus:outline-none"
+            />
+            <span className="font-display text-[11px] text-fg-subtle">sec</span>
+          </div>
+        </div>
+        <div className={cn('mt-2 transition-opacity', !notifyLongCommands && 'pointer-events-none opacity-50')}>
+          <ToggleRow
+            label="Play sound"
+            hint="Use the OS notification sound."
+            checked={notifySound}
+            onChange={() => onNotifySoundChange(!notifySound)}
+          />
+        </div>
       </Section>
     </div>
   );

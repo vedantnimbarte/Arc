@@ -12,6 +12,7 @@
   "dependencies": {
     "@arc/editor": "workspace:*",
     "@arc/mcp": "workspace:*",
+    "@arc/shared": "workspace:*",
     "@arc/terminal": "workspace:*",
     "@arc/ui": "workspace:*",
     "@codemirror/commands": "^6.7.0",
@@ -33,8 +34,10 @@
     "@codemirror/state": "^6.4.1",
     "@codemirror/view": "^6.33.0",
     "@lezer/highlight": "^1.2.1",
+    "@replit/codemirror-vim": "^6.3.0",
     "@tauri-apps/api": "^2.0.3",
     "@tauri-apps/plugin-autostart": "^2.5.1",
+    "@tauri-apps/plugin-notification": "^2.3.3",
     "@xterm/addon-fit": "^0.10.0",
     "@xterm/addon-web-links": "^0.11.0",
     "@xterm/addon-webgl": "^0.19.0",

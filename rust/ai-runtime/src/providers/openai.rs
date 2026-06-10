@@ -62,14 +62,25 @@ struct OpenAiMessage<'a> {
 
 #[derive(Deserialize)]
 struct OpenAiStreamChunk {
+    #[serde(default)]
     choices: Vec<OpenAiChoice>,
+    /// Present only on the trailing usage chunk (requires
+    /// `stream_options.include_usage`). Its `choices` array is empty.
+    #[serde(default)]
+    usage: Option<OpenAiUsage>,
+}
+
+#[derive(Deserialize)]
+struct OpenAiUsage {
+    #[serde(default)]
+    prompt_tokens: Option<u32>,
+    #[serde(default)]
+    completion_tokens: Option<u32>,
 }
 
 #[derive(Deserialize)]
 struct OpenAiChoice {
     delta: OpenAiDelta,
-    #[serde(default)]
-    finish_reason: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -116,6 +127,10 @@ impl Provider for OpenAiProvider {
             "model": req.model,
             "messages": messages,
             "stream": true,
+            // Ask for a trailing usage chunk so we can report token counts.
+            // OpenAI-compatible servers that don't support this simply omit
+            // the extra chunk; everything else still works.
+            "stream_options": { "include_usage": true },
             "temperature": req.temperature,
             "max_tokens": req.max_tokens,
         });
@@ -145,24 +160,39 @@ impl Provider for OpenAiProvider {
                         return Some(Ok(Chunk {
                             text: String::new(),
                             done: true,
+                            ..Default::default()
                         }));
                     }
                     match serde_json::from_str::<OpenAiStreamChunk>(&data) {
                         Ok(chunk) => {
+                            // The trailing usage chunk has empty `choices` and a
+                            // populated `usage`. Forward it as a non-done chunk
+                            // (done is driven by `[DONE]` / stream end) so the
+                            // event loop doesn't break before it arrives.
+                            if let Some(u) = chunk.usage {
+                                return Some(Ok(Chunk {
+                                    text: String::new(),
+                                    done: false,
+                                    input_tokens: u.prompt_tokens,
+                                    output_tokens: u.completion_tokens,
+                                }));
+                            }
                             let text = chunk
                                 .choices
                                 .first()
                                 .and_then(|c| c.delta.content.clone())
                                 .unwrap_or_default();
-                            let done = chunk
-                                .choices
-                                .first()
-                                .and_then(|c| c.finish_reason.as_deref())
-                                .is_some();
-                            if text.is_empty() && !done {
+                            // `finish_reason` no longer drives `done`: with
+                            // include_usage the usage chunk arrives *after* it,
+                            // and `[DONE]` (or stream end) is the real terminator.
+                            if text.is_empty() {
                                 None
                             } else {
-                                Some(Ok(Chunk { text, done }))
+                                Some(Ok(Chunk {
+                                    text,
+                                    done: false,
+                                    ..Default::default()
+                                }))
                             }
                         }
                         Err(e) => {

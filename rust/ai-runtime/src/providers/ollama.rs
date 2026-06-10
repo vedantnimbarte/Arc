@@ -126,7 +126,14 @@ fn jsonl_chunks(
                             if text.is_empty() && !c.done {
                                 continue;
                             }
-                            return Some((Ok(Chunk { text, done: c.done }), (s, buf, finished)));
+                            return Some((
+                                Ok(Chunk {
+                                    text,
+                                    done: c.done,
+                                    ..Default::default()
+                                }),
+                                (s, buf, finished),
+                            ));
                         }
                         Err(e) => {
                             tracing::warn!(error = ?e, "ollama: malformed line");

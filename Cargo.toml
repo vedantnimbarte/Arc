@@ -93,6 +93,7 @@ tauri = { version = "2", features = [] }
 tauri-build = { version = "2", features = [] }
 tauri-plugin-autostart = "2"
 tauri-plugin-window-state = "2"
+tauri-plugin-notification = "2"
 
 # Internal crates
 arc-pty = { path = "rust/pty" }

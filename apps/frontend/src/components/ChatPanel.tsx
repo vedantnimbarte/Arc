@@ -26,8 +26,10 @@ import {
   Paperclip,
   AtSign,
   Eraser,
+  Coins,
   type LucideIcon,
 } from 'lucide-react';
+import { estimateCostUsd, formatUsd } from '@arc/shared';
 import { useChat, type ChatContext } from '../state/chat';
 import {
   useSettings,
@@ -99,6 +101,7 @@ export function ChatPanel({ onClose, intent, onIntentConsumed }: ChatPanelProps 
   const appendChunk = useChat((s) => s.appendChunk);
   const finalize = useChat((s) => s.finalize);
   const setStreaming = useChat((s) => s.setStreaming);
+  const recordUsage = useChat((s) => s.recordUsage);
   const clear = useChat((s) => s.clear);
   const newSession = useChat((s) => s.newSession);
   const pendingContexts = useChat((s) => s.pendingContexts);
@@ -272,6 +275,11 @@ export function ChatPanel({ onClose, intent, onIntentConsumed }: ChatPanelProps 
     wire.push({ role: 'user', content: composed });
 
     const reqId = crypto.randomUUID();
+    // Usage rides cumulative chunks (OpenAI's trailing usage chunk, Anthropic's
+    // message_start/_delta), so take the latest non-zero value rather than
+    // summing across chunks. Recorded into the session total once on done.
+    let turnInput = 0;
+    let turnOutput = 0;
     cancelRef.current = await llmStream(
       {
         id: reqId,
@@ -284,6 +292,8 @@ export function ChatPanel({ onClose, intent, onIntentConsumed }: ChatPanelProps 
       },
       (chunk) => {
         if (chunk.text) appendChunk(assistantId, chunk.text);
+        if (typeof chunk.input_tokens === 'number') turnInput = chunk.input_tokens;
+        if (typeof chunk.output_tokens === 'number') turnOutput = chunk.output_tokens;
       },
       (ev) => {
         setStreaming(false);
@@ -291,6 +301,7 @@ export function ChatPanel({ onClose, intent, onIntentConsumed }: ChatPanelProps 
         if (ev.error) {
           appendChunk(assistantId, `\n\n⚠ ${ev.error}`);
         }
+        recordUsage(turnInput, turnOutput);
         // Stream is over — write the accumulated content to SQLite.
         void finalize(assistantId);
       },
@@ -616,6 +627,7 @@ export function ChatPanel({ onClose, intent, onIntentConsumed }: ChatPanelProps 
       <ChatHeader
         agent={activeAgent}
         view={view}
+        model={cfg.model}
         isStreaming={isStreaming}
         onAgentClick={() =>
           setView((v) => (v === 'agents' ? 'chat' : 'agents'))
@@ -775,6 +787,7 @@ function ViewLayer({
 function ChatHeader({
   agent,
   view,
+  model,
   isStreaming,
   onAgentClick,
   onSessionsClick,
@@ -784,6 +797,7 @@ function ChatHeader({
 }: {
   agent: Agent;
   view: View;
+  model: string;
   isStreaming: boolean;
   onAgentClick: () => void;
   onSessionsClick: () => void;
@@ -830,7 +844,7 @@ function ChatHeader({
       </button>
 
       <div className="flex items-center gap-0.5">
-        {isStreaming && (
+        {isStreaming ? (
           <div className="mr-1 flex items-center gap-1 font-mono text-[10px] tabular-nums text-fg-muted">
             <span className="relative flex h-2 w-2">
               <span className="absolute inset-0 animate-ping rounded-full bg-accent-bright/40" />
@@ -838,6 +852,8 @@ function ChatHeader({
             </span>
             <span>streaming</span>
           </div>
+        ) : (
+          <CostMeter model={model} />
         )}
         <HeaderButton
           onClick={onSessionsClick}
@@ -860,6 +876,36 @@ function ChatHeader({
       </div>
     </div>
   );
+}
+
+/** Compact running token/cost meter for the active session (Tier 1.6). Reads
+ *  the in-memory per-session usage total; hidden until a turn reports usage
+ *  (local models never do). Cost is omitted when the model has no known
+ *  price, so a priced estimate never reads as a misleading $0. */
+function CostMeter({ model }: { model: string }) {
+  const usage = useChat((s) =>
+    s.activeSessionId ? s.usage[s.activeSessionId] : undefined,
+  );
+  if (!usage || usage.turns === 0) return null;
+  const total = usage.inputTokens + usage.outputTokens;
+  const cost = estimateCostUsd(model, usage.inputTokens, usage.outputTokens);
+  return (
+    <div
+      className="mr-1 flex items-center gap-1 rounded-md px-1.5 py-0.5 font-mono text-[10px] tabular-nums text-fg-subtle"
+      title={`${usage.inputTokens.toLocaleString()} in · ${usage.outputTokens.toLocaleString()} out across ${usage.turns} turn${usage.turns === 1 ? '' : 's'}${cost === null ? '\nno pricing for this model' : ''}`}
+    >
+      <Coins size={10} strokeWidth={2.1} className="text-fg-subtle/80" />
+      <span>{formatTokenCount(total)}</span>
+      {cost !== null && <span className="text-fg-muted">· {formatUsd(cost)}</span>}
+    </div>
+  );
+}
+
+/** 1234 → "1.2k", 1_200_000 → "1.2M". Keeps the meter narrow. */
+function formatTokenCount(n: number): string {
+  if (n < 1000) return `${n}`;
+  if (n < 1_000_000) return `${(n / 1000).toFixed(1)}k`;
+  return `${(n / 1_000_000).toFixed(2)}M`;
 }
 
 function HeaderButton({

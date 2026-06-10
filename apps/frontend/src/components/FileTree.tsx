@@ -26,7 +26,7 @@ import {
 } from '../lib/tauri';
 import { fileIcon, folderIcon, MOCHA } from '../lib/fileIcons';
 import { useFiles } from '../state/files';
-import { useGit } from '../state/git';
+import { useGit, normPathKey, type GitDecoration } from '../state/git';
 import { useWorkspace } from '../state/workspace';
 import { cn } from '../lib/cn';
 
@@ -950,6 +950,49 @@ function hasDescendantMatch(
   return false;
 }
 
+// ── Git decorations ───────────────────────────────────────────────────────────
+
+/** Tailwind text-color class for a file's git status. Conflicts are always
+ *  red; otherwise we key off the porcelain status letter. */
+function gitDecoColor(d: GitDecoration): string {
+  if (d.kind === 'conflict') return 'text-red-400';
+  switch (d.status) {
+    case 'A':
+      return 'text-emerald-400';
+    case 'D':
+      return 'text-red-400';
+    case 'R':
+    case 'C':
+      return 'text-sky-400';
+    case '?':
+      return 'text-emerald-400/70';
+    case 'M':
+    default:
+      return 'text-amber-400';
+  }
+}
+
+/** Human label for the status tooltip. */
+function gitDecoLabel(d: GitDecoration): string {
+  if (d.kind === 'conflict') return 'conflicted';
+  switch (d.status) {
+    case 'A':
+      return 'added';
+    case 'D':
+      return 'deleted';
+    case 'R':
+      return 'renamed';
+    case 'C':
+      return 'copied';
+    case '?':
+      return 'untracked';
+    case 'M':
+      return 'modified';
+    default:
+      return d.kind;
+  }
+}
+
 // ── TreeNode ──────────────────────────────────────────────────────────────────
 
 function TreeNode({
@@ -976,6 +1019,13 @@ function TreeNode({
   const isDir = entry.kind === 'dir';
   const state = nodes[entry.path];
   const expanded = !!state?.expanded;
+
+  // Git decorations (Tier 1.3): a status letter on changed files, and a dot on
+  // collapsed folders that hide changes. Keyed by normalized absolute path.
+  const pathKey = normPathKey(entry.path);
+  const decoration = useGit((s) => (isDir ? undefined : s.statusByPath.get(pathKey)));
+  const dirDirty = useGit((s) => isDir && !expanded && s.dirtyDirs.has(pathKey));
+  const decoColor = decoration ? gitDecoColor(decoration) : '';
 
   const { Icon, color } = isDir
     ? folderIcon(entry.name, expanded)
@@ -1058,6 +1108,7 @@ function TreeNode({
           className={cn(
             'truncate',
             isDir ? 'font-medium text-fg-base/90' : 'text-fg-base/85',
+            decoColor,
           )}
         >
           {entry.name}
@@ -1070,6 +1121,27 @@ function TreeNode({
           >
             ↪
           </span>
+        )}
+
+        {/* Git status: a letter for changed files, a dot for collapsed dirty
+            folders. `ml-auto` pushes it to the right edge of the row. */}
+        {decoration && (
+          <span
+            className={cn(
+              'ml-auto pr-1 font-mono text-[10px] font-semibold leading-none',
+              decoColor,
+            )}
+            title={`git: ${gitDecoLabel(decoration)}`}
+          >
+            {decoration.status}
+          </span>
+        )}
+        {dirDirty && (
+          <span
+            className="ml-auto mr-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-amber-400/80"
+            title="contains changes"
+            aria-hidden
+          />
         )}
       </button>
 

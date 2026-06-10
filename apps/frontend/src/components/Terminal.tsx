@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Terminal as XTerm } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import { WebLinksAddon } from '@xterm/addon-web-links';
@@ -16,7 +16,11 @@ import {
   sessionCommandLog,
   type PtyId,
 } from '../lib/tauri';
+import { createPathLinkProvider } from '../lib/links';
+import { notifyCommandFinished } from '../lib/notify';
+import { NewTabSplash } from './NewTabSplash';
 import { useFiles } from '../state/files';
+import { detectRiskyPaste, usePaste } from '../state/paste';
 import { useSelection } from '../state/selection';
 import { useSettings } from '../state/settings';
 import { useWorkspace } from '../state/workspace';
@@ -34,6 +38,20 @@ export function Terminal({ sessionKey }: Props) {
   // Snapshot the root at mount — the PTY can only be spawned with one CWD,
   // and we don't restart it when the user reroots the tree.
   const initialCwd = useRef<string | null>(useFiles.getState().root);
+  // New-tab splash (Tier 1.2): shown over a fresh, untouched terminal and
+  // dismissed on the first keystroke / interaction.
+  const [showSplash, setShowSplash] = useState(true);
+
+  const pasteRecentCommand = (command: string) => {
+    const ptyId = useWorkspace.getState().tabs.find((t) => t.id === sessionKey)?.ptyId;
+    if (ptyId) void ptyWrite(ptyId, command).catch(() => {});
+    setShowSplash(false);
+    termRef.current?.focus();
+  };
+  const openRecentFile = (path: string) => {
+    useWorkspace.getState().openFile(path);
+    setShowSplash(false);
+  };
 
   useEffect(() => {
     const container = containerRef.current;
@@ -86,6 +104,15 @@ export function Terminal({ sessionKey }: Props) {
     const links = new WebLinksAddon();
     term.loadAddon(fit);
     term.loadAddon(links);
+    // File-path links → editor (Tier 1.1). Resolves relative paths against the
+    // tree root (which tracks the shell's CWD) and opens them in an editor tab.
+    const pathLinks = term.registerLinkProvider(
+      createPathLinkProvider(
+        term,
+        () => useFiles.getState().root,
+        (absPath) => useWorkspace.getState().openFile(absPath),
+      ),
+    );
     // Remove orphaned DOM from a previous xterm instance. In React Strict Mode
     // effects run twice (mount→cleanup→remount); dispose() doesn't always
     // remove every child, so the second open() finds a dirty container.
@@ -198,6 +225,36 @@ export function Terminal({ sessionKey }: Props) {
     };
     const selDisposable = term.onSelectionChange(pushSelection);
 
+    // ─── Smart paste warnings (Tier 1.4) ───────────────────────────────
+    // Intercept paste in the capture phase — before xterm's own textarea
+    // handler — so we can vet the clipboard text. Risky pastes (multi-line,
+    // sudo, rm -rf, curl|sh, …) are parked behind a confirm dialog; safe
+    // pastes fall straight through to xterm untouched. Holding shift while
+    // pasting bypasses the check entirely.
+    let shiftHeld = false;
+    const trackShift = (e: KeyboardEvent) => {
+      shiftHeld = e.shiftKey;
+    };
+    window.addEventListener('keydown', trackShift, true);
+    window.addEventListener('keyup', trackShift, true);
+    const onPaste = (e: ClipboardEvent) => {
+      if (shiftHeld) return; // explicit bypass
+      const text = e.clipboardData?.getData('text') ?? '';
+      if (!text) return;
+      const flags = detectRiskyPaste(text);
+      if (flags.length === 0) return; // nothing to warn about
+      // Stop xterm from pasting now; re-issue via term.paste() on confirm.
+      e.preventDefault();
+      e.stopPropagation();
+      void usePaste
+        .getState()
+        .request(text, flags)
+        .then((ok) => {
+          if (ok && !disposed) term.paste(text);
+        });
+    };
+    container.addEventListener('paste', onPaste, true);
+
     const boot = async () => {
       if (!isTauri) {
         term.writeln('\x1b[38;2;212;214;220m  arc \x1b[0m\x1b[2mrunning outside Tauri — PTY disabled.\x1b[0m');
@@ -224,6 +281,10 @@ export function Terminal({ sessionKey }: Props) {
       // row on `D`) and the keystroke loop (which sets it on `\r`)
       // share the same reference.
       let lastCommandId: number | null = null;
+      // Long-command notification bookkeeping (Tier 1.5): the command text is
+      // set on Enter, the start time on the `C` (execution begins) marker.
+      let lastCommandText: string | null = null;
+      let cmdStartMs: number | null = null;
       const handleChunkText = (text: string) => {
         if (!text.includes('\x1b]133;')) {
           if (osc.capturing) {
@@ -246,6 +307,7 @@ export function Terminal({ sessionKey }: Props) {
           if (verb === 'C') {
             osc.capturing = true;
             osc.buf = '';
+            cmdStartMs = Date.now();
           } else if (verb === 'D') {
             osc.capturing = false;
             const exitStr = fields[1];
@@ -259,6 +321,21 @@ export function Terminal({ sessionKey }: Props) {
               void sessionCommandFinish(id, code, excerpt.length > 0 ? excerpt : null).catch(
                 () => {},
               );
+            }
+            // Notify on slow commands that finished while we weren't looking.
+            const startedAt = cmdStartMs;
+            cmdStartMs = null;
+            const s = useSettings.getState();
+            if (s.notifyLongCommands && startedAt !== null) {
+              const elapsed = Date.now() - startedAt;
+              if (elapsed >= s.notifyThresholdSecs * 1000 && !document.hasFocus()) {
+                void notifyCommandFinished({
+                  command: lastCommandText ?? '(command)',
+                  exitCode: code,
+                  durationMs: elapsed,
+                  sound: s.notifySound,
+                });
+              }
             }
           }
           lastIdx = m.index + m[0].length;
@@ -454,6 +531,8 @@ export function Terminal({ sessionKey }: Props) {
         let cmdBuffer = '';
         term.onData((data) => {
           if (ptyId) ptyWrite(ptyId, data).catch(() => {});
+          // First interaction dismisses the new-tab splash.
+          setShowSplash(false);
 
           // Handle each char in `data` separately so a fast paste of
           // "ls\rgit status\r" splits into two commands.
@@ -464,6 +543,8 @@ export function Terminal({ sessionKey }: Props) {
               const trimmed = cmdBuffer.trim();
               cmdBuffer = '';
               if (trimmed.length === 0) continue;
+              // Remember the text for the long-command notification (Tier 1.5).
+              lastCommandText = trimmed;
               const { activeTabId } = useWorkspace.getState();
               const { sessionId } = useWorkspace.getState();
               const cwd = useFiles.getState().root;
@@ -546,6 +627,14 @@ export function Terminal({ sessionKey }: Props) {
       ro.disconnect();
       host?.removeEventListener('arc:host-shown', onHostShown);
       container.removeEventListener('mouseup', onContainerMouseUp);
+      container.removeEventListener('paste', onPaste, true);
+      window.removeEventListener('keydown', trackShift, true);
+      window.removeEventListener('keyup', trackShift, true);
+      try {
+        pathLinks.dispose();
+      } catch {
+        /* terminal already disposed */
+      }
       try {
         selDisposable.dispose();
       } catch {
@@ -575,6 +664,9 @@ export function Terminal({ sessionKey }: Props) {
         className="selectable h-full w-full"
         data-session={sessionKey}
       />
+      {showSplash && (
+        <NewTabSplash onPasteCommand={pasteRecentCommand} onOpenFile={openRecentFile} />
+      )}
     </div>
   );
 }

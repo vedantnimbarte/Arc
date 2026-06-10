@@ -4,6 +4,7 @@
 //!   invoke("git_status",         { path })                              -> Option<GitInfo>
 //!   invoke("git_diff_stat",      { path })                              -> Option<DiffStat>
 //!   invoke("git_changes",        { path })                              -> Vec<ChangeEntry>
+//!   invoke("git_root",           { path })                              -> Option<String>
 //!   invoke("git_log",            { path, limit, options? })             -> Vec<LogEntry>
 //!   invoke("git_diff",           { path, scope, pathFilter? })          -> String
 //!   invoke("git_blame",          { path, file, startLine?, endLine? })  -> Vec<BlameLine>
@@ -55,6 +56,11 @@ pub async fn git_diff_stat(path: String) -> Result<Option<DiffStat>, String> {
 #[tauri::command]
 pub async fn git_changes(path: String) -> Result<Vec<ChangeEntry>, String> {
     arc_git::changes(&path).await.map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn git_root(path: String) -> Result<Option<String>, String> {
+    arc_git::root(&path).await.map_err(|e| e.to_string())
 }
 
 #[tauri::command]

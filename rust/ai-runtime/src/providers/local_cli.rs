@@ -185,7 +185,11 @@ impl Provider for LocalCliProvider {
             }
             match rx.recv().await {
                 Some(Ok(text)) => Some((
-                    Ok(Chunk { text, done: false }),
+                    Ok(Chunk {
+                        text,
+                        done: false,
+                        ..Default::default()
+                    }),
                     (rx, child_opt, stderr, false),
                 )),
                 Some(Err(e)) => Some((Err(e), (rx, child_opt, stderr, true))),
@@ -202,6 +206,7 @@ impl Provider for LocalCliProvider {
                             Ok(Chunk {
                                 text: String::new(),
                                 done: true,
+                                ..Default::default()
                             }),
                             (rx, None, None, true),
                         )),

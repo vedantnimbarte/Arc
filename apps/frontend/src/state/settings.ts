@@ -26,6 +26,7 @@ import {
   presetOrDefault,
   type ProviderPreset,
 } from './providers';
+import { loadInstalledThemes } from '../lib/themeMarketplace';
 
 export interface ProviderConfig {
   apiKey?: string;
@@ -68,6 +69,16 @@ export interface Settings {
   restoreWindowState: boolean;
   /** Use the WebGL renderer for newly-opened terminal tabs. */
   terminalWebgl: boolean;
+  /** Enable Vim keybindings in the CodeMirror editor. Multi-cursor is always
+   *  on; this gates the modal Vim layer specifically. */
+  editorVimMode: boolean;
+  /** Fire a system notification when an OSC133-tracked command runs longer
+   *  than `notifyThresholdSecs` and the window is unfocused (Tier 1.5). */
+  notifyLongCommands: boolean;
+  /** Duration (seconds) a command must exceed to notify. */
+  notifyThresholdSecs: number;
+  /** Play the OS notification sound alongside the toast. */
+  notifySound: boolean;
   /** True once hydrateSecrets() has finished. */
   secretsHydrated: boolean;
   /** True once hydrateSettings() has applied stored values. */
@@ -93,6 +104,10 @@ export interface Settings {
   setLaunchAtLogin: (on: boolean) => Promise<void>;
   setRestoreWindowState: (on: boolean) => void;
   setTerminalWebgl: (on: boolean) => void;
+  setEditorVimMode: (on: boolean) => void;
+  setNotifyLongCommands: (on: boolean) => void;
+  setNotifyThresholdSecs: (secs: number) => void;
+  setNotifySound: (on: boolean) => void;
   hydrateSettings: () => Promise<void>;
   hydrateSecrets: () => Promise<void>;
 }
@@ -135,7 +150,16 @@ const DEFAULTS = {
   launchAtLogin: false,
   restoreWindowState: true,
   terminalWebgl: false,
+  editorVimMode: false,
+  notifyLongCommands: true,
+  notifyThresholdSecs: 30,
+  notifySound: false,
 };
+
+const MIN_NOTIFY_SECS = 5;
+const MAX_NOTIFY_SECS = 3600;
+const clampNotifySecs = (n: number): number =>
+  Math.max(MIN_NOTIFY_SECS, Math.min(MAX_NOTIFY_SECS, Math.round(n)));
 
 const clampFontSize = (n: number): number =>
   Math.max(MIN_FONT_SIZE, Math.min(MAX_FONT_SIZE, Math.round(n)));
@@ -271,10 +295,24 @@ export const useSettings = create<Settings>()((set, get) => ({
   },
   setRestoreWindowState: (on) => set({ restoreWindowState: on }),
   setTerminalWebgl: (on) => set({ terminalWebgl: on }),
+  setEditorVimMode: (on) => set({ editorVimMode: on }),
+  setNotifyLongCommands: (on) => set({ notifyLongCommands: on }),
+  setNotifyThresholdSecs: (secs) => set({ notifyThresholdSecs: clampNotifySecs(secs) }),
+  setNotifySound: (on) => set({ notifySound: on }),
 
   hydrateSettings: async () => {
     if (get().settingsHydrated) return;
     set({ settingsHydrated: true });
+
+    // Register user-installed themes (Tier 1.7) before resolving, so a stored
+    // themeId pointing at one applies on first paint instead of falling back.
+    if (isTauri) {
+      try {
+        await loadInstalledThemes();
+      } catch (err) {
+        console.error('[settings] installed themes load failed:', err);
+      }
+    }
 
     applyTheme(resolveActiveTheme(get().appearance, get().themeId));
     if (!isTauri) return;
@@ -490,6 +528,20 @@ function applyStored(
       typeof stored.terminalWebgl === 'boolean'
         ? stored.terminalWebgl
         : current.terminalWebgl,
+    editorVimMode:
+      typeof stored.editorVimMode === 'boolean'
+        ? stored.editorVimMode
+        : current.editorVimMode,
+    notifyLongCommands:
+      typeof stored.notifyLongCommands === 'boolean'
+        ? stored.notifyLongCommands
+        : current.notifyLongCommands,
+    notifyThresholdSecs:
+      typeof stored.notifyThresholdSecs === 'number'
+        ? clampNotifySecs(stored.notifyThresholdSecs)
+        : current.notifyThresholdSecs,
+    notifySound:
+      typeof stored.notifySound === 'boolean' ? stored.notifySound : current.notifySound,
   };
 }
 
@@ -517,6 +569,10 @@ function toPersistedSettings(s: Settings): PersistedSettings {
     launchAtLogin: s.launchAtLogin,
     restoreWindowState: s.restoreWindowState,
     terminalWebgl: s.terminalWebgl,
+    editorVimMode: s.editorVimMode,
+    notifyLongCommands: s.notifyLongCommands,
+    notifyThresholdSecs: s.notifyThresholdSecs,
+    notifySound: s.notifySound,
   };
 }
 
@@ -567,7 +623,8 @@ export async function rehydrateSettingsFromBroadcast(): Promise<void> {
     const sameStartup =
       (stored.launchAtLogin ?? current.launchAtLogin) === current.launchAtLogin &&
       (stored.restoreWindowState ?? current.restoreWindowState) === current.restoreWindowState &&
-      (stored.terminalWebgl ?? current.terminalWebgl) === current.terminalWebgl;
+      (stored.terminalWebgl ?? current.terminalWebgl) === current.terminalWebgl &&
+      (stored.editorVimMode ?? current.editorVimMode) === current.editorVimMode;
     if (samePreset && sameAppearance && sameTheme && sameFont && sameShell && sameStartup) return;
 
     suppressSave = true;

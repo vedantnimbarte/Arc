@@ -623,6 +623,13 @@ export interface LlmStreamReq {
 export interface LlmChunk {
   text: string;
   done: boolean;
+  /** Cumulative prompt-token count, present on the chunk(s) where the
+   *  provider reports usage (OpenAI's trailing usage chunk, Anthropic's
+   *  message_start). Absent for providers without usage (Ollama, local CLI). */
+  input_tokens?: number;
+  /** Cumulative completion-token count — OpenAI's usage chunk, or Anthropic's
+   *  latest message_delta. */
+  output_tokens?: number;
 }
 
 /** One row from the provider's model catalog. `id` is what's sent back in
@@ -865,6 +872,14 @@ export interface PersistedSettings {
    *  the default canvas/DOM renderer on context-loss or when WebGL is
    *  unsupported. */
   terminalWebgl?: boolean;
+  /** Enable Vim keybindings in the CodeMirror editor. */
+  editorVimMode?: boolean;
+  /** Notify on long-running commands when unfocused (Tier 1.5). */
+  notifyLongCommands?: boolean;
+  /** Seconds a command must exceed before notifying. */
+  notifyThresholdSecs?: number;
+  /** Play the OS notification sound. */
+  notifySound?: boolean;
 }
 
 /** Returns the stored settings blob, or `null` on first launch. */
@@ -1188,6 +1203,13 @@ export interface GitChangeEntry {
 /** Per-file working-copy status. Returns [] when not in a repo. */
 export async function gitChanges(path: string): Promise<GitChangeEntry[]> {
   return invoke<GitChangeEntry[]>('git_changes', { path });
+}
+
+/** Absolute path to the repo root containing `path` (`git rev-parse
+ *  --show-toplevel`). `null` when `path` isn't inside a repo. Used to map the
+ *  repo-relative paths from `gitChanges` to absolute file-tree paths. */
+export async function gitRoot(path: string): Promise<string | null> {
+  return invoke<string | null>('git_root', { path });
 }
 
 export interface GitLogEntry {
