@@ -172,8 +172,8 @@ export function StatusBar({ chatOpen, onToggleChat, onOpenShortcuts }: Props) {
  *  currently-live SSH sessions. Hidden when no hosts are saved AND no
  *  session is live — keeps the bar quiet for users who don't use SSH. */
 function SshStatusButton() {
-  const open = useSsh((s) => s.panelOpen);
-  const toggle = useSsh((s) => s.togglePanel);
+  const open = useFiles((s) => s.sidebarView === 'ssh' && !s.collapsed);
+  const toggle = useFiles((s) => s.toggleSidebarView);
   const liveCount = useSsh((s) => Object.keys(s.liveByHost).length);
   const hostCount = useSsh((s) => s.hosts.length);
 
@@ -182,8 +182,8 @@ function SshStatusButton() {
   return (
     <button
       type="button"
-      onClick={toggle}
-      aria-label={open ? 'Close SSH panel' : 'Open SSH panel'}
+      onClick={() => toggle('ssh')}
+      aria-label={open ? 'Close SSH sidebar' : 'Open SSH sidebar'}
       aria-pressed={open}
       title={`SSH (${formatBinding(getBinding('toggle-ssh-panel'))})`}
       className={cn(

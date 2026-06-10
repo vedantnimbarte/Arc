@@ -113,6 +113,13 @@ export default {
           from: { opacity: '0', transform: 'translateY(4px)' },
           to: { opacity: '1', transform: 'translateY(0)' },
         },
+        // Quieter, quicker sibling of fade-in for compact view swaps (the
+        // sidebar activity rail). Barely-there lift so the body reads as
+        // settling rather than flying in.
+        'view-in': {
+          from: { opacity: '0', transform: 'translateY(2px)' },
+          to: { opacity: '1', transform: 'translateY(0)' },
+        },
         'shimmer-cursor': {
           '0%, 100%': { opacity: '1' },
           '50%': { opacity: '0.4' },
@@ -133,6 +140,7 @@ export default {
       animation: {
         'pulse-soft': 'pulse-soft 2.4s cubic-bezier(0.4, 0, 0.6, 1) infinite',
         'fade-in': 'fade-in 0.35s cubic-bezier(0.16, 1, 0.3, 1) both',
+        'view-in': 'view-in 0.24s cubic-bezier(0.16, 1, 0.3, 1) both',
         'shimmer-cursor': 'shimmer-cursor 1.2s ease-in-out infinite',
         'sheet-in': 'sheet-in 0.32s cubic-bezier(0.22, 1, 0.36, 1) both',
         'popover-in': 'popover-in 0.28s cubic-bezier(0.22, 1, 0.36, 1) both',
