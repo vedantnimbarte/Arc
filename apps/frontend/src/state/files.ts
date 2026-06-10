@@ -4,6 +4,8 @@ import { persist } from 'zustand/middleware';
 export const SIDEBAR_MIN = 180;
 export const SIDEBAR_MAX = 480;
 export const SIDEBAR_DEFAULT = 260;
+/** Width of the vertical mini-rail shown when the sidebar is collapsed. */
+export const SIDEBAR_RAIL_WIDTH = 44;
 
 export const CHAT_MIN = 260;
 export const CHAT_MAX = 560;
@@ -28,6 +30,9 @@ interface FilesState {
   chatWidth: number;
   /** Which panel is mounted in the left sidebar. Persisted. */
   sidebarView: SidebarView;
+  /** Last sidebar view per workspace root, so each project reopens on the
+   *  view you left it on. Keyed by absolute root path. Persisted. */
+  viewByRoot: Record<string, SidebarView>;
   /** Absolute paths of recently-opened editor files, most-recent first.
    *  Surfaced on the new-tab splash. Capped + persisted. */
   recentFiles: string[];
@@ -49,6 +54,16 @@ interface FilesState {
 const clamp = (n: number, min: number, max: number) =>
   Math.min(Math.max(n, min), max);
 
+/** Record `view` as the last-used view for `root` (no-op without a root). */
+function rememberView(
+  viewByRoot: Record<string, SidebarView>,
+  root: string | null,
+  view: SidebarView,
+): Record<string, SidebarView> {
+  if (!root) return viewByRoot;
+  return { ...viewByRoot, [root]: view };
+}
+
 const STORAGE_KEY = 'arc-files';
 const RECENT_FILES_CAP = 12;
 
@@ -61,8 +76,12 @@ export const useFiles = create<FilesState>()(
       sidebarWidth: SIDEBAR_DEFAULT,
       chatWidth: CHAT_DEFAULT,
       sidebarView: 'files',
+      viewByRoot: {},
       recentFiles: [],
-      setRoot: (root) => set({ root }),
+      // Switching workspace root restores that root's last view (falling back
+      // to the current view for roots we haven't seen before).
+      setRoot: (root) =>
+        set((s) => ({ root, sidebarView: s.viewByRoot[root] ?? s.sidebarView })),
       pushRecentFile: (path) =>
         set((s) => ({
           recentFiles: [path, ...s.recentFiles.filter((p) => p !== path)].slice(
@@ -74,14 +93,27 @@ export const useFiles = create<FilesState>()(
       toggleCollapsed: () => set((s) => ({ collapsed: !s.collapsed })),
       setSidebarWidth: (w) => set({ sidebarWidth: clamp(w, SIDEBAR_MIN, SIDEBAR_MAX) }),
       setChatWidth: (w) => set({ chatWidth: clamp(w, CHAT_MIN, CHAT_MAX) }),
-      setSidebarView: (view) => set({ sidebarView: view }),
-      showSidebarView: (view) => set({ collapsed: false, sidebarView: view }),
+      setSidebarView: (view) =>
+        set((s) => ({
+          sidebarView: view,
+          viewByRoot: rememberView(s.viewByRoot, s.root, view),
+        })),
+      showSidebarView: (view) =>
+        set((s) => ({
+          collapsed: false,
+          sidebarView: view,
+          viewByRoot: rememberView(s.viewByRoot, s.root, view),
+        })),
       toggleSidebarView: (view) =>
-        set((s) =>
-          s.sidebarView === view && !s.collapsed
-            ? { sidebarView: 'files' }
-            : { collapsed: false, sidebarView: view },
-        ),
+        set((s) => {
+          const next: SidebarView =
+            s.sidebarView === view && !s.collapsed ? 'files' : view;
+          return {
+            collapsed: false,
+            sidebarView: next,
+            viewByRoot: rememberView(s.viewByRoot, s.root, next),
+          };
+        }),
     }),
     {
       name: STORAGE_KEY,

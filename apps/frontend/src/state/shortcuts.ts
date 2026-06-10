@@ -16,6 +16,8 @@ export type ActionId =
   | 'toggle-agent-picker'
   | 'open-chat-sessions'
   | 'open-shortcuts'
+  | 'show-explorer'
+  | 'show-source-control'
   | 'toggle-ssh-panel'
   | 'ask-arc-ai'
   | 'launch-claude-cli'
@@ -109,6 +111,18 @@ export const ACTION_META: Record<ActionId, ActionMeta> = {
     description: 'Browse past chat sessions.',
     category: 'Assistant',
   },
+  'show-explorer': {
+    id: 'show-explorer',
+    label: 'Show Explorer',
+    description: 'Reveal the file tree in the sidebar.',
+    category: 'Workspace',
+  },
+  'show-source-control': {
+    id: 'show-source-control',
+    label: 'Show Source Control',
+    description: 'Reveal source control in the sidebar.',
+    category: 'Workspace',
+  },
   'toggle-ssh-panel': {
     id: 'toggle-ssh-panel',
     label: 'Toggle SSH Panel',
@@ -159,6 +173,8 @@ export const ACTION_ORDER: ActionId[] = [
   'toggle-agent-picker',
   'open-chat-sessions',
   'open-shortcuts',
+  'show-explorer',
+  'show-source-control',
   'toggle-ssh-panel',
   'ask-arc-ai',
   'launch-claude-cli',
@@ -181,6 +197,8 @@ export const DEFAULT_BINDINGS: Record<ActionId, KeyBinding | null> = {
   'open-command-history': { code: 'KeyR', shift: false, alt: false, ...mod() },
   'open-search': { code: 'KeyP', shift: false, alt: false, ...mod() },
   'open-shortcuts': { code: 'Slash', shift: true, alt: false, ...mod() },
+  'show-explorer': { code: 'KeyE', shift: true, alt: false, ...mod() },
+  'show-source-control': { code: 'KeyG', shift: true, alt: false, ...mod() },
   'toggle-chat': { code: 'KeyJ', shift: false, alt: false, ...mod() },
   'new-chat': { code: 'KeyN', shift: true, alt: false, ...mod() },
   'toggle-agent-picker': { code: 'Slash', shift: false, alt: false, ...mod() },
