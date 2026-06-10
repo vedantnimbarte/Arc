@@ -1,4 +1,11 @@
-import { useEffect, useRef, type KeyboardEvent } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type KeyboardEvent,
+} from 'react';
 import { FileTree } from './FileTree';
 import { SourceControl } from './SourceControl';
 import { SshPanel } from './ssh/SshPanel';
@@ -126,7 +133,40 @@ function SidebarRail({
   gitCount: number;
   gitConflicts: number;
 }) {
+  const containerRef = useRef<HTMLDivElement>(null);
   const btnRefs = useRef(new Map<SidebarView, HTMLButtonElement | null>());
+  const [indicator, setIndicator] = useState({ left: 0, width: 0, ready: false });
+
+  const measure = useCallback(() => {
+    const cont = containerRef.current;
+    const el = btnRefs.current.get(view);
+    if (!cont || !el) return;
+    const cr = cont.getBoundingClientRect();
+    const er = el.getBoundingClientRect();
+    setIndicator({ left: er.left - cr.left, width: er.width, ready: true });
+  }, [view]);
+
+  // Track the active item's rect while its pill expands/collapses so the
+  // single indicator glides + resizes with it. A short rAF loop samples the
+  // in-flight CSS transition frame by frame; a ResizeObserver backstops late
+  // reflows (font load, sidebar resize). Under reduced motion the items snap,
+  // so the first frame lands the indicator at its final spot.
+  useLayoutEffect(() => {
+    let raf = 0;
+    let start = 0;
+    const tick = (t: number) => {
+      if (!start) start = t;
+      measure();
+      if (t - start < 340) raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    const ro = new ResizeObserver(() => measure());
+    if (containerRef.current) ro.observe(containerRef.current);
+    return () => {
+      cancelAnimationFrame(raf);
+      ro.disconnect();
+    };
+  }, [measure]);
 
   // Arrow-key navigation with automatic activation — the standard ARIA tabs
   // pattern. Left/Up and Right/Down wrap; Home/End jump to the ends.
@@ -161,11 +201,30 @@ function SidebarRail({
 
   return (
     <div
+      ref={containerRef}
       role="tablist"
       aria-label="Sidebar views"
       onKeyDown={onKeyDown}
-      className="flex h-8 shrink-0 items-center gap-0.5 border-b border-border-hairline px-1.5"
+      className="relative flex h-8 shrink-0 items-center gap-0.5 border-b border-border-hairline px-1.5"
     >
+      {/* Single sliding indicator — the only active background. Its left/width
+          are driven live (see measure/rAF) so it glides and resizes to wrap
+          whichever item is active. */}
+      <span
+        aria-hidden
+        style={{ left: indicator.left, width: indicator.width }}
+        className={cn(
+          'pointer-events-none absolute top-1/2 z-0 h-[22px] -translate-y-1/2 rounded-md',
+          'bg-white/[0.06] ring-1 ring-inset ring-accent/15 shadow-[inset_0_1px_0_0_rgba(255,255,255,0.05)]',
+          'transition-opacity duration-200 motion-reduce:transition-none',
+          indicator.ready ? 'opacity-100' : 'opacity-0',
+        )}
+      >
+        <span
+          aria-hidden
+          className="absolute inset-x-1.5 top-0 h-px bg-gradient-to-r from-transparent via-white/[0.16] to-transparent"
+        />
+      </span>
       {SIDEBAR_VIEWS.map(({ id, label, Icon }) => {
         const active = view === id;
         const showBadge = id === 'git' && gitCount > 0;
@@ -183,22 +242,15 @@ function SidebarRail({
             title={label}
             onClick={() => onSelect(id)}
             className={cn(
-              'group relative flex h-[22px] items-center overflow-hidden rounded-md outline-none',
+              'group relative z-10 flex h-[22px] items-center overflow-hidden rounded-md outline-none',
               'transition-all duration-[260ms] ease-out-soft active:scale-[0.97]',
               'motion-reduce:transition-none',
               'focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-accent/40',
               active
-                ? 'bg-white/[0.06] px-1.5 text-accent-bright ring-1 ring-inset ring-accent/15 shadow-[inset_0_1px_0_0_rgba(255,255,255,0.05)]'
+                ? 'px-1.5 text-accent-bright'
                 : 'w-[22px] justify-center text-fg-muted hover:bg-white/[0.045] hover:text-fg-base',
             )}
           >
-            {/* Top highlight on the active pill — same lift the toolbars use. */}
-            {active && (
-              <span
-                aria-hidden
-                className="pointer-events-none absolute inset-x-1.5 top-0 h-px bg-gradient-to-r from-transparent via-white/[0.16] to-transparent"
-              />
-            )}
             <span className="relative flex h-3 w-3 shrink-0 items-center justify-center">
               <Icon
                 size={11}
