@@ -253,9 +253,13 @@ function SidebarRail({
           className="absolute inset-x-1.5 top-0 h-px bg-gradient-to-r from-transparent via-white/[0.16] to-transparent"
         />
       </span>
-      {SIDEBAR_VIEWS.map(({ id, label, Icon }) => {
+      {SIDEBAR_VIEWS.map(({ id, label, Icon, shortcut }) => {
         const active = view === id;
         const badge = railBadge(id, gitCount, gitConflicts, sshLive);
+        const binding = getBinding(shortcut);
+        const tip = [label, binding ? formatBinding(binding) : null, badge?.title]
+          .filter(Boolean)
+          .join(' · ');
         return (
           <button
             key={id}
@@ -267,7 +271,7 @@ function SidebarRail({
             aria-controls={SIDEBAR_PANEL_ID}
             aria-label={label}
             tabIndex={active ? 0 : -1}
-            title={label}
+            title={tip}
             onClick={() => onSelect(id)}
             onContextMenu={(e) => menu.open(id, e)}
             className={cn(
@@ -360,7 +364,9 @@ export function SidebarMiniRail() {
             // The strip is only interactive while collapsed; once expanded the
             // horizontal rail owns the roving focus.
             tabIndex={collapsed && active ? 0 : -1}
-            title={binding ? `${label} · ${formatBinding(binding)}` : label}
+            title={[label, binding ? formatBinding(binding) : null, badge?.title]
+              .filter(Boolean)
+              .join(' · ')}
             onClick={() => show(id)}
             onContextMenu={(e) => menu.open(id, e)}
             className={cn(
