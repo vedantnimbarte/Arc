@@ -11,6 +11,7 @@
     "tauri:dev": "pnpm --filter @arc/desktop tauri:dev",
     "tauri:build": "pnpm --filter @arc/desktop tauri:build",
     "typecheck": "pnpm -r typecheck",
+    "test": "pnpm -r test",
     "lint": "pnpm -r lint",
     "format": "prettier --write \"**/*.{ts,tsx,js,jsx,json,md,yml,yaml}\"",
     "clean": "pnpm -r --parallel exec rimraf dist node_modules .turbo && rimraf node_modules"
