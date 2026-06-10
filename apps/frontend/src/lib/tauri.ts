@@ -517,6 +517,9 @@ export interface AgentRunReq {
   workspace_id: string | null;
   /** Persona prompt layered on top of the runtime's default agent prompt. */
   system_prompt?: string | null;
+  /** Run inside an isolated git worktree so edits don't touch the live tree
+   *  until reviewed. Requires `workspace_root` to be a git repo. */
+  worktree?: boolean;
 }
 
 /**
@@ -554,6 +557,15 @@ export async function agentDecide(approvalId: string, approve: boolean): Promise
     // Stale approval id is not user-actionable.
     console.warn('[agent] decide ignored:', err);
   }
+}
+
+/** Discard an isolated run's worktree: force-removes the worktree directory and
+ *  deletes its throwaway branch. The main repo root is derived backend-side. */
+export async function agentWorktreeDiscard(
+  worktreePath: string,
+  branch: string | null,
+): Promise<void> {
+  await invoke('agent_worktree_discard', { worktreePath, branch: branch ?? null });
 }
 
 // ----- MCP client -------------------------------------------------------
@@ -762,6 +774,10 @@ export interface AgentRunRecord {
   started_at: number;
   finished_at: number | null;
   summary: string | null;
+  /** Path of the isolated worktree this run used, or null for an in-place run. */
+  worktree_path: string | null;
+  /** Throwaway branch the worktree was created on, or null. */
+  worktree_branch: string | null;
 }
 
 export type ChatRole = 'system' | 'user' | 'assistant';

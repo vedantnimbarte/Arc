@@ -66,6 +66,7 @@ import {
   type MemoryHit,
 } from '../lib/tauri';
 import { useFiles } from '../state/files';
+import { lineDiff, type DiffLine } from '../lib/inlineEdit';
 import { cn } from '../lib/cn';
 import { SessionsView } from './chat/SessionsView';
 import { AgentsView } from './chat/AgentsView';
@@ -308,11 +309,22 @@ export function ChatPanel({ onClose, intent, onIntentConsumed }: ChatPanelProps 
     );
   }
 
-  async function runAgent(goal: string) {
+  async function runAgent(rawGoal: string) {
+    // Optional leading `--worktree` / `-w` flag runs the agent in an isolated
+    // git worktree so its edits don't touch the live tree until reviewed.
+    let worktree = false;
+    let goal = rawGoal;
+    const flag = goal.match(/^(--worktree|-w)\b\s*/);
+    if (flag) {
+      worktree = true;
+      goal = goal.slice(flag[0].length).trim();
+    }
     if (!goal) {
       append({
         role: 'system',
-        content: 'Usage: `/agent <goal>` — e.g. `/agent find the LLM provider files and explain what they do`.',
+        content:
+          'Usage: `/agent <goal>` — e.g. `/agent find the LLM provider files and explain what they do`. ' +
+          'Prefix with `--worktree` to run in an isolated git worktree you can review and discard.',
       });
       return;
     }
@@ -357,6 +369,7 @@ export function ChatPanel({ onClose, intent, onIntentConsumed }: ChatPanelProps 
         // Persona overlay — the runtime composes this on top of its
         // built-in coding-agent prompt.
         system_prompt: activeAgent.systemPrompt || null,
+        worktree,
       },
       (ev) => {
         if (ev.kind === 'text') {
@@ -1043,6 +1056,7 @@ function ApprovalCard({
           <p className="mt-0.5 line-clamp-3 break-all font-mono text-[10.5px] leading-snug text-fg-muted">
             {summary}
           </p>
+          <ApprovalDiff name={approval.name} input={approval.input} />
         </div>
         {!settled && (
           <div className="flex shrink-0 items-center gap-1">
@@ -1062,6 +1076,59 @@ function ApprovalCard({
         )}
       </div>
     </div>
+  );
+}
+
+/** Cap on diff lines shown inline in an approval card — enough to judge the
+ *  change without flooding the composer. */
+const APPROVAL_DIFF_MAX_LINES = 40;
+
+/** A compact diff preview for the file-mutating tools, so the user can see
+ *  *what* will change before approving — not just which file. `fs_edit` shows
+ *  old→new as a line diff; `fs_write_file` shows the new content as additions.
+ *  Renders nothing for other tools (shell, MCP, etc.). */
+function ApprovalDiff({ name, input }: { name: string; input: unknown }) {
+  if (!input || typeof input !== 'object') return null;
+  const obj = input as Record<string, unknown>;
+  let diff: DiffLine[] | null = null;
+  if (
+    name === 'fs_edit' &&
+    typeof obj.old_string === 'string' &&
+    typeof obj.new_string === 'string'
+  ) {
+    diff = lineDiff(obj.old_string, obj.new_string);
+  } else if (name === 'fs_write_file' && typeof obj.content === 'string') {
+    diff = obj.content.split('\n').map((text) => ({ op: 'add' as const, text }));
+  }
+  if (!diff || diff.length === 0) return null;
+
+  const truncated = diff.length > APPROVAL_DIFF_MAX_LINES;
+  const shown = truncated ? diff.slice(0, APPROVAL_DIFF_MAX_LINES) : diff;
+  return (
+    <pre className="mt-1 max-h-44 overflow-auto rounded-md border border-border-hairline/60 bg-black/25 font-mono text-[10px] leading-snug">
+      {shown.map((line, i) => (
+        <div
+          key={i}
+          className={cn(
+            'px-1.5',
+            line.op === 'add' && 'bg-status-ok/15 text-status-ok',
+            line.op === 'del' && 'bg-status-err/15 text-status-err',
+            line.op === 'same' && 'text-fg-muted',
+          )}
+        >
+          <span className="mr-1 select-none opacity-60">
+            {line.op === 'add' ? '+' : line.op === 'del' ? '-' : ' '}
+          </span>
+          {line.text || ' '}
+        </div>
+      ))}
+      {truncated && (
+        <div className="px-1.5 py-0.5 text-fg-subtle">
+          … {diff.length - APPROVAL_DIFF_MAX_LINES} more line
+          {diff.length - APPROVAL_DIFF_MAX_LINES === 1 ? '' : 's'}
+        </div>
+      )}
+    </pre>
   );
 }
 
