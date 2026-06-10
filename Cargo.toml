@@ -12,6 +12,7 @@ members = [
     "rust/ssh",
     "rust/project-config",
     "rust/git-host",
+    "rust/lsp",
 ]
 
 [workspace.package]
@@ -106,6 +107,7 @@ arc-http-client = { path = "rust/http-client" }
 arc-ssh = { path = "rust/ssh" }
 arc-project-config = { path = "rust/project-config" }
 arc-git-host = { path = "rust/git-host" }
+arc-lsp = { path = "rust/lsp" }
 
 [profile.dev]
 opt-level = 0
