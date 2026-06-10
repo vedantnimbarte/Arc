@@ -1,5 +1,6 @@
 pub mod agent;
 pub mod apiclient;
+pub mod fonts;
 pub mod fs;
 pub mod git;
 pub mod git_host;

@@ -257,6 +257,14 @@ export async function networkProbePort(port: number): Promise<boolean> {
   return invoke<boolean>('network_probe_port', { port });
 }
 
+// Enumerate the font families installed on this machine, sorted and
+// de-duplicated. Powers the "System installed fonts" group in Settings →
+// Font Family. Returns [] outside Tauri (the frontend-only dev shell).
+export async function listSystemFonts(): Promise<string[]> {
+  if (!isTauri) return [];
+  return invoke<string[]>('fonts_list_system');
+}
+
 // Open a URL in the user's default OS handler (system browser for http/https).
 // Inside a Tauri webview `window.open` does NOT reliably hop to the system
 // browser, so anything that needs to escape the embedded webview routes here.
