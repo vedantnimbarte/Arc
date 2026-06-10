@@ -196,6 +196,7 @@ fn main() {
             commands::ssh::ssh_session_logs,
             commands::agent::agent_run,
             commands::agent::agent_decide,
+            commands::agent::agent_worktree_discard,
             commands::mcp::mcp_connect,
             commands::mcp::mcp_connect_http,
             commands::mcp::mcp_list_tools,

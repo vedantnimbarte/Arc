@@ -395,6 +395,31 @@ pub struct AgentRunReq {
     /// Layered on top of the runtime's default coding-agent prompt.
     #[serde(default)]
     pub system_prompt: Option<String>,
+    /// When true, run the agent inside a fresh git worktree on a throwaway
+    /// branch so its edits don't touch the user's working tree until reviewed.
+    /// Requires `workspace_root` to be a git repository.
+    #[serde(default)]
+    pub worktree: bool,
+}
+
+/// Provision an isolated worktree for a run. Returns `(worktree_path, branch)`
+/// on success. The branch is `arc/agent-<short>` and the worktree lives under
+/// the OS temp dir so it never clutters the user's working tree.
+async fn provision_worktree(repo_root: &str, run_id: &str) -> Result<(String, String), String> {
+    let short: String = run_id
+        .chars()
+        .filter(|c| c.is_ascii_alphanumeric())
+        .take(8)
+        .collect();
+    let short = if short.is_empty() { "run".to_string() } else { short };
+    let branch = format!("arc/agent-{short}");
+    let path = std::env::temp_dir().join(format!("arc-agent-{short}"));
+    let path_str = path.to_string_lossy().to_string();
+    // create_branch=true, start_point=None → branch off current HEAD.
+    arc_git::worktree_add(repo_root, &path_str, Some(&branch), true, None)
+        .await
+        .map_err(|e| format!("failed to create worktree: {e}"))?;
+    Ok((path_str, branch))
 }
 
 #[tauri::command]
@@ -407,11 +432,44 @@ pub async fn agent_run(
 ) -> Result<(), String> {
     let topic = format!("agent://event/{}", req.id);
 
+    // When isolation is requested, spin up a dedicated worktree and redirect
+    // the run's working root onto it. If creation fails we abort the run with
+    // a clear error rather than silently falling back to the live tree — a
+    // surprise in-place edit is exactly what isolation exists to prevent.
+    let mut effective_root = req.workspace_root.clone();
+    let (worktree_path, worktree_branch) = if req.worktree {
+        match req.workspace_root.as_deref() {
+            Some(root) => match provision_worktree(root, &req.id).await {
+                Ok((path, branch)) => {
+                    effective_root = Some(path.clone());
+                    (Some(path), Some(branch))
+                }
+                Err(msg) => {
+                    let _ = app.emit(&topic, &AgentEvent::Error { message: msg });
+                    return Ok(());
+                }
+            },
+            None => {
+                let _ = app.emit(
+                    &topic,
+                    &AgentEvent::Error {
+                        message: "isolated run requires an open workspace folder".into(),
+                    },
+                );
+                return Ok(());
+            }
+        }
+    } else {
+        (None, None)
+    };
+
     if let Err(err) = agent_db::start(
         store.pool(),
         &req.id,
         req.workspace_id.as_deref(),
         "coding-v1",
+        worktree_path.as_deref(),
+        worktree_branch.as_deref(),
     )
     .await
     {
@@ -421,7 +479,7 @@ pub async fn agent_run(
     let cfg = RunConfig {
         api_key: req.api_key,
         model: req.model,
-        workspace_root: req.workspace_root,
+        workspace_root: effective_root,
         system_prompt: req.system_prompt,
         ..Default::default()
     };
@@ -508,4 +566,26 @@ pub async fn agent_decide(
         // vague — the UI doesn't need to distinguish.
         None => Err(format!("no pending approval for {approval_id}")),
     }
+}
+
+/// Discard an isolated run's worktree: force-removes the worktree directory and
+/// best-effort deletes its throwaway branch. `repo_root` is the main repository
+/// (the user's workspace folder); `worktree_path` and `branch` come from the
+/// persisted run record. Branch deletion failures are swallowed — the worktree
+/// removal is what matters; a dangling branch is harmless and user-prunable.
+#[tauri::command]
+pub async fn agent_worktree_discard(
+    repo_root: String,
+    worktree_path: String,
+    branch: Option<String>,
+) -> Result<(), String> {
+    arc_git::worktree_remove(&repo_root, &worktree_path, true)
+        .await
+        .map_err(|e| format!("worktree remove failed: {e}"))?;
+    if let Some(branch) = branch {
+        if let Err(err) = arc_git::branch_delete(&repo_root, &branch, true).await {
+            tracing::warn!(?err, %branch, "agent worktree branch delete failed");
+        }
+    }
+    Ok(())
 }
