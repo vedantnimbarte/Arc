@@ -10,6 +10,7 @@ import {
 import { createPortal } from 'react-dom';
 import { FileTree } from './FileTree';
 import { SourceControl } from './SourceControl';
+import { SearchView } from './SearchView';
 import { SshPanel } from './ssh/SshPanel';
 import { fsReveal, fsWatchStart, fsWatchStop, isTauri } from '../lib/tauri';
 import { useFiles, type SidebarView } from '../state/files';
@@ -115,6 +116,8 @@ export function Sidebar() {
             <FileTree />
           ) : view === 'git' ? (
             <SourceControl />
+          ) : view === 'search' ? (
+            <SearchView />
           ) : (
             <SshPanel onClose={() => setSidebarView('files')} />
           )}
@@ -256,7 +259,7 @@ function SidebarRail({
       {SIDEBAR_VIEWS.map(({ id, label, Icon, shortcut }) => {
         const active = view === id;
         const badge = railBadge(id, gitCount, gitConflicts, sshLive);
-        const binding = getBinding(shortcut);
+        const binding = shortcut ? getBinding(shortcut) : null;
         const tip = [label, binding ? formatBinding(binding) : null, badge?.title]
           .filter(Boolean)
           .join(' · ');
@@ -353,7 +356,7 @@ export function SidebarMiniRail() {
       {SIDEBAR_VIEWS.map(({ id, label, Icon, shortcut }) => {
         const active = view === id;
         const badge = railBadge(id, gitCount, gitConflicts, sshLive);
-        const binding = getBinding(shortcut);
+        const binding = shortcut ? getBinding(shortcut) : null;
         return (
           <button
             key={id}
@@ -461,6 +464,8 @@ function railMenuItems(view: SidebarView): RailMenuItem[] {
           },
         },
       ];
+    default:
+      return [];
   }
 }
 
@@ -471,6 +476,8 @@ function useRailMenu() {
   const open = (view: SidebarView, e: ReactMouseEvent) => {
     e.preventDefault();
     e.stopPropagation();
+    // Skip views that expose no quick actions — no empty menu.
+    if (railMenuItems(view).length === 0) return;
     setMenu({ x: e.clientX, y: e.clientY, view });
   };
   const node = menu ? (

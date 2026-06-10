@@ -12,8 +12,8 @@ export const CHAT_MAX = 560;
 export const CHAT_DEFAULT = 340;
 
 /** Which panel is showing in the left sidebar. Driven by the sidebar's
- *  activity rail (Explorer / Source Control / SSH). */
-export type SidebarView = 'files' | 'git' | 'ssh';
+ *  activity rail (Explorer / Source Control / SSH / Search / Outline / Agents). */
+export type SidebarView = 'files' | 'git' | 'ssh' | 'search' | 'outline' | 'agents';
 
 interface FilesState {
   /**
