@@ -355,6 +355,160 @@ export function bindingFromEvent(e: KeyboardEvent): KeyBinding | null {
   };
 }
 
+// ─── Built-in (non-rebindable) shortcuts ────────────────────────────────────
+// A reference list of the keystrokes hardcoded across the editor, terminal,
+// chat composer, pickers and dialogs. These aren't user-rebindable, but the
+// Shortcuts dialog surfaces them so the list reflects *every* shortcut the
+// app supports — not just the customizable ones above.
+
+export type ReferenceCategory =
+  | 'Editor'
+  | 'Terminal'
+  | 'File Tree'
+  | 'Assistant'
+  | 'Source Control'
+  | 'Navigation';
+
+export interface ReferenceShortcut {
+  /** Platform-resolved display string (e.g. "⌘S" on macOS, "Ctrl+S" on Win). */
+  keys: string;
+  label: string;
+  description: string;
+  category: ReferenceCategory;
+}
+
+const MOD_KEY = IS_MAC ? '⌘' : 'Ctrl';
+const ALT_KEY = IS_MAC ? '⌥' : 'Alt';
+const SHIFT_KEY = IS_MAC ? '⇧' : 'Shift';
+const KEY_SEP = IS_MAC ? '' : '+';
+const combo = (...parts: string[]) => parts.join(KEY_SEP);
+
+export const REFERENCE_CATEGORIES: ReferenceCategory[] = [
+  'Editor',
+  'Terminal',
+  'File Tree',
+  'Assistant',
+  'Source Control',
+  'Navigation',
+];
+
+export const REFERENCE_SHORTCUTS: ReferenceShortcut[] = [
+  // Editor (CodeMirror)
+  {
+    keys: combo(MOD_KEY, 'S'),
+    label: 'Save File',
+    description: 'Write the active editor tab to disk.',
+    category: 'Editor',
+  },
+  {
+    keys: combo(MOD_KEY, 'F'),
+    label: 'Find in File',
+    description: 'Open the editor search panel.',
+    category: 'Editor',
+  },
+  {
+    keys: combo(MOD_KEY, 'D'),
+    label: 'Select Next Occurrence',
+    description: 'Add the next match of the selection as a new cursor.',
+    category: 'Editor',
+  },
+  {
+    keys: combo(MOD_KEY, 'Z'),
+    label: 'Undo',
+    description: 'Undo the last editor change.',
+    category: 'Editor',
+  },
+  {
+    keys: IS_MAC ? combo('⌘', '⇧', 'Z') : combo('Ctrl', 'Y'),
+    label: 'Redo',
+    description: 'Redo the last undone editor change.',
+    category: 'Editor',
+  },
+  {
+    keys: 'Alt-Click',
+    label: 'Add Cursor',
+    description: 'Drop an additional cursor in the editor.',
+    category: 'Editor',
+  },
+  {
+    keys: 'Alt-Drag',
+    label: 'Rectangular Selection',
+    description: 'Select a column / box of text.',
+    category: 'Editor',
+  },
+  // Terminal
+  {
+    keys: combo(SHIFT_KEY, 'Paste'),
+    label: 'Force Paste',
+    description: 'Paste into the terminal, bypassing the risky-paste warning.',
+    category: 'Terminal',
+  },
+  // File Tree
+  {
+    keys: 'Alt-Click',
+    label: 'Paste Path',
+    description: 'Insert a file path into the active terminal.',
+    category: 'File Tree',
+  },
+  {
+    keys: 'Double-Click',
+    label: 'Change Directory',
+    description: 'Paste `cd <folder>` into the active terminal.',
+    category: 'File Tree',
+  },
+  // Assistant (chat composer)
+  {
+    keys: 'Enter',
+    label: 'Send Message',
+    description: 'Send the current chat message.',
+    category: 'Assistant',
+  },
+  {
+    keys: combo(SHIFT_KEY, 'Enter'),
+    label: 'New Line',
+    description: 'Insert a line break without sending.',
+    category: 'Assistant',
+  },
+  {
+    keys: 'Tab',
+    label: 'Accept Suggestion',
+    description: 'Accept the highlighted @mention or / command.',
+    category: 'Assistant',
+  },
+  // Source Control
+  {
+    keys: combo(MOD_KEY, 'Enter'),
+    label: 'Commit',
+    description: 'Submit the commit message in Source Control.',
+    category: 'Source Control',
+  },
+  // Navigation (palettes, pickers & dialogs)
+  {
+    keys: '↑ / ↓',
+    label: 'Move Selection',
+    description: 'Navigate items in palettes, pickers and popovers.',
+    category: 'Navigation',
+  },
+  {
+    keys: 'Enter',
+    label: 'Confirm',
+    description: 'Choose the highlighted item or confirm a dialog.',
+    category: 'Navigation',
+  },
+  {
+    keys: 'Esc',
+    label: 'Dismiss',
+    description: 'Close the open palette, popover or dialog.',
+    category: 'Navigation',
+  },
+  {
+    keys: '← / → / Home / End',
+    label: 'Switch Sidebar View',
+    description: 'Move between activity-bar views when the rail is focused.',
+    category: 'Navigation',
+  },
+];
+
 /** Returns the action that would conflict with `binding`, or null. */
 export function findConflict(binding: KeyBinding, ignore?: ActionId): ActionId | null {
   const overrides = useShortcuts.getState().overrides;

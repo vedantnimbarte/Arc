@@ -4,6 +4,8 @@ import {
   ACTION_META,
   ACTION_ORDER,
   DEFAULT_BINDINGS,
+  REFERENCE_CATEGORIES,
+  REFERENCE_SHORTCUTS,
   bindingFromEvent,
   findConflict,
   formatBinding,
@@ -69,6 +71,19 @@ export function ShortcutsDialog({ open, onClose }: Props) {
       );
     });
   }, [query, overrides]);
+
+  const filteredRef = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    return REFERENCE_SHORTCUTS.filter((s) => {
+      if (!q) return true;
+      return (
+        s.label.toLowerCase().includes(q) ||
+        s.description.toLowerCase().includes(q) ||
+        s.category.toLowerCase().includes(q) ||
+        s.keys.toLowerCase().includes(q)
+      );
+    });
+  }, [query]);
 
   if (!open) return null;
 
@@ -168,7 +183,49 @@ export function ShortcutsDialog({ open, onClose }: Props) {
               </section>
             );
           })}
-          {filtered.length === 0 && (
+          {filteredRef.length > 0 && (
+            <div className="mb-2 mt-1">
+              <div className="mb-2 flex items-center gap-2 px-1">
+                <div className="h-px flex-1 bg-border-hairline" />
+                <span className="font-display text-[9.5px] font-semibold uppercase tracking-widest2 text-fg-subtle">
+                  Built-in · not rebindable
+                </span>
+                <div className="h-px flex-1 bg-border-hairline" />
+              </div>
+              {REFERENCE_CATEGORIES.map((cat) => {
+                const rows = filteredRef.filter((s) => s.category === cat);
+                if (rows.length === 0) return null;
+                return (
+                  <section key={cat} className="mb-3">
+                    <h3 className="px-1 pb-1 font-display text-[10.5px] font-semibold uppercase tracking-widest2 text-fg-subtle">
+                      {cat}
+                    </h3>
+                    <div className="space-y-0.5">
+                      {rows.map((s) => (
+                        <div
+                          key={`${cat}:${s.label}`}
+                          className="flex items-center gap-3 rounded-md px-2 py-1.5"
+                        >
+                          <div className="min-w-0 flex-1">
+                            <span className="font-display text-[12.5px] font-medium tracking-tight text-fg-base">
+                              {s.label}
+                            </span>
+                            <p className="truncate font-display text-[11px] text-fg-subtle">
+                              {s.description}
+                            </p>
+                          </div>
+                          <span className="shrink-0 rounded-md border border-border-subtle bg-bg-base/40 px-2.5 py-1 font-mono text-[11px] text-fg-muted">
+                            {s.keys}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </section>
+                );
+              })}
+            </div>
+          )}
+          {filtered.length === 0 && filteredRef.length === 0 && (
             <div className="flex items-center justify-center gap-1.5 px-4 py-12 font-display text-[12px] italic text-fg-subtle">
               <Search size={11} strokeWidth={2} />
               no actions match "{query}"
@@ -182,7 +239,9 @@ export function ShortcutsDialog({ open, onClose }: Props) {
             <kbd className="font-mono">click</kbd> a binding to rebind ·{' '}
             <kbd className="font-mono">esc</kbd> to cancel
           </span>
-          <span className="tabular-nums">{ACTION_ORDER.length} actions</span>
+          <span className="tabular-nums">
+            {ACTION_ORDER.length + REFERENCE_SHORTCUTS.length} shortcuts
+          </span>
         </div>
       </div>
     </div>
