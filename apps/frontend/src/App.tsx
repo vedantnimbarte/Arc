@@ -269,6 +269,12 @@ export default function App() {
         setChatOpen(true);
         setChatIntent({ type: 'toggle-sessions', at: Date.now() });
         return;
+      case 'show-explorer':
+        useFiles.getState().showSidebarView('files');
+        return;
+      case 'show-source-control':
+        useFiles.getState().showSidebarView('git');
+        return;
       case 'toggle-ssh-panel':
         useFiles.getState().toggleSidebarView('ssh');
         return;
