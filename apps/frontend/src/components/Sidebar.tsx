@@ -1,11 +1,11 @@
 import { useEffect } from 'react';
-import { FolderTree, GitBranch, Server, type LucideIcon } from 'lucide-react';
 import { FileTree } from './FileTree';
 import { SourceControl } from './SourceControl';
 import { SshPanel } from './ssh/SshPanel';
 import { fsWatchStart, fsWatchStop, isTauri } from '../lib/tauri';
 import { useFiles, type SidebarView } from '../state/files';
 import { useGit } from '../state/git';
+import { SIDEBAR_VIEWS } from '../lib/sidebarViews';
 import { cn } from '../lib/cn';
 
 /**
@@ -106,18 +106,6 @@ export function Sidebar() {
 
 // ── Activity rail ──────────────────────────────────────────────────────────
 
-interface RailItem {
-  id: SidebarView;
-  label: string;
-  Icon: LucideIcon;
-}
-
-const RAIL_ITEMS: RailItem[] = [
-  { id: 'files', label: 'Explorer', Icon: FolderTree },
-  { id: 'git', label: 'Source Control', Icon: GitBranch },
-  { id: 'ssh', label: 'SSH', Icon: Server },
-];
-
 function SidebarRail({
   view,
   onSelect,
@@ -135,7 +123,7 @@ function SidebarRail({
       aria-label="Sidebar views"
       className="flex h-8 shrink-0 items-center gap-0.5 border-b border-border-hairline px-1.5"
     >
-      {RAIL_ITEMS.map(({ id, label, Icon }) => {
+      {SIDEBAR_VIEWS.map(({ id, label, Icon }) => {
         const active = view === id;
         const showBadge = id === 'git' && gitCount > 0;
         return (
