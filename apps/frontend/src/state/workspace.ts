@@ -10,11 +10,17 @@ import {
 } from '../lib/tauri';
 import { useFiles } from './files';
 import { useReveal } from './reveal';
+import { nextGroupColor, type TabGroupColorId } from '../lib/tabGroups';
 
 export interface Tab {
   id: string;
   title: string;
   kind: 'terminal' | 'editor' | 'preview' | 'apiclient' | 'ssh' | 'diff';
+  /** Group this tab belongs to (Chrome-style tab grouping), or undefined for
+   *  a free tab. Membership is a within-leaf concept: a group's tabs always
+   *  live in one leaf and render contiguously. Persisted via the layout
+   *  envelope (see `serializeLayout`), not a tab column. */
+  groupId?: string;
   /** PTY id for terminal tabs. Transient — stripped from persisted state. */
   ptyId?: string;
   /** Absolute path for editor tabs (read on mount). */
@@ -41,6 +47,19 @@ export interface Tab {
   diffRoot?: string;
   /** Diff scope for `kind: 'diff'` tabs. */
   diffScope?: 'worktree' | 'staged' | 'head';
+}
+
+/** A Chrome-style tab group: a named, colour-coded, collapsible container for
+ *  a contiguous run of tabs within a single leaf. The membership lives on the
+ *  tabs (`tab.groupId`); this record holds only the group's own metadata. */
+export interface TabGroup {
+  id: string;
+  /** Display name. Empty string renders as a colour-only pill (Chrome's
+   *  unnamed-group affordance). */
+  name: string;
+  color: TabGroupColorId;
+  /** When true the strip hides the member pills and shows only the chip. */
+  collapsed: boolean;
 }
 
 // ─── Pane layout tree ─────────────────────────────────────────────────────
@@ -78,6 +97,12 @@ export interface SerializedLayout {
   v: 1;
   root: PaneNode;
   focusedPaneId: string;
+  /** Tab-group metadata. Optional + additive so the envelope stays v:1 — older
+   *  binaries ignore these fields, newer ones rehydrate the groups. */
+  groups?: TabGroup[];
+  /** tabId → groupId membership map. Kept beside `groups` (rather than on the
+   *  tab rows) so a single column round-trips the whole grouping. */
+  groupAssignments?: Record<string, string>;
 }
 
 interface WorkspaceState {
@@ -92,6 +117,8 @@ interface WorkspaceState {
    *  from the last-saved content on disk. Kept off the Tab itself so
    *  it doesn't get accidentally persisted. */
   tabDirty: Record<string, boolean>;
+  /** Chrome-style tab groups. Metadata only — membership is on the tabs. */
+  tabGroups: TabGroup[];
   /** SQLite session id; null until `hydrate()` has run. Used as the key for
    *  every persistence write. */
   sessionId: string | null;
@@ -102,6 +129,28 @@ interface WorkspaceState {
   closeTab: (id: string) => void;
   setActive: (id: string) => void;
   renameTab: (id: string, title: string) => void;
+  // ─── Tab groups (Chrome-style) ──────────────────────────────────────────
+  /** Create a new group from one or more tabs that share a leaf. The members
+   *  are reordered contiguous and the group becomes the tabs' owner. Returns
+   *  the new group id. Tabs not in the first tab's leaf are ignored. */
+  groupTabs: (tabIds: string[], opts?: { name?: string; color?: TabGroupColorId }) => string;
+  /** Add a single tab to an existing group. The tab must share the group's
+   *  leaf; cross-leaf adds are a no-op (the UI only offers same-leaf groups). */
+  addTabToGroup: (tabId: string, groupId: string) => void;
+  /** Remove one tab from its group, keeping the group (unless it empties). */
+  removeTabFromGroup: (tabId: string) => void;
+  /** Rename a group. Empty string is allowed (colour-only chip). */
+  renameGroup: (groupId: string, name: string) => void;
+  /** Recolour a group. */
+  setGroupColor: (groupId: string, color: TabGroupColorId) => void;
+  /** Collapse/expand a group. Collapsing while the active tab is inside moves
+   *  focus to the nearest tab outside the group, mirroring Chrome. */
+  toggleGroupCollapsed: (groupId: string) => void;
+  /** Disband a group but keep every member tab open and ungrouped. */
+  ungroupGroup: (groupId: string) => void;
+  /** Close every tab in a group. Falls back to ungroup if it would empty the
+   *  whole workspace. */
+  closeGroup: (groupId: string) => void;
   setTabPtyId: (id: string, ptyId: string | undefined) => void;
   setTabDirty: (id: string, dirty: boolean) => void;
   /** Find an existing editor tab for `path`, or create one and focus it.
@@ -286,6 +335,60 @@ export function setLeafActiveTab(node: PaneNode, paneId: string, tabId: string):
   return { ...node, children: node.children.map((c) => setLeafActiveTab(c, paneId, tabId)) };
 }
 
+// ─── Tab-group helpers ───────────────────────────────────────────────────
+
+function newGroupId(): string {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return `grp-${crypto.randomUUID()}`;
+  }
+  return `grp-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+}
+
+/** Build a fast tabId → groupId lookup from the flat tab list. */
+function groupOfMap(tabs: Tab[]): (id: string) => string | undefined {
+  const m = new Map(tabs.map((t) => [t.id, t.groupId]));
+  return (id) => m.get(id);
+}
+
+/**
+ * Reorder a leaf's tabIds so every group's members are contiguous, anchoring
+ * each group's run at the position of its earliest member. Free (ungrouped)
+ * tabs keep their slots. Stable — feeding an already-normalized order back in
+ * is a no-op. This is what keeps a group from visually fragmenting after an
+ * add/remove.
+ */
+function normalizeLeafOrder(tabIds: string[], groupOf: (id: string) => string | undefined): string[] {
+  const result: string[] = [];
+  const placed = new Set<string>();
+  for (const id of tabIds) {
+    const g = groupOf(id);
+    if (!g) {
+      result.push(id);
+      continue;
+    }
+    if (placed.has(g)) continue; // its run was already emitted on first sight
+    placed.add(g);
+    for (const id2 of tabIds) if (groupOf(id2) === g) result.push(id2);
+  }
+  return result;
+}
+
+/** Replace a leaf's `tabIds` with `order` (same membership, new sequence). */
+function reorderLeafTabs(node: PaneNode, paneId: string, order: string[]): PaneNode {
+  if (node.kind === 'leaf') {
+    if (node.id !== paneId) return node;
+    return { ...node, tabIds: order };
+  }
+  return { ...node, children: node.children.map((c) => reorderLeafTabs(c, paneId, order)) };
+}
+
+/** Drop any group that no longer has at least one member among `tabs`. */
+function pruneEmptyGroups(groups: TabGroup[], tabs: Tab[]): TabGroup[] {
+  const live = new Set(tabs.map((t) => t.groupId).filter(Boolean) as string[]);
+  if (groups.every((g) => live.has(g.id))) return groups;
+  return groups.filter((g) => live.has(g.id));
+}
+
 /** Replace `splitId`'s `sizes` with `sizes`. Used after a resize-handle
  *  drag so the new pane ratios survive across restarts. */
 function updateSplitSizes(node: PaneNode, splitId: string, sizes: number[]): PaneNode {
@@ -411,6 +514,7 @@ export const useWorkspace = create<WorkspaceState>()((set, get) => ({
   tabs: [],
   activeTabId: null,
   tabDirty: {},
+  tabGroups: [],
   sessionId: null,
   hydrated: false,
   addTab: (tab) =>
@@ -456,6 +560,7 @@ export const useWorkspace = create<WorkspaceState>()((set, get) => ({
           layout: fresh,
           focusedPaneId: fresh.id,
           tabDirty: nextDirty,
+          tabGroups: pruneEmptyGroups(s.tabGroups, remaining),
         };
       }
       const focusedExists = !!findLeaf(pruned, s.focusedPaneId);
@@ -469,6 +574,8 @@ export const useWorkspace = create<WorkspaceState>()((set, get) => ({
         layout: pruned,
         focusedPaneId: newFocusedPaneId,
         tabDirty: nextDirty,
+        // A group that just lost its last member disappears with it.
+        tabGroups: pruneEmptyGroups(s.tabGroups, remaining),
       };
     }),
   setActive: (id) =>
@@ -485,6 +592,136 @@ export const useWorkspace = create<WorkspaceState>()((set, get) => ({
     set((s) => ({
       tabs: s.tabs.map((t) => (t.id === id ? { ...t, title } : t)),
     })),
+  groupTabs: (tabIds, opts) => {
+    const id = newGroupId();
+    set((s) => {
+      const anchor = tabIds[0];
+      if (!anchor) return s;
+      const leaf = findLeafContaining(s.layout, anchor);
+      if (!leaf) return s;
+      // Only tabs that actually live in the anchor's leaf can join — a group
+      // never spans leaves.
+      const members = new Set(tabIds.filter((tid) => leaf.tabIds.includes(tid)));
+      if (members.size === 0) return s;
+      const group: TabGroup = {
+        id,
+        name: opts?.name ?? '',
+        color: opts?.color ?? nextGroupColor(s.tabGroups.map((g) => g.color)),
+        collapsed: false,
+      };
+      const tabs = s.tabs.map((t) => (members.has(t.id) ? { ...t, groupId: id } : t));
+      const order = normalizeLeafOrder(leaf.tabIds, groupOfMap(tabs));
+      return {
+        tabs,
+        tabGroups: [...s.tabGroups, group],
+        layout: reorderLeafTabs(s.layout, leaf.id, order),
+      };
+    });
+    return id;
+  },
+  addTabToGroup: (tabId, groupId) =>
+    set((s) => {
+      const group = s.tabGroups.find((g) => g.id === groupId);
+      if (!group) return s;
+      const tabLeaf = findLeafContaining(s.layout, tabId);
+      const member = s.tabs.find((t) => t.groupId === groupId);
+      const groupLeaf = member ? findLeafContaining(s.layout, member.id) : tabLeaf;
+      // Cross-leaf joins are disallowed — the UI only surfaces same-leaf
+      // groups, but guard anyway so a stale action can't fragment a group.
+      if (!tabLeaf || !groupLeaf || tabLeaf.id !== groupLeaf.id) return s;
+      const tabs = s.tabs.map((t) => (t.id === tabId ? { ...t, groupId } : t));
+      const order = normalizeLeafOrder(tabLeaf.tabIds, groupOfMap(tabs));
+      return { tabs, layout: reorderLeafTabs(s.layout, tabLeaf.id, order) };
+    }),
+  removeTabFromGroup: (tabId) =>
+    set((s) => {
+      const tab = s.tabs.find((t) => t.id === tabId);
+      if (!tab || !tab.groupId) return s;
+      const leaf = findLeafContaining(s.layout, tabId);
+      const tabs = s.tabs.map((t) => (t.id === tabId ? { ...t, groupId: undefined } : t));
+      const layout = leaf
+        ? reorderLeafTabs(s.layout, leaf.id, normalizeLeafOrder(leaf.tabIds, groupOfMap(tabs)))
+        : s.layout;
+      return { tabs, layout, tabGroups: pruneEmptyGroups(s.tabGroups, tabs) };
+    }),
+  renameGroup: (groupId, name) =>
+    set((s) => ({
+      tabGroups: s.tabGroups.map((g) => (g.id === groupId ? { ...g, name } : g)),
+    })),
+  setGroupColor: (groupId, color) =>
+    set((s) => ({
+      tabGroups: s.tabGroups.map((g) => (g.id === groupId ? { ...g, color } : g)),
+    })),
+  toggleGroupCollapsed: (groupId) =>
+    set((s) => {
+      const group = s.tabGroups.find((g) => g.id === groupId);
+      if (!group) return s;
+      const collapsing = !group.collapsed;
+      let activeTabId = s.activeTabId;
+      let layout = s.layout;
+      if (collapsing && activeTabId) {
+        const active = s.tabs.find((t) => t.id === activeTabId);
+        if (active?.groupId === groupId) {
+          // Active tab is about to be hidden — hand focus to the nearest tab
+          // outside the group in the same leaf (Chrome's behaviour).
+          const leaf = findLeafContaining(s.layout, activeTabId);
+          const outside = leaf?.tabIds.find(
+            (tid) => s.tabs.find((t) => t.id === tid)?.groupId !== groupId,
+          );
+          if (outside && leaf) {
+            activeTabId = outside;
+            layout = setLeafActiveTab(s.layout, leaf.id, outside);
+          }
+          // No tab outside the group → leave focus put; the collapsed chip
+          // renders as active so the user can still see what's selected.
+        }
+      }
+      return {
+        tabGroups: s.tabGroups.map((g) => (g.id === groupId ? { ...g, collapsed: collapsing } : g)),
+        activeTabId,
+        layout,
+      };
+    }),
+  ungroupGroup: (groupId) =>
+    set((s) => {
+      if (!s.tabGroups.some((g) => g.id === groupId)) return s;
+      const tabs = s.tabs.map((t) => (t.groupId === groupId ? { ...t, groupId: undefined } : t));
+      return { tabs, tabGroups: s.tabGroups.filter((g) => g.id !== groupId) };
+    }),
+  closeGroup: (groupId) =>
+    set((s) => {
+      const memberIds = s.tabs.filter((t) => t.groupId === groupId).map((t) => t.id);
+      if (memberIds.length === 0) {
+        return { tabGroups: s.tabGroups.filter((g) => g.id !== groupId) };
+      }
+      const remaining = s.tabs.filter((t) => t.groupId !== groupId);
+      // Closing the group would leave the workspace empty — fall back to
+      // ungrouping so the last tabs survive (matches the closeTab guard).
+      if (remaining.length === 0) {
+        return {
+          tabs: s.tabs.map((t) => (t.groupId === groupId ? { ...t, groupId: undefined } : t)),
+          tabGroups: s.tabGroups.filter((g) => g.id !== groupId),
+        };
+      }
+      const removed = new Set(memberIds);
+      const pruned = pruneLayout(s.layout, removed) ?? singleLeafLayout(
+        remaining.map((t) => t.id),
+        remaining[0]?.id ?? null,
+      );
+      const nextDirty = { ...s.tabDirty };
+      for (const id of memberIds) delete nextDirty[id];
+      const focusedExists = !!findLeaf(pruned, s.focusedPaneId);
+      const focusedPaneId = focusedExists ? s.focusedPaneId : allLeaves(pruned)[0]!.id;
+      const focusedLeaf = findLeaf(pruned, focusedPaneId)!;
+      return {
+        tabs: remaining,
+        tabGroups: s.tabGroups.filter((g) => g.id !== groupId),
+        layout: pruned,
+        focusedPaneId,
+        activeTabId: focusedLeaf.activeTabId,
+        tabDirty: nextDirty,
+      };
+    }),
   setTabPtyId: (id, ptyId) =>
     set((s) => ({
       tabs: s.tabs.map((t) => (t.id === id ? { ...t, ptyId } : t)),
@@ -697,30 +934,57 @@ export const useWorkspace = create<WorkspaceState>()((set, get) => ({
       if (!sourceLeaf) return s;
       // Same leaf, no reposition requested → no-op.
       if (sourceLeaf.id === target.id && !beforeTabId) return s;
+      // A tab dragged into a *different* leaf leaves its group behind — a
+      // group never spans leaves. Within the same leaf, membership is kept
+      // (and re-normalized below so the group stays contiguous).
+      const crossLeaf = sourceLeaf.id !== target.id;
+      const movedTab = s.tabs.find((t) => t.id === tabId);
+      const tabs =
+        crossLeaf && movedTab?.groupId
+          ? s.tabs.map((t) => (t.id === tabId ? { ...t, groupId: undefined } : t))
+          : s.tabs;
       const moved = insertTabIntoLeaf(s.layout, target.id, tabId, beforeTabId ?? null);
       // Prune empties (the source leaf may be empty now). pruneLayout
       // collapses single-child splits as a side effect, which is exactly
       // what we want when a leaf becomes empty.
-      const cleaned = pruneLayout(moved, new Set()) ?? moved;
-      // After prune, anchor focus to the leaf that owns the moved tab.
+      let cleaned = pruneLayout(moved, new Set()) ?? moved;
+      // Re-normalize the destination leaf so any group there stays a single
+      // contiguous run after the insert.
+      const destLeaf = findLeafContaining(cleaned, tabId);
+      if (destLeaf) {
+        cleaned = reorderLeafTabs(
+          cleaned,
+          destLeaf.id,
+          normalizeLeafOrder(destLeaf.tabIds, groupOfMap(tabs)),
+        );
+      }
       const focusedLeaf = findLeafContaining(cleaned, tabId);
       return {
+        tabs,
         layout: cleaned,
         focusedPaneId: focusedLeaf?.id ?? s.focusedPaneId,
         activeTabId: tabId,
+        tabGroups: pruneEmptyGroups(s.tabGroups, tabs),
       };
     }),
   splitPaneWithTab: (targetPaneId, side, tabId) =>
     set((s) => {
       const target = findLeaf(s.layout, targetPaneId);
       if (!target) return s;
+      // Splitting a tab into its own new leaf pulls it out of any group.
+      const movedTab = s.tabs.find((t) => t.id === tabId);
+      const tabs = movedTab?.groupId
+        ? s.tabs.map((t) => (t.id === tabId ? { ...t, groupId: undefined } : t))
+        : s.tabs;
       const newLayout = splitLeafForTab(s.layout, targetPaneId, side, tabId);
       const cleaned = pruneLayout(newLayout, new Set()) ?? newLayout;
       const focusedLeaf = findLeafContaining(cleaned, tabId);
       return {
+        tabs,
         layout: cleaned,
         focusedPaneId: focusedLeaf?.id ?? s.focusedPaneId,
         activeTabId: tabId,
+        tabGroups: pruneEmptyGroups(s.tabGroups, tabs),
       };
     }),
   setSplitSizes: (splitId, sizes) =>
@@ -824,6 +1088,7 @@ export const useWorkspace = create<WorkspaceState>()((set, get) => ({
       // layout containing every loaded tab in order.
       let layout: PaneNode;
       let focusedPaneId: string;
+      let tabGroups: TabGroup[] = [];
       const parsed = parsePersistedLayout(loaded.session.pane_layout);
       if (parsed && layoutCoversTabs(parsed.root, tabs)) {
         layout = parsed.root;
@@ -831,6 +1096,15 @@ export const useWorkspace = create<WorkspaceState>()((set, get) => ({
         if (!findLeaf(layout, focusedPaneId)) {
           focusedPaneId = allLeaves(layout)[0]!.id;
         }
+        // Re-attach group membership: only honour assignments that point at a
+        // group we actually loaded and a tab that still exists, then drop any
+        // group left with no members.
+        const groupIds = new Set(parsed.groups.map((g) => g.id));
+        tabs = tabs.map((t) => {
+          const gid = parsed.assignments[t.id];
+          return gid && groupIds.has(gid) ? { ...t, groupId: gid } : t;
+        });
+        tabGroups = pruneEmptyGroups(parsed.groups, tabs);
       } else {
         const leaf = singleLeafLayout(
           tabs.map((t) => t.id),
@@ -848,7 +1122,12 @@ export const useWorkspace = create<WorkspaceState>()((set, get) => ({
         (legacy && legacy.tabs.length > 0 && loaded.tabs.length === 0) ||
         loaded.session.pane_layout == null;
       if (needsWriteBack) {
-        await persistTabs(loaded.session.id, tabs, activeTabId, serializeLayout(layout, focusedPaneId));
+        await persistTabs(
+          loaded.session.id,
+          tabs,
+          activeTabId,
+          serializeLayout(layout, focusedPaneId, tabGroups, tabs),
+        );
       }
 
       set({
@@ -856,6 +1135,7 @@ export const useWorkspace = create<WorkspaceState>()((set, get) => ({
         activeTabId,
         layout,
         focusedPaneId,
+        tabGroups,
         sessionId: loaded.session.id,
         hydrated: true,
       });
@@ -888,7 +1168,7 @@ useWorkspace.subscribe((state, prev) => {
   const sessionId = state.sessionId;
   const tabs = state.tabs;
   const activeTabId = state.activeTabId;
-  const layoutJson = serializeLayout(state.layout, state.focusedPaneId);
+  const layoutJson = serializeLayout(state.layout, state.focusedPaneId, state.tabGroups, tabs);
   saveTimer = setTimeout(() => {
     void persistTabs(sessionId, tabs, activeTabId, layoutJson).catch((err) =>
       console.error('[workspace] persist failed:', err),
@@ -940,12 +1220,28 @@ function tabSliceEqual(a: WorkspaceState, b: WorkspaceState): boolean {
       x.filePath !== y.filePath ||
       x.previewUrl !== y.previewUrl ||
       x.apiClientState !== y.apiClientState ||
-      x.sshHostId !== y.sshHostId
+      x.sshHostId !== y.sshHostId ||
+      x.groupId !== y.groupId
     ) {
       return false;
     }
   }
+  if (!tabGroupsEqual(a.tabGroups, b.tabGroups)) return false;
   return layoutEqual(a.layout, b.layout);
+}
+
+/** Structural compare of the group metadata so collapse/rename/recolour all
+ *  trigger a persist. */
+function tabGroupsEqual(a: TabGroup[], b: TabGroup[]): boolean {
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) {
+    const x = a[i]!;
+    const y = b[i]!;
+    if (x.id !== y.id || x.name !== y.name || x.color !== y.color || x.collapsed !== y.collapsed) {
+      return false;
+    }
+  }
+  return true;
 }
 
 /** Cheap structural compare so the debounce subscriber only fires the
@@ -973,8 +1269,20 @@ function layoutEqual(a: PaneNode, b: PaneNode): boolean {
   return false;
 }
 
-function serializeLayout(layout: PaneNode, focusedPaneId: string): string {
-  const env: SerializedLayout = { v: 1, root: layout, focusedPaneId };
+function serializeLayout(
+  layout: PaneNode,
+  focusedPaneId: string,
+  groups: TabGroup[],
+  tabs: Tab[],
+): string {
+  // Build the membership map from the live tabs so it can never drift from
+  // `tab.groupId`. Only emit assignments for groups we're actually persisting.
+  const groupIds = new Set(groups.map((g) => g.id));
+  const groupAssignments: Record<string, string> = {};
+  for (const t of tabs) {
+    if (t.groupId && groupIds.has(t.groupId)) groupAssignments[t.id] = t.groupId;
+  }
+  const env: SerializedLayout = { v: 1, root: layout, focusedPaneId, groups, groupAssignments };
   return JSON.stringify(env);
 }
 
@@ -983,7 +1291,12 @@ function serializeLayout(layout: PaneNode, focusedPaneId: string): string {
  *  falls back to a synthesized single-leaf layout. */
 function parsePersistedLayout(
   raw: string | null,
-): { root: PaneNode; focusedPaneId: string } | null {
+): {
+  root: PaneNode;
+  focusedPaneId: string;
+  groups: TabGroup[];
+  assignments: Record<string, string>;
+} | null {
   if (!raw) return null;
   try {
     const parsed = JSON.parse(raw) as Partial<SerializedLayout> & {
@@ -993,10 +1306,57 @@ function parsePersistedLayout(
     if (parsed.v !== 1 || !parsed.root || typeof parsed.focusedPaneId !== 'string') return null;
     const root = coercePaneNode(parsed.root);
     if (!root) return null;
-    return { root, focusedPaneId: parsed.focusedPaneId };
+    return {
+      root,
+      focusedPaneId: parsed.focusedPaneId,
+      groups: coerceGroups(parsed.groups),
+      assignments: coerceAssignments(parsed.groupAssignments),
+    };
   } catch {
     return null;
   }
+}
+
+const VALID_GROUP_COLORS: ReadonlySet<string> = new Set([
+  'slate',
+  'blue',
+  'cyan',
+  'green',
+  'amber',
+  'orange',
+  'rose',
+  'violet',
+]);
+
+/** Coerce the optional `groups` array, dropping anything malformed. Absent or
+ *  corrupt → empty list (the layout just has no groups). */
+function coerceGroups(raw: unknown): TabGroup[] {
+  if (!Array.isArray(raw)) return [];
+  const out: TabGroup[] = [];
+  for (const g of raw) {
+    if (!g || typeof g !== 'object') continue;
+    const r = g as Record<string, unknown>;
+    if (typeof r.id !== 'string') continue;
+    const color = typeof r.color === 'string' && VALID_GROUP_COLORS.has(r.color)
+      ? (r.color as TabGroupColorId)
+      : 'blue';
+    out.push({
+      id: r.id,
+      name: typeof r.name === 'string' ? r.name : '',
+      color,
+      collapsed: r.collapsed === true,
+    });
+  }
+  return out;
+}
+
+function coerceAssignments(raw: unknown): Record<string, string> {
+  if (!raw || typeof raw !== 'object') return {};
+  const out: Record<string, string> = {};
+  for (const [k, v] of Object.entries(raw as Record<string, unknown>)) {
+    if (typeof v === 'string') out[k] = v;
+  }
+  return out;
 }
 
 function coercePaneNode(raw: unknown): PaneNode | null {
