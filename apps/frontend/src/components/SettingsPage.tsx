@@ -98,6 +98,7 @@ export function SettingsPage() {
     restoreWindowState,
     terminalWebgl,
     editorVimMode,
+    editorInlineAi,
     notifyLongCommands,
     notifyThresholdSecs,
     notifySound,
@@ -113,6 +114,7 @@ export function SettingsPage() {
     setRestoreWindowState,
     setTerminalWebgl,
     setEditorVimMode,
+    setEditorInlineAi,
     setNotifyLongCommands,
     setNotifyThresholdSecs,
     setNotifySound,
@@ -235,6 +237,8 @@ export function SettingsPage() {
                 <EditorPane
                   vimMode={editorVimMode}
                   onVimModeChange={setEditorVimMode}
+                  inlineAi={editorInlineAi}
+                  onInlineAiChange={setEditorInlineAi}
                 />
               )}
               {pane === 'sidebar' && <SidebarSettingsPane />}
@@ -1743,9 +1747,13 @@ function FieldSection({
 function EditorPane({
   vimMode,
   onVimModeChange,
+  inlineAi,
+  onInlineAiChange,
 }: {
   vimMode: boolean;
   onVimModeChange: (on: boolean) => void;
+  inlineAi: boolean;
+  onInlineAiChange: (on: boolean) => void;
 }) {
   return (
     <div className="space-y-7">
@@ -1758,6 +1766,12 @@ function EditorPane({
           hint="Modal Vim keybindings in the editor. Loads the first time it's enabled."
           checked={vimMode}
           onChange={() => onVimModeChange(!vimMode)}
+        />
+        <ToggleRow
+          label="Inline AI edit (⌘K)"
+          hint="Press ⌘K in the editor to rewrite the selection with AI — type an instruction, review the diff, accept or discard. Uses the active chat provider. When off, ⌘K opens the command palette."
+          checked={inlineAi}
+          onChange={() => onInlineAiChange(!inlineAi)}
         />
       </Section>
     </div>

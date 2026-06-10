@@ -401,6 +401,12 @@ export const REFERENCE_SHORTCUTS: ReferenceShortcut[] = [
     category: 'Editor',
   },
   {
+    keys: combo(MOD_KEY, 'K'),
+    label: 'Inline AI Edit',
+    description: 'Rewrite the selected code with AI, then review the diff. Toggle in Settings → Editor.',
+    category: 'Editor',
+  },
+  {
     keys: combo(MOD_KEY, 'F'),
     label: 'Find in File',
     description: 'Open the editor search panel.',

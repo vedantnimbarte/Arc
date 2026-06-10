@@ -905,6 +905,8 @@ export interface PersistedSettings {
   terminalWebgl?: boolean;
   /** Enable Vim keybindings in the CodeMirror editor. */
   editorVimMode?: boolean;
+  /** Enable the ⌘K inline AI edit inside the CodeMirror editor. */
+  editorInlineAi?: boolean;
   /** Notify on long-running commands when unfocused (Tier 1.5). */
   notifyLongCommands?: boolean;
   /** Seconds a command must exceed before notifying. */

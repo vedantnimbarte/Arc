@@ -21,6 +21,7 @@ import {
 } from 'lucide-react';
 import { fileIcon, MOCHA } from '../lib/fileIcons';
 import { fsReadFile, fsWriteFile, isTauri } from '../lib/tauri';
+import { InlineEditPanel, type InlineSession } from './InlineEditPanel';
 import { useSelection } from '../state/selection';
 import { useSettings } from '../state/settings';
 import { useWorkspace } from '../state/workspace';
@@ -77,6 +78,28 @@ export function Editor({ filePath, tabId }: Props) {
   const [status, setStatus] = useState<Status>({ kind: 'loading' });
   const [dirty, setDirty] = useState(false);
   const [mode, setModeState] = useState<Mode>('code');
+  /** Active ⌘K inline-edit session (selection range + anchor), or null. */
+  const [inlineEdit, setInlineEdit] = useState<InlineSession | null>(null);
+  /** Stable indirection so the CodeMirror keymap closure (captured at mount)
+   *  always calls the latest opener. */
+  const openInlineEditRef = useRef<(view: EditorView) => void>(() => {});
+  openInlineEditRef.current = (view: EditorView) => {
+    const sel = view.state.selection.main;
+    let from = sel.from;
+    let to = sel.to;
+    if (from === to) {
+      // No selection — target the whole current line so ⌘K is useful from a
+      // bare cursor.
+      const line = view.state.doc.lineAt(from);
+      from = line.from;
+      to = line.to;
+    }
+    if (from === to) return; // empty doc / empty line — nothing to edit
+    const code = view.state.sliceDoc(from, to);
+    const coords = view.coordsAtPos(from);
+    const anchor = coords ? { left: coords.left, top: coords.bottom } : null;
+    setInlineEdit({ from, to, code, anchor });
+  };
 
   const isMarkdown = useMemo(() => /\.(md|markdown|mdx)$/i.test(filePath), [filePath]);
 
@@ -138,6 +161,7 @@ export function Editor({ filePath, tabId }: Props) {
     let disposed = false;
     setStatus({ kind: 'loading' });
     setDirty(false);
+    setInlineEdit(null);
     modeRef.current = 'code';
     setModeState('code');
     setTabDirty(tabId, false);
@@ -166,6 +190,27 @@ export function Editor({ filePath, tabId }: Props) {
           },
         ]);
 
+        // ⌘K opens inline AI edit. We handle it at the DOM level (not via the
+        // keymap facet) so we can stopPropagation — otherwise the same keydown
+        // bubbles to the window listener in App.tsx and also opens the global
+        // command palette. When the toggle is off we return false and let it
+        // fall through to the palette as usual.
+        const inlineEditKeys = EditorView.domEventHandlers({
+          keydown: (e, view) => {
+            const isK =
+              (e.key === 'k' || e.key === 'K') &&
+              (e.metaKey || e.ctrlKey) &&
+              !e.shiftKey &&
+              !e.altKey;
+            if (!isK) return false;
+            if (!useSettings.getState().editorInlineAi) return false;
+            e.preventDefault();
+            e.stopPropagation();
+            openInlineEditRef.current(view);
+            return true;
+          },
+        });
+
         viewRef.current = new EditorView({
           state: EditorState.create({
             doc: content,
@@ -179,6 +224,7 @@ export function Editor({ filePath, tabId }: Props) {
                           // being explicit makes intent clear
               keymap.of(historyKeymap),
               saveKeymap,
+              inlineEditKeys,
               // Multi-cursor: Alt-click drops extra cursors, ⌘D selects the
               // next occurrence (via basicSetup's search keymap). These three
               // enable rectangular (Alt-drag) selection + the crosshair
@@ -503,6 +549,16 @@ export function Editor({ filePath, tabId }: Props) {
             />
           )}
         </div>
+      )}
+
+      {inlineEdit && viewRef.current && (
+        <InlineEditPanel
+          session={inlineEdit}
+          view={viewRef.current}
+          filePath={filePath}
+          language={pathToLanguageId(filePath)}
+          onClose={() => setInlineEdit(null)}
+        />
       )}
     </div>
   );

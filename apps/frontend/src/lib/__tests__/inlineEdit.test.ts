@@ -17,8 +17,8 @@ describe('buildInlineEditMessages', () => {
     });
     expect(system).toBe(INLINE_EDIT_SYSTEM);
     expect(messages).toHaveLength(1);
-    expect(messages[0].role).toBe('user');
-    const content = messages[0].content;
+    expect(messages[0]!.role).toBe('user');
+    const content = messages[0]!.content;
     expect(content).toContain('foo.ts (typescript)');
     // Instruction is trimmed.
     expect(content).toContain('Instruction: make it a let');
@@ -32,8 +32,8 @@ describe('buildInlineEditMessages', () => {
       fileName: 'plain.txt',
       language: null,
     });
-    expect(messages[0].content).toContain('File: plain.txt\n');
-    expect(messages[0].content).not.toContain('(null)');
+    expect(messages[0]!.content).toContain('File: plain.txt\n');
+    expect(messages[0]!.content).not.toContain('(null)');
   });
 });
 

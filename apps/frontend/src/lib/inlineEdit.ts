@@ -89,29 +89,35 @@ export function lineDiff(oldText: string, newText: string): DiffLine[] {
   const n = a.length;
   const m = b.length;
   // lcs[i][j] = length of the longest common subsequence of a[i:] and b[j:].
-  const lcs: number[][] = Array.from({ length: n + 1 }, () => new Array(m + 1).fill(0));
+  // The `!` assertions are safe: every index below is bounded by the loop and
+  // the table is sized n+1 × m+1. They satisfy `noUncheckedIndexedAccess`.
+  const lcs: number[][] = Array.from({ length: n + 1 }, () => new Array<number>(m + 1).fill(0));
   for (let i = n - 1; i >= 0; i--) {
+    const row = lcs[i]!;
+    const next = lcs[i + 1]!;
     for (let j = m - 1; j >= 0; j--) {
-      lcs[i][j] = a[i] === b[j] ? lcs[i + 1][j + 1] + 1 : Math.max(lcs[i + 1][j], lcs[i][j + 1]);
+      row[j] = a[i] === b[j] ? next[j + 1]! + 1 : Math.max(next[j]!, row[j + 1]!);
     }
   }
   const out: DiffLine[] = [];
   let i = 0;
   let j = 0;
   while (i < n && j < m) {
-    if (a[i] === b[j]) {
-      out.push({ op: 'same', text: a[i] });
+    const ai = a[i]!;
+    const bj = b[j]!;
+    if (ai === bj) {
+      out.push({ op: 'same', text: ai });
       i++;
       j++;
-    } else if (lcs[i + 1][j] >= lcs[i][j + 1]) {
-      out.push({ op: 'del', text: a[i] });
+    } else if (lcs[i + 1]![j]! >= lcs[i]![j + 1]!) {
+      out.push({ op: 'del', text: ai });
       i++;
     } else {
-      out.push({ op: 'add', text: b[j] });
+      out.push({ op: 'add', text: bj });
       j++;
     }
   }
-  while (i < n) out.push({ op: 'del', text: a[i++] });
-  while (j < m) out.push({ op: 'add', text: b[j++] });
+  while (i < n) out.push({ op: 'del', text: a[i++]! });
+  while (j < m) out.push({ op: 'add', text: b[j++]! });
   return out;
 }
