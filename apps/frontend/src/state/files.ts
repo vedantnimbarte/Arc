@@ -9,8 +9,9 @@ export const CHAT_MIN = 260;
 export const CHAT_MAX = 560;
 export const CHAT_DEFAULT = 340;
 
-/** Which panel is showing in the left sidebar. */
-export type SidebarView = 'files' | 'source-control';
+/** Which panel is showing in the left sidebar. Driven by the sidebar's
+ *  activity rail (Explorer / Source Control / SSH). */
+export type SidebarView = 'files' | 'git' | 'ssh';
 
 interface FilesState {
   /**
@@ -38,6 +39,11 @@ interface FilesState {
   setSidebarWidth: (w: number) => void;
   setChatWidth: (w: number) => void;
   setSidebarView: (view: SidebarView) => void;
+  /** Reveal a view: un-collapse the sidebar and switch to it. */
+  showSidebarView: (view: SidebarView) => void;
+  /** Toggle a view: if it's already the visible view, fall back to the
+   *  Explorer; otherwise reveal it. Powers the SSH / git launcher buttons. */
+  toggleSidebarView: (view: SidebarView) => void;
 }
 
 const clamp = (n: number, min: number, max: number) =>
@@ -69,8 +75,27 @@ export const useFiles = create<FilesState>()(
       setSidebarWidth: (w) => set({ sidebarWidth: clamp(w, SIDEBAR_MIN, SIDEBAR_MAX) }),
       setChatWidth: (w) => set({ chatWidth: clamp(w, CHAT_MIN, CHAT_MAX) }),
       setSidebarView: (view) => set({ sidebarView: view }),
+      showSidebarView: (view) => set({ collapsed: false, sidebarView: view }),
+      toggleSidebarView: (view) =>
+        set((s) =>
+          s.sidebarView === view && !s.collapsed
+            ? { sidebarView: 'files' }
+            : { collapsed: false, sidebarView: view },
+        ),
     }),
-    { name: STORAGE_KEY, version: 2 },
+    {
+      name: STORAGE_KEY,
+      version: 3,
+      // v2 stored the source-control view under the old 'source-control'
+      // key; the activity rail renamed it to 'git'.
+      migrate: (persisted, version) => {
+        const state = persisted as Partial<FilesState> | undefined;
+        if (state && version < 3 && (state.sidebarView as string) === 'source-control') {
+          state.sidebarView = 'git';
+        }
+        return state as FilesState;
+      },
+    },
   ),
 );
 
