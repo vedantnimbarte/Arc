@@ -27,6 +27,9 @@ interface FilesState {
   collapsed: boolean;
   /** Persistent pane widths (px). Clamped on the way in. */
   sidebarWidth: number;
+  /** Remembered sidebar width per view, so each view keeps its own size
+   *  (SSH wider than Explorer, etc.). Keyed by view id. Persisted. */
+  widthByView: Record<string, number>;
   chatWidth: number;
   /** Which panel is mounted in the left sidebar. Persisted. */
   sidebarView: SidebarView;
@@ -54,6 +57,26 @@ interface FilesState {
 const clamp = (n: number, min: number, max: number) =>
   Math.min(Math.max(n, min), max);
 
+/** Per-view default width — SSH / Search / Agents want a touch more room than
+ *  the file tree. Falls back to SIDEBAR_DEFAULT for anything unlisted. */
+const DEFAULT_WIDTH_BY_VIEW: Record<string, number> = {
+  files: SIDEBAR_DEFAULT,
+  git: SIDEBAR_DEFAULT,
+  ssh: 300,
+  search: 300,
+  outline: 240,
+  agents: 300,
+};
+
+export function defaultWidthForView(view: SidebarView): number {
+  return clamp(DEFAULT_WIDTH_BY_VIEW[view] ?? SIDEBAR_DEFAULT, SIDEBAR_MIN, SIDEBAR_MAX);
+}
+
+/** Resolve the width to apply for `view`: a remembered width, else its default. */
+function widthForView(widthByView: Record<string, number>, view: SidebarView): number {
+  return widthByView[view] ?? defaultWidthForView(view);
+}
+
 /** Record `view` as the last-used view for `root` (no-op without a root). */
 function rememberView(
   viewByRoot: Record<string, SidebarView>,
@@ -74,14 +97,19 @@ export const useFiles = create<FilesState>()(
       showHidden: false,
       collapsed: false,
       sidebarWidth: SIDEBAR_DEFAULT,
+      widthByView: {},
       chatWidth: CHAT_DEFAULT,
       sidebarView: 'files',
       viewByRoot: {},
       recentFiles: [],
       // Switching workspace root restores that root's last view (falling back
-      // to the current view for roots we haven't seen before).
+      // to the current view for roots we haven't seen before) and that view's
+      // remembered width.
       setRoot: (root) =>
-        set((s) => ({ root, sidebarView: s.viewByRoot[root] ?? s.sidebarView })),
+        set((s) => {
+          const view = s.viewByRoot[root] ?? s.sidebarView;
+          return { root, sidebarView: view, sidebarWidth: widthForView(s.widthByView, view) };
+        }),
       pushRecentFile: (path) =>
         set((s) => ({
           recentFiles: [path, ...s.recentFiles.filter((p) => p !== path)].slice(
@@ -91,17 +119,27 @@ export const useFiles = create<FilesState>()(
         })),
       toggleHidden: () => set((s) => ({ showHidden: !s.showHidden })),
       toggleCollapsed: () => set((s) => ({ collapsed: !s.collapsed })),
-      setSidebarWidth: (w) => set({ sidebarWidth: clamp(w, SIDEBAR_MIN, SIDEBAR_MAX) }),
+      // Width is recorded against the *current* view so each view keeps its own.
+      setSidebarWidth: (w) =>
+        set((s) => {
+          const width = clamp(w, SIDEBAR_MIN, SIDEBAR_MAX);
+          return {
+            sidebarWidth: width,
+            widthByView: { ...s.widthByView, [s.sidebarView]: width },
+          };
+        }),
       setChatWidth: (w) => set({ chatWidth: clamp(w, CHAT_MIN, CHAT_MAX) }),
       setSidebarView: (view) =>
         set((s) => ({
           sidebarView: view,
+          sidebarWidth: widthForView(s.widthByView, view),
           viewByRoot: rememberView(s.viewByRoot, s.root, view),
         })),
       showSidebarView: (view) =>
         set((s) => ({
           collapsed: false,
           sidebarView: view,
+          sidebarWidth: widthForView(s.widthByView, view),
           viewByRoot: rememberView(s.viewByRoot, s.root, view),
         })),
       toggleSidebarView: (view) =>
@@ -111,6 +149,7 @@ export const useFiles = create<FilesState>()(
           return {
             collapsed: false,
             sidebarView: next,
+            sidebarWidth: widthForView(s.widthByView, next),
             viewByRoot: rememberView(s.viewByRoot, s.root, next),
           };
         }),
