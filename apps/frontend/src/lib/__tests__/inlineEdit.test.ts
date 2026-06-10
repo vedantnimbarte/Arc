@@ -3,6 +3,7 @@ import {
   buildInlineEditMessages,
   INLINE_EDIT_SYSTEM,
   isUsableInstruction,
+  lineDiff,
   stripCodeFence,
 } from '../inlineEdit';
 
@@ -57,6 +58,38 @@ describe('stripCodeFence', () => {
   it('does not strip an interior fence when the whole thing is not fenced', () => {
     const input = 'before\n```\ncode\n```\nafter';
     expect(stripCodeFence(input)).toBe(input);
+  });
+});
+
+describe('lineDiff', () => {
+  it('marks every line same for identical input', () => {
+    expect(lineDiff('a\nb', 'a\nb')).toEqual([
+      { op: 'same', text: 'a' },
+      { op: 'same', text: 'b' },
+    ]);
+  });
+
+  it('detects a single changed line as del + add', () => {
+    expect(lineDiff('a\nb\nc', 'a\nB\nc')).toEqual([
+      { op: 'same', text: 'a' },
+      { op: 'del', text: 'b' },
+      { op: 'add', text: 'B' },
+      { op: 'same', text: 'c' },
+    ]);
+  });
+
+  it('detects pure additions', () => {
+    expect(lineDiff('a', 'a\nb')).toEqual([
+      { op: 'same', text: 'a' },
+      { op: 'add', text: 'b' },
+    ]);
+  });
+
+  it('detects pure deletions', () => {
+    expect(lineDiff('a\nb', 'a')).toEqual([
+      { op: 'same', text: 'a' },
+      { op: 'del', text: 'b' },
+    ]);
   });
 });
 
