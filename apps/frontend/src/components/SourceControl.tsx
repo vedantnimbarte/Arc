@@ -214,7 +214,7 @@ export function SourceControl() {
   const openFile = useWorkspace((s) => s.openFile);
   const openDiff = useWorkspace((s) => s.openDiff);
 
-  // Single shared poller lives in `Sidebar`; we just subscribe to the cache.
+  // Single shared refresh driver lives in `Sidebar`; we just subscribe to the cache.
   const info = useGit((s) => s.info);
   const entries = useGit((s) => s.entries);
   const loading = useGit((s) => s.loading);

@@ -30,9 +30,10 @@ export function normPathKey(p: string): string {
 /**
  * Shared cache for the current workspace's git status + per-file changes.
  *
- * The Sidebar polls a single time at 4s for the active root; both
- * `SourceControl` and the sidebar tab badge subscribe to the same store, so
- * there's never more than one poll in flight.
+ * The Sidebar drives refreshes for the active root — fs-watcher-triggered
+ * with a slow backstop poll; both `SourceControl` and the sidebar tab badge
+ * subscribe to the same store, so there's never more than one refresh in
+ * flight.
  */
 interface GitStoreState {
   info: GitInfo | null;
