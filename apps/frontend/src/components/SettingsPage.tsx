@@ -52,14 +52,13 @@ import {
 } from '../state/providers';
 import { resolveModelsFor, useModels } from '../state/models';
 import { ProviderIcon } from './ProviderIcon';
+import { FontPicker } from './FontPicker';
 import { useFiles, type SidebarView } from '../state/files';
 import { useSidebarLayout } from '../state/sidebarLayout';
 import { normalizeOrder, PINNED_VIEW, SIDEBAR_VIEW_BY_ID } from '../lib/sidebarViews';
 import { agentEditorWindowOpen, isTauri, ptyListShells, type ShellInfo } from '../lib/tauri';
 import { cn } from '../lib/cn';
 import {
-  FONT_OPTIONS,
-  getFont,
   listThemes,
   MAX_FONT_SIZE,
   MIN_FONT_SIZE,
@@ -71,6 +70,8 @@ import {
   ACTION_META,
   ACTION_ORDER,
   DEFAULT_BINDINGS,
+  REFERENCE_CATEGORIES,
+  REFERENCE_SHORTCUTS,
   bindingFromEvent,
   findConflict,
   formatBinding,
@@ -302,26 +303,8 @@ function AppearancePane({
         </div>
       </Section>
 
-      <Section title="Font Family" hint="Used by the terminal and editor. Falls back to the next available font on your system.">
-        <div className="relative">
-          <select
-            value={fontId}
-            onChange={(e) => onFontChange(e.target.value)}
-            className="w-full appearance-none rounded-lg border border-border-subtle bg-bg-base/60 px-3 py-2 pr-9 font-display text-[12.5px] font-medium tracking-tight text-fg-base transition-colors focus:border-accent/45 focus:bg-bg-base/80 focus:shadow-focus focus:outline-none"
-            style={{ fontFamily: getFont(fontId).stack }}
-          >
-            {FONT_OPTIONS.map((f) => (
-              <option key={f.id} value={f.id} style={{ fontFamily: f.stack }}>
-                {f.label}
-              </option>
-            ))}
-          </select>
-          <ChevronDown
-            size={12}
-            strokeWidth={2.2}
-            className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-fg-subtle"
-          />
-        </div>
+      <Section title="Font Family" hint="Used by the terminal and editor. Pick from the fonts installed on your system.">
+        <FontPicker value={fontId} onChange={onFontChange} />
       </Section>
 
       <Section title="Font Size">
@@ -668,7 +651,14 @@ function DarkSwatch() {
 
 // ─── Shortcuts ─────────────────────────────────────────────────────────────
 
-const SHORTCUT_CATEGORIES: ActionCategory[] = ['Workspace', 'Terminal', 'Assistant', 'AI CLIs', 'Help'];
+const SHORTCUT_CATEGORIES: ActionCategory[] = [
+  'Workspace',
+  'Terminal',
+  'Assistant',
+  'SSH',
+  'AI CLIs',
+  'Help',
+];
 
 function ShortcutsPane() {
   const overrides = useShortcuts((s) => s.overrides);
@@ -693,6 +683,19 @@ function ShortcutsPane() {
       );
     });
   }, [query, overrides]);
+
+  const filteredRef = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    return REFERENCE_SHORTCUTS.filter((s) => {
+      if (!q) return true;
+      return (
+        s.label.toLowerCase().includes(q) ||
+        s.description.toLowerCase().includes(q) ||
+        s.category.toLowerCase().includes(q) ||
+        s.keys.toLowerCase().includes(q)
+      );
+    });
+  }, [query]);
 
   return (
     <div className="space-y-3">
@@ -764,7 +767,49 @@ function ShortcutsPane() {
             </section>
           );
         })}
-        {filtered.length === 0 && (
+        {filteredRef.length > 0 && (
+          <div className="mb-1 mt-1">
+            <div className="mb-2 flex items-center gap-2 px-1">
+              <div className="h-px flex-1 bg-border-hairline" />
+              <span className="font-display text-[9.5px] font-semibold uppercase tracking-widest2 text-fg-subtle">
+                Built-in · not rebindable
+              </span>
+              <div className="h-px flex-1 bg-border-hairline" />
+            </div>
+            {REFERENCE_CATEGORIES.map((cat) => {
+              const rows = filteredRef.filter((s) => s.category === cat);
+              if (rows.length === 0) return null;
+              return (
+                <section key={cat} className="mb-3">
+                  <h4 className="px-1 pb-1 font-display text-[10.5px] font-semibold uppercase tracking-widest2 text-fg-subtle">
+                    {cat}
+                  </h4>
+                  <div className="space-y-0.5">
+                    {rows.map((s) => (
+                      <div
+                        key={`${cat}:${s.label}`}
+                        className="flex items-center gap-3 rounded-md px-2 py-1.5"
+                      >
+                        <div className="min-w-0 flex-1">
+                          <span className="font-display text-[12.5px] font-medium tracking-tight text-fg-base">
+                            {s.label}
+                          </span>
+                          <p className="truncate font-display text-[11px] text-fg-subtle">
+                            {s.description}
+                          </p>
+                        </div>
+                        <span className="shrink-0 rounded-md border border-border-subtle bg-bg-base/40 px-2.5 py-1 font-mono text-[11px] text-fg-muted">
+                          {s.keys}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </section>
+              );
+            })}
+          </div>
+        )}
+        {filtered.length === 0 && filteredRef.length === 0 && (
           <div className="flex items-center justify-center gap-1.5 px-4 py-12 font-display text-[12px] italic text-fg-subtle">
             <Search size={11} strokeWidth={2} />
             no actions match "{query}"
@@ -773,7 +818,8 @@ function ShortcutsPane() {
       </div>
 
       <p className="font-display text-[11px] text-fg-subtle">
-        Click a binding to rebind · <kbd className="font-mono">esc</kbd> to cancel
+        Click a binding to rebind · <kbd className="font-mono">esc</kbd> to cancel ·
+        built-in shortcuts are shown for reference
       </p>
     </div>
   );

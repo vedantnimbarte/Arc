@@ -211,6 +211,7 @@ fn main() {
             commands::memory::memory_vector_search,
             commands::network::network_probe_port,
             commands::network::shell_open_external,
+            commands::fonts::fonts_list_system,
             commands::http::http_request,
             commands::apiclient::apiclient_list_collections,
             commands::apiclient::apiclient_upsert_collection,

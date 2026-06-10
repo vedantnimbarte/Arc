@@ -34,6 +34,7 @@ arc-project-config = { workspace = true }
 arc-git-host = { workspace = true }
 async-trait = { workspace = true }
 dashmap = { workspace = true }
+fontdb = "0.18"
 eventsource-stream = { workspace = true }
 futures-util = { workspace = true }
 keyring = { workspace = true }

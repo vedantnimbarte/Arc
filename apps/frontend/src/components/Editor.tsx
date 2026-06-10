@@ -25,6 +25,7 @@ import { useSelection } from '../state/selection';
 import { useSettings } from '../state/settings';
 import { useWorkspace } from '../state/workspace';
 import { useReveal } from '../state/reveal';
+import { getFont } from '../themes';
 import { cn } from '../lib/cn';
 
 interface Props {
@@ -51,6 +52,11 @@ export function Editor({ filePath, tabId }: Props) {
    *  Vim mode in Settings so the editor doesn't need to remount. */
   const vimCompartment = useRef(new Compartment());
   const vimMode = useSettings((s) => s.editorVimMode);
+  /** Holds the user-chosen font family + size. Reconfigured live from
+   *  Settings so changing the font reflows the editor without a remount. */
+  const fontCompartment = useRef(new Compartment());
+  const fontId = useSettings((s) => s.fontId);
+  const fontSize = useSettings((s) => s.fontSize);
   const lastSavedRef = useRef<string>('');
   /** Live mirror of the file's text. The CodeMirror update listener writes
    *  to it on every doc change; saves and preview renders both read from
@@ -190,6 +196,15 @@ export function Editor({ filePath, tabId }: Props) {
               // fallback, so the Mocha palette below is what actually paints.
               syntaxHighlighting(catppuccinHighlight),
               macTheme,
+              // Sits after macTheme so the user's font family + size override
+              // the base theme's defaults. Seeded from current settings; the
+              // effect below keeps it live.
+              fontCompartment.current.of(
+                fontTheme(
+                  getFont(useSettings.getState().fontId).stack,
+                  useSettings.getState().fontSize,
+                ),
+              ),
               langCompartment.current.of([]),
               EditorView.updateListener.of((u) => {
                 if (u.docChanged) {
@@ -297,6 +312,17 @@ export function Editor({ filePath, tabId }: Props) {
       cancelled = true;
     };
   }, [vimMode]);
+
+  // Live-apply the font family + size from Settings without remounting.
+  useEffect(() => {
+    const view = viewRef.current;
+    if (!view) return;
+    view.dispatch({
+      effects: fontCompartment.current.reconfigure(
+        fontTheme(getFont(fontId).stack, fontSize),
+      ),
+    });
+  }, [fontId, fontSize]);
 
   // Apply a pending "jump to line" once the view is ready. Runs both on a
   // fresh mount (status flips to `ready` with a line already queued) and when
@@ -675,6 +701,15 @@ const catppuccinHighlight = HighlightStyle.define([
 
   { tag: t.invalid, color: MOCHA.red, textDecoration: 'underline' },
 ]);
+
+/** A tiny theme layer carrying only the user's font family + size. Kept in a
+ *  compartment so Settings changes reflow the editor without a remount. */
+function fontTheme(stack: string, size: number): Extension {
+  return EditorView.theme({
+    '&': { fontFamily: stack, fontSize: `${size}px` },
+    '.cm-scroller': { fontFamily: 'inherit' },
+  });
+}
 
 const macTheme: Extension = EditorView.theme(
   {
