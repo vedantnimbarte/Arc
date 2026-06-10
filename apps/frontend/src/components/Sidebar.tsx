@@ -11,6 +11,7 @@ import { createPortal } from 'react-dom';
 import { FileTree } from './FileTree';
 import { SourceControl } from './SourceControl';
 import { SearchView } from './SearchView';
+import { OutlineView } from './OutlineView';
 import { SshPanel } from './ssh/SshPanel';
 import { fsReveal, fsWatchStart, fsWatchStop, isTauri } from '../lib/tauri';
 import { useFiles, type SidebarView } from '../state/files';
@@ -118,6 +119,8 @@ export function Sidebar() {
             <SourceControl />
           ) : view === 'search' ? (
             <SearchView />
+          ) : view === 'outline' ? (
+            <OutlineView />
           ) : (
             <SshPanel onClose={() => setSidebarView('files')} />
           )}

@@ -1,6 +1,7 @@
 import {
   FolderTree,
   GitBranch,
+  ListTree,
   Search,
   Server,
   type LucideIcon,
@@ -29,6 +30,7 @@ export const SIDEBAR_VIEWS: SidebarViewDef[] = [
   { id: 'files', label: 'Explorer', Icon: FolderTree, shortcut: 'show-explorer' },
   { id: 'git', label: 'Source Control', Icon: GitBranch, shortcut: 'show-source-control' },
   { id: 'search', label: 'Search', Icon: Search },
+  { id: 'outline', label: 'Outline', Icon: ListTree },
   { id: 'ssh', label: 'SSH', Icon: Server, shortcut: 'toggle-ssh-panel' },
 ];
 
