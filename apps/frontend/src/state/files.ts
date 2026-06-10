@@ -4,6 +4,8 @@ import { persist } from 'zustand/middleware';
 export const SIDEBAR_MIN = 180;
 export const SIDEBAR_MAX = 480;
 export const SIDEBAR_DEFAULT = 260;
+/** Width of the vertical mini-rail shown when the sidebar is collapsed. */
+export const SIDEBAR_RAIL_WIDTH = 44;
 
 export const CHAT_MIN = 260;
 export const CHAT_MAX = 560;

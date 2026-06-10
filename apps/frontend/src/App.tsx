@@ -11,13 +11,13 @@ import { ChatPanel } from './components/ChatPanel';
 import { StatusBar } from './components/StatusBar';
 import { CommandPalette } from './components/CommandPalette';
 import { CommandHistoryPalette } from './components/CommandHistoryPalette';
-import { Sidebar } from './components/Sidebar';
+import { Sidebar, SidebarMiniRail } from './components/Sidebar';
 import { ResizeHandle } from './components/ResizeHandle';
 import { SearchPalette } from './components/SearchPalette';
 import { ShortcutsDialog } from './components/ShortcutsDialog';
 import { PaneTreeView } from './components/PaneTreeView';
 import { useWorkspace } from './state/workspace';
-import { useFiles, CHAT_DEFAULT } from './state/files';
+import { useFiles, CHAT_DEFAULT, SIDEBAR_RAIL_WIDTH } from './state/files';
 import { useChat } from './state/chat';
 import { useSelection, type SelectionInfo } from './state/selection';
 import {
@@ -406,6 +406,21 @@ export default function App() {
         {/* Layout: file-tree | main | chat sidebar | SSH sidebar */}
         <div className="relative flex min-h-0 flex-1 px-3 pb-3 pt-1">
           <div className="material-content flex min-h-0 w-full overflow-hidden rounded-window shadow-panel ring-1 ring-border-subtle">
+            {/* Collapsed mini-rail — a thin vertical icon strip that slides in
+                as the sidebar collapses; clicking an icon expands + switches. */}
+            <aside
+              className="shrink-0 overflow-hidden transition-[width] duration-300 ease-apple"
+              style={{ width: sidebarCollapsed ? SIDEBAR_RAIL_WIDTH : 0 }}
+              aria-hidden={!sidebarCollapsed}
+            >
+              <div
+                className="material-sidebar h-full border-r border-border-hairline"
+                style={{ width: SIDEBAR_RAIL_WIDTH }}
+              >
+                <SidebarMiniRail />
+              </div>
+            </aside>
+
             {/* File-tree wrapper — animates width to 0 on collapse. */}
             <aside
               className="shrink-0 overflow-hidden transition-[width] duration-300 ease-apple"

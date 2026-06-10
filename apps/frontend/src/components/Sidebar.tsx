@@ -14,6 +14,7 @@ import { useFiles, type SidebarView } from '../state/files';
 import { useGit } from '../state/git';
 import { useSsh } from '../state/ssh';
 import { SIDEBAR_VIEWS } from '../lib/sidebarViews';
+import { formatBinding, getBinding } from '../state/shortcuts';
 import { cn } from '../lib/cn';
 
 /**
@@ -307,6 +308,82 @@ function SidebarRail({
                 {label}
               </span>
             </span>
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+// ── Collapsed mini-rail ──────────────────────────────────────────────────────
+
+/**
+ * Vertical icon strip shown when the sidebar is collapsed (⌘B). Clicking an
+ * icon expands the sidebar and switches to that view — VS Code-style. Reads
+ * its own state so App can mount it standalone in the collapsed slot.
+ */
+export function SidebarMiniRail() {
+  const view = useFiles((s) => s.sidebarView);
+  const collapsed = useFiles((s) => s.collapsed);
+  const show = useFiles((s) => s.showSidebarView);
+  const gitCount = useGit((s) => s.entries.length);
+  const gitConflicts = useGit((s) =>
+    s.entries.reduce((n, e) => (e.kind === 'conflict' ? n + 1 : n), 0),
+  );
+  const sshLive = useSsh((s) => Object.keys(s.liveByHost).length);
+
+  return (
+    <div
+      role="tablist"
+      aria-orientation="vertical"
+      aria-label="Sidebar views"
+      className="flex h-full w-full flex-col items-center gap-1 py-2"
+    >
+      {SIDEBAR_VIEWS.map(({ id, label, Icon, shortcut }) => {
+        const active = view === id;
+        const badge = railBadge(id, gitCount, gitConflicts, sshLive);
+        const binding = getBinding(shortcut);
+        return (
+          <button
+            key={id}
+            type="button"
+            role="tab"
+            aria-selected={active}
+            aria-label={label}
+            // The strip is only interactive while collapsed; once expanded the
+            // horizontal rail owns the roving focus.
+            tabIndex={collapsed && active ? 0 : -1}
+            title={binding ? `${label} · ${formatBinding(binding)}` : label}
+            onClick={() => show(id)}
+            className={cn(
+              'group relative flex h-7 w-7 items-center justify-center rounded-md outline-none',
+              'transition-all duration-200 ease-out-soft active:scale-95 motion-reduce:transition-none',
+              'focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-accent/40',
+              active
+                ? 'bg-white/[0.06] text-accent-bright ring-1 ring-inset ring-accent/15 shadow-[inset_0_1px_0_0_rgba(255,255,255,0.05)]'
+                : 'text-fg-muted hover:bg-white/[0.045] hover:text-fg-base',
+            )}
+          >
+            {/* Left ribbon marks the active view — the vertical analogue of the
+                horizontal rail's sliding indicator. */}
+            {active && (
+              <span
+                aria-hidden
+                className="pointer-events-none absolute -left-2 top-1/2 h-3.5 w-[2px] -translate-y-1/2 rounded-r-full bg-accent-bright/70"
+              />
+            )}
+            <Icon size={13} strokeWidth={2} />
+            {badge && (
+              <span
+                aria-hidden
+                title={badge.title}
+                className={cn(
+                  'pointer-events-none absolute right-1 top-1 h-[5px] w-[5px] rounded-full ring-1 ring-bg-chrome',
+                  badge.color,
+                  badge.pulse && 'animate-pulse-soft motion-reduce:animate-none',
+                )}
+              />
+            )}
           </button>
         );
       })}
