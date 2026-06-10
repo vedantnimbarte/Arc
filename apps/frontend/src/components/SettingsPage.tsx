@@ -33,6 +33,9 @@ import {
   Trash2,
   Lock,
   FileCode2,
+  PanelLeft,
+  ArrowUp,
+  ArrowDown,
 } from 'lucide-react';
 import { useSettings } from '../state/settings';
 import {
@@ -49,7 +52,9 @@ import {
 } from '../state/providers';
 import { resolveModelsFor, useModels } from '../state/models';
 import { ProviderIcon } from './ProviderIcon';
-import { useFiles } from '../state/files';
+import { useFiles, type SidebarView } from '../state/files';
+import { useSidebarLayout } from '../state/sidebarLayout';
+import { normalizeOrder, PINNED_VIEW, SIDEBAR_VIEW_BY_ID } from '../lib/sidebarViews';
 import { agentEditorWindowOpen, isTauri, ptyListShells, type ShellInfo } from '../lib/tauri';
 import { cn } from '../lib/cn';
 import {
@@ -76,7 +81,7 @@ import {
 } from '../state/shortcuts';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 
-type Pane = 'appearance' | 'themes' | 'shortcuts' | 'terminal' | 'editor' | 'agents' | 'providers' | 'about';
+type Pane = 'appearance' | 'themes' | 'shortcuts' | 'terminal' | 'editor' | 'sidebar' | 'agents' | 'providers' | 'about';
 
 export function SettingsPage() {
   const {
@@ -167,6 +172,7 @@ export function SettingsPage() {
             <SidebarRow icon={Keyboard} label="Shortcuts" active={pane === 'shortcuts'} onClick={() => setPane('shortcuts')} />
             <SidebarRow icon={TerminalIcon} label="Terminal" active={pane === 'terminal'} onClick={() => setPane('terminal')} />
             <SidebarRow icon={FileCode2} label="Editor" active={pane === 'editor'} onClick={() => setPane('editor')} />
+            <SidebarRow icon={PanelLeft} label="Sidebar" active={pane === 'sidebar'} onClick={() => setPane('sidebar')} />
             <SidebarRow icon={Bot} label="Agents" active={pane === 'agents'} onClick={() => setPane('agents')} />
             <SidebarRow icon={SlidersHorizontal} label="Providers" active={pane === 'providers'} onClick={() => setPane('providers')} />
             <SidebarRow icon={Info} label="About" active={pane === 'about'} onClick={() => setPane('about')} />
@@ -230,6 +236,7 @@ export function SettingsPage() {
                   onVimModeChange={setEditorVimMode}
                 />
               )}
+              {pane === 'sidebar' && <SidebarSettingsPane />}
               {pane === 'about' && <AboutPane />}
             </div>
           )}
@@ -1708,6 +1715,112 @@ function EditorPane({
         />
       </Section>
     </div>
+  );
+}
+
+function SidebarSettingsPane() {
+  const order = useSidebarLayout((s) => s.order);
+  const hidden = useSidebarLayout((s) => s.hidden);
+  const move = useSidebarLayout((s) => s.move);
+  const setHidden = useSidebarLayout((s) => s.setHidden);
+  const reset = useSidebarLayout((s) => s.reset);
+
+  const ordered = useMemo(() => normalizeOrder(order), [order]);
+  const hiddenSet = useMemo(() => new Set(hidden), [hidden]);
+
+  return (
+    <div className="space-y-7">
+      <Section
+        title="Activity Rail"
+        hint="Reorder, show, or hide the views in the left sidebar rail. Explorer is always shown."
+      >
+        <div className="flex flex-col gap-1.5">
+          {ordered.map((id, i) => {
+            const def = SIDEBAR_VIEW_BY_ID[id];
+            const Icon = def.Icon;
+            const locked = id === PINNED_VIEW;
+            const isHidden = !locked && hiddenSet.has(id);
+            return (
+              <div
+                key={id}
+                className={cn(
+                  'flex items-center gap-2.5 rounded-lg border border-border-subtle bg-bg-base/40 px-3 py-2',
+                  isHidden && 'opacity-55',
+                )}
+              >
+                <Icon size={14} strokeWidth={1.9} className="shrink-0 text-fg-muted" />
+                <span className="flex-1 font-display text-[12.5px] font-medium tracking-tight text-fg-base">
+                  {def.label}
+                </span>
+                <SidebarRowBtn
+                  disabled={i === 0}
+                  onClick={() => move(id, -1)}
+                  title="Move up"
+                >
+                  <ArrowUp size={13} strokeWidth={2} />
+                </SidebarRowBtn>
+                <SidebarRowBtn
+                  disabled={i === ordered.length - 1}
+                  onClick={() => move(id, 1)}
+                  title="Move down"
+                >
+                  <ArrowDown size={13} strokeWidth={2} />
+                </SidebarRowBtn>
+                <SidebarRowBtn
+                  disabled={locked}
+                  onClick={() => setHidden(id, !isHidden)}
+                  title={locked ? 'Always shown' : isHidden ? 'Show' : 'Hide'}
+                >
+                  {locked ? (
+                    <Lock size={13} strokeWidth={2} />
+                  ) : isHidden ? (
+                    <EyeOff size={13} strokeWidth={2} />
+                  ) : (
+                    <Eye size={13} strokeWidth={2} />
+                  )}
+                </SidebarRowBtn>
+              </div>
+            );
+          })}
+        </div>
+      </Section>
+
+      <Section title="Reset">
+        <button
+          type="button"
+          onClick={reset}
+          className="inline-flex items-center gap-2 rounded-lg border border-border-subtle bg-bg-base/60 px-3 py-2 font-display text-[12px] font-medium tracking-tight text-fg-base transition-colors hover:bg-bg-hover"
+        >
+          <RotateCcw size={13} strokeWidth={2} />
+          Reset to defaults
+        </button>
+      </Section>
+    </div>
+  );
+}
+
+function SidebarRowBtn({
+  children,
+  onClick,
+  disabled,
+  title,
+}: {
+  children: React.ReactNode;
+  onClick: () => void;
+  disabled?: boolean;
+  title?: string;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      title={title}
+      aria-label={title}
+      className="flex h-6 w-6 items-center justify-center rounded-md text-fg-muted transition-colors hover:bg-bg-hover hover:text-fg-base disabled:opacity-30 disabled:hover:bg-transparent"
+    >
+      {children}
+    </button>
   );
 }
 

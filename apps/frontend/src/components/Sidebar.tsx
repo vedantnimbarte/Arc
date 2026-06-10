@@ -2,6 +2,7 @@ import {
   useCallback,
   useEffect,
   useLayoutEffect,
+  useMemo,
   useRef,
   useState,
   type KeyboardEvent,
@@ -14,12 +15,18 @@ import { SearchView } from './SearchView';
 import { OutlineView } from './OutlineView';
 import { AgentsView } from './AgentsView';
 import { SshPanel } from './ssh/SshPanel';
-import { fsReveal, fsWatchStart, fsWatchStop, isTauri } from '../lib/tauri';
+import { fsReveal, fsWatchStart, fsWatchStop, isTauri, settingsWindowOpen } from '../lib/tauri';
 import { useFiles, type SidebarView } from '../state/files';
 import { useGit } from '../state/git';
 import { useGitUi } from '../state/gitUi';
 import { useSsh } from '../state/ssh';
-import { SIDEBAR_VIEWS } from '../lib/sidebarViews';
+import { useSidebarLayout } from '../state/sidebarLayout';
+import {
+  PINNED_VIEW,
+  resolveRailViews,
+  SIDEBAR_VIEW_BY_ID,
+  type SidebarViewDef,
+} from '../lib/sidebarViews';
 import { formatBinding, getBinding } from '../state/shortcuts';
 import { cn } from '../lib/cn';
 
@@ -44,6 +51,16 @@ export function Sidebar() {
     s.entries.reduce((n, e) => (e.kind === 'conflict' ? n + 1 : n), 0),
   );
   const sshLiveCount = useSsh((s) => Object.keys(s.liveByHost).length);
+
+  const order = useSidebarLayout((s) => s.order);
+  const hidden = useSidebarLayout((s) => s.hidden);
+  const views = useMemo(() => resolveRailViews(order, hidden), [order, hidden]);
+
+  // If the active view gets hidden (via Settings / context menu), fall back to
+  // the Explorer so the rail always has a highlighted, reachable item.
+  useEffect(() => {
+    if (!views.some((v) => v.id === view)) setSidebarView(PINNED_VIEW);
+  }, [views, view, setSidebarView]);
 
   // Single git refresh driver for the whole sidebar — both `SourceControl`
   // and the FileTree header badge subscribe to the same store, so the work
@@ -97,6 +114,7 @@ export function Sidebar() {
   return (
     <div className="flex h-full min-w-0 flex-col">
       <SidebarRail
+        views={views}
         view={view}
         onSelect={setSidebarView}
         gitCount={gitChangeCount}
@@ -157,12 +175,14 @@ function railBadge(
 }
 
 function SidebarRail({
+  views,
   view,
   onSelect,
   gitCount,
   gitConflicts,
   sshLive,
 }: {
+  views: SidebarViewDef[];
   view: SidebarView;
   onSelect: (view: SidebarView) => void;
   gitCount: number;
@@ -208,17 +228,18 @@ function SidebarRail({
   // Arrow-key navigation with automatic activation — the standard ARIA tabs
   // pattern. Left/Up and Right/Down wrap; Home/End jump to the ends.
   const onKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
-    const len = SIDEBAR_VIEWS.length;
-    const idx = SIDEBAR_VIEWS.findIndex((v) => v.id === view);
-    let next = idx;
+    const len = views.length;
+    if (len === 0) return;
+    const idx = views.findIndex((v) => v.id === view);
+    let next = idx < 0 ? 0 : idx;
     switch (e.key) {
       case 'ArrowRight':
       case 'ArrowDown':
-        next = (idx + 1) % len;
+        next = (next + 1) % len;
         break;
       case 'ArrowLeft':
       case 'ArrowUp':
-        next = (idx - 1 + len) % len;
+        next = (next - 1 + len) % len;
         break;
       case 'Home':
         next = 0;
@@ -229,7 +250,7 @@ function SidebarRail({
       default:
         return;
     }
-    const nextView = SIDEBAR_VIEWS[next];
+    const nextView = views[next];
     if (!nextView) return;
     e.preventDefault();
     onSelect(nextView.id);
@@ -262,7 +283,7 @@ function SidebarRail({
           className="absolute inset-x-1.5 top-0 h-px bg-gradient-to-r from-transparent via-white/[0.16] to-transparent"
         />
       </span>
-      {SIDEBAR_VIEWS.map(({ id, label, Icon, shortcut }) => {
+      {views.map(({ id, label, Icon, shortcut }) => {
         const active = view === id;
         const badge = railBadge(id, gitCount, gitConflicts, sshLive);
         const binding = shortcut ? getBinding(shortcut) : null;
@@ -350,6 +371,9 @@ export function SidebarMiniRail() {
     s.entries.reduce((n, e) => (e.kind === 'conflict' ? n + 1 : n), 0),
   );
   const sshLive = useSsh((s) => Object.keys(s.liveByHost).length);
+  const order = useSidebarLayout((s) => s.order);
+  const hidden = useSidebarLayout((s) => s.hidden);
+  const views = useMemo(() => resolveRailViews(order, hidden), [order, hidden]);
   const menu = useRailMenu();
 
   return (
@@ -359,7 +383,7 @@ export function SidebarMiniRail() {
       aria-label="Sidebar views"
       className="flex h-full w-full flex-col items-center gap-1 py-2"
     >
-      {SIDEBAR_VIEWS.map(({ id, label, Icon, shortcut }) => {
+      {views.map(({ id, label, Icon, shortcut }) => {
         const active = view === id;
         const badge = railBadge(id, gitCount, gitConflicts, sshLive);
         const binding = shortcut ? getBinding(shortcut) : null;
@@ -417,19 +441,17 @@ export function SidebarMiniRail() {
 
 // ── Rail context menu ────────────────────────────────────────────────────────
 
-interface RailMenuItem {
-  label: string;
-  onClick: () => void;
-}
+type RailMenuItem =
+  | { separator: true }
+  | { separator?: false; label: string; onClick: () => void };
 
 const revealLabel = () =>
   typeof navigator !== 'undefined' && /Mac/i.test(navigator.platform)
     ? 'Reveal in Finder'
     : 'Reveal in Explorer';
 
-/** Per-view quick actions. Handlers read stores lazily so the menu doesn't
- *  subscribe — it's rebuilt each time it opens. */
-function railMenuItems(view: SidebarView): RailMenuItem[] {
+/** Per-view quick actions — the contextual top of the menu. */
+function railQuickActions(view: SidebarView): RailMenuItem[] {
   switch (view) {
     case 'files': {
       const collapsed = useFiles.getState().collapsed;
@@ -475,6 +497,35 @@ function railMenuItems(view: SidebarView): RailMenuItem[] {
   }
 }
 
+/** Full menu = per-view quick actions + shared customization (reorder / hide /
+ *  customize). Handlers read stores lazily so the menu doesn't subscribe. */
+function railMenuItems(view: SidebarView): RailMenuItem[] {
+  const quick = railQuickActions(view);
+  const items: RailMenuItem[] = [...quick];
+  if (quick.length) items.push({ separator: true });
+  items.push({
+    label: 'Move Up',
+    onClick: () => useSidebarLayout.getState().move(view, -1),
+  });
+  items.push({
+    label: 'Move Down',
+    onClick: () => useSidebarLayout.getState().move(view, 1),
+  });
+  if (view !== PINNED_VIEW) {
+    items.push({
+      label: `Hide ${SIDEBAR_VIEW_BY_ID[view].label}`,
+      onClick: () => useSidebarLayout.getState().setHidden(view, true),
+    });
+  }
+  items.push({
+    label: 'Customize Sidebar…',
+    onClick: () => {
+      if (isTauri) void settingsWindowOpen().catch(() => {});
+    },
+  });
+  return items;
+}
+
 /** Shared right-click menu wiring for both rails. `open(view, event)` parks a
  *  menu at the cursor; `node` renders it (a portal, so placement is moot). */
 function useRailMenu() {
@@ -482,8 +533,6 @@ function useRailMenu() {
   const open = (view: SidebarView, e: ReactMouseEvent) => {
     e.preventDefault();
     e.stopPropagation();
-    // Skip views that expose no quick actions — no empty menu.
-    if (railMenuItems(view).length === 0) return;
     setMenu({ x: e.clientX, y: e.clientY, view });
   };
   const node = menu ? (
@@ -541,20 +590,24 @@ function RailContextMenu({
       aria-label="View actions"
       className="fixed z-[9999] min-w-[172px] rounded-xl border border-white/[0.09] bg-[#1b1b1d] p-1.5 shadow-2xl shadow-black/70 animate-view-in motion-reduce:animate-none"
     >
-      {items.map((item) => (
-        <button
-          key={item.label}
-          type="button"
-          role="menuitem"
-          onClick={() => {
-            item.onClick();
-            onClose();
-          }}
-          className="flex w-full items-center rounded-md px-3 py-[5px] font-display text-[12.5px] tracking-tight text-fg-base/90 transition-colors duration-100 hover:bg-white/[0.07] hover:text-fg-base"
-        >
-          {item.label}
-        </button>
-      ))}
+      {items.map((item, i) =>
+        item.separator ? (
+          <div key={`sep-${i}`} className="my-1 border-t border-white/[0.07]" />
+        ) : (
+          <button
+            key={item.label}
+            type="button"
+            role="menuitem"
+            onClick={() => {
+              item.onClick();
+              onClose();
+            }}
+            className="flex w-full items-center rounded-md px-3 py-[5px] font-display text-[12.5px] tracking-tight text-fg-base/90 transition-colors duration-100 hover:bg-white/[0.07] hover:text-fg-base"
+          >
+            {item.label}
+          </button>
+        ),
+      )}
     </div>,
     document.body,
   );
