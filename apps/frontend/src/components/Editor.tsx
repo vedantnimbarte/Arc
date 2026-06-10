@@ -24,6 +24,7 @@ import { fsReadFile, fsWriteFile, isTauri } from '../lib/tauri';
 import { useSelection } from '../state/selection';
 import { useSettings } from '../state/settings';
 import { useWorkspace } from '../state/workspace';
+import { useReveal } from '../state/reveal';
 import { cn } from '../lib/cn';
 
 interface Props {
@@ -63,6 +64,9 @@ export function Editor({ filePath, tabId }: Props) {
   /** Coalesces preview re-renders across bursts of CM keystrokes. */
   const previewFrameRef = useRef<number | null>(null);
   const setTabDirty = useWorkspace((s) => s.setTabDirty);
+  /** Pending "jump to line" for this tab — set by openFile when a terminal
+   *  path link (or any caller) targets a specific line. */
+  const pendingLine = useReveal((s) => s.pending[tabId]);
 
   const [status, setStatus] = useState<Status>({ kind: 'loading' });
   const [dirty, setDirty] = useState(false);
@@ -264,6 +268,8 @@ export function Editor({ filePath, tabId }: Props) {
       viewRef.current?.destroy();
       viewRef.current = null;
       useSelection.getState().clear('editor', tabId);
+      // Drop any unapplied reveal so a closed tab doesn't leak an entry.
+      useReveal.getState().consume(tabId);
     };
   }, [filePath, tabId, setTabDirty]);
 
@@ -291,6 +297,24 @@ export function Editor({ filePath, tabId }: Props) {
       cancelled = true;
     };
   }, [vimMode]);
+
+  // Apply a pending "jump to line" once the view is ready. Runs both on a
+  // fresh mount (status flips to `ready` with a line already queued) and when
+  // an already-open tab gets re-focused with a new target line. Clamps to the
+  // doc's line count and consumes the request so it fires once.
+  useEffect(() => {
+    if (status.kind !== 'ready' || pendingLine === undefined) return;
+    const view = viewRef.current;
+    if (!view) return;
+    const n = Math.max(1, Math.min(pendingLine, view.state.doc.lines));
+    const pos = view.state.doc.line(n).from;
+    view.dispatch({
+      selection: { anchor: pos },
+      effects: EditorView.scrollIntoView(pos, { y: 'center' }),
+    });
+    view.focus();
+    useReveal.getState().consume(tabId);
+  }, [pendingLine, status.kind, tabId]);
 
   /** Bidirectional, ratio-based scroll sync between the code and preview
    *  panes while in split mode. We don't try to map markdown lines to

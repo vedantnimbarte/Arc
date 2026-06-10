@@ -110,7 +110,7 @@ export function Terminal({ sessionKey }: Props) {
       createPathLinkProvider(
         term,
         () => useFiles.getState().root,
-        (absPath) => useWorkspace.getState().openFile(absPath),
+        (absPath, line) => useWorkspace.getState().openFile(absPath, undefined, { line }),
       ),
     );
     // Remove orphaned DOM from a previous xterm instance. In React Strict Mode
