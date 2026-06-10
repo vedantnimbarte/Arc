@@ -12,6 +12,7 @@ import { SshPanel } from './ssh/SshPanel';
 import { fsWatchStart, fsWatchStop, isTauri } from '../lib/tauri';
 import { useFiles, type SidebarView } from '../state/files';
 import { useGit } from '../state/git';
+import { useSsh } from '../state/ssh';
 import { SIDEBAR_VIEWS } from '../lib/sidebarViews';
 import { cn } from '../lib/cn';
 
@@ -35,6 +36,7 @@ export function Sidebar() {
   const gitConflictCount = useGit((s) =>
     s.entries.reduce((n, e) => (e.kind === 'conflict' ? n + 1 : n), 0),
   );
+  const sshLiveCount = useSsh((s) => Object.keys(s.liveByHost).length);
 
   // Single git refresh driver for the whole sidebar — both `SourceControl`
   // and the FileTree header badge subscribe to the same store, so the work
@@ -92,6 +94,7 @@ export function Sidebar() {
         onSelect={setSidebarView}
         gitCount={gitChangeCount}
         gitConflicts={gitConflictCount}
+        sshLive={sshLiveCount}
       />
       {/* Body — cross-fades on switch. `key` re-mounts the active view so the
           view-in animation replays each time, while absolute positioning keeps
@@ -122,16 +125,36 @@ export function Sidebar() {
 const SIDEBAR_PANEL_ID = 'sidebar-view-panel';
 const tabId = (view: SidebarView) => `sidebar-tab-${view}`;
 
+/** Status dot shown on a rail item, or null when the view is quiet. */
+function railBadge(
+  id: SidebarView,
+  gitCount: number,
+  gitConflicts: number,
+  sshLive: number,
+): { color: string; pulse: boolean; title: string } | null {
+  if (id === 'git' && gitCount > 0) {
+    return gitConflicts > 0
+      ? { color: 'bg-status-err', pulse: true, title: `${gitConflicts} conflict${gitConflicts === 1 ? '' : 's'}` }
+      : { color: 'bg-accent-bright', pulse: false, title: `${gitCount} change${gitCount === 1 ? '' : 's'}` };
+  }
+  if (id === 'ssh' && sshLive > 0) {
+    return { color: 'bg-status-ok', pulse: true, title: `${sshLive} live session${sshLive === 1 ? '' : 's'}` };
+  }
+  return null;
+}
+
 function SidebarRail({
   view,
   onSelect,
   gitCount,
   gitConflicts,
+  sshLive,
 }: {
   view: SidebarView;
   onSelect: (view: SidebarView) => void;
   gitCount: number;
   gitConflicts: number;
+  sshLive: number;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const btnRefs = useRef(new Map<SidebarView, HTMLButtonElement | null>());
@@ -227,7 +250,7 @@ function SidebarRail({
       </span>
       {SIDEBAR_VIEWS.map(({ id, label, Icon }) => {
         const active = view === id;
-        const showBadge = id === 'git' && gitCount > 0;
+        const badge = railBadge(id, gitCount, gitConflicts, sshLive);
         return (
           <button
             key={id}
@@ -260,14 +283,14 @@ function SidebarRail({
                   active && 'scale-[1.05]',
                 )}
               />
-              {showBadge && (
+              {badge && (
                 <span
                   aria-hidden
+                  title={badge.title}
                   className={cn(
                     'pointer-events-none absolute -right-0.5 -top-0.5 h-[5px] w-[5px] rounded-full ring-1 ring-bg-chrome',
-                    gitConflicts > 0
-                      ? 'bg-status-err animate-pulse-soft motion-reduce:animate-none'
-                      : 'bg-accent-bright',
+                    badge.color,
+                    badge.pulse && 'animate-pulse-soft motion-reduce:animate-none',
                   )}
                 />
               )}
