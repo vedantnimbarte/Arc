@@ -5,13 +5,16 @@ import {
   useRef,
   useState,
   type KeyboardEvent,
+  type MouseEvent as ReactMouseEvent,
 } from 'react';
+import { createPortal } from 'react-dom';
 import { FileTree } from './FileTree';
 import { SourceControl } from './SourceControl';
 import { SshPanel } from './ssh/SshPanel';
-import { fsWatchStart, fsWatchStop, isTauri } from '../lib/tauri';
+import { fsReveal, fsWatchStart, fsWatchStop, isTauri } from '../lib/tauri';
 import { useFiles, type SidebarView } from '../state/files';
 import { useGit } from '../state/git';
+import { useGitUi } from '../state/gitUi';
 import { useSsh } from '../state/ssh';
 import { SIDEBAR_VIEWS } from '../lib/sidebarViews';
 import { formatBinding, getBinding } from '../state/shortcuts';
@@ -160,6 +163,7 @@ function SidebarRail({
   const containerRef = useRef<HTMLDivElement>(null);
   const btnRefs = useRef(new Map<SidebarView, HTMLButtonElement | null>());
   const [indicator, setIndicator] = useState({ left: 0, width: 0, ready: false });
+  const menu = useRailMenu();
 
   const measure = useCallback(() => {
     const cont = containerRef.current;
@@ -265,6 +269,7 @@ function SidebarRail({
             tabIndex={active ? 0 : -1}
             title={label}
             onClick={() => onSelect(id)}
+            onContextMenu={(e) => menu.open(id, e)}
             className={cn(
               'group relative z-10 flex h-[22px] items-center overflow-hidden rounded-md outline-none',
               'transition-all duration-[260ms] ease-out-soft active:scale-[0.97]',
@@ -311,6 +316,7 @@ function SidebarRail({
           </button>
         );
       })}
+      {menu.node}
     </div>
   );
 }
@@ -331,6 +337,7 @@ export function SidebarMiniRail() {
     s.entries.reduce((n, e) => (e.kind === 'conflict' ? n + 1 : n), 0),
   );
   const sshLive = useSsh((s) => Object.keys(s.liveByHost).length);
+  const menu = useRailMenu();
 
   return (
     <div
@@ -355,6 +362,7 @@ export function SidebarMiniRail() {
             tabIndex={collapsed && active ? 0 : -1}
             title={binding ? `${label} · ${formatBinding(binding)}` : label}
             onClick={() => show(id)}
+            onContextMenu={(e) => menu.open(id, e)}
             className={cn(
               'group relative flex h-7 w-7 items-center justify-center rounded-md outline-none',
               'transition-all duration-200 ease-out-soft active:scale-95 motion-reduce:transition-none',
@@ -387,6 +395,148 @@ export function SidebarMiniRail() {
           </button>
         );
       })}
+      {menu.node}
     </div>
+  );
+}
+
+// ── Rail context menu ────────────────────────────────────────────────────────
+
+interface RailMenuItem {
+  label: string;
+  onClick: () => void;
+}
+
+const revealLabel = () =>
+  typeof navigator !== 'undefined' && /Mac/i.test(navigator.platform)
+    ? 'Reveal in Finder'
+    : 'Reveal in Explorer';
+
+/** Per-view quick actions. Handlers read stores lazily so the menu doesn't
+ *  subscribe — it's rebuilt each time it opens. */
+function railMenuItems(view: SidebarView): RailMenuItem[] {
+  switch (view) {
+    case 'files': {
+      const collapsed = useFiles.getState().collapsed;
+      return [
+        {
+          label: revealLabel(),
+          onClick: () => {
+            const root = useFiles.getState().root;
+            if (root && isTauri) void fsReveal(root);
+          },
+        },
+        {
+          label: collapsed ? 'Expand Sidebar' : 'Collapse Sidebar',
+          onClick: () => useFiles.getState().toggleCollapsed(),
+        },
+      ];
+    }
+    case 'git':
+      return [
+        { label: 'Pull Requests', onClick: () => useGitUi.getState().openPrList() },
+        { label: 'Worktrees', onClick: () => useGitUi.getState().setWorktreePanelOpen(true) },
+        { label: 'Rebase', onClick: () => useGitUi.getState().setRebasePanelOpen(true) },
+      ];
+    case 'ssh':
+      return [
+        {
+          label: 'Manage Hosts',
+          onClick: () => {
+            useFiles.getState().showSidebarView('ssh');
+            useSsh.getState().setPanelTab('hosts');
+          },
+        },
+        {
+          label: 'Manage Keys',
+          onClick: () => {
+            useFiles.getState().showSidebarView('ssh');
+            useSsh.getState().setPanelTab('keys');
+          },
+        },
+      ];
+  }
+}
+
+/** Shared right-click menu wiring for both rails. `open(view, event)` parks a
+ *  menu at the cursor; `node` renders it (a portal, so placement is moot). */
+function useRailMenu() {
+  const [menu, setMenu] = useState<{ x: number; y: number; view: SidebarView } | null>(null);
+  const open = (view: SidebarView, e: ReactMouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setMenu({ x: e.clientX, y: e.clientY, view });
+  };
+  const node = menu ? (
+    <RailContextMenu {...menu} onClose={() => setMenu(null)} />
+  ) : null;
+  return { open, node };
+}
+
+function RailContextMenu({
+  x,
+  y,
+  view,
+  onClose,
+}: {
+  x: number;
+  y: number;
+  view: SidebarView;
+  onClose: () => void;
+}) {
+  const ref = useRef<HTMLDivElement>(null);
+  const [pos, setPos] = useState({ x, y });
+
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const { width, height } = el.getBoundingClientRect();
+    setPos({
+      x: x + width > window.innerWidth ? Math.max(0, window.innerWidth - width - 8) : x,
+      y: y + height > window.innerHeight ? Math.max(0, window.innerHeight - height - 8) : y,
+    });
+  }, [x, y]);
+
+  useEffect(() => {
+    const onMouse = (e: globalThis.MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) onClose();
+    };
+    const onKey = (e: globalThis.KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+    document.addEventListener('mousedown', onMouse, { capture: true });
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('mousedown', onMouse, { capture: true });
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [onClose]);
+
+  const items = railMenuItems(view);
+
+  return createPortal(
+    <div
+      ref={ref}
+      style={{ left: pos.x, top: pos.y }}
+      role="menu"
+      aria-label="View actions"
+      className="fixed z-[9999] min-w-[172px] rounded-xl border border-white/[0.09] bg-[#1b1b1d] p-1.5 shadow-2xl shadow-black/70 animate-view-in motion-reduce:animate-none"
+    >
+      {items.map((item) => (
+        <button
+          key={item.label}
+          type="button"
+          role="menuitem"
+          onClick={() => {
+            item.onClick();
+            onClose();
+          }}
+          className="flex w-full items-center rounded-md px-3 py-[5px] font-display text-[12.5px] tracking-tight text-fg-base/90 transition-colors duration-100 hover:bg-white/[0.07] hover:text-fg-base"
+        >
+          {item.label}
+        </button>
+      ))}
+    </div>,
+    document.body,
   );
 }
