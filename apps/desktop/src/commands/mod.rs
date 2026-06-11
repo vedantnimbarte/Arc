@@ -15,4 +15,5 @@ pub mod pty;
 pub mod secrets;
 pub mod session;
 pub mod ssh;
+pub mod usage;
 pub mod window;
