@@ -517,6 +517,9 @@ export interface AgentRunReq {
   workspace_id: string | null;
   /** Persona prompt layered on top of the runtime's default agent prompt. */
   system_prompt?: string | null;
+  /** Run inside an isolated git worktree so edits don't touch the live tree
+   *  until reviewed. Requires `workspace_root` to be a git repo. */
+  worktree?: boolean;
 }
 
 /**
@@ -554,6 +557,124 @@ export async function agentDecide(approvalId: string, approve: boolean): Promise
     // Stale approval id is not user-actionable.
     console.warn('[agent] decide ignored:', err);
   }
+}
+
+/** Discard an isolated run's worktree: force-removes the worktree directory and
+ *  deletes its throwaway branch. The main repo root is derived backend-side. */
+export async function agentWorktreeDiscard(
+  worktreePath: string,
+  branch: string | null,
+): Promise<void> {
+  await invoke('agent_worktree_discard', { worktreePath, branch: branch ?? null });
+}
+
+// ----- LSP client -------------------------------------------------------
+
+export interface LspPosition {
+  line: number;
+  character: number;
+}
+export interface LspRange {
+  start: LspPosition;
+  end: LspPosition;
+}
+/** LSP `Diagnostic` (subset). `severity`: 1 error, 2 warning, 3 info, 4 hint. */
+export interface LspDiagnostic {
+  range: LspRange;
+  severity?: number;
+  message: string;
+  source?: string;
+  code?: string | number;
+}
+/** Payload of `textDocument/publishDiagnostics`. */
+export interface LspPublishDiagnostics {
+  uri: string;
+  version?: number;
+  diagnostics: LspDiagnostic[];
+}
+/** Server→client notification, tagged with its session id. */
+export interface LspEvent {
+  session_id: string;
+  method: string;
+  params: unknown;
+}
+
+/** Start (or restart) a language server under `id`. Returns the server's
+ *  advertised capabilities. */
+export async function lspStart(
+  id: string,
+  command: string,
+  args: string[],
+  rootUri?: string | null,
+): Promise<unknown> {
+  return invoke('lsp_start', { id, command, args, rootUri: rootUri ?? null });
+}
+
+export async function lspDidOpen(
+  id: string,
+  uri: string,
+  languageId: string,
+  version: number,
+  text: string,
+): Promise<void> {
+  await invoke('lsp_did_open', { id, uri, languageId, version, text });
+}
+
+export async function lspDidChange(
+  id: string,
+  uri: string,
+  version: number,
+  text: string,
+): Promise<void> {
+  await invoke('lsp_did_change', { id, uri, version, text });
+}
+
+export async function lspDidClose(id: string, uri: string): Promise<void> {
+  await invoke('lsp_did_close', { id, uri });
+}
+
+export async function lspHover(
+  id: string,
+  uri: string,
+  line: number,
+  character: number,
+): Promise<unknown> {
+  return invoke('lsp_hover', { id, uri, line, character });
+}
+
+export async function lspCompletion(
+  id: string,
+  uri: string,
+  line: number,
+  character: number,
+): Promise<unknown> {
+  return invoke('lsp_completion', { id, uri, line, character });
+}
+
+export async function lspDefinition(
+  id: string,
+  uri: string,
+  line: number,
+  character: number,
+): Promise<unknown> {
+  return invoke('lsp_definition', { id, uri, line, character });
+}
+
+export async function lspStop(id: string): Promise<void> {
+  await invoke('lsp_stop', { id });
+}
+
+export async function lspIsRunning(id: string): Promise<boolean> {
+  return invoke<boolean>('lsp_is_running', { id });
+}
+
+/** Subscribe to a language server's notifications (diagnostics, logs, …).
+ *  Returns an unlisten function. */
+export async function onLspEvent(
+  id: string,
+  handler: (ev: LspEvent) => void,
+): Promise<UnlistenFn> {
+  return listen<LspEvent>(`lsp://event/${id}`, (e) => handler(e.payload));
 }
 
 // ----- MCP client -------------------------------------------------------
@@ -762,6 +883,10 @@ export interface AgentRunRecord {
   started_at: number;
   finished_at: number | null;
   summary: string | null;
+  /** Path of the isolated worktree this run used, or null for an in-place run. */
+  worktree_path: string | null;
+  /** Throwaway branch the worktree was created on, or null. */
+  worktree_branch: string | null;
 }
 
 export type ChatRole = 'system' | 'user' | 'assistant';
@@ -905,6 +1030,11 @@ export interface PersistedSettings {
   terminalWebgl?: boolean;
   /** Enable Vim keybindings in the CodeMirror editor. */
   editorVimMode?: boolean;
+  /** Enable the ⌘K inline AI edit inside the CodeMirror editor. */
+  editorInlineAi?: boolean;
+  /** Enable Language Server Protocol features (diagnostics, hover, completion)
+   *  in the editor. Requires the relevant language servers on PATH. */
+  editorLsp?: boolean;
   /** Notify on long-running commands when unfocused (Tier 1.5). */
   notifyLongCommands?: boolean;
   /** Seconds a command must exceed before notifying. */

@@ -6,6 +6,7 @@ pub mod git;
 pub mod git_host;
 pub mod http;
 pub mod llm;
+pub mod lsp;
 pub mod mcp;
 pub mod memory;
 pub mod network;

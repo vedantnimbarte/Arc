@@ -21,6 +21,10 @@ import {
 } from 'lucide-react';
 import { fileIcon, MOCHA } from '../lib/fileIcons';
 import { fsReadFile, fsWriteFile, isTauri } from '../lib/tauri';
+import { InlineEditPanel, type InlineSession } from './InlineEditPanel';
+import { attachLsp, pathToFileUri, type LspAttachment } from '../lib/lspClient';
+import { lspServerFor } from '../lib/lspServers';
+import { useFiles } from '../state/files';
 import { useSelection } from '../state/selection';
 import { useSettings } from '../state/settings';
 import { useWorkspace } from '../state/workspace';
@@ -57,6 +61,13 @@ export function Editor({ filePath, tabId }: Props) {
   const fontCompartment = useRef(new Compartment());
   const fontId = useSettings((s) => s.fontId);
   const fontSize = useSettings((s) => s.fontSize);
+  /** Holds the LSP feature layer (diagnostics/hover/completion), reconfigured
+   *  once a language server attaches. */
+  const lspCompartment = useRef(new Compartment());
+  /** Live LSP attachment for the open document, or null. */
+  const lspCtlRef = useRef<LspAttachment | null>(null);
+  /** Debounces didChange notifications to the language server. */
+  const lspChangeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastSavedRef = useRef<string>('');
   /** Live mirror of the file's text. The CodeMirror update listener writes
    *  to it on every doc change; saves and preview renders both read from
@@ -77,6 +88,28 @@ export function Editor({ filePath, tabId }: Props) {
   const [status, setStatus] = useState<Status>({ kind: 'loading' });
   const [dirty, setDirty] = useState(false);
   const [mode, setModeState] = useState<Mode>('code');
+  /** Active ⌘K inline-edit session (selection range + anchor), or null. */
+  const [inlineEdit, setInlineEdit] = useState<InlineSession | null>(null);
+  /** Stable indirection so the CodeMirror keymap closure (captured at mount)
+   *  always calls the latest opener. */
+  const openInlineEditRef = useRef<(view: EditorView) => void>(() => {});
+  openInlineEditRef.current = (view: EditorView) => {
+    const sel = view.state.selection.main;
+    let from = sel.from;
+    let to = sel.to;
+    if (from === to) {
+      // No selection — target the whole current line so ⌘K is useful from a
+      // bare cursor.
+      const line = view.state.doc.lineAt(from);
+      from = line.from;
+      to = line.to;
+    }
+    if (from === to) return; // empty doc / empty line — nothing to edit
+    const code = view.state.sliceDoc(from, to);
+    const coords = view.coordsAtPos(from);
+    const anchor = coords ? { left: coords.left, top: coords.bottom } : null;
+    setInlineEdit({ from, to, code, anchor });
+  };
 
   const isMarkdown = useMemo(() => /\.(md|markdown|mdx)$/i.test(filePath), [filePath]);
 
@@ -138,6 +171,7 @@ export function Editor({ filePath, tabId }: Props) {
     let disposed = false;
     setStatus({ kind: 'loading' });
     setDirty(false);
+    setInlineEdit(null);
     modeRef.current = 'code';
     setModeState('code');
     setTabDirty(tabId, false);
@@ -166,6 +200,27 @@ export function Editor({ filePath, tabId }: Props) {
           },
         ]);
 
+        // ⌘K opens inline AI edit. We handle it at the DOM level (not via the
+        // keymap facet) so we can stopPropagation — otherwise the same keydown
+        // bubbles to the window listener in App.tsx and also opens the global
+        // command palette. When the toggle is off we return false and let it
+        // fall through to the palette as usual.
+        const inlineEditKeys = EditorView.domEventHandlers({
+          keydown: (e, view) => {
+            const isK =
+              (e.key === 'k' || e.key === 'K') &&
+              (e.metaKey || e.ctrlKey) &&
+              !e.shiftKey &&
+              !e.altKey;
+            if (!isK) return false;
+            if (!useSettings.getState().editorInlineAi) return false;
+            e.preventDefault();
+            e.stopPropagation();
+            openInlineEditRef.current(view);
+            return true;
+          },
+        });
+
         viewRef.current = new EditorView({
           state: EditorState.create({
             doc: content,
@@ -179,6 +234,7 @@ export function Editor({ filePath, tabId }: Props) {
                           // being explicit makes intent clear
               keymap.of(historyKeymap),
               saveKeymap,
+              inlineEditKeys,
               // Multi-cursor: Alt-click drops extra cursors, ⌘D selects the
               // next occurrence (via basicSetup's search keymap). These three
               // enable rectangular (Alt-drag) selection + the crosshair
@@ -206,6 +262,7 @@ export function Editor({ filePath, tabId }: Props) {
                 ),
               ),
               langCompartment.current.of([]),
+              lspCompartment.current.of([]),
               EditorView.updateListener.of((u) => {
                 if (u.docChanged) {
                   const current = u.state.doc.toString();
@@ -215,6 +272,14 @@ export function Editor({ filePath, tabId }: Props) {
                   setTabDirty(tabId, isDirty);
                   // Keep the preview pane live in preview / split modes.
                   if (modeRef.current !== 'code') schedulePreviewRender();
+                  // Push the change to the language server (debounced) so
+                  // diagnostics + completion stay in sync with the buffer.
+                  if (lspCtlRef.current) {
+                    if (lspChangeTimer.current) clearTimeout(lspChangeTimer.current);
+                    lspChangeTimer.current = setTimeout(() => {
+                      lspCtlRef.current?.didChange(current);
+                    }, 300);
+                  }
                 }
                 if (u.selectionSet || u.docChanged) {
                   const sel = u.state.selection.main;
@@ -271,6 +336,26 @@ export function Editor({ filePath, tabId }: Props) {
         }
 
         if (!disposed) setStatus({ kind: 'ready' });
+
+        // Attach a language server if LSP is enabled and one is registered for
+        // this file's language. Failures degrade to a plain editor (attachLsp
+        // returns an empty attachment).
+        if (!disposed && isTauri && useSettings.getState().editorLsp) {
+          const server = lspServerFor(pathToLanguageId(filePath));
+          if (server && viewRef.current) {
+            const root = useFiles.getState().root;
+            const rootUri = root ? pathToFileUri(root) : null;
+            const att = await attachLsp(viewRef.current, server, filePath, rootUri);
+            if (disposed || !viewRef.current) {
+              att.dispose();
+            } else {
+              lspCtlRef.current = att;
+              viewRef.current.dispatch({
+                effects: lspCompartment.current.reconfigure(att.extensions),
+              });
+            }
+          }
+        }
       } catch (err) {
         if (!disposed) setStatus({ kind: 'error', message: String(err) });
       }
@@ -280,6 +365,13 @@ export function Editor({ filePath, tabId }: Props) {
 
     return () => {
       disposed = true;
+      // Detach the language server for this document before the view goes.
+      if (lspChangeTimer.current) {
+        clearTimeout(lspChangeTimer.current);
+        lspChangeTimer.current = null;
+      }
+      lspCtlRef.current?.dispose();
+      lspCtlRef.current = null;
       viewRef.current?.destroy();
       viewRef.current = null;
       useSelection.getState().clear('editor', tabId);
@@ -503,6 +595,16 @@ export function Editor({ filePath, tabId }: Props) {
             />
           )}
         </div>
+      )}
+
+      {inlineEdit && viewRef.current && (
+        <InlineEditPanel
+          session={inlineEdit}
+          view={viewRef.current}
+          filePath={filePath}
+          language={pathToLanguageId(filePath)}
+          onClose={() => setInlineEdit(null)}
+        />
       )}
     </div>
   );

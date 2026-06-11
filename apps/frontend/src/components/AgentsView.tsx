@@ -1,6 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Bot, RefreshCw } from 'lucide-react';
-import { isTauri, sessionAgentRunsList, type AgentRunRecord, type AgentRunStatus } from '../lib/tauri';
+import { Bot, FolderTree, GitBranch, RefreshCw, Trash2 } from 'lucide-react';
+import {
+  agentWorktreeDiscard,
+  isTauri,
+  sessionAgentRunsList,
+  type AgentRunRecord,
+  type AgentRunStatus,
+} from '../lib/tauri';
+import { useFiles } from '../state/files';
 import { cn } from '../lib/cn';
 
 const STATUS_DOT: Record<AgentRunStatus, string> = {
@@ -164,9 +171,96 @@ export function AgentsView() {
                   No summary recorded.
                 </p>
               )}
+              {isOpen && run.worktree_path && (
+                <WorktreeActions run={run} onAfter={() => void refresh()} />
+              )}
             </div>
           );
         })}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Review affordances for an isolated (worktree-backed) run: shows the branch +
+ * worktree path, lets the user reroot the file tree onto the worktree to review
+ * the agent's edits via Source Control / the editor, and discard the worktree
+ * (force-remove + branch delete) once they're done.
+ */
+function WorktreeActions({ run, onAfter }: { run: AgentRunRecord; onAfter: () => void }) {
+  const setRoot = useFiles((s) => s.setRoot);
+  const [confirming, setConfirming] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  const path = run.worktree_path;
+  if (!path) return null;
+
+  const discard = async () => {
+    setBusy(true);
+    setErr(null);
+    try {
+      await agentWorktreeDiscard(path, run.worktree_branch);
+      onAfter();
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+      setConfirming(false);
+    }
+  };
+
+  return (
+    <div className="mx-2 mb-1.5 mt-0.5 rounded-md border border-border-hairline/70 bg-black/[0.12] px-2.5 py-2">
+      <div className="flex items-center gap-1.5 font-mono text-[10px] text-fg-muted">
+        <GitBranch size={10} strokeWidth={2.2} className="shrink-0 text-accent" />
+        <span className="truncate">{run.worktree_branch ?? 'detached'}</span>
+      </div>
+      <div className="mt-0.5 truncate font-mono text-[9.5px] text-fg-subtle" title={path}>
+        {path}
+      </div>
+      {err && <div className="mt-1 font-mono text-[10px] text-status-err">{err}</div>}
+      <div className="mt-1.5 flex items-center gap-1.5">
+        <button
+          type="button"
+          onClick={() => setRoot(path)}
+          className="flex items-center gap-1 rounded px-1.5 py-0.5 font-display text-[10.5px] text-fg-muted transition-colors hover:bg-white/[0.06] hover:text-fg-base"
+          title="Open this worktree in the file tree to review the changes"
+        >
+          <FolderTree size={10} strokeWidth={2.1} />
+          review changes
+        </button>
+        {confirming ? (
+          <div className="flex items-center gap-1 rounded bg-status-err/[0.12] px-1.5 py-0.5">
+            <button
+              type="button"
+              onClick={() => void discard()}
+              disabled={busy}
+              className="font-display text-[10.5px] text-status-err hover:opacity-80 disabled:opacity-50"
+            >
+              {busy ? 'discarding…' : 'confirm discard'}
+            </button>
+            <button
+              type="button"
+              onClick={() => setConfirming(false)}
+              disabled={busy}
+              className="font-display text-[10.5px] text-fg-subtle hover:text-fg-base disabled:opacity-50"
+            >
+              cancel
+            </button>
+          </div>
+        ) : (
+          <button
+            type="button"
+            onClick={() => setConfirming(true)}
+            className="flex items-center gap-1 rounded px-1.5 py-0.5 font-display text-[10.5px] text-fg-subtle transition-colors hover:bg-status-err/[0.12] hover:text-status-err"
+            title="Remove the worktree and its branch"
+          >
+            <Trash2 size={10} strokeWidth={2.1} />
+            discard
+          </button>
+        )}
       </div>
     </div>
   );
