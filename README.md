@@ -21,34 +21,6 @@
 - **Git Integration** — View branch status, diffs, logs, blame, and more directly from the UI without terminal commands
 - **File Search & Indexing** — BM25 full-text search with tantivy indexing for fast codebase exploration
 
-## Feature Status
-
-| Area | Status | Details |
-|------|--------|---------|
-| **PTY Terminal** | ✅ V1 | Multi-tab, shell picker, custom shells (cmd/powershell/pwsh/bash/zsh/fish/nu), resize on window change, OSC 133 integration |
-| **Code Editor** | ✅ V1 | CodeMirror 6, lazy-loaded syntax highlighting, 5 MiB file cap, refusal of binaries |
-| **AI Chat** | ✅ V1 | OpenAI/Anthropic/Ollama streaming, multi-session, agent personas, chat history persistence |
-| **Coding Agent** | ✅ V2 | Tool-using Anthropic agent, approval gating, built-in tools, MCP tools auto-bridge, 16 KiB output cap |
-| **File Tree** | ✅ V1 | Directory browsing, watch for changes, click-to-paste paths, folder picker |
-| **File Search** | ✅ V1 | tantivy BM25 indexing, full-text search with FTS5 fallback, 256 KiB cap |
-| **Session Persistence** | ✅ V1 | SQLite workspaces, tabs, chat history, command history, agent runs, layout state |
-| **Git Integration** | ✅ V1 | status (porcelain v2), log, diff (worktree/staged/head), blame, branch tracking |
-| **Command History** | ✅ V1 | OSC 133 structured logging, exit codes, fuzzy search (⌃R), 4 KiB output excerpts |
-| **Memory / Search** | ✅ V1 | Keyword FTS5, vector embeddings (OpenAI/Ollama), BM25 ranking, /memory commands |
-| **MCP Client** | ✅ V2 | stdio (Content-Length framed) + HTTP/SSE, tool auto-bridging, server notifications |
-| **Settings** | ✅ V1 | API key vault (Keychain/Credential Manager), model selection, shell picker, customizable UI |
-| **Keyboard Shortcuts** | ✅ V1 | Customizable via settings, common defaults (⌘J chat, ⌘P file search, ⌘T new tab, ⌃R history) |
-| **Git UI Enhancements** | 🟡 Phase 1 | Branch switcher, interactive staging, conflict resolver, commit templates, GPG signing |
-| **Environment Manager** | 🟡 Phase 1 | .env file editor, syntax highlighting, validation, environment-aware preview URLs |
-| **Test Integration** | 🟡 Phase 2 | Test output parsing, inline gutter results, quick-jump navigation, watch mode auto-rerun |
-| **Database Browser** | 🟡 Phase 3 | SQLite explorer, query editor, export/import, external DB support via MCP |
-| **Split Pane Layout** | 🟡 Phase 5 | Multi-pane editing, draggable resizing, maximize/swap actions, layout persistence |
-| **Agent Templates** | 🟡 Phase 4 | Custom agents, Code Review agent, Docs Generator, Performance Analyzer |
-| **Terminal Recording** | 🟡 Phase 6 | Record/replay sessions, playback speed control, export as JSON/video/markdown |
-| **Docker / Server** | 🟡 Phase 2 | Reserved for multi-user server deployment |
-| **Real-time Collab** | 🟡 Phase 8 | Shared editor + terminal, cursor positions, conflict-free merge (CRDT/OT) |
-| **Plugin System** | 🟡 Future | Extensible tool ecosystem, custom tool packaging |
-
 ## Quick Start
 
 ### Desktop App (Tauri)
