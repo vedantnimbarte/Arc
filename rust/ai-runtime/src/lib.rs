@@ -7,8 +7,10 @@
 
 pub mod embed;
 pub mod providers;
+pub mod usage;
 
 pub use embed::{embed, EmbedProvider, EmbedResult};
+pub use usage::{fetch_usage, UsageProvider, UsageReport};
 
 use async_trait::async_trait;
 use futures_util::stream::BoxStream;
