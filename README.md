@@ -38,16 +38,6 @@
 | **MCP Client** | ✅ V2 | stdio (Content-Length framed) + HTTP/SSE, tool auto-bridging, server notifications |
 | **Settings** | ✅ V1 | API key vault (Keychain/Credential Manager), model selection, shell picker, customizable UI |
 | **Keyboard Shortcuts** | ✅ V1 | Customizable via settings, common defaults (⌘J chat, ⌘P file search, ⌘T new tab, ⌃R history) |
-| **Git UI Enhancements** | 🟡 Phase 1 | Branch switcher, interactive staging, conflict resolver, commit templates, GPG signing |
-| **Environment Manager** | 🟡 Phase 1 | .env file editor, syntax highlighting, validation, environment-aware preview URLs |
-| **Test Integration** | 🟡 Phase 2 | Test output parsing, inline gutter results, quick-jump navigation, watch mode auto-rerun |
-| **Database Browser** | 🟡 Phase 3 | SQLite explorer, query editor, export/import, external DB support via MCP |
-| **Split Pane Layout** | 🟡 Phase 5 | Multi-pane editing, draggable resizing, maximize/swap actions, layout persistence |
-| **Agent Templates** | 🟡 Phase 4 | Custom agents, Code Review agent, Docs Generator, Performance Analyzer |
-| **Terminal Recording** | 🟡 Phase 6 | Record/replay sessions, playback speed control, export as JSON/video/markdown |
-| **Docker / Server** | 🟡 Phase 2 | Reserved for multi-user server deployment |
-| **Real-time Collab** | 🟡 Phase 8 | Shared editor + terminal, cursor positions, conflict-free merge (CRDT/OT) |
-| **Plugin System** | 🟡 Future | Extensible tool ecosystem, custom tool packaging |
 
 ## Quick Start
 
@@ -113,7 +103,6 @@ pnpm dev                     # Open http://127.0.0.1:5173
 | **[docs/architecture.md](docs/architecture.md)** | Layered design, component communication, Zustand stores, SQLite schema |
 | **[docs/decisions.md](docs/decisions.md)** | Why Tauri/Rust/Zustand, crate split, tradeoffs (architecture decision records) |
 | **[CLAUDE.md](CLAUDE.md)** | Orientation for Claude Code editing this repository |
-| **[PLANNED_FEATURES.md](PLANNED_FEATURES.md)** | Roadmap: Git UI, test integration, database browser, split panes, plugins |
 
 ### 📚 Rust Crate Documentation
 
@@ -173,23 +162,6 @@ docs/                 Architecture guides, decision records
 | **macOS** | ✅ Tested | 12+ (x86_64 + Apple Silicon) |
 | **Windows** | ✅ Tested | 10+ (WebView2 required) |
 | **Linux** | ✅ Tested | gtk3 (WebKit2GTK) required |
-
-## Roadmap
-
-ARC is in **Phase 1** with core features shipped (terminal, editor, chat, agent, memory, git, search). Future phases include:
-
-| Phase | Timeline | Highlights |
-|-------|----------|-----------|
-| **Phase 1** ✅ | Now | PTY terminal, editor, AI chat, agents, MCP, memory, git, file search |
-| **Phase 2** 🟡 | Weeks 1-6 | Git UI (branches/stash), test integration, environment manager, database browser |
-| **Phase 3** 🟡 | Weeks 6-8 | SQLite explorer, external DB support via MCP, query builder |
-| **Phase 4** 🟡 | Weeks 8-12 | Custom agent templates, code review agent, docs generator, perf analyzer |
-| **Phase 5** 🟡 | Weeks 6-10 | Split pane layout, workspace snapshots, UI polish |
-| **Phase 6** 🟡 | Weeks 8-12 | Terminal recording/replay, quick actions palette (⌘K), dependency scanner |
-| **Phase 7** 🟡 | Weeks 10-14 | Dependency graph, vulnerability scanning, accessibility |
-| **Phase 8** 🟡 | Weeks 12+ | Workspace sharing, cloud sync, real-time collaboration |
-
-See [PLANNED_FEATURES.md](PLANNED_FEATURES.md) for detailed specs, implementation notes, and prioritization.
 
 ## Contributing
 
