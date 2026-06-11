@@ -36,8 +36,9 @@ import {
   PanelLeft,
   ArrowUp,
   ArrowDown,
+  Activity,
 } from 'lucide-react';
-import { useSettings } from '../state/settings';
+import { useSettings, type ProviderConfig } from '../state/settings';
 import {
   AGENT_ICONS,
   AGENT_TINTS,
@@ -56,7 +57,20 @@ import { FontPicker } from './FontPicker';
 import { useFiles, type SidebarView } from '../state/files';
 import { useSidebarLayout } from '../state/sidebarLayout';
 import { normalizeOrder, PINNED_VIEW, SIDEBAR_VIEW_BY_ID } from '../lib/sidebarViews';
-import { agentEditorWindowOpen, isTauri, ptyListShells, type ShellInfo } from '../lib/tauri';
+import {
+  agentEditorWindowOpen,
+  isTauri,
+  ptyListShells,
+  ptyListAiClis,
+  usageCliFetch,
+  usageApiFetch,
+  type ShellInfo,
+  type AiCliInfo,
+  type AiCliId,
+  type CliUsageResult,
+  type UsageReport,
+} from '../lib/tauri';
+import { parseCliUsage, formatTokens } from '../lib/usage';
 import { cn } from '../lib/cn';
 import {
   listThemes,
@@ -82,7 +96,7 @@ import {
 } from '../state/shortcuts';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 
-type Pane = 'appearance' | 'themes' | 'shortcuts' | 'terminal' | 'editor' | 'sidebar' | 'agents' | 'providers' | 'about';
+type Pane = 'appearance' | 'themes' | 'shortcuts' | 'terminal' | 'editor' | 'sidebar' | 'agents' | 'providers' | 'usage' | 'about';
 
 export function SettingsPage() {
   const {
@@ -180,6 +194,7 @@ export function SettingsPage() {
             <SidebarRow icon={PanelLeft} label="Sidebar" active={pane === 'sidebar'} onClick={() => setPane('sidebar')} />
             <SidebarRow icon={Bot} label="Agents" active={pane === 'agents'} onClick={() => setPane('agents')} />
             <SidebarRow icon={SlidersHorizontal} label="Providers" active={pane === 'providers'} onClick={() => setPane('providers')} />
+            <SidebarRow icon={Activity} label="Usage" active={pane === 'usage'} onClick={() => setPane('usage')} />
             <SidebarRow icon={Info} label="About" active={pane === 'about'} onClick={() => setPane('about')} />
           </nav>
 
@@ -246,6 +261,9 @@ export function SettingsPage() {
                 />
               )}
               {pane === 'sidebar' && <SidebarSettingsPane />}
+              {pane === 'usage' && (
+                <UsagePane enabledPresetIds={enabledPresetIds} providers={providers} />
+              )}
               {pane === 'about' && <AboutPane />}
             </div>
           )}
@@ -2514,6 +2532,290 @@ function EmptyCustomAgentCard({ onCreate }: { onCreate: () => void }) {
   );
 }
 
+
+// ─── Usage ───────────────────────────────────────────────────────────────────
+
+// Only the canonical OpenAI / Anthropic presets have a real org usage API; the
+// other openai-kind presets (Gemini, DeepSeek, …) point at base URLs with no
+// usage endpoint, so we don't offer them here.
+const USAGE_API_PRESETS: { id: 'openai' | 'anthropic'; label: string }[] = [
+  { id: 'anthropic', label: 'Anthropic' },
+  { id: 'openai', label: 'OpenAI' },
+];
+
+function UsagePane({
+  enabledPresetIds,
+  providers,
+}: {
+  enabledPresetIds: string[];
+  providers: Record<string, ProviderConfig>;
+}) {
+  return (
+    <div className="space-y-7">
+      <Section
+        title="CLI Tools"
+        hint="Usage is read by running each installed CLI's usage command. Some CLIs don't expose machine-readable usage — those fall back to showing raw output, and a tool with no usage command is listed without stats."
+      >
+        <CliUsageGroup />
+      </Section>
+      <Section
+        title="API Usage"
+        hint="Month-to-date usage from each provider's organization usage API. This needs an admin / usage-scoped key (Anthropic Admin key or an OpenAI org admin key) configured under Providers — a regular chat key shows a “not authorized” note."
+      >
+        <ApiUsageGroup enabledPresetIds={enabledPresetIds} providers={providers} />
+      </Section>
+    </div>
+  );
+}
+
+function UsageCard({
+  title,
+  subtitle,
+  onRefresh,
+  busy,
+  children,
+}: {
+  title: string;
+  subtitle?: string;
+  onRefresh?: () => void;
+  busy?: boolean;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="rounded-lg border border-border-subtle bg-bg-base/40 px-3 py-2.5">
+      <div className="flex items-center justify-between gap-3">
+        <div className="min-w-0">
+          <p className="font-display text-[12.5px] font-medium tracking-tight text-fg-base">{title}</p>
+          {subtitle && (
+            <p className="mt-0.5 truncate font-mono text-[10.5px] text-fg-subtle">{subtitle}</p>
+          )}
+        </div>
+        {onRefresh && (
+          <button
+            onClick={onRefresh}
+            disabled={busy}
+            className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-fg-subtle transition-colors hover:bg-white/[0.06] hover:text-fg-base disabled:opacity-40"
+            aria-label={`Refresh ${title} usage`}
+            title="Refresh"
+          >
+            <RefreshCw size={12} strokeWidth={2.1} className={busy ? 'animate-spin' : ''} />
+          </button>
+        )}
+      </div>
+      <div className="mt-2">{children}</div>
+    </div>
+  );
+}
+
+function UsageFields({
+  fields,
+}: {
+  fields: { label: string; value: string; note?: string }[];
+}) {
+  return (
+    <dl className="space-y-1">
+      {fields.map((f) => (
+        <div key={f.label} className="flex items-baseline justify-between gap-3">
+          <dt className="shrink-0 font-display text-[11px] text-fg-subtle">{f.label}</dt>
+          <dd className="min-w-0 text-right">
+            <span className="font-display text-[12px] font-medium tabular-nums text-fg-base">
+              {f.value}
+            </span>
+            {f.note && (
+              <span className="ml-1.5 font-display text-[10.5px] text-fg-subtle">{f.note}</span>
+            )}
+          </dd>
+        </div>
+      ))}
+    </dl>
+  );
+}
+
+function RawOutput({ stdout, stderr }: { stdout: string; stderr: string }) {
+  const text = [stdout.trim(), stderr.trim() && `--- stderr ---\n${stderr.trim()}`]
+    .filter(Boolean)
+    .join('\n\n');
+  if (!text) return <p className="font-display text-[11px] text-fg-subtle">No output.</p>;
+  return (
+    <pre className="max-h-48 overflow-auto whitespace-pre-wrap rounded bg-black/30 p-2 font-mono text-[11px] leading-relaxed text-fg-muted">
+      {text}
+    </pre>
+  );
+}
+
+type CliState = 'loading' | CliUsageResult | { error: string };
+
+function CliUsageGroup() {
+  const [clis, setClis] = useState<AiCliInfo[] | null>(null);
+  const [results, setResults] = useState<Record<string, CliState>>({});
+
+  const fetchOne = (id: AiCliId) => {
+    setResults((r) => ({ ...r, [id]: 'loading' }));
+    usageCliFetch(id)
+      .then((res) => setResults((r) => ({ ...r, [id]: res })))
+      .catch((e) => setResults((r) => ({ ...r, [id]: { error: String(e) } })));
+  };
+
+  useEffect(() => {
+    if (!isTauri) {
+      setClis([]);
+      return;
+    }
+    let cancelled = false;
+    ptyListAiClis()
+      .then((list) => {
+        if (cancelled) return;
+        setClis(list);
+        list.forEach((c) => fetchOne(c.id));
+      })
+      .catch(() => {
+        if (!cancelled) setClis([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  if (clis === null) {
+    return <p className="font-display text-[11.5px] text-fg-subtle">Detecting installed CLIs…</p>;
+  }
+  if (clis.length === 0) {
+    return (
+      <p className="font-display text-[11.5px] text-fg-subtle">
+        No AI coding CLIs detected on your PATH. Install Claude Code or OpenAI Codex to see usage here.
+      </p>
+    );
+  }
+
+  return (
+    <div className="space-y-2">
+      {clis.map((cli) => {
+        const state = results[cli.id];
+        const busy = state === 'loading' || state === undefined;
+        return (
+          <UsageCard
+            key={cli.id}
+            title={cli.label}
+            subtitle={state && state !== 'loading' && 'command' in state ? state.command : cli.path}
+            onRefresh={() => fetchOne(cli.id)}
+            busy={busy}
+          >
+            <CliUsageBody id={cli.id} state={state} />
+          </UsageCard>
+        );
+      })}
+    </div>
+  );
+}
+
+function CliUsageBody({ id, state }: { id: AiCliId; state: CliState | undefined }) {
+  if (state === undefined || state === 'loading') {
+    return <p className="font-display text-[11px] text-fg-subtle">Fetching…</p>;
+  }
+  if ('error' in state) {
+    return <p className="font-display text-[11px] text-red-300">{state.error}</p>;
+  }
+  if (!state.supported) {
+    return (
+      <p className="font-display text-[11px] text-fg-subtle">
+        No usage command available for this tool yet.
+      </p>
+    );
+  }
+  if (state.timedOut) {
+    return <p className="font-display text-[11px] text-amber-300">{state.stderr || 'Timed out.'}</p>;
+  }
+  const parsed = parseCliUsage(id, state.stdout);
+  if (parsed.ok) return <UsageFields fields={parsed.fields} />;
+  return <RawOutput stdout={state.stdout} stderr={state.stderr} />;
+}
+
+type ApiState = 'loading' | UsageReport | { error: string };
+
+function ApiUsageGroup({
+  enabledPresetIds,
+  providers,
+}: {
+  enabledPresetIds: string[];
+  providers: Record<string, ProviderConfig>;
+}) {
+  const eligible = USAGE_API_PRESETS.filter(
+    (p) => enabledPresetIds.includes(p.id) && Boolean(providers[p.id]?.apiKey),
+  );
+  const [results, setResults] = useState<Record<string, ApiState>>({});
+
+  const fetchOne = (id: 'openai' | 'anthropic') => {
+    const cfg = providers[id];
+    if (!cfg?.apiKey) return;
+    setResults((r) => ({ ...r, [id]: 'loading' }));
+    usageApiFetch(id, cfg.apiKey!, cfg.baseUrl || null)
+      .then((res) => setResults((r) => ({ ...r, [id]: res })))
+      .catch((e) => setResults((r) => ({ ...r, [id]: { error: String(e) } })));
+  };
+
+  useEffect(() => {
+    if (!isTauri) return;
+    eligible.forEach((p) => fetchOne(p.id));
+    // Re-fetch when the set of eligible providers changes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [eligible.map((p) => p.id).join(',')]);
+
+  if (eligible.length === 0) {
+    return (
+      <p className="font-display text-[11.5px] text-fg-subtle">
+        No usage-capable providers configured. Add an Anthropic or OpenAI key under Providers to see API usage.
+      </p>
+    );
+  }
+
+  return (
+    <div className="space-y-2">
+      {eligible.map((p) => {
+        const state = results[p.id];
+        const busy = state === 'loading' || state === undefined;
+        return (
+          <UsageCard key={p.id} title={p.label} onRefresh={() => fetchOne(p.id)} busy={busy}>
+            <ApiUsageBody state={state} />
+          </UsageCard>
+        );
+      })}
+    </div>
+  );
+}
+
+function ApiUsageBody({ state }: { state: ApiState | undefined }) {
+  if (state === undefined || state === 'loading') {
+    return <p className="font-display text-[11px] text-fg-subtle">Fetching…</p>;
+  }
+  if ('error' in state) {
+    return <p className="font-display text-[11px] text-red-300">{state.error}</p>;
+  }
+  if (!state.authorized) {
+    return (
+      <p className="font-display text-[11px] leading-relaxed text-amber-300">
+        {state.note ?? 'This key is not authorized for the usage API.'}
+      </p>
+    );
+  }
+  const fields: { label: string; value: string }[] = [];
+  if (state.inputTokens != null) fields.push({ label: 'Input tokens', value: formatTokens(state.inputTokens) });
+  if (state.outputTokens != null) fields.push({ label: 'Output tokens', value: formatTokens(state.outputTokens) });
+  if (state.costUsd != null) fields.push({ label: 'Cost', value: `$${state.costUsd.toFixed(2)}` });
+  return (
+    <div className="space-y-1.5">
+      <p className="font-display text-[10.5px] uppercase tracking-widest2 text-fg-subtle">
+        {state.periodLabel}
+      </p>
+      {fields.length > 0 ? (
+        <UsageFields fields={fields} />
+      ) : (
+        <p className="font-display text-[11px] text-fg-subtle">
+          Authorized, but no usage reported for this period.
+        </p>
+      )}
+    </div>
+  );
+}
 
 // ─── primitives ────────────────────────────────────────────────────────────
 

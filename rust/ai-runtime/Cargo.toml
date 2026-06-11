@@ -13,6 +13,7 @@ path = "src/lib.rs"
 anyhow.workspace = true
 async-trait.workspace = true
 bytes.workspace = true
+chrono.workspace = true
 eventsource-stream.workspace = true
 futures-util.workspace = true
 reqwest = { workspace = true }

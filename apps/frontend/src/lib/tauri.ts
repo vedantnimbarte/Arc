@@ -89,6 +89,54 @@ export async function ptyListAiClis(): Promise<AiCliInfo[]> {
   return invoke<AiCliInfo[]>('pty_list_ai_clis');
 }
 
+/** Result of running an AI CLI's usage subcommand (Settings → Usage). The
+ *  output is returned verbatim; the frontend parses it best-effort and shows
+ *  the raw text when parsing fails. Never throws on a non-zero exit. */
+export interface CliUsageResult {
+  id: AiCliId;
+  label: string;
+  /** Human-readable command that was (or would be) run. */
+  command: string;
+  installed: boolean;
+  /** Whether we have a known usage subcommand for this CLI. */
+  supported: boolean;
+  stdout: string;
+  stderr: string;
+  exitCode: number | null;
+  timedOut: boolean;
+}
+
+/** Run the hardcoded usage subcommand for a detected AI CLI. */
+export async function usageCliFetch(id: AiCliId): Promise<CliUsageResult> {
+  return invoke<CliUsageResult>('usage_cli_fetch', { id });
+}
+
+/** Normalized provider usage summary (current calendar month, UTC). When
+ *  `authorized` is false the key lacks usage/admin scope and `note` explains. */
+export interface UsageReport {
+  authorized: boolean;
+  inputTokens: number | null;
+  outputTokens: number | null;
+  costUsd: number | null;
+  periodLabel: string;
+  raw: unknown;
+  note?: string;
+}
+
+/** Fetch cloud provider usage. `kind` is the routing target ('anthropic' |
+ *  'openai'); the key must be an admin/usage-scoped key. */
+export async function usageApiFetch(
+  kind: 'anthropic' | 'openai',
+  apiKey: string,
+  baseUrl?: string | null,
+): Promise<UsageReport> {
+  return invoke<UsageReport>('usage_api_fetch', {
+    kind,
+    apiKey,
+    baseUrl: baseUrl ?? null,
+  });
+}
+
 export async function onPtyExit(
   id: PtyId,
   handler: (code: number | null) => void,

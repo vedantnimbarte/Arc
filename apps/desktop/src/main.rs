@@ -238,6 +238,8 @@ fn main() {
             commands::apiclient::apiclient_envs_delete,
             commands::apiclient::apiclient_envs_set_active,
             commands::project_config::project_config_load,
+            commands::usage::usage_cli_fetch,
+            commands::usage::usage_api_fetch,
             commands::window::settings_window_open,
             commands::window::settings_broadcast_changed,
             commands::window::git_window_open,
