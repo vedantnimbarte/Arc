@@ -85,7 +85,6 @@ pnpm dev                     # Open http://127.0.0.1:5173
 | **[docs/architecture.md](docs/architecture.md)** | Layered design, component communication, Zustand stores, SQLite schema |
 | **[docs/decisions.md](docs/decisions.md)** | Why Tauri/Rust/Zustand, crate split, tradeoffs (architecture decision records) |
 | **[CLAUDE.md](CLAUDE.md)** | Orientation for Claude Code editing this repository |
-| **[PLANNED_FEATURES.md](PLANNED_FEATURES.md)** | Roadmap: Git UI, test integration, database browser, split panes, plugins |
 
 ### 📚 Rust Crate Documentation
 
@@ -145,23 +144,6 @@ docs/                 Architecture guides, decision records
 | **macOS** | ✅ Tested | 12+ (x86_64 + Apple Silicon) |
 | **Windows** | ✅ Tested | 10+ (WebView2 required) |
 | **Linux** | ✅ Tested | gtk3 (WebKit2GTK) required |
-
-## Roadmap
-
-ARC is in **Phase 1** with core features shipped (terminal, editor, chat, agent, memory, git, search). Future phases include:
-
-| Phase | Timeline | Highlights |
-|-------|----------|-----------|
-| **Phase 1** ✅ | Now | PTY terminal, editor, AI chat, agents, MCP, memory, git, file search |
-| **Phase 2** 🟡 | Weeks 1-6 | Git UI (branches/stash), test integration, environment manager, database browser |
-| **Phase 3** 🟡 | Weeks 6-8 | SQLite explorer, external DB support via MCP, query builder |
-| **Phase 4** 🟡 | Weeks 8-12 | Custom agent templates, code review agent, docs generator, perf analyzer |
-| **Phase 5** 🟡 | Weeks 6-10 | Split pane layout, workspace snapshots, UI polish |
-| **Phase 6** 🟡 | Weeks 8-12 | Terminal recording/replay, quick actions palette (⌘K), dependency scanner |
-| **Phase 7** 🟡 | Weeks 10-14 | Dependency graph, vulnerability scanning, accessibility |
-| **Phase 8** 🟡 | Weeks 12+ | Workspace sharing, cloud sync, real-time collaboration |
-
-See [PLANNED_FEATURES.md](PLANNED_FEATURES.md) for detailed specs, implementation notes, and prioritization.
 
 ## Contributing
 

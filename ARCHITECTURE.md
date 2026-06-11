@@ -86,8 +86,7 @@ Arc/
 │
 ├── docs/
 │   ├── architecture.md       # This file (system design)
-│   ├── decisions.md          # Why we chose Tauri, Zustand, etc.
-│   └── mvp-spec.md           # Original product spec
+│   └── decisions.md          # Why we chose Tauri, Zustand, etc.
 │
 ├── CLAUDE.md                 # Orientation for Claude Code editing this repo
 ├── INSTALLATION.md           # Setup guide for all platforms
