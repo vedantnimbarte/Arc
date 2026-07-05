@@ -38,9 +38,9 @@ export function Terminal({ sessionKey }: Props) {
   // Snapshot the root at mount — the PTY can only be spawned with one CWD,
   // and we don't restart it when the user reroots the tree.
   const initialCwd = useRef<string | null>(useFiles.getState().root);
-  // New-tab splash (Tier 1.2): shown over a fresh, untouched terminal and
-  // dismissed on the first keystroke / interaction.
-  const [showSplash, setShowSplash] = useState(true);
+  // New-tab splash (Tier 1.2): disabled — open straight to the terminal.
+  // ponytail: hard-off; reintroduce a setting here if it's ever wanted back.
+  const [showSplash, setShowSplash] = useState(false);
 
   const pasteRecentCommand = (command: string) => {
     const ptyId = useWorkspace.getState().tabs.find((t) => t.id === sessionKey)?.ptyId;
