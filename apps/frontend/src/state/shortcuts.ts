@@ -10,6 +10,7 @@ export type ActionId =
   | 'toggle-sidebar'
   | 'open-command-palette'
   | 'open-command-history'
+  | 'open-command-blocks'
   | 'open-search'
   | 'toggle-chat'
   | 'new-chat'
@@ -74,6 +75,12 @@ export const ACTION_META: Record<ActionId, ActionMeta> = {
     label: 'Command History',
     description: 'Open the command-history palette.',
     category: 'Workspace',
+  },
+  'open-command-blocks': {
+    id: 'open-command-blocks',
+    label: 'Command Blocks',
+    description: 'Browse recent commands as blocks; explain failures with AI.',
+    category: 'Terminal',
   },
   'open-search': {
     id: 'open-search',
@@ -167,6 +174,7 @@ export const ACTION_ORDER: ActionId[] = [
   'toggle-sidebar',
   'open-command-palette',
   'open-command-history',
+  'open-command-blocks',
   'open-search',
   'toggle-chat',
   'new-chat',
@@ -195,6 +203,7 @@ export const DEFAULT_BINDINGS: Record<ActionId, KeyBinding | null> = {
   'toggle-sidebar': { code: 'KeyB', shift: false, alt: false, ...mod() },
   'open-command-palette': { code: 'KeyK', shift: false, alt: false, ...mod() },
   'open-command-history': { code: 'KeyR', shift: false, alt: false, ...mod() },
+  'open-command-blocks': { code: 'KeyR', shift: true, alt: false, ...mod() },
   'open-search': { code: 'KeyP', shift: false, alt: false, ...mod() },
   'open-shortcuts': { code: 'Slash', shift: true, alt: false, ...mod() },
   'show-explorer': { code: 'KeyE', shift: true, alt: false, ...mod() },
