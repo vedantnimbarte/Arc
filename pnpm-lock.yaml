@@ -44,6 +44,9 @@ importers:
       '@arc/ui':
         specifier: workspace:*
         version: link:../../packages/ui
+      '@codemirror/autocomplete':
+        specifier: ^6.20.2
+        version: 6.20.2
       '@codemirror/commands':
         specifier: ^6.7.0
         version: 6.10.3
@@ -92,6 +95,9 @@ importers:
       '@codemirror/language':
         specifier: ^6.10.3
         version: 6.12.3
+      '@codemirror/lint':
+        specifier: ^6.9.6
+        version: 6.9.6
       '@codemirror/state':
         specifier: ^6.4.1
         version: 6.6.0
