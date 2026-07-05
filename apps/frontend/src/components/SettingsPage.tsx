@@ -1327,6 +1327,10 @@ function ProviderDetail({
   const [advancedOpen, setAdvancedOpen] = useState(Boolean(preset.advancedDefault));
   const [customModel, setCustomModel] = useState('');
   const [testState, setTestState] = useState<'idle' | 'running' | 'ok' | 'fail'>('idle');
+  // Searchable, provider-grouped model dropdown state.
+  const [modelOpen, setModelOpen] = useState(false);
+  const [modelQuery, setModelQuery] = useState('');
+  const modelBoxRef = useRef<HTMLDivElement>(null);
 
   // Live model catalog — pulled the first time this preset is selected.
   const entry = useModels((s) => s.entries[preset.id]);
@@ -1347,6 +1351,34 @@ function ProviderDetail({
 
   const configured = !preset.needsApiKey || Boolean(cfg.apiKey);
   const liveModels = resolveModelsFor(preset.id, entry);
+
+  // Filter by query, then group by the `provider/` prefix in the model id
+  // (OpenRouter-style). Ids without a slash fall under the preset label.
+  const groupedModels = useMemo(() => {
+    const q = modelQuery.trim().toLowerCase();
+    const matches = q
+      ? liveModels.filter(
+          (m) => m.id.toLowerCase().includes(q) || m.label?.toLowerCase().includes(q),
+        )
+      : liveModels;
+    const groups = new Map<string, typeof liveModels>();
+    for (const m of matches) {
+      const slash = m.id.indexOf('/');
+      const group = slash > 0 ? m.id.slice(0, slash) : preset.label;
+      (groups.get(group) ?? groups.set(group, []).get(group)!).push(m);
+    }
+    return [...groups.entries()].sort((a, b) => a[0].localeCompare(b[0]));
+  }, [liveModels, modelQuery, preset.label]);
+
+  useEffect(() => {
+    if (!modelOpen) return;
+    const onDown = (e: MouseEvent) => {
+      if (!modelBoxRef.current?.contains(e.target as Node)) setModelOpen(false);
+    };
+    document.addEventListener('mousedown', onDown);
+    return () => document.removeEventListener('mousedown', onDown);
+  }, [modelOpen]);
+
   const knownIds = liveModels.map((m) => m.id);
   const modelInKnown = knownIds.includes(cfg.model);
   const showFreeForm = preset.freeFormModel || knownIds.length === 0;
@@ -1515,25 +1547,78 @@ function ProviderDetail({
             )}
 
             {liveModels.length > 0 ? (
-              <div className="flex flex-wrap gap-1.5">
-                {liveModels.map((m) => {
-                  const selectedModel = m.id === cfg.model;
-                  return (
-                    <button
-                      key={m.id}
-                      onClick={() => onUpdate({ model: m.id })}
-                      className={cn(
-                        'rounded-md border px-2.5 py-1 font-mono text-[11px] transition-all duration-150 ease-apple',
-                        selectedModel
-                          ? 'border-accent/50 bg-accent-soft text-fg-base shadow-glow-sm'
-                          : 'border-border-subtle bg-bg-base/40 text-fg-muted hover:border-border-strong hover:text-fg-base',
+              <div ref={modelBoxRef} className="relative">
+                <button
+                  onClick={() => setModelOpen((o) => !o)}
+                  className="flex w-full items-center justify-between gap-2 rounded-lg border border-border-subtle bg-bg-base/40 px-3 py-1.5 text-left font-mono text-[12px] text-fg-base transition-colors hover:border-border-strong"
+                  aria-haspopup="listbox"
+                  aria-expanded={modelOpen}
+                >
+                  <span className={cn('truncate', !cfg.model && 'text-fg-subtle')}>
+                    {cfg.model || 'Select a model…'}
+                  </span>
+                  <ChevronDown size={13} strokeWidth={2.1} className="shrink-0 text-fg-subtle" />
+                </button>
+
+                {modelOpen && (
+                  <div
+                    className="absolute z-50 mt-1 flex max-h-72 w-full flex-col overflow-hidden rounded-lg border border-border-strong shadow-lg"
+                    style={{ backgroundColor: 'rgb(var(--bg-panel))' }}
+                  >
+                    <div className="flex items-center gap-1.5 border-b border-border-subtle px-2.5 py-1.5">
+                      <Search size={12} strokeWidth={2.1} className="shrink-0 text-fg-subtle" />
+                      <input
+                        autoFocus
+                        value={modelQuery}
+                        onChange={(e) => setModelQuery(e.target.value)}
+                        placeholder="Search models…"
+                        className="w-full bg-transparent font-display text-[12px] text-fg-base placeholder:text-fg-subtle focus:outline-none"
+                        autoComplete="off"
+                        spellCheck={false}
+                      />
+                    </div>
+                    <div className="overflow-y-auto py-1">
+                      {groupedModels.length === 0 ? (
+                        <p className="px-3 py-2 font-display text-[11px] text-fg-subtle">
+                          No models match "{modelQuery}"
+                        </p>
+                      ) : (
+                        groupedModels.map(([group, models]) => (
+                          <div key={group}>
+                            <div className="px-3 pb-0.5 pt-1.5 font-display text-[9.5px] font-semibold uppercase tracking-widest2 text-fg-subtle">
+                              {group}
+                            </div>
+                            {models.map((m) => {
+                              const selectedModel = m.id === cfg.model;
+                              return (
+                                <button
+                                  key={m.id}
+                                  onClick={() => {
+                                    onUpdate({ model: m.id });
+                                    setModelOpen(false);
+                                    setModelQuery('');
+                                  }}
+                                  className={cn(
+                                    'flex w-full items-center justify-between gap-2 px-3 py-1 text-left font-mono text-[11.5px] transition-colors',
+                                    selectedModel
+                                      ? 'bg-accent-soft text-fg-base'
+                                      : 'text-fg-muted hover:bg-white/[0.05] hover:text-fg-base',
+                                  )}
+                                  title={m.label ?? m.id}
+                                >
+                                  <span className="truncate">{m.label ?? m.id}</span>
+                                  {selectedModel && (
+                                    <Check size={12} strokeWidth={2.4} className="shrink-0 text-accent" />
+                                  )}
+                                </button>
+                              );
+                            })}
+                          </div>
+                        ))
                       )}
-                      title={m.label ?? m.id}
-                    >
-                      {m.label ?? m.id}
-                    </button>
-                  );
-                })}
+                    </div>
+                  </div>
+                )}
               </div>
             ) : !loading && !errored ? (
               <p className="font-display text-[11px] text-fg-subtle">
