@@ -13,6 +13,9 @@ export interface PtySpawnOptions {
   cwd?: string | null;
   cols: number;
   rows: number;
+  /** Extra env vars from the project's `.arc/config.toml`, layered on the
+   *  inherited process env. */
+  env?: Record<string, string> | null;
 }
 
 export interface PtyExitEvent {
