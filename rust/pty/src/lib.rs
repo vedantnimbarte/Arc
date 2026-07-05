@@ -28,6 +28,9 @@ pub struct SpawnOptions {
     pub cwd: Option<String>,
     pub cols: u16,
     pub rows: u16,
+    /// Extra env vars (e.g. from a project's `.arc/config.toml`) layered on
+    /// top of the inherited process env.
+    pub env: Option<std::collections::HashMap<String, String>>,
 }
 
 /// Returned to the caller of [`PtyManager::spawn`]. The two receivers must be
@@ -100,6 +103,12 @@ impl PtyManager {
         // ANSI hint for apps that check.
         cmd.env("TERM", "xterm-256color");
         cmd.env("COLORTERM", "truecolor");
+        // Project config env wins over inherited vars (applied last).
+        if let Some(ref env) = opts.env {
+            for (k, v) in env {
+                cmd.env(k, v);
+            }
+        }
 
         // Inject OSC 7 emission so the frontend's file tree can follow the
         // shell's CWD. Default cmd.exe and PowerShell don't emit it; we
