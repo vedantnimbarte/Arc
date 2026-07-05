@@ -196,10 +196,16 @@ export const DEFAULT_AGENTS: Agent[] = [
 
 interface AgentsState {
   custom: Agent[];
+  /** Agents declared in the active project's `.arc/config.toml`. Ephemeral —
+   *  NOT persisted (see `partialize`); repopulated whenever the workspace root
+   *  changes. Shown after built-ins, before user-created customs. */
+  project: Agent[];
   /** Per-agent extra instructions appended to the base systemPrompt. Keyed
    *  by agent id; applies to both built-in and custom agents. Empty/whitespace
    *  values mean "no override" — same as a missing entry. */
   instructions: Record<string, string>;
+  /** Replace the project-agent slice wholesale (called on config load). */
+  setProjectAgents: (agents: Agent[]) => void;
   createAgent: (
     input: Omit<Agent, 'id' | 'builtin' | 'createdAt'>,
   ) => string;
@@ -217,7 +223,9 @@ export const useAgents = create<AgentsState>()(
   persist(
     (set) => ({
       custom: [],
+      project: [],
       instructions: {},
+      setProjectAgents: (agents) => set({ project: agents }),
       createAgent: (input) => {
         const id = `custom-${crypto.randomUUID()}`;
         set((s) => ({
@@ -257,7 +265,14 @@ export const useAgents = create<AgentsState>()(
     // Version stays at 1 — adding the `instructions` field is backwards
     // compatible because Zustand persist shallow-merges the loaded blob
     // onto the initial state, so v1 stores get `instructions: {}` for free.
-    { name: 'arc-agents', version: 1 },
+    // `project` is deliberately excluded from `partialize`: project agents are
+    // reloaded from `.arc/config.toml` each session and must not leak across
+    // projects via localStorage.
+    {
+      name: 'arc-agents',
+      version: 1,
+      partialize: (s) => ({ custom: s.custom, instructions: s.instructions }),
+    },
   ),
 );
 
@@ -274,9 +289,9 @@ if (typeof window !== 'undefined') {
 
 // --- Selectors -------------------------------------------------------------
 
-/** All agents in display order (built-ins first, then user-created). */
+/** All agents in display order (built-ins, then project, then user-created). */
 export function getAllAgents(state: AgentsState = useAgents.getState()): Agent[] {
-  return [...DEFAULT_AGENTS, ...state.custom];
+  return [...DEFAULT_AGENTS, ...state.project, ...state.custom];
 }
 
 /** Resolve an agent and layer the user's custom instructions on top. The
@@ -284,7 +299,7 @@ export function getAllAgents(state: AgentsState = useAgents.getState()): Agent[]
  *  model — base prompt + a blank line + the user's extras. */
 export function getAgentById(id: string | undefined | null): Agent {
   const state = useAgents.getState();
-  const all = [...DEFAULT_AGENTS, ...state.custom];
+  const all = [...DEFAULT_AGENTS, ...state.project, ...state.custom];
   const base = (id ? all.find((a) => a.id === id) : undefined) ?? DEFAULT_AGENTS[0]!;
   const extra = (state.instructions[base.id] ?? '').trim();
   if (extra.length === 0) return base;
@@ -296,6 +311,7 @@ export function getAgentById(id: string | undefined | null): Agent {
  *  the user's override. */
 export function getRawAgentById(id: string | undefined | null): Agent {
   if (!id) return DEFAULT_AGENTS[0]!;
-  const all = [...DEFAULT_AGENTS, ...useAgents.getState().custom];
+  const { project, custom } = useAgents.getState();
+  const all = [...DEFAULT_AGENTS, ...project, ...custom];
   return all.find((a) => a.id === id) ?? DEFAULT_AGENTS[0]!;
 }

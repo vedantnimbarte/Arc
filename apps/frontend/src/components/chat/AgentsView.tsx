@@ -22,6 +22,7 @@ const TINT_KEYS = Object.keys(AGENT_TINTS) as AgentTint[];
 
 export function AgentsView({ onBack, onPicked }: Props) {
   const custom = useAgents((s) => s.custom);
+  const project = useAgents((s) => s.project);
   const deleteAgent = useAgents((s) => s.deleteAgent);
 
   const activeSessionId = useChat((s) => s.activeSessionId);
@@ -100,6 +101,27 @@ export function AgentsView({ onBack, onPicked }: Props) {
             />
           ))}
         </ul>
+
+        {project.length > 0 && (
+          <>
+            <div
+              className="mt-4 mb-2 px-1 font-display text-[10px] uppercase tracking-widest2 text-fg-subtle"
+              title="Defined in this project's .arc/config.toml"
+            >
+              Project
+            </div>
+            <ul className="flex flex-col gap-1.5">
+              {project.map((a) => (
+                <AgentRow
+                  key={a.id}
+                  agent={a}
+                  active={a.id === activeAgentId}
+                  onPick={() => pick(a.id)}
+                />
+              ))}
+            </ul>
+          </>
+        )}
 
         <div className="mt-4 mb-2 px-1 font-display text-[10px] uppercase tracking-widest2 text-fg-subtle">
           Custom
