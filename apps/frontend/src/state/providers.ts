@@ -151,7 +151,7 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
     description: 'One key, every model — gateway for 200+ models',
     monogram: 'R',
     tint: 'emerald',
-    defaultBaseUrl: 'https://openrouter.ai/api',
+    defaultBaseUrl: 'https://openrouter.ai/api/v1',
     defaultModels: [
       'openai/gpt-4o',
       'anthropic/claude-3.5-sonnet',
