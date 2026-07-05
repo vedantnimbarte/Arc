@@ -1179,6 +1179,7 @@ export interface CommandRecord {
   started_at: number;
   finished_at: number | null;
   exit_code: number | null;
+  output_excerpt: string | null;
 }
 
 export interface CommandLogReq {
