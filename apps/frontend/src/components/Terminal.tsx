@@ -8,6 +8,7 @@ import {
   fsReadDir,
   isTauri,
   onPtyExit,
+  projectConfigLoad,
   ptyKill,
   ptyResize,
   ptySpawn,
@@ -369,14 +370,28 @@ export function Terminal({ sessionKey }: Props) {
         // the global default shell.
         const tab = useWorkspace.getState().tabs.find((t) => t.id === sessionKey);
         const chosenShell = tab?.shellOverride ?? useSettings.getState().defaultShell;
+        // Layer any `.arc/config.toml` env for the terminal's actual cwd on
+        // top of the inherited process env. Loaded per-cwd (not from the
+        // file-tree-keyed store) so it's race-free against the home reset.
+        let projectEnv: Record<string, string> | null = null;
+        const cwd = initialCwd.current;
+        if (cwd) {
+          try {
+            const pc = await projectConfigLoad(cwd);
+            if (pc?.env && Object.keys(pc.env).length > 0) projectEnv = pc.env;
+          } catch {
+            // No config / unreadable → inherit env only.
+          }
+        }
         // `onPtyChunk` is wired to the output channel *inside* ptySpawn
         // before the pty_spawn command runs, so no early output is dropped.
         ptyId = await ptySpawn(
           {
             shell: chosenShell && chosenShell.length > 0 ? chosenShell : null,
-            cwd: initialCwd.current ?? null,
+            cwd: cwd ?? null,
             cols: term.cols,
             rows: term.rows,
+            env: projectEnv,
           },
           onPtyChunk,
         );

@@ -11,6 +11,7 @@ import { ChatPanel } from './components/ChatPanel';
 import { StatusBar } from './components/StatusBar';
 import { CommandPalette } from './components/CommandPalette';
 import { CommandHistoryPalette } from './components/CommandHistoryPalette';
+import { CommandBlocks } from './components/CommandBlocks';
 import { Sidebar, SidebarMiniRail } from './components/Sidebar';
 import { ResizeHandle } from './components/ResizeHandle';
 import { SearchPalette } from './components/SearchPalette';
@@ -152,6 +153,7 @@ export default function App() {
   void activeTab;
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
+  const [blocksOpen, setBlocksOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
   // Chat panel is now a floating popover instead of a docked sidebar.
@@ -248,6 +250,9 @@ export default function App() {
         return;
       case 'open-command-history':
         setHistoryOpen(true);
+        return;
+      case 'open-command-blocks':
+        setBlocksOpen(true);
         return;
       case 'open-search':
         setSearchOpen(true);
@@ -491,6 +496,7 @@ export default function App() {
 
       <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} />
       <CommandHistoryPalette open={historyOpen} onClose={() => setHistoryOpen(false)} />
+      <CommandBlocks open={blocksOpen} onClose={() => setBlocksOpen(false)} />
       <WorktreePanel />
       <CherryPickDialog />
       <RebasePanel />

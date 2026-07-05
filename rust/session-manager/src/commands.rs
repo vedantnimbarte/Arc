@@ -20,6 +20,7 @@ pub struct CommandRecord {
     pub started_at: i64,
     pub finished_at: Option<i64>,
     pub exit_code: Option<i64>,
+    pub output_excerpt: Option<String>,
 }
 
 /// Finalize a previously-appended command: record exit code, the time it
@@ -109,9 +110,9 @@ pub async fn recent(pool: &SqlitePool, limit: i64, query: Option<&str>) -> Resul
         let like = format!("%{q}%");
         sqlx::query_as::<
             _,
-            (i64, Option<String>, Option<String>, Option<String>, Option<String>, String, i64, Option<i64>, Option<i64>),
+            (i64, Option<String>, Option<String>, Option<String>, Option<String>, String, i64, Option<i64>, Option<i64>, Option<String>),
         >(
-            "SELECT id, session_id, tab_id, workspace_id, cwd, command, started_at, finished_at, exit_code \
+            "SELECT id, session_id, tab_id, workspace_id, cwd, command, started_at, finished_at, exit_code, output_excerpt \
              FROM command_history \
              WHERE command LIKE ? \
              ORDER BY started_at DESC, id DESC LIMIT ?",
@@ -123,9 +124,9 @@ pub async fn recent(pool: &SqlitePool, limit: i64, query: Option<&str>) -> Resul
     } else {
         sqlx::query_as::<
             _,
-            (i64, Option<String>, Option<String>, Option<String>, Option<String>, String, i64, Option<i64>, Option<i64>),
+            (i64, Option<String>, Option<String>, Option<String>, Option<String>, String, i64, Option<i64>, Option<i64>, Option<String>),
         >(
-            "SELECT id, session_id, tab_id, workspace_id, cwd, command, started_at, finished_at, exit_code \
+            "SELECT id, session_id, tab_id, workspace_id, cwd, command, started_at, finished_at, exit_code, output_excerpt \
              FROM command_history \
              ORDER BY started_at DESC, id DESC LIMIT ?",
         )
@@ -137,7 +138,7 @@ pub async fn recent(pool: &SqlitePool, limit: i64, query: Option<&str>) -> Resul
     Ok(rows
         .into_iter()
         .map(
-            |(id, session_id, tab_id, workspace_id, cwd, command, started_at, finished_at, exit_code)| {
+            |(id, session_id, tab_id, workspace_id, cwd, command, started_at, finished_at, exit_code, output_excerpt)| {
                 CommandRecord {
                     id,
                     session_id,
@@ -148,6 +149,7 @@ pub async fn recent(pool: &SqlitePool, limit: i64, query: Option<&str>) -> Resul
                     started_at,
                     finished_at,
                     exit_code,
+                    output_excerpt,
                 }
             },
         )
