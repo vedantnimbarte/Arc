@@ -7,6 +7,7 @@ import { SshTab } from './components/ssh/SshTab';
 import { SshSessionLogPanel } from './components/ssh/SshSessionLogDrawer';
 import { useSsh } from './state/ssh';
 import { TabBar } from './components/TabBar';
+import { WindowResizeHandles } from './components/WindowResizeHandles';
 import { ChatPanel } from './components/ChatPanel';
 import { StatusBar } from './components/StatusBar';
 import { CommandPalette } from './components/CommandPalette';
@@ -516,6 +517,10 @@ export default function App() {
           The host div is stable across drag/drop and split moves; the React
           subtree below the portal therefore never unmounts. */}
       {portals}
+
+      {/* Frameless-window resize grips — the window has decorations:false, so
+          native edge/corner resize is gone (notably on Linux). */}
+      <WindowResizeHandles />
     </div>
   );
 }

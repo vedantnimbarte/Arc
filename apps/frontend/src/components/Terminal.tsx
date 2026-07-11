@@ -114,45 +114,61 @@ export function Terminal({ sessionKey }: Props) {
         (absPath, line) => useWorkspace.getState().openFile(absPath, undefined, { line }),
       ),
     );
-    // Remove orphaned DOM from a previous xterm instance. In React Strict Mode
-    // effects run twice (mount→cleanup→remount); dispose() doesn't always
-    // remove every child, so the second open() finds a dirty container.
-    while (container.firstChild) container.removeChild(container.firstChild);
-    term.open(container);
+    // Defer `term.open()` until the container is actually visible. Tabs that
+    // aren't the active leaf mount with their host div parked in the hidden
+    // (`display:none`) stage, so the container is 0×0. Opening xterm there
+    // makes it defer renderer creation, and the first PTY write then crashes
+    // inside `syncScrollArea` (`this._renderer.value.dimensions` on an
+    // undefined renderer). ensureOpen() runs once the host is shown — see the
+    // `arc:host-shown` handler and ResizeObserver below.
+    let opened = false;
+    const ensureOpen = () => {
+      if (opened || disposed) return;
+      if (container.offsetWidth === 0 || container.offsetHeight === 0) return;
+      opened = true;
+      // Remove orphaned DOM from a previous xterm instance. In React Strict
+      // Mode effects run twice (mount→cleanup→remount); dispose() doesn't
+      // always remove every child, so the second open() finds a dirty
+      // container.
+      while (container.firstChild) container.removeChild(container.firstChild);
+      term.open(container);
 
-    // Optional WebGL renderer. xterm requires it to be loaded *after*
-    // `open()` because it needs a live canvas to grab a GL context from.
-    // The setting captures the user's preference at mount time; switching
-    // it in Settings applies to subsequently-opened tabs.
-    if (initialSettings.terminalWebgl) {
-      void (async () => {
-        try {
-          const { WebglAddon } = await import('@xterm/addon-webgl');
-          if (disposed) return;
-          const webgl = new WebglAddon();
-          // Dispose on context loss so xterm transparently falls back to
-          // its canvas renderer instead of freezing the pane. Route
-          // through disposeWebgl so the cleanup path can't double-dispose
-          // (which throws inside xterm's AddonManager).
-          webgl.onContextLoss(() => disposeWebgl());
-          term.loadAddon(webgl);
-          webglAddon = webgl;
-        } catch (err) {
-          // GPU lacks WebGL2, driver crashed, etc. — terminal keeps working
-          // with the default renderer.
-          console.warn('[terminal] WebGL renderer unavailable:', err);
-        }
-      })();
-    }
+      // Optional WebGL renderer. xterm requires it to be loaded *after*
+      // `open()` because it needs a live canvas to grab a GL context from.
+      // The setting captures the user's preference at mount time; switching
+      // it in Settings applies to subsequently-opened tabs.
+      if (initialSettings.terminalWebgl) {
+        void (async () => {
+          try {
+            const { WebglAddon } = await import('@xterm/addon-webgl');
+            if (disposed) return;
+            const webgl = new WebglAddon();
+            // Dispose on context loss so xterm transparently falls back to
+            // its canvas renderer instead of freezing the pane. Route
+            // through disposeWebgl so the cleanup path can't double-dispose
+            // (which throws inside xterm's AddonManager).
+            webgl.onContextLoss(() => disposeWebgl());
+            term.loadAddon(webgl);
+            webglAddon = webgl;
+          } catch (err) {
+            // GPU lacks WebGL2, driver crashed, etc. — terminal keeps working
+            // with the default renderer.
+            console.warn('[terminal] WebGL renderer unavailable:', err);
+          }
+        })();
+      }
+      safeFit();
+    };
 
     const safeFit = () => {
+      if (!opened) return;
       try {
         fit.fit();
       } catch {
         /* container not measurable yet */
       }
     };
-    safeFit();
+    ensureOpen();
 
     // Live-update font + theme when the user changes them in Settings.
     const unsubAppearance = useSettings.subscribe((s, prev) => {
@@ -176,7 +192,9 @@ export function Terminal({ sessionKey }: Props) {
     // Deferred fit: on the next frame the flex layout is guaranteed to have
     // resolved, which matters when this pane is freshly created by a split.
     const rafId = requestAnimationFrame(() => {
-      if (!disposed) safeFit();
+      if (disposed) return;
+      ensureOpen();
+      safeFit();
     });
 
     // Re-fit once webfonts (Geist Mono) finish loading — prevents column drift
@@ -613,7 +631,10 @@ export function Terminal({ sessionKey }: Props) {
 
     void boot();
 
-    const ro = new ResizeObserver(() => safeFit());
+    const ro = new ResizeObserver(() => {
+      ensureOpen();
+      safeFit();
+    });
     ro.observe(container);
 
     // When the tab's host div is reparented from the offscreen stage back
@@ -626,6 +647,7 @@ export function Terminal({ sessionKey }: Props) {
     const onHostShown = () => {
       requestAnimationFrame(() => {
         if (disposed) return;
+        ensureOpen();
         safeFit();
         try {
           term.refresh(0, Math.max(0, term.rows - 1));
