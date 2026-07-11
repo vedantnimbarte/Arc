@@ -94,28 +94,6 @@ export function TabBar({
   }, [root]);
   const plusRef = useRef<HTMLButtonElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
-  const toolbarRef = useRef<HTMLDivElement>(null);
-
-  // Linux (webkit2gtk) ignores the `-webkit-app-region: drag` CSS that moves
-  // the frameless window on Windows/macOS, and Tauri's built-in handler only
-  // fires when the mousedown target *itself* carries `data-tauri-drag-region`
-  // — child containers covering the bar block it. So on Linux we replicate the
-  // subtree behaviour ourselves: any mousedown that isn't on an interactive
-  // control starts the window drag (double-click toggles maximize).
-  useEffect(() => {
-    const el = toolbarRef.current;
-    if (!el || !isTauri || !navigator.userAgent.includes('Linux')) return;
-    const onDown = (e: MouseEvent) => {
-      if (e.button !== 0) return;
-      const t = e.target as HTMLElement;
-      if (t.closest('button, a, input, textarea, select, [role="button"], [role="menuitem"], [contenteditable="true"]')) return;
-      const win = getCurrentWindow();
-      if (e.detail === 2) void win.toggleMaximize();
-      else void win.startDragging();
-    };
-    el.addEventListener('mousedown', onDown);
-    return () => el.removeEventListener('mousedown', onDown);
-  }, []);
 
   // One-shot detection. The list is cheap (PATH scan) but doesn't change
   // mid-session, so we cache it. Users who install a CLI mid-session can
@@ -213,8 +191,7 @@ export function TabBar({
   return (
     <>
     <div
-      ref={toolbarRef}
-      data-tauri-drag-region
+      data-tauri-drag-region="deep"
       className="material-toolbar relative flex h-12 shrink-0 items-center gap-2 pl-3"
     >
       {/* Sidebar toggle — left rail, mirrors macOS toolbar control */}
