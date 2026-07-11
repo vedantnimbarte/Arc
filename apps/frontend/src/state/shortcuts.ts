@@ -19,7 +19,10 @@ export type ActionId =
   | 'launch-claude-cli'
   | 'launch-codex-cli'
   | 'launch-opencode-cli'
-  | 'launch-kimi-code-cli';
+  | 'launch-kimi-code-cli'
+  | 'launch-wingman-cli'
+  | 'launch-wingman-pilot'
+  | 'launch-wingman-headless';
 
 export type ActionCategory = 'Workspace' | 'Terminal' | 'SSH' | 'AI CLIs' | 'Help';
 
@@ -131,6 +134,24 @@ export const ACTION_META: Record<ActionId, ActionMeta> = {
     description: 'Open a new terminal tab running the Kimi Code CLI.',
     category: 'AI CLIs',
   },
+  'launch-wingman-cli': {
+    id: 'launch-wingman-cli',
+    label: 'Launch Wingman',
+    description: 'Open a new terminal tab running the Wingman TUI.',
+    category: 'AI CLIs',
+  },
+  'launch-wingman-pilot': {
+    id: 'launch-wingman-pilot',
+    label: 'Launch Wingman Pilot',
+    description: 'Prompt for a goal, then run Wingman pilot mode in a terminal tab.',
+    category: 'AI CLIs',
+  },
+  'launch-wingman-headless': {
+    id: 'launch-wingman-headless',
+    label: 'Launch Wingman (headless)',
+    description: 'Prompt for a message, then run a one-shot headless Wingman response.',
+    category: 'AI CLIs',
+  },
 };
 
 export const ACTION_ORDER: ActionId[] = [
@@ -149,6 +170,9 @@ export const ACTION_ORDER: ActionId[] = [
   'launch-codex-cli',
   'launch-opencode-cli',
   'launch-kimi-code-cli',
+  'launch-wingman-cli',
+  'launch-wingman-pilot',
+  'launch-wingman-headless',
 ];
 
 const mod = (extra: Partial<KeyBinding> = {}): Pick<KeyBinding, 'ctrl' | 'meta'> => ({
@@ -176,6 +200,9 @@ export const DEFAULT_BINDINGS: Record<ActionId, KeyBinding | null> = {
   'launch-codex-cli': null,
   'launch-opencode-cli': null,
   'launch-kimi-code-cli': null,
+  'launch-wingman-cli': null,
+  'launch-wingman-pilot': null,
+  'launch-wingman-headless': null,
 };
 
 interface ShortcutsState {

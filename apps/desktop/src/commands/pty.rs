@@ -38,6 +38,7 @@ pub struct PtySpawnOpts {
     pub cols: u16,
     pub rows: u16,
     pub env: Option<std::collections::HashMap<String, String>>,
+    pub args: Option<Vec<String>>,
 }
 
 #[derive(Debug, Serialize, Clone)]
@@ -61,6 +62,7 @@ pub async fn pty_spawn(
             cols: opts.cols,
             rows: opts.rows,
             env: opts.env,
+            args: opts.args,
         })
         .map_err(|e| format!("{e:#}"))?;
 

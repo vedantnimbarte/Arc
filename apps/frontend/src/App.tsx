@@ -29,6 +29,7 @@ import {
 import { useCommands, type CommandAction, type CommandGroup } from './state/commands';
 import { WorktreePanel } from './components/git/WorktreePanel';
 import { CherryPickDialog } from './components/git/CherryPickDialog';
+import { WingmanPromptDialog } from './components/WingmanPromptDialog';
 import { RebasePanel } from './components/git/RebasePanel';
 import { PrPanel } from './components/git/PrPanel';
 import { FolderOpen, FolderTree, GitPullRequest, ListOrdered } from 'lucide-react';
@@ -50,6 +51,7 @@ const DiffView = lazy(() =>
 export default function App() {
   const { tabs, activeTabId } = useWorkspace();
   const launchAiCli = useWorkspace((s) => s.launchAiCli);
+  const launchWingman = useWorkspace((s) => s.launchWingman);
   const newTerminal = useWorkspace((s) => s.newTerminal);
   const hydrate = useWorkspace((s) => s.hydrate);
   const activeTab = tabs.find((t) => t.id === activeTabId);
@@ -243,6 +245,15 @@ export default function App() {
       case 'launch-kimi-code-cli':
         void launchCli('kimi-code-cli');
         return;
+      case 'launch-wingman-cli':
+        void launchWingman('tui');
+        return;
+      case 'launch-wingman-pilot':
+        void launchWingman('pilot');
+        return;
+      case 'launch-wingman-headless':
+        void launchWingman('headless');
+        return;
     }
   };
 
@@ -407,6 +418,7 @@ export default function App() {
       <CommandBlocks open={blocksOpen} onClose={() => setBlocksOpen(false)} />
       <WorktreePanel />
       <CherryPickDialog />
+      <WingmanPromptDialog />
       <RebasePanel />
       <PrPanel />
       <SearchPalette open={searchOpen} onClose={() => setSearchOpen(false)} />

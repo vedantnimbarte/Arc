@@ -13,6 +13,9 @@ export interface PtySpawnOptions {
   /** Extra env vars from the project's `.arc/config.toml`, layered on the
    *  inherited process env. */
   env?: Record<string, string> | null;
+  /** Extra arguments passed to the spawned program — used by AI CLI
+   *  launchers that run a subcommand (e.g. `wingman pilot run <goal>`). */
+  args?: string[] | null;
 }
 
 export interface PtyExitEvent {
@@ -71,7 +74,12 @@ export async function ptyListShells(): Promise<ShellInfo[]> {
 }
 
 /** Stable id assigned to each AI CLI by the Rust detector. */
-export type AiCliId = 'claude-cli' | 'codex-cli' | 'opencode-cli' | 'kimi-code-cli';
+export type AiCliId =
+  | 'claude-cli'
+  | 'codex-cli'
+  | 'opencode-cli'
+  | 'kimi-code-cli'
+  | 'wingman-cli';
 
 /** One installed AI coding-agent CLI discovered on PATH. */
 export interface AiCliInfo {

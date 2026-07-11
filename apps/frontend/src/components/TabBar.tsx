@@ -48,6 +48,7 @@ export function TabBar({
     closeTab,
     openFile,
     launchAiCli,
+    launchWingman,
     newTerminal,
     openPreview,
     openApiClient,
@@ -175,6 +176,12 @@ export function TabBar({
     void launchAiCli(cli);
     setMenuOpen(false);
   };
+
+  const launchWingmanMode = (mode: 'pilot' | 'headless') => {
+    void launchWingman(mode);
+    setMenuOpen(false);
+  };
+  const hasWingman = aiClis.some((c) => c.id === 'wingman-cli');
 
   const requestClose = (id: string, title: string) => {
     // Workspace invariant: at least one tab is always open. The store also
@@ -362,6 +369,28 @@ export function TabBar({
                   <span className="flex-1 truncate">{cli.label}</span>
                 </button>
               ))}
+              {hasWingman && (
+                <>
+                  <button
+                    role="menuitem"
+                    onClick={() => launchWingmanMode('pilot')}
+                    className="flex w-full items-center gap-2 px-3 py-2 text-left font-display text-[12px] text-fg-base/90 transition-colors hover:bg-white/[0.06]"
+                    title="Prompt for a goal, then run Wingman pilot mode"
+                  >
+                    <Bot size={12} strokeWidth={2} className="text-fg-subtle" />
+                    <span className="flex-1 truncate">Wingman Pilot</span>
+                  </button>
+                  <button
+                    role="menuitem"
+                    onClick={() => launchWingmanMode('headless')}
+                    className="flex w-full items-center gap-2 px-3 py-2 text-left font-display text-[12px] text-fg-base/90 transition-colors hover:bg-white/[0.06]"
+                    title="Prompt for a message, then run a one-shot headless response"
+                  >
+                    <Bot size={12} strokeWidth={2} className="text-fg-subtle" />
+                    <span className="flex-1 truncate">Wingman (headless)</span>
+                  </button>
+                </>
+              )}
             </>
           )}
         </div>,

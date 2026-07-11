@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import {
   fsDefaultRoot,
   isTauri,
+  ptyListAiClis,
   sessionLoad,
   sessionSaveTabs,
   type AiCliInfo,
@@ -36,6 +37,10 @@ export interface Tab {
    *  AI CLI launchers (Claude Code / Codex / OpenCode). Transient: not
    *  persisted across restarts (the tab would come back as a regular shell). */
   shellOverride?: string;
+  /** Extra args for `shellOverride` — used by the Wingman launcher to run a
+   *  subcommand (`pilot run <goal>`) or headless `--print <prompt>`. Transient,
+   *  like `shellOverride`. */
+  shellArgs?: string[];
   /** SSH host id for `kind: 'ssh'` tabs. Persisted so an SSH tab restores
    *  after relaunch — the tab opens in `idle` state and the user clicks
    *  Reconnect to redial. */
@@ -125,6 +130,10 @@ interface WorkspaceState {
   /** Becomes true after the first hydrate() call (success or failure).
    *  Components can use this to delay any "write" side effects. */
   hydrated: boolean;
+  /** Non-null while the Wingman goal/prompt dialog is open. Holds the mode
+   *  awaiting user input and the resolved CLI so submit can launch without
+   *  re-scanning PATH. Transient (never persisted). */
+  wingmanPrompt: { mode: 'pilot' | 'headless'; cli: AiCliInfo } | null;
   addTab: (tab: Tab) => void;
   closeTab: (id: string) => void;
   setActive: (id: string) => void;
@@ -168,8 +177,18 @@ interface WorkspaceState {
   openDiff: (absPath: string, root: string, scope: 'worktree' | 'staged' | 'head') => string;
   /** Spawn a new terminal tab that runs an AI CLI (Claude Code / Codex /
    *  OpenCode) directly instead of the default shell. Anchors the new tab
-   *  (and the file tree) at the user's home directory. */
-  launchAiCli: (cli: AiCliInfo) => Promise<string>;
+   *  (and the file tree) at the user's home directory. `opts.args` runs the
+   *  CLI with a subcommand; `opts.title` overrides the tab label. */
+  launchAiCli: (cli: AiCliInfo, opts?: { args?: string[]; title?: string }) => Promise<string>;
+  /** Launch Wingman in one of its modes. `tui` opens the interactive TUI
+   *  immediately; `pilot`/`headless` need an argument, so they open the
+   *  Wingman prompt dialog (see `wingmanPrompt`) instead of launching now. */
+  launchWingman: (mode: 'tui' | 'pilot' | 'headless') => Promise<void>;
+  /** Resolve the open Wingman prompt with the user's goal/prompt text and
+   *  launch the tab. Blank input cancels. */
+  confirmWingmanPrompt: (input: string) => Promise<void>;
+  /** Dismiss the Wingman prompt dialog without launching. */
+  cancelWingmanPrompt: () => void;
   /** Open a new terminal tab anchored at the user's home directory.
    *  Resets the file-tree root to home first so the spawning PTY inherits
    *  it as CWD and both panes stay in sync. */
@@ -517,6 +536,7 @@ export const useWorkspace = create<WorkspaceState>()((set, get) => ({
   tabGroups: [],
   sessionId: null,
   hydrated: false,
+  wingmanPrompt: null,
   addTab: (tab) =>
     set((s) => {
       // New tab always lands in the currently-focused leaf so opening a
@@ -780,18 +800,56 @@ export const useWorkspace = create<WorkspaceState>()((set, get) => ({
     get().addTab(tab);
     return id;
   },
-  launchAiCli: async (cli) => {
+  launchAiCli: async (cli, opts) => {
     await resetRootToHome();
     const id = `${cli.id}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
     const tab: Tab = {
       id,
-      title: cli.label,
+      title: opts?.title ?? cli.label,
       kind: 'terminal',
       shellOverride: cli.path,
+      shellArgs: opts?.args,
     };
     get().addTab(tab);
     return id;
   },
+  launchWingman: async (mode) => {
+    let cli: AiCliInfo | undefined;
+    try {
+      cli = (await ptyListAiClis()).find((c) => c.id === 'wingman-cli');
+    } catch (err) {
+      console.error('[wingman] discover failed:', err);
+      return;
+    }
+    if (!cli) {
+      console.warn('[wingman] not detected on PATH');
+      return;
+    }
+    if (mode === 'tui') {
+      await get().launchAiCli(cli);
+      return;
+    }
+    // pilot/headless both need a runtime argument — collect it via the dialog.
+    set({ wingmanPrompt: { mode, cli } });
+  },
+  confirmWingmanPrompt: async (input) => {
+    const prompt = get().wingmanPrompt;
+    set({ wingmanPrompt: null });
+    const text = input.trim();
+    if (!prompt || !text) return;
+    if (prompt.mode === 'pilot') {
+      await get().launchAiCli(prompt.cli, {
+        args: ['pilot', 'run', text],
+        title: 'Wingman Pilot',
+      });
+    } else {
+      await get().launchAiCli(prompt.cli, {
+        args: ['--print', text],
+        title: 'Wingman (headless)',
+      });
+    }
+  },
+  cancelWingmanPrompt: () => set({ wingmanPrompt: null }),
   newTerminal: async (override) => {
     await resetRootToHome();
     const id = `term-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;

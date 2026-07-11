@@ -31,6 +31,9 @@ pub struct SpawnOptions {
     /// Extra env vars (e.g. from a project's `.arc/config.toml`) layered on
     /// top of the inherited process env.
     pub env: Option<std::collections::HashMap<String, String>>,
+    /// Extra arguments passed to the spawned program — used by AI CLI
+    /// launchers that run a subcommand (e.g. `wingman pilot run <goal>`).
+    pub args: Option<Vec<String>>,
 }
 
 /// Returned to the caller of [`PtyManager::spawn`]. The two receivers must be
@@ -70,6 +73,11 @@ impl PtyManager {
 
         let shell = opts.shell.unwrap_or_else(default_shell);
         let mut cmd = CommandBuilder::new(&shell);
+        if let Some(ref args) = opts.args {
+            for a in args {
+                cmd.arg(a);
+            }
+        }
         // Pick the most plausible cwd, validating each candidate so we
         // never hand the spawn a non-existent directory. On Windows that
         // would cause `CreateProcessW` to exit the shell with code 1
@@ -427,6 +435,48 @@ mod env_denylist_tests {
     }
 }
 
+#[cfg(all(test, unix))]
+mod spawn_args_tests {
+    use super::{PtyManager, SpawnOptions};
+    use std::time::{Duration, Instant};
+
+    // The Wingman launcher runs `wingman pilot run <goal>` etc. via
+    // SpawnOptions.args — confirm those args actually reach the child.
+    #[test]
+    fn args_are_passed_to_the_child() {
+        let mgr = PtyManager::new();
+        let mut result = mgr
+            .spawn(SpawnOptions {
+                shell: Some("/bin/sh".into()),
+                cwd: None,
+                cols: 80,
+                rows: 24,
+                env: None,
+                args: Some(vec!["-c".into(), "printf ARGSOK123".into()]),
+            })
+            .expect("spawn");
+
+        let mut out = Vec::new();
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while Instant::now() < deadline {
+            match result.data_rx.try_recv() {
+                Ok(chunk) => out.extend_from_slice(&chunk),
+                Err(_) => {
+                    if String::from_utf8_lossy(&out).contains("ARGSOK123") {
+                        break;
+                    }
+                    std::thread::sleep(Duration::from_millis(20));
+                }
+            }
+        }
+        assert!(
+            String::from_utf8_lossy(&out).contains("ARGSOK123"),
+            "child output missing arg marker; got {:?}",
+            String::from_utf8_lossy(&out),
+        );
+    }
+}
+
 /// One shell discovered on the user's `PATH`. Returned by [`discover_shells`].
 ///
 /// `label` is a human-friendly name ("Windows PowerShell", "Zsh"), `path`
@@ -560,6 +610,11 @@ pub fn discover_ai_clis() -> Vec<AiCliInfo> {
                     "kimicode",
                 ],
             ),
+            (
+                "wingman-cli",
+                "Wingman",
+                &["wingman.cmd", "wingman.exe", "wingman.bat", "wingman"],
+            ),
         ]
     } else {
         &[
@@ -567,6 +622,7 @@ pub fn discover_ai_clis() -> Vec<AiCliInfo> {
             ("codex-cli", "OpenAI Codex", &["codex"]),
             ("opencode-cli", "OpenCode", &["opencode"]),
             ("kimi-code-cli", "Kimi Code", &["kimi", "kimicode"]),
+            ("wingman-cli", "Wingman", &["wingman"]),
         ]
     };
 
