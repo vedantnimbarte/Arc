@@ -40,5 +40,8 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm typecheck
       - run: pnpm -r test
+      # Tauri's generate_context! macro validates that frontendDist exists at
+      # compile time, so the frontend must be built before any cargo step.
+      - run: pnpm --filter @arc/frontend build
       - run: cargo check --workspace
       - run: cargo test --workspace
