@@ -5,7 +5,7 @@ edition.workspace = true
 license.workspace = true
 authors.workspace = true
 rust-version.workspace = true
-description = "ARC — AI-native terminal & agent runtime (Tauri shell)"
+description = "ARC — terminal, editor & developer workspace (Tauri shell)"
 
 [build-dependencies]
 tauri-build = { workspace = true }
@@ -24,8 +24,6 @@ anyhow = { workspace = true }
 
 arc-pty = { workspace = true }
 arc-session-manager = { workspace = true }
-arc-agent-runtime = { workspace = true }
-arc-ai-runtime = { workspace = true }
 arc-filesystem = { workspace = true }
 arc-git = { workspace = true }
 arc-http-client = { workspace = true }
@@ -33,14 +31,10 @@ arc-ssh = { workspace = true }
 arc-project-config = { workspace = true }
 arc-git-host = { workspace = true }
 arc-lsp = { workspace = true }
-async-trait = { workspace = true }
 dashmap = { workspace = true }
 fontdb = "0.18"
-eventsource-stream = { workspace = true }
-futures-util = { workspace = true }
 keyring = { workspace = true }
 open = { workspace = true }
-reqwest = { workspace = true }
 rfd = { workspace = true }
 uuid = { workspace = true }
 

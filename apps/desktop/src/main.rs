@@ -5,11 +5,8 @@
 mod commands;
 
 use arc_session_manager::SessionStore;
-use commands::agent::AgentApprovals;
 use commands::fs::WatchState;
-use commands::llm::LlmState;
 use commands::lsp::LspState;
-use commands::mcp::McpState;
 use commands::pty::PtyState;
 use commands::ssh::SshState;
 use tauri::Manager;
@@ -50,7 +47,7 @@ fn main() {
         .with_env_filter(
             EnvFilter::try_from_default_env().unwrap_or_else(|_| {
                 EnvFilter::new(
-                    "arc=debug,arc_pty=debug,arc_ai_runtime=debug,arc_session_manager=debug,info",
+                    "arc=debug,arc_pty=debug,arc_session_manager=debug,info",
                 )
             }),
         )
@@ -76,16 +73,13 @@ fn main() {
         .plugin(
             WindowStateBuilder::default()
                 .with_state_flags(WINDOW_STATE_FLAGS)
-                .with_denylist(&["settings", "git", "agent-editor"])
+                .with_denylist(&["settings", "git"])
                 .skip_initial_state("main")
                 .build(),
         )
         .manage(PtyState::default())
         .manage(SshState::default())
-        .manage(LlmState::default())
         .manage(WatchState::default())
-        .manage(McpState::default())
-        .manage(AgentApprovals::new())
         .invoke_handler(tauri::generate_handler![
             commands::pty::pty_spawn,
             commands::pty::pty_write,
@@ -93,9 +87,6 @@ fn main() {
             commands::pty::pty_kill,
             commands::pty::pty_list_shells,
             commands::pty::pty_list_ai_clis,
-            commands::llm::llm_stream,
-            commands::llm::llm_cancel,
-            commands::llm::llm_list_models,
             commands::fs::fs_default_root,
             commands::fs::fs_parent,
             commands::fs::fs_read_dir,
@@ -119,15 +110,6 @@ fn main() {
             commands::session::session_workspaces_list,
             commands::session::session_workspace_upsert,
             commands::session::session_workspace_delete,
-            commands::session::session_agent_runs_list,
-            commands::session::session_chat_load,
-            commands::session::session_chat_append,
-            commands::session::session_chat_clear,
-            commands::session::session_chat_sessions_list,
-            commands::session::session_chat_session_create,
-            commands::session::session_chat_session_update,
-            commands::session::session_chat_session_delete,
-            commands::session::session_chat_messages_load,
             commands::session::session_command_log,
             commands::session::session_commands_recent,
             commands::session::session_command_finish,
@@ -180,9 +162,6 @@ fn main() {
             commands::git_host::git_host_pr_list,
             commands::git_host::git_host_pr_get,
             commands::git_host::git_host_pr_create,
-            commands::secrets::secrets_set_api_key,
-            commands::secrets::secrets_get_api_key,
-            commands::secrets::secrets_delete_api_key,
             commands::ssh::ssh_connect,
             commands::ssh::ssh_write,
             commands::ssh::ssh_resize,
@@ -195,9 +174,6 @@ fn main() {
             commands::ssh::ssh_key_import,
             commands::ssh::ssh_key_delete,
             commands::ssh::ssh_session_logs,
-            commands::agent::agent_run,
-            commands::agent::agent_decide,
-            commands::agent::agent_worktree_discard,
             commands::lsp::lsp_start,
             commands::lsp::lsp_did_open,
             commands::lsp::lsp_did_change,
@@ -207,19 +183,6 @@ fn main() {
             commands::lsp::lsp_definition,
             commands::lsp::lsp_stop,
             commands::lsp::lsp_is_running,
-            commands::mcp::mcp_connect,
-            commands::mcp::mcp_connect_http,
-            commands::mcp::mcp_list_tools,
-            commands::mcp::mcp_call_tool,
-            commands::mcp::mcp_disconnect,
-            commands::memory::memory_save,
-            commands::memory::memory_update,
-            commands::memory::memory_delete,
-            commands::memory::memory_get,
-            commands::memory::memory_list,
-            commands::memory::memory_search,
-            commands::memory::memory_embed_entry,
-            commands::memory::memory_vector_search,
             commands::network::network_probe_port,
             commands::network::shell_open_external,
             commands::fonts::fonts_list_system,
@@ -238,12 +201,9 @@ fn main() {
             commands::apiclient::apiclient_envs_delete,
             commands::apiclient::apiclient_envs_set_active,
             commands::project_config::project_config_load,
-            commands::usage::usage_cli_fetch,
-            commands::usage::usage_api_fetch,
             commands::window::settings_window_open,
             commands::window::settings_broadcast_changed,
             commands::window::git_window_open,
-            commands::window::agent_editor_window_open,
         ])
         .setup(|app| {
             // Open the SQLite store before the window appears so the first
@@ -299,10 +259,6 @@ fn main() {
     app.run(|app_handle, event| match event {
         tauri::RunEvent::ExitRequested { .. } | tauri::RunEvent::Exit => {
             app_handle.state::<PtyState>().manager.kill_all();
-            // Reap MCP stdio children too — they're separate OS processes that
-            // outlive process::exit (kill_on_drop never runs). PTY conhosts are
-            // handled above; SSH sockets die with the process.
-            app_handle.state::<McpState>().kill_all();
         }
         _ => {}
     });

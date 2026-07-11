@@ -1,10 +1,8 @@
-//! arc-session-manager — workspace, tab, chat, command-history, agent-run,
-//! and memory persistence backed by SQLite via sqlx.
+//! arc-session-manager — workspace, tab, and command-history persistence
+//! backed by SQLite via sqlx.
 //!
 //! Each table has a sibling module that owns its repository functions:
-//! [`workspaces`], [`tabs`], [`chat`], [`commands`], [`agent`], [`memory`].
-//! `memory_entries` is paired with an FTS5 virtual table (`memory_fts`)
-//! kept in sync by triggers, so `memory::search` runs through bm25.
+//! [`workspaces`], [`tabs`], [`commands`].
 //!
 //! The store is cheaply cloneable (it's just a wrapped `SqlitePool`), so it
 //! can be `.manage()`d in Tauri and handed to commands as `State<SessionStore>`.
@@ -16,20 +14,14 @@ use sqlx::sqlite::{
 };
 use thiserror::Error;
 
-pub mod agent;
 pub mod apiclient;
-pub mod chat;
 pub mod commands;
-pub mod memory;
 pub mod settings;
 pub mod ssh;
 pub mod tabs;
 pub mod workspaces;
 
-pub use agent::AgentRun;
-pub use chat::{ChatConversation, ChatMessage, ChatRole};
 pub use commands::CommandRecord;
-pub use memory::{MemoryEntry, MemoryHit};
 pub use ssh::{SshHost, SshHostInput, SshKey, SshSessionLogEntry};
 // Re-export so downstream crates (e.g. apps/desktop) that hold a
 // `&SessionStore` can name the pool type without taking a direct sqlx dep.
@@ -192,21 +184,4 @@ mod tests {
         assert_eq!(again.session.active_tab_id.as_deref(), Some("t2"));
     }
 
-    #[tokio::test]
-    async fn chat_history_persists() {
-        let store = fresh_store().await;
-        let conv = chat::current_or_create(store.pool(), None)
-            .await
-            .expect("conv");
-        chat::append(store.pool(), &conv.id, ChatRole::User, "hello")
-            .await
-            .expect("append");
-        chat::append(store.pool(), &conv.id, ChatRole::Assistant, "hi there")
-            .await
-            .expect("append");
-
-        let msgs = chat::list(store.pool(), &conv.id).await.expect("list");
-        assert_eq!(msgs.len(), 2);
-        assert_eq!(msgs[1].content, "hi there");
-    }
 }
