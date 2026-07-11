@@ -32,9 +32,6 @@ importers:
       '@arc/editor':
         specifier: workspace:*
         version: link:../../packages/editor
-      '@arc/mcp':
-        specifier: workspace:*
-        version: link:../../packages/mcp
       '@arc/shared':
         specifier: workspace:*
         version: link:../../packages/shared
@@ -196,25 +193,7 @@ importers:
         specifier: ^2.1.9
         version: 2.1.9(@types/node@20.19.41)
 
-  packages/agents:
-    devDependencies:
-      typescript:
-        specifier: ^5.6.2
-        version: 5.9.3
-
   packages/editor:
-    devDependencies:
-      typescript:
-        specifier: ^5.6.2
-        version: 5.9.3
-
-  packages/mcp:
-    devDependencies:
-      typescript:
-        specifier: ^5.6.2
-        version: 5.9.3
-
-  packages/provider-sdk:
     devDependencies:
       typescript:
         specifier: ^5.6.2
