@@ -1,4 +1,4 @@
-# ARC — AI-Native Terminal & Agent Runtime
+# ARC — Terminal, Editor & Developer Workspace
 
 <div align="center">
   <img src="apps/desktop/icons/icon.png" alt="ARC Logo" width="128" height="128" />
@@ -7,35 +7,32 @@
 [![License](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Linux-lightgrey)](https://github.com/vedantnimbarte/Arc)
 
-**ARC** is a powerful desktop terminal and AI agent runtime built with Tauri (Rust) and React (TypeScript). It unifies a real PTY-backed terminal, embedded code editor, multi-tab workspace management, AI chat with tool-using agents, and local + cloud AI providers into a single, cohesive developer interface.
+**ARC** is a desktop developer workspace built with Tauri (Rust) and React (TypeScript). It
+unifies a real PTY-backed terminal, an embedded code editor, a git-aware file tree, source
+control, SSH, and a REST API client into a single, cohesive interface.
 
-## What is ARC?
+## Features
 
-**Core features:**
-- **Real PTY Terminal** — xterm.js frontend backed by portable-pty, supporting bash, zsh, PowerShell, cmd, Nu, WSL, and custom shells
-- **Code Editor** — CodeMirror 6 with syntax highlighting, git-aware features, and real-time file watching
-- **AI Chat** — Stream from OpenAI, Anthropic (Claude), or local Ollama models with customizable agent personas
-- **Autonomous Agents** — Run `/agent <goal>` to spawn a tool-using AI agent that reads files, searches code, runs shell commands, and edits files—all with your explicit approval
-- **Model Context Protocol (MCP)** — Connect MCP servers to extend agents with third-party tools (web search, databases, APIs, etc.)
-- **Persistent Memory** — Workspace-scoped notes with dual search: keyword-based full-text (FTS5) and semantic (vector embeddings)
-- **Git Integration** — View branch status, diffs, logs, blame, and more directly from the UI without terminal commands
-- **File Search & Indexing** — BM25 full-text search with tantivy indexing for fast codebase exploration
-
-## Download
-
-Prebuilt installers for macOS, Windows, and Linux are on the
-[**Releases page**](https://github.com/vedantnimbarte/Arc/releases). Builds are
-currently **unsigned** — see [INSTALLATION.md](INSTALLATION.md#download-end-users)
-for the one-time macOS/Windows first-run bypass. Prefer to build from source?
-Follow the Quick Start below.
+- **Real PTY Terminal** — xterm.js frontend backed by portable-pty, supporting bash, zsh,
+  PowerShell, cmd, Nu, WSL, and custom shells. Clickable file paths, smart-paste warnings,
+  long-command notifications, and per-tab command history (OSC 133).
+- **Code Editor** — CodeMirror 6 with syntax highlighting, multi-cursor, optional Vim mode,
+  optional LSP (diagnostics/hover/completion), and real-time file watching.
+- **File Tree & Search** — Browse, open, and manage files with git status decorations, plus
+  BM25 full-text search backed by a tantivy index.
+- **Git Integration** — Branch status, diffs, logs, blame, staging/commit, worktrees,
+  interactive rebase, cherry-pick, and GitHub pull requests, all from the UI.
+- **SSH Client** — Pure-Rust SSH (russh) with saved hosts, key generation/import, and
+  per-session logs.
+- **API Client** — A built-in Postman-style REST client (collections, environments, history).
+- **Tabs & Workspaces** — Split panes, tab groups, and session state persisted to SQLite.
+- **AI CLI Launcher** — Optionally launch external coding CLIs (Claude Code, Codex, OpenCode)
+  in a terminal tab when installed on your PATH.
 
 ## Quick Start
 
-### Desktop App (Tauri)
-
 ```bash
 # Prerequisites: Node 20+, pnpm 9.x, Rust 1.80+
-# See INSTALLATION.md for full setup
 
 git clone https://github.com/vedantnimbarte/Arc.git
 cd arc
@@ -44,152 +41,62 @@ pnpm install                 # Install JS dependencies
 pnpm tauri:dev               # Boot the app (Vite + Rust shell)
 ```
 
-The Tauri window opens at `1280x820` with the terminal, editor, and file tree ready to use.
-
-### Frontend Only (Browser, No Terminal)
-
-To develop the UI in isolation without Rust dependencies:
+### Frontend only (browser, no terminal)
 
 ```bash
 pnpm dev                     # Open http://127.0.0.1:5173
 ```
 
-**Limitations:** PTY, filesystem, and LLM features are stubbed (chat echoes locally).
-
-## Documentation
-
-**Start here:** [INSTALLATION.md](INSTALLATION.md) for setup, then choose your path below.
-
-### 📖 For New Users
-
-| Document | Purpose |
-|----------|---------|
-| **[INSTALLATION.md](INSTALLATION.md)** | Setup on macOS/Windows/Linux, configure AI providers, set default shell |
-| **[FEATURES.md](FEATURES.md)** | Step-by-step guides for Terminal, Editor, Chat, Agents, Memory, Settings |
-| **[FAQ_AND_TROUBLESHOOTING.md](FAQ_AND_TROUBLESHOOTING.md)** | Common questions, performance tips, error fixes |
-| **[GLOSSARY.md](GLOSSARY.md)** | Definitions (MCP, agent, PTY, approval, Zustand, etc.) |
-
-### 👨‍💻 For Developers & Contributors
-
-| Document | Purpose |
-|----------|---------|
-| **[DEVELOPMENT.md](DEVELOPMENT.md)** | Local dev setup, code conventions, adding Tauri commands, React components, Rust crates |
-| **[ARCHITECTURE.md](ARCHITECTURE.md)** | System design, IPC contract, all 57+ Tauri commands, data flow diagrams |
-| **[API_REFERENCE.md](API_REFERENCE.md)** | Complete Tauri command signatures, parameters, return types, errors, examples |
-| **[CONTRIBUTING.md](CONTRIBUTING.md)** | PR process, commit messages, areas needing help, licensing |
-
-### 🤖 For Agents & AI Integration
-
-| Document | Purpose |
-|----------|---------|
-| **[AGENTS.md](AGENTS.md)** | How agents work, built-in tools, approval gating, agent personas, custom agents |
-| **[MCP_INTEGRATION.md](MCP_INTEGRATION.md)** | Building MCP servers, connecting to ARC, tool/resource definitions, examples |
-| **[SECURITY.md](SECURITY.md)** | Credential vault, approval security, best practices, incident response |
-
-### 🏗️ For Deep Dives
-
-| Document | Purpose |
-|----------|---------|
-| **[docs/architecture.md](docs/architecture.md)** | Layered design, component communication, Zustand stores, SQLite schema |
-| **[docs/decisions.md](docs/decisions.md)** | Why Tauri/Rust/Zustand, crate split, tradeoffs (architecture decision records) |
-| **[CLAUDE.md](CLAUDE.md)** | Orientation for Claude Code editing this repository |
-
-### 📚 Rust Crate Documentation
-
-- **[rust/pty/](rust/pty/)** — PTY spawning, resizing, I/O via portable-pty
-- **[rust/ai-runtime/](rust/ai-runtime/)** — Streaming LLM providers (OpenAI, Anthropic, Ollama)
-- **[rust/filesystem/](rust/filesystem/)** — File ops, watching, tantivy search, indexing
-- **[rust/git/](rust/git/)** — Git status/log/diff/blame via CLI
-- **[rust/session-manager/](rust/session-manager/)** — SQLite persistence (workspace, chat, memory)
-- **[rust/agent-runtime/](rust/agent-runtime/)** — Tool-using agent loop, approval gating
+PTY and filesystem features are stubbed in the browser-only build.
 
 ## Tech Stack
 
-**Frontend:** 
-- React 18 + Vite + TypeScript
-- State: Zustand (workspace, chat, settings, files stores)
-- Editor: CodeMirror 6 (lazy-loaded language support)
-- Terminal: xterm.js (PTY-backed)
-- Styling: Tailwind CSS (dark-first, Catppuccin Mocha palette)
-- Testing: Vitest (unit tests)
+**Frontend:** React 18 + Vite + TypeScript · Zustand state · CodeMirror 6 · xterm.js ·
+Tailwind CSS · Vitest.
 
-**Desktop Shell:**
-- Tauri 2 (app framework, native system access)
-- IPC via invoke/listen (typed wrappers in `lib/tauri.ts`)
-- WebView2 (Windows), WebKit2GTK (Linux), WKWebView (macOS)
+**Desktop shell:** Tauri 2, IPC via typed `invoke`/`listen` wrappers in `lib/tauri.ts`.
 
 **Backend (Rust 1.80+):**
-- `arc-pty` — PTY process spawning/resize/kill (portable-pty, tokio)
-- `arc-ai-runtime` — Streaming LLM providers: OpenAI, Anthropic, Ollama (reqwest, eventsource, serde)
-- `arc-session-manager` — SQLite persistence: workspaces, tabs, chat, commands, memory, agent runs (sqlx, sqlx-sqlite)
-- `arc-agent-runtime` — Tool-using coding agent with approval gating, built-in tools, MCP bridge (anthropic SDK)
-- `arc-filesystem` — File ops, watching, BM25 search, indexing (notify, tantivy, serde)
-- `arc-git` — Git introspection via CLI (porcelain output parsing)
+- `arc-pty` — PTY spawn/resize/kill (portable-pty, tokio)
+- `arc-filesystem` — file ops, watching, BM25 search/indexing (notify, tantivy)
+- `arc-git` / `arc-git-host` — git introspection and GitHub PRs
+- `arc-session-manager` — SQLite persistence (sqlx): workspaces, tabs, command history
+- `arc-ssh` — pure-Rust SSH client (russh)
+- `arc-lsp` — language-server client (stdio JSON-RPC)
+- `arc-http-client` / `arc-project-config` — REST client engine + `.arc/config.toml` loader
 
-**Database & Search:**
-- SQLite 3 (bundled, ~50 MiB database at `<data_dir>/arc/arc.db`)
-- tantivy 0.22 (BM25 full-text search, FTS5 fallback, index at `<data_dir>/arc/index/`)
-- SQLx (async, compile-time verified SQL queries)
+**Storage:** SQLite (bundled) at `<data_dir>/arc/arc.db`; tantivy index at `<data_dir>/arc/index/`.
 
-**Credentials & Secrets:**
-- OS credential vault: Keychain (macOS), Credential Manager (Windows), secret-service (Linux)
-- `keyring` crate for vault integration
-- API keys never persisted to disk
+**Credentials:** OS credential vault (Keychain / Credential Manager / secret-service) via the
+`keyring` crate — used for SSH passphrases and GitHub tokens.
 
-**Workspace Structure:**
+### Workspace structure
+
 ```
 apps/frontend/        React UI (Vite, TypeScript)
-apps/desktop/         Tauri shell (Rust, CLI commands)
-packages/             Shared TS packages (types, providers, UI tokens)
-rust/                 Cargo workspace (pty, ai-runtime, session-manager, etc.)
-docs/                 Architecture guides, decision records
+apps/desktop/         Tauri shell (Rust, IPC commands)
+packages/             Shared TS packages (types, editor/terminal/ui tokens)
+rust/                 Cargo workspace (pty, filesystem, git, ssh, lsp, ...)
 ```
 
 ## Platform Support
 
-| Platform | Status | Notes |
-|----------|--------|-------|
-| **macOS** | ✅ Tested | 12+ (x86_64 + Apple Silicon) |
-| **Windows** | ✅ Tested | 10+ (WebView2 required) |
-| **Linux** | ✅ Tested | gtk3 (WebKit2GTK) required |
+| Platform | Notes |
+|----------|-------|
+| **macOS** | 12+ (x86_64 + Apple Silicon) |
+| **Windows** | 10+ (WebView2 required) |
+| **Linux** | gtk3 / WebKit2GTK required |
 
-## Contributing
-
-We welcome contributions! Please read [CONTRIBUTING.md](CONTRIBUTING.md) for:
-- Setting up your development environment
-- Code conventions and style
-- Commit message format
-- Pull request process
-- Areas where we need help (testing, docs, bugs, performance, MCP integrations)
-
-**Quick checklist before submitting a PR:**
+## Before submitting a PR
 
 ```bash
 pnpm typecheck               # Type-check all TypeScript
 cargo check --workspace      # Check all Rust crates
-pnpm lint && pnpm format     # Lint and format code
-pnpm tauri:dev               # Test the app manually
+pnpm test                    # Run the Vitest suite
 ```
 
-For the reasoning behind architectural decisions, see [docs/decisions.md](docs/decisions.md).
+See [CONTRIBUTING.md](CONTRIBUTING.md) and [SECURITY.md](SECURITY.md).
 
 ## License
 
-ARC is licensed under the [MIT License](LICENSE), which permits:
-- ✅ Commercial use
-- ✅ Modification and distribution
-- ✅ Private use
-
-See [LICENSE](LICENSE) for full details.
-
-## Help & Questions
-
-- **Setup issues?** → [INSTALLATION.md](INSTALLATION.md#troubleshooting)
-- **How do I use ARC?** → [FEATURES.md](FEATURES.md)
-- **Common questions?** → [FAQ_AND_TROUBLESHOOTING.md](FAQ_AND_TROUBLESHOOTING.md)
-- **How does it work?** → [ARCHITECTURE.md](ARCHITECTURE.md)
-- **Want to contribute?** → [DEVELOPMENT.md](DEVELOPMENT.md) + [CONTRIBUTING.md](CONTRIBUTING.md)
-- **Security questions?** → [SECURITY.md](SECURITY.md)
-- **Building MCP servers?** → [MCP_INTEGRATION.md](MCP_INTEGRATION.md)
-- **Using agents?** → [AGENTS.md](AGENTS.md)
-- **Editing this repo in Claude Code?** → [CLAUDE.md](CLAUDE.md)
+ARC is licensed under the [MIT License](LICENSE).
