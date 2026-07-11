@@ -375,6 +375,7 @@ export function Terminal({ sessionKey }: Props) {
             cols: term.cols,
             rows: term.rows,
             env: projectEnv,
+            args: tab?.shellArgs ?? null,
           },
           onPtyChunk,
         );
