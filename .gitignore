@@ -14,11 +14,11 @@ out/
 # Rust
 target/
 **/*.rs.bk
-Cargo.lock
+# Cargo.lock is intentionally committed: ARC ships as a binary/app, so a
+# pinned lockfile is what makes release builds reproducible.
 
 # Tauri
 src-tauri/target/
-src-tauri/Cargo.lock
 
 # Env / secrets
 .env

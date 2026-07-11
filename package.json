@@ -1,7 +1,7 @@
 {
   "name": "arc",
   "private": true,
-  "version": "0.0.1",
+  "version": "0.1.0",
   "description": "ARC — AI-native terminal & agent runtime",
   "packageManager": "pnpm@9.15.9",
   "scripts": {

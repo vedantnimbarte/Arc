@@ -2,6 +2,27 @@
 
 This guide covers all deployment modes: **desktop app** (Tauri), **browser frontend** (development only), and setup notes for **server/Docker** (planned).
 
+## Download (end users)
+
+Grab a prebuilt installer for your OS from the
+[**Releases page**](https://github.com/vedantnimbarte/Arc/releases):
+
+- **macOS** — `.dmg` (Apple Silicon and Intel builds)
+- **Windows** — `.msi` or `.exe`
+- **Linux** — `.AppImage`, `.deb`, or `.rpm`
+
+> **First-run warnings (unsigned builds).** ARC isn't code-signed yet, so the OS
+> will warn on first launch:
+> - **macOS:** if you see "ARC is damaged and can't be opened", run
+>   `xattr -cr /Applications/ARC.app` once, then reopen. (Or right-click the app →
+>   Open → Open.)
+> - **Windows:** on the SmartScreen prompt, click **More info → Run anyway**.
+>
+> These warnings go away once signing is in place — see "Signing status" below.
+
+If you'd rather build it yourself, or you're contributing, follow the
+from-source steps below.
+
 ## Prerequisites
 
 ### Required
@@ -33,17 +54,22 @@ If you plan to run the desktop app, install the Tauri prerequisites for your OS:
 
 #### Linux
 - **GTK 3** development libraries and **WebKit2GTK** (Tauri uses WebKit for rendering):
-  - **Debian/Ubuntu:** `sudo apt-get install libgtk-3-0 libwebkit2gtk-4.1-0 libwebkit2gtk-4.1-dev`
-  - **Fedora/RHEL:** `sudo dnf install gtk3 webkit2gtk4-devel`
-  - **Arch:** `sudo pacman -S gtk3 webkit2gtk`
-  - **Alpine:** `apk add gtk+3.0-dev webkitgtk-dev`
+  - **Debian/Ubuntu:** `sudo apt-get install libgtk-3-dev libwebkit2gtk-4.1-dev librsvg2-dev patchelf libayatana-appindicator3-dev`
+  - **Fedora/RHEL:** `sudo dnf install gtk3-devel webkit2gtk4.1-devel librsvg2-devel patchelf libappindicator-gtk3-devel`
+  - **Arch:** `sudo pacman -S gtk3 webkit2gtk-4.1 librsvg patchelf libappindicator-gtk3`
+  - **Alpine:** `apk add gtk+3.0-dev webkit2gtk-4.1-dev librsvg-dev patchelf`
+
+  > `librsvg2-dev`, `patchelf`, and the appindicator library are only needed to
+  > **build** the `.deb`/`.AppImage` bundles; the dev app (`pnpm tauri:dev`)
+  > runs without them. Tauri pins WebKit **4.1**, so build on Ubuntu 22.04 —
+  > 24.04's newer WebKit is a known source of build/runtime issues.
 
 ## Installation Steps
 
 ### 1. Clone the Repository
 
 ```bash
-git clone https://github.com/anthropics/arc.git
+git clone https://github.com/vedantnimbarte/Arc.git
 cd arc
 ```
 
@@ -124,20 +150,24 @@ Opens http://127.0.0.1:5173 in your default browser. Hot reload is enabled for R
 
 ### Option C: Building for Distribution
 
-To create an optimized, signed app bundle for macOS/Windows/Linux:
+To create an optimized app bundle for macOS/Windows/Linux:
 
 ```bash
 pnpm tauri:build
 ```
 
-Artifacts appear in `apps/desktop/src-tauri/target/release/bundle/`:
-- **macOS:** `.dmg` (disk image) and `.app` (signed if you have a dev certificate)
+Artifacts appear in `target/release/bundle/` (at the Cargo workspace root — this
+repo keeps the Tauri config in `apps/desktop/`, not a `src-tauri/` folder):
+- **macOS:** `.dmg` (disk image) and `.app`
 - **Windows:** `.msi` (installer) and `.exe` (standalone)
 - **Linux:** `.deb` (Debian/Ubuntu), `.rpm` (Fedora/RHEL), `.AppImage` (universal)
 
-**Sign & notarize (macOS/Windows):**
-- macOS: See [Tauri docs on codesigning](https://tauri.app/v1/guides/distribution/sign-macos/)
-- Windows: Set `WINDOWS_SIGN_*` env vars; see [Tauri docs](https://tauri.app/v1/guides/distribution/sign-windows/)
+**Signing status:** builds are currently **unsigned**. On macOS, Gatekeeper will
+say the app "is damaged / can't be opened"; on Windows, SmartScreen shows an
+"unknown publisher" warning. See the first-run bypass in the download section
+above. Wiring up real signing (Apple Developer ID + notarization, a Windows
+code-signing cert) is tracked as a pre-1.0 task; when the CI secrets are added,
+`.github/workflows/release.yml` signs automatically.
 
 ---
 

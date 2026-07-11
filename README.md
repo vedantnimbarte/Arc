@@ -5,7 +5,7 @@
 </div>
 
 [![License](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
-[![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Linux-lightgrey)](https://github.com/anthropics/arc)
+[![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Linux-lightgrey)](https://github.com/vedantnimbarte/Arc)
 
 **ARC** is a powerful desktop terminal and AI agent runtime built with Tauri (Rust) and React (TypeScript). It unifies a real PTY-backed terminal, embedded code editor, multi-tab workspace management, AI chat with tool-using agents, and local + cloud AI providers into a single, cohesive developer interface.
 
@@ -21,6 +21,14 @@
 - **Git Integration** — View branch status, diffs, logs, blame, and more directly from the UI without terminal commands
 - **File Search & Indexing** — BM25 full-text search with tantivy indexing for fast codebase exploration
 
+## Download
+
+Prebuilt installers for macOS, Windows, and Linux are on the
+[**Releases page**](https://github.com/vedantnimbarte/Arc/releases). Builds are
+currently **unsigned** — see [INSTALLATION.md](INSTALLATION.md#download-end-users)
+for the one-time macOS/Windows first-run bypass. Prefer to build from source?
+Follow the Quick Start below.
+
 ## Quick Start
 
 ### Desktop App (Tauri)
@@ -29,7 +37,7 @@
 # Prerequisites: Node 20+, pnpm 9.x, Rust 1.80+
 # See INSTALLATION.md for full setup
 
-git clone https://github.com/anthropics/arc.git
+git clone https://github.com/vedantnimbarte/Arc.git
 cd arc
 
 pnpm install                 # Install JS dependencies
