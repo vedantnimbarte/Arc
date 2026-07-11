@@ -129,9 +129,9 @@ export default {
           from: { opacity: '0', transform: 'translateY(-12px) scale(0.985)' },
           to: { opacity: '1', transform: 'translateY(0) scale(1)' },
         },
-        // Slide-from-right popover entry — used by the assistant floater.
-        // Pairs a horizontal nudge with a touch of scale so the surface
-        // reads as "arriving" rather than fading flat.
+        // Slide-from-right popover entry. Pairs a horizontal nudge with a
+        // touch of scale so the surface reads as "arriving" rather than
+        // fading flat.
         'popover-in': {
           from: { opacity: '0', transform: 'translateX(10px) scale(0.98)' },
           to: { opacity: '1', transform: 'translateX(0) scale(1)' },

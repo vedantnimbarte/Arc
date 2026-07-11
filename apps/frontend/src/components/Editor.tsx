@@ -24,7 +24,6 @@ import { fsReadFile, fsWriteFile, isTauri } from '../lib/tauri';
 import { attachLsp, pathToFileUri, type LspAttachment } from '../lib/lspClient';
 import { lspServerFor } from '../lib/lspServers';
 import { useFiles } from '../state/files';
-import { useSelection } from '../state/selection';
 import { useSettings } from '../state/settings';
 import { useWorkspace } from '../state/workspace';
 import { useReveal } from '../state/reveal';
@@ -235,35 +234,6 @@ export function Editor({ filePath, tabId }: Props) {
                     }, 300);
                   }
                 }
-                if (u.selectionSet || u.docChanged) {
-                  const sel = u.state.selection.main;
-                  if (sel.empty) {
-                    useSelection.getState().clear('editor', tabId);
-                  } else {
-                    const text = u.state.sliceDoc(sel.from, sel.to);
-                    // Anchor the floating pill to the selection head — that's
-                    // where the cursor lives after a drag-select, so it
-                    // matches the user's gaze.
-                    const coords = u.view.coordsAtPos(sel.head);
-                    const rect = coords
-                      ? {
-                          left: coords.left,
-                          top: coords.top,
-                          width: 0,
-                          height: Math.max(0, coords.bottom - coords.top),
-                        }
-                      : null;
-                    const fileName =
-                      filePath.split(/[\\/]/).pop() || filePath;
-                    useSelection.getState().set({
-                      source: 'editor',
-                      sourceId: tabId,
-                      label: `Editor · ${fileName}`,
-                      text,
-                      rect,
-                    });
-                  }
-                }
               }),
             ],
           }),
@@ -328,7 +298,6 @@ export function Editor({ filePath, tabId }: Props) {
       lspCtlRef.current = null;
       viewRef.current?.destroy();
       viewRef.current = null;
-      useSelection.getState().clear('editor', tabId);
       // Drop any unapplied reveal so a closed tab doesn't leak an entry.
       useReveal.getState().consume(tabId);
     };

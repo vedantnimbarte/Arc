@@ -23,7 +23,6 @@ import { NewTabSplash } from './NewTabSplash';
 import { useFiles } from '../state/files';
 import { useTrust } from '../state/trust';
 import { detectRiskyPaste, usePaste } from '../state/paste';
-import { useSelection } from '../state/selection';
 import { useSettings } from '../state/settings';
 import { useWorkspace } from '../state/workspace';
 import { getFont, resolveActiveTheme } from '../themes';
@@ -206,44 +205,6 @@ export function Terminal({ sessionKey }: Props) {
     }
 
     const decoder = new TextDecoder('utf-8');
-
-    // ─── Ask-ARC-AI selection wiring ────────────────────────────────────
-    // xterm paints its selection on a canvas, so there's no DOM rect we
-    // can read. The pragmatic anchor is the last mouse position inside
-    // this terminal (selection is mouse-driven in 99% of cases). We
-    // record mouseup coords on the container, then `onSelectionChange`
-    // packages them up with the current selection text.
-    let lastPointer: { x: number; y: number } | null = null;
-    const onContainerMouseUp = (e: MouseEvent) => {
-      lastPointer = { x: e.clientX, y: e.clientY };
-    };
-    container.addEventListener('mouseup', onContainerMouseUp);
-    const shellName = () => {
-      const tab = useWorkspace.getState().tabs.find((t) => t.id === sessionKey);
-      return tab?.title?.trim() || 'shell';
-    };
-    const pushSelection = () => {
-      const text = term.getSelection();
-      if (!text || !text.trim()) {
-        useSelection.getState().clear('terminal', sessionKey);
-        return;
-      }
-      // Anchor: mouseup position, falling back to the container's
-      // top-center if we have no pointer record (e.g. keyboard select).
-      const cb = container.getBoundingClientRect();
-      const anchor = lastPointer ?? { x: cb.left + cb.width / 2, y: cb.top + 24 };
-      // Build a tiny rect at the anchor so AskAiFloater can position
-      // its pill relative to it.
-      const rect = { left: anchor.x, top: anchor.y - 16, width: 0, height: 16 };
-      useSelection.getState().set({
-        source: 'terminal',
-        sourceId: sessionKey,
-        label: `Terminal · ${shellName()}`,
-        text,
-        rect,
-      });
-    };
-    const selDisposable = term.onSelectionChange(pushSelection);
 
     // ─── Smart paste warnings (Tier 1.4) ───────────────────────────────
     // Intercept paste in the capture phase — before xterm's own textarea
@@ -667,7 +628,6 @@ export function Terminal({ sessionKey }: Props) {
       cancelAnimationFrame(rafId);
       ro.disconnect();
       host?.removeEventListener('arc:host-shown', onHostShown);
-      container.removeEventListener('mouseup', onContainerMouseUp);
       container.removeEventListener('paste', onPaste, true);
       window.removeEventListener('keydown', trackShift, true);
       window.removeEventListener('keyup', trackShift, true);
@@ -676,12 +636,6 @@ export function Terminal({ sessionKey }: Props) {
       } catch {
         /* terminal already disposed */
       }
-      try {
-        selDisposable.dispose();
-      } catch {
-        /* terminal already disposed */
-      }
-      useSelection.getState().clear('terminal', sessionKey);
       unsubAppearance();
       unlistens.forEach((u) => u());
       if (ptyId) void ptyKill(ptyId).catch(() => {});
