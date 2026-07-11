@@ -7,7 +7,6 @@ import {
   GitBranch,
   Keyboard,
   Server,
-  Sparkles,
   Terminal as TerminalIcon,
 } from 'lucide-react';
 import { useSsh } from '../state/ssh';
@@ -28,15 +27,12 @@ import { useSettings } from '../state/settings';
 import { cn } from '../lib/cn';
 import { formatBinding, getBinding } from '../state/shortcuts';
 import { BranchPicker } from './BranchPicker';
-import { ModelTriggerPill } from './ChatPanel';
 
 interface Props {
-  chatOpen: boolean;
-  onToggleChat: () => void;
   onOpenShortcuts: () => void;
 }
 
-export function StatusBar({ chatOpen, onToggleChat, onOpenShortcuts }: Props) {
+export function StatusBar({ onOpenShortcuts }: Props) {
   const tabs = useWorkspace((s) => s.tabs);
   const launchAiCli = useWorkspace((s) => s.launchAiCli);
   const newTerminal = useWorkspace((s) => s.newTerminal);
@@ -99,8 +95,6 @@ export function StatusBar({ chatOpen, onToggleChat, onOpenShortcuts }: Props) {
             {tabs.length} {tabs.length === 1 ? 'tab' : 'tabs'}
           </span>
           <Dot />
-          <ModelTriggerPill placement="up" align="end" compact />
-          <Dot />
 
           {/* Trailing control cluster — the bar is now 32px tall so the
               pills sit at their natural 22px height with vertical breathing
@@ -118,36 +112,6 @@ export function StatusBar({ chatOpen, onToggleChat, onOpenShortcuts }: Props) {
             <AiCliButton onLaunch={launchAiCli} />
 
             <SshStatusButton />
-
-            <button
-              type="button"
-              onClick={onToggleChat}
-              aria-label={chatOpen ? 'Close assistant' : 'Open assistant'}
-              aria-pressed={chatOpen}
-              title="Assistant"
-              className={cn(
-                'group relative flex h-[22px] items-center gap-1.5 rounded-md px-2 transition-colors',
-                chatOpen
-                  ? 'bg-accent-soft text-accent-bright shadow-[inset_0_0_0_1px_rgba(220,224,232,0.18)]'
-                  : 'text-fg-muted hover:bg-white/[0.06] hover:text-fg-base/95 focus-visible:bg-white/[0.06] focus:outline-none',
-              )}
-            >
-              <Sparkles
-                size={11.5}
-                strokeWidth={2}
-                className={cn(
-                  'transition-transform duration-300 ease-apple',
-                  chatOpen && 'scale-110 drop-shadow-[0_0_6px_rgba(220,224,232,0.6)]',
-                )}
-              />
-              <span className="font-display text-[10.5px] tracking-tight">assistant</span>
-              {chatOpen && (
-                <span
-                  className="pointer-events-none absolute -bottom-[3px] left-1/2 h-[2px] w-3 -translate-x-1/2 rounded-full bg-accent-bright/85 shadow-glow-sm"
-                  aria-hidden
-                />
-              )}
-            </button>
           </div>
 
           <Dot />

@@ -7,13 +7,9 @@ export const SIDEBAR_DEFAULT = 260;
 /** Width of the vertical mini-rail shown when the sidebar is collapsed. */
 export const SIDEBAR_RAIL_WIDTH = 44;
 
-export const CHAT_MIN = 260;
-export const CHAT_MAX = 560;
-export const CHAT_DEFAULT = 340;
-
 /** Which panel is showing in the left sidebar. Driven by the sidebar's
- *  activity rail (Explorer / Source Control / SSH / Search / Outline / Agents). */
-export type SidebarView = 'files' | 'git' | 'ssh' | 'search' | 'outline' | 'agents';
+ *  activity rail (Explorer / Source Control / SSH / Search / Outline). */
+export type SidebarView = 'files' | 'git' | 'ssh' | 'search' | 'outline';
 
 interface FilesState {
   /**
@@ -30,7 +26,6 @@ interface FilesState {
   /** Remembered sidebar width per view, so each view keeps its own size
    *  (SSH wider than Explorer, etc.). Keyed by view id. Persisted. */
   widthByView: Record<string, number>;
-  chatWidth: number;
   /** Which panel is mounted in the left sidebar. Persisted. */
   sidebarView: SidebarView;
   /** Last sidebar view per workspace root, so each project reopens on the
@@ -45,7 +40,6 @@ interface FilesState {
   toggleHidden: () => void;
   toggleCollapsed: () => void;
   setSidebarWidth: (w: number) => void;
-  setChatWidth: (w: number) => void;
   setSidebarView: (view: SidebarView) => void;
   /** Reveal a view: un-collapse the sidebar and switch to it. */
   showSidebarView: (view: SidebarView) => void;
@@ -57,15 +51,14 @@ interface FilesState {
 const clamp = (n: number, min: number, max: number) =>
   Math.min(Math.max(n, min), max);
 
-/** Per-view default width — SSH / Search / Agents want a touch more room than
- *  the file tree. Falls back to SIDEBAR_DEFAULT for anything unlisted. */
+/** Per-view default width — SSH / Search want a touch more room than the file
+ *  tree. Falls back to SIDEBAR_DEFAULT for anything unlisted. */
 const DEFAULT_WIDTH_BY_VIEW: Record<string, number> = {
   files: SIDEBAR_DEFAULT,
   git: SIDEBAR_DEFAULT,
   ssh: 300,
   search: 300,
   outline: 240,
-  agents: 300,
 };
 
 export function defaultWidthForView(view: SidebarView): number {
@@ -98,7 +91,6 @@ export const useFiles = create<FilesState>()(
       collapsed: false,
       sidebarWidth: SIDEBAR_DEFAULT,
       widthByView: {},
-      chatWidth: CHAT_DEFAULT,
       sidebarView: 'files',
       viewByRoot: {},
       recentFiles: [],
@@ -128,7 +120,6 @@ export const useFiles = create<FilesState>()(
             widthByView: { ...s.widthByView, [s.sidebarView]: width },
           };
         }),
-      setChatWidth: (w) => set({ chatWidth: clamp(w, CHAT_MIN, CHAT_MAX) }),
       setSidebarView: (view) =>
         set((s) => ({
           sidebarView: view,

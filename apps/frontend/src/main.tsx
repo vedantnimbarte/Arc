@@ -3,7 +3,6 @@ import ReactDOM from 'react-dom/client';
 import App from './App';
 import { SettingsPage } from './components/SettingsPage';
 import { rehydrateSettingsFromBroadcast, useSettings } from './state/settings';
-import { useModels } from './state/models';
 import { onSettingsChanged } from './lib/tauri';
 import './index.css';
 
@@ -11,13 +10,9 @@ const GitPage = React.lazy(() =>
   import('./components/GitPage').then((m) => ({ default: m.GitPage })),
 );
 
-const AgentEditorPage = React.lazy(() =>
-  import('./components/AgentEditorPage').then((m) => ({ default: m.AgentEditorPage })),
-);
-
-// One frontend bundle, four entry points. Standalone windows pass a `view`
+// One frontend bundle, three entry points. Standalone windows pass a `view`
 // query param so main.tsx can dispatch — see rust/window.rs for the
-// Settings, Git, and Agent-editor launchers.
+// Settings and Git launchers.
 const view =
   typeof window !== 'undefined'
     ? new URLSearchParams(window.location.search).get('view')
@@ -25,9 +20,6 @@ const view =
 
 function Root() {
   const hydrateSettings = useSettings((s) => s.hydrateSettings);
-  const hydrateSecrets = useSettings((s) => s.hydrateSecrets);
-  const secretsHydrated = useSettings((s) => s.secretsHydrated);
-  const warmUpModels = useModels((s) => s.warmUpEnabled);
 
   // Both windows hydrate from SQLite on boot so themes/fonts apply
   // immediately, and both subscribe to `settings://changed` so a save
@@ -35,15 +27,6 @@ function Root() {
   useEffect(() => {
     void hydrateSettings();
   }, [hydrateSettings]);
-  useEffect(() => {
-    void hydrateSecrets();
-  }, [hydrateSecrets]);
-  // Warm up the model catalog once keys are loaded so the picker pops open
-  // populated rather than empty. Best-effort — silent on failure.
-  useEffect(() => {
-    if (!secretsHydrated) return;
-    void warmUpModels();
-  }, [secretsHydrated, warmUpModels]);
 
   useEffect(() => {
     let unlisten: (() => void) | undefined;
@@ -64,18 +47,12 @@ function Root() {
         <GitPage />
       </Suspense>
     );
-  if (view === 'agent-editor')
-    return (
-      <Suspense fallback={null}>
-        <AgentEditorPage />
-      </Suspense>
-    );
   return <App />;
 }
 
 /**
  * Last-resort boundary around the whole app. `TabErrorBoundary` only wraps tab
- * content, so a throw in the shell (Sidebar / TabBar / ChatPanel / StatusBar /
+ * content, so a throw in the shell (Sidebar / TabBar / StatusBar /
  * App itself) would otherwise unmount everything to a blank white window with
  * no way out. This keeps a reload affordance on screen instead.
  */

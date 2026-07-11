@@ -13,7 +13,6 @@
   },
   "dependencies": {
     "@arc/editor": "workspace:*",
-    "@arc/mcp": "workspace:*",
     "@arc/shared": "workspace:*",
     "@arc/terminal": "workspace:*",
     "@arc/ui": "workspace:*",

@@ -1,51 +1,7 @@
 import { create } from 'zustand';
-import {
-  mcpConnect,
-  mcpConnectHttp,
-  projectConfigLoad,
-  type ProjectConfig,
-} from '../lib/tauri';
-import { useAgents, type Agent } from './agents';
+import { projectConfigLoad, type ProjectConfig } from '../lib/tauri';
 import { useFiles } from './files';
 import { useTrust, configNeedsTrust } from './trust';
-
-/** Map a `.arc/config.toml` agent onto the UI's Agent shape. Ids are prefixed
- *  so they can't collide with built-ins or user customs. */
-function toAgent(a: ProjectConfig['agents'][number]): Agent {
-  return {
-    id: `project-${a.id}`,
-    name: a.label || a.id,
-    description: 'Defined in .arc/config.toml',
-    systemPrompt: a.prompt,
-    iconKey: 'terminal',
-    tint: 'lime',
-    builtin: false,
-    createdAt: 0,
-  };
-}
-
-/** Push a freshly-loaded config into its consumers: register project agents
- *  and auto-connect declared MCP servers. Both are best-effort — a failure in
- *  one server/agent must not block the others or the config load itself.
- *
- *  SECURITY: only call this for a trusted root. Both spawning MCP servers and
- *  registering agent prompts run repo-supplied content; the caller gates on
- *  `useTrust`. Exported so `<TrustPrompt>` can apply after the user consents. */
-export function applyProjectConfig(cfg: ProjectConfig | null): void {
-  useAgents.getState().setProjectAgents((cfg?.agents ?? []).map(toAgent));
-  for (const s of cfg?.mcp_servers ?? []) {
-    // stdio (command) takes precedence over HTTP (url) when both are set.
-    if (s.command && s.command.length > 0) {
-      void mcpConnect(s.id, s.command[0]!, s.command.slice(1)).catch((e) =>
-        console.warn(`[project-config] MCP connect ${s.id} failed:`, e),
-      );
-    } else if (s.url) {
-      void mcpConnectHttp(s.id, s.url, s.headers).catch((e) =>
-        console.warn(`[project-config] MCP connect ${s.id} failed:`, e),
-      );
-    }
-  }
-}
 
 // Per-project `.arc/config.toml` state. Loaded once when the workspace root
 // changes; consumers (env injection, agents, theme override) read from here.
@@ -74,7 +30,6 @@ export const useProjectConfig = create<ProjectConfigState>((set, get) => ({
   reload: async (root) => {
     if (root === null) {
       set({ config: null, loadedRoot: null, error: null, loading: false });
-      applyProjectConfig(null);
       return;
     }
     if (get().loadedRoot === root && !get().error) return;
@@ -82,14 +37,11 @@ export const useProjectConfig = create<ProjectConfigState>((set, get) => ({
     try {
       const cfg = await projectConfigLoad(root);
       set({ config: cfg, loading: false });
-      // Never apply repo-supplied MCP servers / agents / env from an untrusted
-      // folder — that's drive-by RCE on `git clone && open`. Prompt instead;
-      // `<TrustPrompt>` re-applies once the user consents.
+      // A repo-supplied `.arc/config.toml` that injects shell env is a
+      // drive-by risk on `git clone && open`. Prompt for trust; env consumers
+      // gate on `useTrust.isTrusted(root)` before applying it.
       if (configNeedsTrust(cfg) && !useTrust.getState().isTrusted(root)) {
-        applyProjectConfig(null);
         useTrust.getState().request(root, cfg!);
-      } else {
-        applyProjectConfig(cfg);
       }
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);

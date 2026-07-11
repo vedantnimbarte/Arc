@@ -4,8 +4,6 @@ members = [
     "apps/desktop",
     "rust/pty",
     "rust/session-manager",
-    "rust/agent-runtime",
-    "rust/ai-runtime",
     "rust/filesystem",
     "rust/git",
     "rust/http-client",
@@ -77,7 +75,6 @@ keyring = { version = "3", default-features = false, features = ["apple-native",
 reqwest = { version = "0.12", default-features = false, features = ["json", "stream", "rustls-tls"] }
 futures-util = "0.3"
 async-trait = "0.1"
-eventsource-stream = "0.2"
 
 # TOML — used by arc-project-config to parse .arc/config.toml.
 toml = "0.8"
@@ -99,8 +96,6 @@ tauri-plugin-notification = "2"
 # Internal crates
 arc-pty = { path = "rust/pty" }
 arc-session-manager = { path = "rust/session-manager" }
-arc-agent-runtime = { path = "rust/agent-runtime" }
-arc-ai-runtime = { path = "rust/ai-runtime" }
 arc-filesystem = { path = "rust/filesystem" }
 arc-git = { path = "rust/git" }
 arc-http-client = { path = "rust/http-client" }

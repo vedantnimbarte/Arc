@@ -1,12 +1,9 @@
 import { create } from 'zustand';
 import {
   isTauri,
-  secretsGetApiKey,
-  secretsSetApiKey,
   sessionSettingsLoad,
   sessionSettingsSave,
   settingsBroadcastChanged,
-  type LlmProvider,
   type PersistedSettings,
 } from '../lib/tauri';
 import {
@@ -20,34 +17,9 @@ import {
   resolveActiveTheme,
   type Appearance,
 } from '../themes';
-import {
-  PROVIDER_PRESETS,
-  getPreset,
-  presetOrDefault,
-  type ProviderPreset,
-} from './providers';
 import { loadInstalledThemes } from '../lib/themeMarketplace';
 
-export interface ProviderConfig {
-  apiKey?: string;
-  baseUrl?: string;
-  model: string;
-}
-
 export interface Settings {
-  /** Id of the provider preset currently selected for the next chat turn.
-   *  Multiple presets can be `enabled`; this one is the one actively in use. */
-  activePresetId: string;
-  /** Model id paired with `activePresetId`. Stored separately so a session
-   *  can lock to a specific model independently of the preset's default. */
-  currentModel: string;
-  /** Preset ids the user has explicitly enabled — these are the ones that
-   *  appear in the model dropdown. A preset auto-enables when its key is
-   *  set, and can be disabled by hand from the Providers pane. */
-  enabledPresetIds: string[];
-  /** Per-preset configuration keyed by preset id (not by backend kind). */
-  providers: Record<string, ProviderConfig>;
-  systemPrompt: string;
   /** Path to the shell binary new terminals should spawn. `null` means
    *  "let the Rust side pick the OS default" (COMSPEC on Windows,
    *  `$SHELL` elsewhere). Applies to newly-opened tabs only; in-flight
@@ -72,9 +44,6 @@ export interface Settings {
   /** Enable Vim keybindings in the CodeMirror editor. Multi-cursor is always
    *  on; this gates the modal Vim layer specifically. */
   editorVimMode: boolean;
-  /** Enable the ⌘K inline AI edit inside the editor. When off, ⌘K falls
-   *  through to the global command palette. */
-  editorInlineAi: boolean;
   /** Enable LSP features (diagnostics, hover, completion) in the editor.
    *  Off by default — requires the relevant language servers on PATH. */
   editorLsp: boolean;
@@ -85,18 +54,8 @@ export interface Settings {
   notifyThresholdSecs: number;
   /** Play the OS notification sound alongside the toast. */
   notifySound: boolean;
-  /** True once hydrateSecrets() has finished. */
-  secretsHydrated: boolean;
   /** True once hydrateSettings() has applied stored values. */
   settingsHydrated: boolean;
-  setActivePresetId: (id: string) => void;
-  /** Switch both the preset and the model in one step. Used by the model
-   *  picker so the two never drift apart. */
-  setCurrentModel: (presetId: string, model: string) => void;
-  /** Toggle whether a preset appears in the model picker. */
-  setPresetEnabled: (id: string, enabled: boolean) => void;
-  updateProvider: (id: string, patch: Partial<ProviderConfig>) => void;
-  setSystemPrompt: (s: string) => void;
   setDefaultShell: (shell: string | null) => void;
   setAppearance: (a: Appearance) => void;
   /** Pick a specific theme id, or pass `null` to fall back to the dark/light
@@ -111,45 +70,14 @@ export interface Settings {
   setRestoreWindowState: (on: boolean) => void;
   setTerminalWebgl: (on: boolean) => void;
   setEditorVimMode: (on: boolean) => void;
-  setEditorInlineAi: (on: boolean) => void;
   setEditorLsp: (on: boolean) => void;
   setNotifyLongCommands: (on: boolean) => void;
   setNotifyThresholdSecs: (secs: number) => void;
   setNotifySound: (on: boolean) => void;
   hydrateSettings: () => Promise<void>;
-  hydrateSecrets: () => Promise<void>;
-}
-
-const KEY_SAVE_DEBOUNCE_MS = 300;
-const keySaveTimers: Record<string, ReturnType<typeof setTimeout>> = {};
-
-/** Defaults: every preset gets a row in `providers` so the UI doesn't have
- *  to deal with undefined entries. apiKey is empty until hydrateSecrets
- *  pulls from the keychain; model defaults to the first known model (or
- *  empty for free-form-only presets). */
-function defaultProviderConfigs(): Record<string, ProviderConfig> {
-  return Object.fromEntries(
-    PROVIDER_PRESETS.map((p) => [
-      p.id,
-      {
-        apiKey: p.needsApiKey ? '' : undefined,
-        baseUrl: p.defaultBaseUrl,
-        model: p.defaultModels[0] ?? '',
-      },
-    ]),
-  );
 }
 
 const DEFAULTS = {
-  activePresetId: 'openai',
-  currentModel: PROVIDER_PRESETS[0]?.defaultModels[0] ?? '',
-  // No keys set yet → no providers enabled. Once the user pastes a key the
-  // preset auto-enables (see updateProvider). Local presets that don't need
-  // a key are enabled out of the box.
-  enabledPresetIds: PROVIDER_PRESETS.filter((p) => !p.needsApiKey).map((p) => p.id),
-  providers: defaultProviderConfigs(),
-  systemPrompt:
-    'You are ARC, a helpful AI assistant embedded in a terminal. Keep answers tight, prefer code over prose, and assume the user is a developer.',
   defaultShell: null as string | null,
   appearance: DEFAULT_APPEARANCE,
   themeId: null as string | null,
@@ -159,7 +87,6 @@ const DEFAULTS = {
   restoreWindowState: true,
   terminalWebgl: false,
   editorVimMode: false,
-  editorInlineAi: true,
   editorLsp: false,
   notifyLongCommands: true,
   notifyThresholdSecs: 30,
@@ -179,96 +106,8 @@ const isAppearance = (v: unknown): v is Appearance =>
 
 export const useSettings = create<Settings>()((set, get) => ({
   ...DEFAULTS,
-  secretsHydrated: false,
   settingsHydrated: false,
 
-  setActivePresetId: (id) => {
-    const preset = getPreset(id);
-    if (!preset) return;
-    set((s) => {
-      // Snap the current model to one that belongs to this preset so the
-      // picker never shows a foreign model paired with the new provider.
-      const cfg = s.providers[id];
-      const model = cfg?.model || preset.defaultModels[0] || s.currentModel;
-      return { activePresetId: id, currentModel: model };
-    });
-  },
-
-  setCurrentModel: (presetId, model) => {
-    if (!getPreset(presetId)) return;
-    set((s) => {
-      // Mirror the choice onto the per-preset config so the user's last
-      // pick sticks across switches and gets persisted to SQLite.
-      const cfg = s.providers[presetId] ?? { model: '' };
-      return {
-        activePresetId: presetId,
-        currentModel: model,
-        providers: { ...s.providers, [presetId]: { ...cfg, model } },
-      };
-    });
-  },
-
-  setPresetEnabled: (id, enabled) => {
-    if (!getPreset(id)) return;
-    set((s) => {
-      const current = new Set(s.enabledPresetIds);
-      if (enabled) current.add(id);
-      else current.delete(id);
-      // Order presets by their canonical registry position so the picker
-      // groups stay stable regardless of toggle order.
-      const ordered = PROVIDER_PRESETS.filter((p) => current.has(p.id)).map((p) => p.id);
-      // If we just disabled the current preset, snap to the next enabled one.
-      let nextActive = s.activePresetId;
-      let nextModel = s.currentModel;
-      if (!current.has(s.activePresetId)) {
-        const fallback = ordered[0];
-        if (fallback) {
-          const preset = getPreset(fallback)!;
-          const cfg = s.providers[fallback];
-          nextActive = fallback;
-          nextModel = cfg?.model || preset.defaultModels[0] || '';
-        }
-      }
-      return {
-        enabledPresetIds: ordered,
-        activePresetId: nextActive,
-        currentModel: nextModel,
-      };
-    });
-  },
-
-  updateProvider: (id, patch) => {
-    if (!getPreset(id)) return;
-    set((s) => {
-      const cfg = { ...(s.providers[id] ?? { model: '' }), ...patch };
-      // Auto-enable a preset the moment a key gets set, so the user doesn't
-      // have to find a separate toggle. Clearing the key does NOT
-      // auto-disable — they may want to keep the entry for later.
-      const enabled = new Set(s.enabledPresetIds);
-      if (patch.apiKey && patch.apiKey.length > 0) enabled.add(id);
-      const ordered = PROVIDER_PRESETS.filter((p) => enabled.has(p.id)).map((p) => p.id);
-      // Mirror a model change into `currentModel` if it's the active preset.
-      const currentModel =
-        id === s.activePresetId && patch.model !== undefined ? patch.model : s.currentModel;
-      return {
-        providers: { ...s.providers, [id]: cfg },
-        enabledPresetIds: ordered,
-        currentModel,
-      };
-    });
-    if (patch.apiKey !== undefined && isTauri) {
-      const existing = keySaveTimers[id];
-      if (existing) clearTimeout(existing);
-      const key = patch.apiKey ?? '';
-      keySaveTimers[id] = setTimeout(() => {
-        void secretsSetApiKey(id, key).catch((err) =>
-          console.error('[settings] keyring write failed:', err),
-        );
-      }, KEY_SAVE_DEBOUNCE_MS);
-    }
-  },
-
-  setSystemPrompt: (s) => set({ systemPrompt: s }),
   setDefaultShell: (shell) => set({ defaultShell: shell }),
 
   setAppearance: (a) => {
@@ -306,7 +145,6 @@ export const useSettings = create<Settings>()((set, get) => ({
   setRestoreWindowState: (on) => set({ restoreWindowState: on }),
   setTerminalWebgl: (on) => set({ terminalWebgl: on }),
   setEditorVimMode: (on) => set({ editorVimMode: on }),
-  setEditorInlineAi: (on) => set({ editorInlineAi: on }),
   setEditorLsp: (on) => set({ editorLsp: on }),
   setNotifyLongCommands: (on) => set({ notifyLongCommands: on }),
   setNotifyThresholdSecs: (secs) => set({ notifyThresholdSecs: clampNotifySecs(secs) }),
@@ -384,138 +222,17 @@ export const useSettings = create<Settings>()((set, get) => ({
       console.error('[settings] localStorage migration failed:', err);
     }
   },
-
-  hydrateSecrets: async () => {
-    if (!isTauri) {
-      set({ secretsHydrated: true });
-      return;
-    }
-    const providers = { ...get().providers };
-
-    // One-shot migration: legacy providers stored their apiKey inline
-    // (pre-keychain era). Push anything still sitting in memory.
-    for (const id of Object.keys(providers)) {
-      const legacy = providers[id]?.apiKey;
-      if (legacy && legacy.length > 0) {
-        try {
-          await secretsSetApiKey(id, legacy);
-        } catch (err) {
-          console.error(`[settings] migrate ${id} → keyring failed:`, err);
-        }
-      }
-    }
-
-    // Pull every preset's key from the keychain. Presets that don't take a
-    // key still get a row in the map so the UI lookup stays uniform.
-    for (const preset of PROVIDER_PRESETS) {
-      if (!preset.needsApiKey) {
-        providers[preset.id] = {
-          ...(providers[preset.id] ?? { model: preset.defaultModels[0] ?? '' }),
-          apiKey: undefined,
-        };
-        continue;
-      }
-      try {
-        const stored = await secretsGetApiKey(preset.id);
-        providers[preset.id] = {
-          ...(providers[preset.id] ?? { model: preset.defaultModels[0] ?? '' }),
-          apiKey: stored ?? '',
-        };
-      } catch (err) {
-        console.error(`[settings] keyring read ${preset.id} failed:`, err);
-        providers[preset.id] = {
-          ...(providers[preset.id] ?? { model: preset.defaultModels[0] ?? '' }),
-          apiKey: '',
-        };
-      }
-    }
-    // Auto-enable any preset that has a stored key — keeps the picker honest
-    // after a fresh install where the user has only pasted some keys but
-    // never visited the Providers pane.
-    const current = new Set(get().enabledPresetIds);
-    for (const preset of PROVIDER_PRESETS) {
-      if (preset.needsApiKey && providers[preset.id]?.apiKey) {
-        current.add(preset.id);
-      } else if (!preset.needsApiKey) {
-        current.add(preset.id);
-      }
-    }
-    const enabledPresetIds = PROVIDER_PRESETS.filter((p) => current.has(p.id)).map(
-      (p) => p.id,
-    );
-    set({ providers, enabledPresetIds, secretsHydrated: true });
-  },
 }));
 
 // ─── helpers ───────────────────────────────────────────────────────────────
 
-/** Merge a stored settings blob into the current store state. Handles both
- *  the current preset-keyed shape and the legacy `activeProvider` / 3-key
- *  shape from before the preset refactor. */
+/** Merge a stored settings blob into the current store state. */
 function applyStored(
   current: Settings,
   stored: Partial<PersistedSettings>,
 ): Partial<Settings> {
-  // Pick activePresetId from either field, falling back to the legacy
-  // LlmProvider kind if it happens to match a preset id (it does for
-  // openai / anthropic / ollama).
-  const candidate =
-    (stored as { activePresetId?: string }).activePresetId ??
-    stored.activeProvider ??
-    current.activePresetId;
-  const activePresetId = getPreset(candidate ?? '') ? candidate! : current.activePresetId;
-
-  // Merge per-preset configs. Keep every preset present in the store; only
-  // override entries that match a known preset id.
-  const nextProviders: Record<string, ProviderConfig> = { ...current.providers };
-  const incoming = stored.providers as
-    | Record<string, { model?: string; baseUrl?: string }>
-    | undefined;
-  if (incoming) {
-    for (const [id, cfg] of Object.entries(incoming)) {
-      const preset = getPreset(id);
-      if (!preset) continue;
-      const base = nextProviders[id] ?? { model: preset.defaultModels[0] ?? '' };
-      nextProviders[id] = {
-        ...base,
-        model: cfg.model ?? base.model,
-        baseUrl: cfg.baseUrl ?? base.baseUrl ?? preset.defaultBaseUrl,
-      };
-    }
-  }
-
-  // Enabled-preset list. If absent (older blob), seed with anything that
-  // already has a non-empty model in `providers` — the same heuristic the
-  // legacy single-active store implied.
-  const storedEnabled = (stored as { enabledPresetIds?: string[] }).enabledPresetIds;
-  const enabledIds = storedEnabled
-    ? storedEnabled.filter((id) => getPreset(id))
-    : PROVIDER_PRESETS.filter(
-        (p) => !p.needsApiKey || Boolean(nextProviders[p.id]?.model),
-      ).map((p) => p.id);
-  // Preserve registry order so the picker doesn't reshuffle on every save.
-  const orderedEnabled = PROVIDER_PRESETS.filter((p) =>
-    enabledIds.includes(p.id),
-  ).map((p) => p.id);
-
-  // currentModel: fall back to whichever model is configured on the active
-  // preset, then the preset's first default.
-  const activePreset = getPreset(activePresetId)!;
-  const activeCfg = nextProviders[activePresetId];
-  const storedModel = (stored as { currentModel?: string }).currentModel;
-  const currentModel =
-    storedModel ||
-    activeCfg?.model ||
-    activePreset.defaultModels[0] ||
-    current.currentModel;
-
   return {
-    activePresetId,
-    currentModel,
-    enabledPresetIds: orderedEnabled,
-    systemPrompt: stored.systemPrompt ?? current.systemPrompt,
     defaultShell: stored.defaultShell ?? current.defaultShell,
-    providers: nextProviders,
     appearance: isAppearance(stored.appearance) ? stored.appearance : current.appearance,
     themeId:
       stored.themeId === null
@@ -544,10 +261,6 @@ function applyStored(
       typeof stored.editorVimMode === 'boolean'
         ? stored.editorVimMode
         : current.editorVimMode,
-    editorInlineAi:
-      typeof stored.editorInlineAi === 'boolean'
-        ? stored.editorInlineAi
-        : current.editorInlineAi,
     editorLsp:
       typeof stored.editorLsp === 'boolean' ? stored.editorLsp : current.editorLsp,
     notifyLongCommands:
@@ -565,20 +278,6 @@ function applyStored(
 
 function toPersistedSettings(s: Settings): PersistedSettings {
   return {
-    activePresetId: s.activePresetId,
-    currentModel: s.currentModel,
-    enabledPresetIds: s.enabledPresetIds,
-    // Mirror to the legacy field so an older binary opening the same DB
-    // doesn't end up with an undefined provider. Cast through unknown
-    // because not every preset id maps to a LlmProvider kind.
-    activeProvider: (getPreset(s.activePresetId)?.kind ?? 'openai') as LlmProvider,
-    providers: Object.fromEntries(
-      Object.entries(s.providers).map(([id, cfg]) => [
-        id,
-        { model: cfg.model, baseUrl: cfg.baseUrl },
-      ]),
-    ),
-    systemPrompt: s.systemPrompt,
     defaultShell: s.defaultShell,
     appearance: s.appearance,
     themeId: s.themeId,
@@ -588,7 +287,6 @@ function toPersistedSettings(s: Settings): PersistedSettings {
     restoreWindowState: s.restoreWindowState,
     terminalWebgl: s.terminalWebgl,
     editorVimMode: s.editorVimMode,
-    editorInlineAi: s.editorInlineAi,
     editorLsp: s.editorLsp,
     notifyLongCommands: s.notifyLongCommands,
     notifyThresholdSecs: s.notifyThresholdSecs,
@@ -619,11 +317,6 @@ export async function rehydrateSettingsFromBroadcast(): Promise<void> {
     const stored = await sessionSettingsLoad();
     if (!stored) return;
     const current = useSettings.getState();
-    const incomingPreset =
-      (stored as { activePresetId?: string }).activePresetId ??
-      stored.activeProvider ??
-      current.activePresetId;
-    const samePreset = incomingPreset === current.activePresetId;
     const sameAppearance =
       (isAppearance(stored.appearance) ? stored.appearance : current.appearance) ===
       current.appearance;
@@ -645,7 +338,7 @@ export async function rehydrateSettingsFromBroadcast(): Promise<void> {
       (stored.restoreWindowState ?? current.restoreWindowState) === current.restoreWindowState &&
       (stored.terminalWebgl ?? current.terminalWebgl) === current.terminalWebgl &&
       (stored.editorVimMode ?? current.editorVimMode) === current.editorVimMode;
-    if (samePreset && sameAppearance && sameTheme && sameFont && sameShell && sameStartup) return;
+    if (sameAppearance && sameTheme && sameFont && sameShell && sameStartup) return;
 
     suppressSave = true;
     useSettings.setState((s) => applyStored(s, stored));
@@ -672,28 +365,3 @@ if (typeof window !== 'undefined') {
     }
   });
 }
-
-// ─── derived selectors ─────────────────────────────────────────────────────
-
-/** The preset the user has chosen for new chats. */
-export function useActivePreset(): ProviderPreset {
-  const id = useSettings((s) => s.activePresetId);
-  return presetOrDefault(id);
-}
-
-/** Config row for the active preset. */
-export function useActiveProviderConfig(): ProviderConfig {
-  const id = useSettings((s) => s.activePresetId);
-  const cfg = useSettings((s) => s.providers[id]);
-  return cfg ?? { model: '' };
-}
-
-// Re-export for the (few) call-sites that still want a static map. The
-// PROVIDER_LABELS / PROVIDER_MODELS exports are kept to avoid breaking
-// callers; new code should pull from PROVIDER_PRESETS instead.
-export const PROVIDER_LABELS: Record<string, string> = Object.fromEntries(
-  PROVIDER_PRESETS.map((p) => [p.id, p.label]),
-);
-export const PROVIDER_MODELS: Record<string, string[]> = Object.fromEntries(
-  PROVIDER_PRESETS.map((p) => [p.id, p.defaultModels]),
-);

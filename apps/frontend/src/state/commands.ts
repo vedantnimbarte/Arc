@@ -12,7 +12,6 @@ export type CommandGroup =
   | 'Workspace'
   | 'Terminal'
   | 'Editor'
-  | 'Assistant'
   | 'Git'
   | 'SSH'
   | 'AI CLIs'

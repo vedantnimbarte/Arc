@@ -1,8 +1,5 @@
 import { Channel, invoke } from '@tauri-apps/api/core';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
-import type { McpNotification, McpTool } from '@arc/mcp';
-
-export type { McpNotification, McpTool };
 
 export const isTauri = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
 
@@ -86,58 +83,10 @@ export interface AiCliInfo {
 /**
  * Enumerate AI coding-agent CLIs installed on the user's PATH (Claude Code,
  * OpenAI Codex, OpenCode). Used by the launcher UI in TabBar / new-tab popover
- * and by the chat panel to gate `local-cli` providers behind "is it installed".
+ * to spawn the CLI in a terminal tab.
  */
 export async function ptyListAiClis(): Promise<AiCliInfo[]> {
   return invoke<AiCliInfo[]>('pty_list_ai_clis');
-}
-
-/** Result of running an AI CLI's usage subcommand (Settings → Usage). The
- *  output is returned verbatim; the frontend parses it best-effort and shows
- *  the raw text when parsing fails. Never throws on a non-zero exit. */
-export interface CliUsageResult {
-  id: AiCliId;
-  label: string;
-  /** Human-readable command that was (or would be) run. */
-  command: string;
-  installed: boolean;
-  /** Whether we have a known usage subcommand for this CLI. */
-  supported: boolean;
-  stdout: string;
-  stderr: string;
-  exitCode: number | null;
-  timedOut: boolean;
-}
-
-/** Run the hardcoded usage subcommand for a detected AI CLI. */
-export async function usageCliFetch(id: AiCliId): Promise<CliUsageResult> {
-  return invoke<CliUsageResult>('usage_cli_fetch', { id });
-}
-
-/** Normalized provider usage summary (current calendar month, UTC). When
- *  `authorized` is false the key lacks usage/admin scope and `note` explains. */
-export interface UsageReport {
-  authorized: boolean;
-  inputTokens: number | null;
-  outputTokens: number | null;
-  costUsd: number | null;
-  periodLabel: string;
-  raw: unknown;
-  note?: string;
-}
-
-/** Fetch cloud provider usage. `kind` is the routing target ('anthropic' |
- *  'openai'); the key must be an admin/usage-scoped key. */
-export async function usageApiFetch(
-  kind: 'anthropic' | 'openai',
-  apiKey: string,
-  baseUrl?: string | null,
-): Promise<UsageReport> {
-  return invoke<UsageReport>('usage_api_fetch', {
-    kind,
-    apiKey,
-    baseUrl: baseUrl ?? null,
-  });
 }
 
 export async function onPtyExit(
@@ -159,14 +108,6 @@ export interface ProjectConfig {
   schema: number;
   workspace?: { name?: string };
   env: Record<string, string>;
-  agents: Array<{ id: string; label: string; prompt: string; model?: string }>;
-  mcp_servers: Array<{
-    id: string;
-    command?: string[];
-    url?: string;
-    env: Record<string, string>;
-    headers: Record<string, string>;
-  }>;
   terminal?: { default_shell?: string };
   theme?: { id?: string };
 }
@@ -526,99 +467,6 @@ export async function apiclientEnvsSetActive(
   await invoke('apiclient_envs_set_active', { sessionId, id });
 }
 
-// ----- Secrets (OS credential vault) ------------------------------------
-
-// Provider id here is a preset id (e.g. `'openai'`, `'deepseek'`, `'lmstudio'`)
-// — the Rust side stores per arbitrary string under the same keyring service,
-// so the typing stays loose on purpose.
-export async function secretsSetApiKey(provider: string, key: string): Promise<void> {
-  await invoke('secrets_set_api_key', { provider, key });
-}
-
-export async function secretsGetApiKey(provider: string): Promise<string | null> {
-  return invoke<string | null>('secrets_get_api_key', { provider });
-}
-
-export async function secretsDeleteApiKey(provider: string): Promise<void> {
-  await invoke('secrets_delete_api_key', { provider });
-}
-
-// ----- Agent runtime ----------------------------------------------------
-
-export type AgentEvent =
-  | { kind: 'text'; text: string }
-  | { kind: 'tool_start'; id: string; name: string; input: unknown }
-  | { kind: 'tool_result'; id: string; ok: boolean; output: string }
-  | {
-      kind: 'approval_request';
-      approval_id: string;
-      tool_use_id: string;
-      name: string;
-      input: unknown;
-    }
-  | { kind: 'done'; summary: string }
-  | { kind: 'error'; message: string };
-
-export interface AgentRunReq {
-  id: string;
-  goal: string;
-  api_key: string;
-  model: string;
-  workspace_root: string | null;
-  workspace_id: string | null;
-  /** Persona prompt layered on top of the runtime's default agent prompt. */
-  system_prompt?: string | null;
-  /** Run inside an isolated git worktree so edits don't touch the live tree
-   *  until reviewed. Requires `workspace_root` to be a git repo. */
-  worktree?: boolean;
-}
-
-/**
- * Kick off a coding-agent run. Events stream via `agent://event/<id>`;
- * the promise resolves as soon as the run is queued (not when it finishes).
- */
-export async function agentRun(
-  req: AgentRunReq,
-  onEvent: (ev: AgentEvent) => void,
-): Promise<UnlistenFn> {
-  const unlisten = await listen<AgentEvent>(`agent://event/${req.id}`, (e) => {
-    onEvent(e.payload);
-    if (e.payload.kind === 'done' || e.payload.kind === 'error') {
-      // Tear down on terminal events. We capture the unlisten function
-      // into a self-clearing reference below to support both the
-      // immediate await and this auto-cleanup path.
-      autoCleanup?.();
-    }
-  });
-  let autoCleanup: (() => void) | null = unlisten;
-  await invoke('agent_run', { req });
-  return () => {
-    autoCleanup = null;
-    unlisten();
-  };
-}
-
-/** Resolve a pending tool-approval prompt. Idempotent on the second call
- *  for the same `approvalId` (e.g. double-click on Approve): the backend
- *  will reject the duplicate but we swallow the error here. */
-export async function agentDecide(approvalId: string, approve: boolean): Promise<void> {
-  try {
-    await invoke('agent_decide', { approvalId, approve });
-  } catch (err) {
-    // Stale approval id is not user-actionable.
-    console.warn('[agent] decide ignored:', err);
-  }
-}
-
-/** Discard an isolated run's worktree: force-removes the worktree directory and
- *  deletes its throwaway branch. The main repo root is derived backend-side. */
-export async function agentWorktreeDiscard(
-  worktreePath: string,
-  branch: string | null,
-): Promise<void> {
-  await invoke('agent_worktree_discard', { worktreePath, branch: branch ?? null });
-}
-
 // ----- LSP client -------------------------------------------------------
 
 export interface LspPosition {
@@ -728,154 +576,6 @@ export async function onLspEvent(
   return listen<LspEvent>(`lsp://event/${id}`, (e) => handler(e.payload));
 }
 
-// ----- MCP client -------------------------------------------------------
-//
-// `McpTool` and `McpNotification` shapes are imported from `@arc/mcp` and
-// re-exported above so existing consumers keep importing from this module.
-
-export async function mcpConnect(id: string, command: string, args: string[]): Promise<void> {
-  await invoke('mcp_connect', { id, command, args });
-}
-
-/**
- * Connect over MCP's Streamable HTTP transport (2025-03-26 spec). The
- * server URL is POSTed to with JSON-RPC; responses may come back as either
- * plain `application/json` or an SSE stream — both are handled.
- */
-export async function mcpConnectHttp(
-  id: string,
-  url: string,
-  headers?: Record<string, string>,
-): Promise<void> {
-  await invoke('mcp_connect_http', {
-    id,
-    url,
-    headers: headers ?? null,
-  });
-}
-
-export async function mcpListTools(id: string): Promise<McpTool[]> {
-  return invoke<McpTool[]>('mcp_list_tools', { id });
-}
-
-export async function mcpCallTool(id: string, name: string, args: unknown): Promise<string> {
-  return invoke<string>('mcp_call_tool', { id, name, args });
-}
-
-export async function mcpDisconnect(id: string): Promise<void> {
-  await invoke('mcp_disconnect', { id });
-}
-
-/**
- * Subscribe to server-initiated notifications from `id`. Fires for every
- * notification the transport sees: log messages, progress updates,
- * resource/tool list-changed pings, etc. Returns an unlisten function.
- * Payload shape is `McpNotification` (see `@arc/mcp`).
- */
-export async function onMcpNotification(
-  id: string,
-  handler: (notif: McpNotification) => void,
-): Promise<UnlistenFn> {
-  return listen<McpNotification>(`mcp://notification/${id}`, (e) => handler(e.payload));
-}
-
-// ----- LLM streaming -----------------------------------------------------
-
-export type LlmProvider = 'openai' | 'anthropic' | 'ollama';
-
-export interface LlmMessage {
-  role: 'system' | 'user' | 'assistant';
-  content: string;
-}
-
-export interface LlmStreamReq {
-  id: string;
-  provider: LlmProvider;
-  model: string;
-  messages: LlmMessage[];
-  system?: string;
-  temperature?: number;
-  max_tokens?: number;
-  api_key?: string;
-  base_url?: string;
-}
-
-export interface LlmChunk {
-  text: string;
-  done: boolean;
-  /** Cumulative prompt-token count, present on the chunk(s) where the
-   *  provider reports usage (OpenAI's trailing usage chunk, Anthropic's
-   *  message_start). Absent for providers without usage (Ollama, local CLI). */
-  input_tokens?: number;
-  /** Cumulative completion-token count — OpenAI's usage chunk, or Anthropic's
-   *  latest message_delta. */
-  output_tokens?: number;
-}
-
-/** One row from the provider's model catalog. `id` is what's sent back in
- *  chat requests; `label` is a friendlier name when available. */
-export interface ModelInfo {
-  id: string;
-  label?: string;
-  context_window?: number;
-  kind?: string;
-}
-
-/** Live-fetch the model catalog for a provider kind. */
-export async function llmListModels(
-  provider: LlmProvider,
-  apiKey?: string,
-  baseUrl?: string,
-): Promise<ModelInfo[]> {
-  return invoke<ModelInfo[]>('llm_list_models', {
-    provider,
-    apiKey: apiKey ?? null,
-    baseUrl: baseUrl ?? null,
-  });
-}
-
-export interface LlmDoneEvent {
-  ok?: true;
-  cancelled?: true;
-  error?: string;
-}
-
-/**
- * Start a streaming LLM completion. Returns a cancel function. `onChunk`
- * fires for every text delta, `onDone` fires exactly once with the final
- * status. Both happen on the main thread.
- */
-export async function llmStream(
-  req: LlmStreamReq,
-  onChunk: (chunk: LlmChunk) => void,
-  onDone: (ev: LlmDoneEvent) => void,
-): Promise<() => Promise<void>> {
-  const unlistenChunk = await listen<LlmChunk>(`llm://chunk/${req.id}`, (e) => onChunk(e.payload));
-  const unlistenDone = await listen<LlmDoneEvent>(`llm://done/${req.id}`, (e) => {
-    unlistenChunk();
-    unlistenDone();
-    onDone(e.payload);
-  });
-
-  try {
-    await invoke('llm_stream', { req });
-  } catch (err) {
-    unlistenChunk();
-    unlistenDone();
-    onDone({ error: String(err) });
-  }
-
-  return async () => {
-    unlistenChunk();
-    unlistenDone();
-    try {
-      await invoke('llm_cancel', { id: req.id });
-    } catch {
-      /* already gone */
-    }
-  };
-}
-
 // ----- Session / persistence --------------------------------------------
 //
 // Nested struct fields (Tab, Workspace, ChatMessage) use snake_case to match
@@ -924,47 +624,6 @@ export interface Workspace {
   last_opened_at: number;
 }
 
-export type AgentRunStatus = 'idle' | 'running' | 'paused' | 'completed' | 'failed';
-
-export interface AgentRunRecord {
-  id: string;
-  workspace_id: string | null;
-  agent_id: string;
-  status: AgentRunStatus;
-  started_at: number;
-  finished_at: number | null;
-  summary: string | null;
-  /** Path of the isolated worktree this run used, or null for an in-place run. */
-  worktree_path: string | null;
-  /** Throwaway branch the worktree was created on, or null. */
-  worktree_branch: string | null;
-}
-
-export type ChatRole = 'system' | 'user' | 'assistant';
-
-export interface ChatConversation {
-  id: string;
-  workspace_id: string | null;
-  title: string | null;
-  /** UI agent persona id; NULL means the default "Chat Assistant". */
-  agent_id: string | null;
-  created_at: number;
-  last_message_at: number;
-}
-
-export interface PersistedChatMessage {
-  id: string;
-  conversation_id: string;
-  role: ChatRole;
-  content: string;
-  created_at: number;
-}
-
-export interface ChatLoad {
-  conversation: ChatConversation;
-  messages: PersistedChatMessage[];
-}
-
 // Sessions / tabs
 
 export async function sessionLoad(): Promise<SessionState> {
@@ -993,17 +652,6 @@ export async function sessionWorkspacesList(): Promise<Workspace[]> {
   return invoke<Workspace[]>('session_workspaces_list');
 }
 
-/** List persisted agent runs, most-recent first. */
-export async function sessionAgentRunsList(
-  workspaceId?: string | null,
-  limit?: number,
-): Promise<AgentRunRecord[]> {
-  return invoke<AgentRunRecord[]>('session_agent_runs_list', {
-    workspaceId: workspaceId ?? null,
-    limit: limit ?? null,
-  });
-}
-
 export async function sessionWorkspaceUpsert(
   name: string,
   root: string,
@@ -1015,50 +663,10 @@ export async function sessionWorkspaceDelete(id: string): Promise<void> {
   await invoke('session_workspace_delete', { id });
 }
 
-// Chat history
-
-export async function sessionChatLoad(
-  workspaceId?: string | null,
-): Promise<ChatLoad> {
-  return invoke<ChatLoad>('session_chat_load', { workspaceId: workspaceId ?? null });
-}
-
-export async function sessionChatAppend(
-  conversationId: string,
-  role: ChatRole,
-  content: string,
-): Promise<PersistedChatMessage> {
-  return invoke<PersistedChatMessage>('session_chat_append', {
-    conversationId,
-    role,
-    content,
-  });
-}
-
-export async function sessionChatClear(conversationId: string): Promise<void> {
-  await invoke('session_chat_clear', { conversationId });
-}
-
 // App settings (non-secret; persisted to SQLite)
 
-/** Shape stored in the `app_settings` table under key `"user_settings"`.
- *
- *  Provider entries are keyed by preset id (a string — see
- *  `state/providers.ts`), not by the backend `LlmProvider` kind. The legacy
- *  `activeProvider` field is still written for forward-compat with older
- *  binaries opening the same DB; new code reads `activePresetId`. */
+/** Shape stored in the `app_settings` table under key `"user_settings"`. */
 export interface PersistedSettings {
-  /** Current preset id (e.g. `'openai'`, `'deepseek'`, `'lmstudio'`). */
-  activePresetId?: string;
-  /** Model id paired with the active preset. */
-  currentModel?: string;
-  /** Preset ids the user has enabled — listed in the model picker. */
-  enabledPresetIds?: string[];
-  /** Backend kind mirror — kept so older builds don't end up with an
-   *  undefined provider when they read the same blob. */
-  activeProvider?: LlmProvider;
-  providers: Record<string, { model: string; baseUrl?: string }>;
-  systemPrompt: string;
   defaultShell: string | null;
   /** Appearance preference: 'dark' | 'light' | 'system'. */
   appearance?: 'dark' | 'light' | 'system';
@@ -1081,8 +689,6 @@ export interface PersistedSettings {
   terminalWebgl?: boolean;
   /** Enable Vim keybindings in the CodeMirror editor. */
   editorVimMode?: boolean;
-  /** Enable the ⌘K inline AI edit inside the CodeMirror editor. */
-  editorInlineAi?: boolean;
   /** Enable Language Server Protocol features (diagnostics, hover, completion)
    *  in the editor. Requires the relevant language servers on PATH. */
   editorLsp?: boolean;
@@ -1120,51 +726,6 @@ export async function settingsBroadcastChanged(): Promise<void> {
 /** Listen for cross-window settings updates. */
 export async function onSettingsChanged(handler: () => void): Promise<UnlistenFn> {
   return listen('settings://changed', () => handler());
-}
-
-// Chat sessions (multi-conversation)
-
-export async function sessionChatSessionsList(
-  workspaceId?: string | null,
-): Promise<ChatConversation[]> {
-  return invoke<ChatConversation[]>('session_chat_sessions_list', {
-    workspaceId: workspaceId ?? null,
-  });
-}
-
-export async function sessionChatSessionCreate(
-  workspaceId: string | null,
-  agentId: string | null,
-  title: string | null,
-): Promise<ChatConversation> {
-  return invoke<ChatConversation>('session_chat_session_create', {
-    workspaceId,
-    agentId,
-    title,
-  });
-}
-
-export async function sessionChatSessionUpdate(
-  id: string,
-  patch: { title?: string | null; agentId?: string | null },
-): Promise<void> {
-  await invoke('session_chat_session_update', {
-    id,
-    title: patch.title ?? null,
-    agentId: patch.agentId ?? null,
-  });
-}
-
-export async function sessionChatSessionDelete(id: string): Promise<void> {
-  await invoke('session_chat_session_delete', { id });
-}
-
-export async function sessionChatMessagesLoad(
-  conversationId: string,
-): Promise<PersistedChatMessage[]> {
-  return invoke<PersistedChatMessage[]>('session_chat_messages_load', {
-    conversationId,
-  });
 }
 
 // Command history
@@ -1221,151 +782,6 @@ export async function sessionCommandFinish(
     id,
     exitCode,
     outputExcerpt,
-  });
-}
-
-// ----- Memory subsystem (workspace-scoped notes) ------------------------
-//
-// `workspaceId` semantics on the Rust side:
-//   undefined / null  → entries with NULL workspace_id (global / unscoped)
-//   "__all__"         → every entry, regardless of workspace
-//   any other string  → filter to that workspace
-
-export interface MemoryEntry {
-  id: string;
-  workspace_id: string | null;
-  kind: string;
-  title: string | null;
-  content: string;
-  /** Comma-separated; normalized to lowercase + sorted on save. */
-  tags: string | null;
-  source: string | null;
-  created_at: number;
-  updated_at: number;
-}
-
-export interface MemoryHit {
-  entry: MemoryEntry;
-  /** FTS5 bm25 score — lower is more relevant. */
-  score: number;
-  /** `content` excerpt with matches wrapped in `[` … `]`. */
-  snippet: string;
-}
-
-export interface MemorySaveReq {
-  workspaceId?: string | null;
-  kind?: string | null;
-  title?: string | null;
-  content: string;
-  tags?: string | null;
-  source?: string | null;
-}
-
-export async function memorySave(req: MemorySaveReq): Promise<MemoryEntry> {
-  return invoke<MemoryEntry>('memory_save', {
-    workspaceId: req.workspaceId ?? null,
-    kind: req.kind ?? null,
-    title: req.title ?? null,
-    content: req.content,
-    tags: req.tags ?? null,
-    source: req.source ?? null,
-  });
-}
-
-export async function memoryUpdate(
-  id: string,
-  patch: { title?: string | null; content?: string | null; tags?: string | null },
-): Promise<void> {
-  await invoke('memory_update', {
-    id,
-    title: patch.title ?? null,
-    content: patch.content ?? null,
-    tags: patch.tags ?? null,
-  });
-}
-
-export async function memoryDelete(id: string): Promise<void> {
-  await invoke('memory_delete', { id });
-}
-
-export async function memoryGet(id: string): Promise<MemoryEntry | null> {
-  return invoke<MemoryEntry | null>('memory_get', { id });
-}
-
-export async function memoryList(
-  workspaceId: string | null | undefined,
-  limit: number,
-): Promise<MemoryEntry[]> {
-  return invoke<MemoryEntry[]>('memory_list', {
-    workspaceId: workspaceId ?? null,
-    limit,
-  });
-}
-
-export async function memorySearch(
-  workspaceId: string | null | undefined,
-  query: string,
-  limit: number,
-): Promise<MemoryHit[]> {
-  return invoke<MemoryHit[]>('memory_search', {
-    workspaceId: workspaceId ?? null,
-    query,
-    limit,
-  });
-}
-
-// ----- Memory vector search (V1) ----------------------------------------
-
-export type EmbedProvider = 'openai' | 'ollama';
-
-export interface MemoryEmbedReq {
-  id: string;
-  provider: EmbedProvider;
-  model: string;
-  apiKey?: string | null;
-  baseUrl?: string | null;
-  /** Text to embed — typically the entry's `content` (caller decides). */
-  text: string;
-}
-
-export interface MemoryVectorSearchReq {
-  workspaceId?: string | null;
-  provider: EmbedProvider;
-  model: string;
-  apiKey?: string | null;
-  baseUrl?: string | null;
-  query: string;
-  limit: number;
-}
-
-export interface VectorHit {
-  entry: MemoryEntry;
-  /** Cosine similarity in [-1, 1]; higher = more relevant. */
-  similarity: number;
-}
-
-/** Compute an embedding for `text` and attach it to an existing entry. */
-export async function memoryEmbedEntry(req: MemoryEmbedReq): Promise<void> {
-  await invoke('memory_embed_entry', {
-    id: req.id,
-    provider: req.provider,
-    model: req.model,
-    apiKey: req.apiKey ?? null,
-    baseUrl: req.baseUrl ?? null,
-    text: req.text,
-  });
-}
-
-/** Embed `query` and rank existing entries by cosine similarity. */
-export async function memoryVectorSearch(req: MemoryVectorSearchReq): Promise<VectorHit[]> {
-  return invoke<VectorHit[]>('memory_vector_search', {
-    workspaceId: req.workspaceId ?? null,
-    provider: req.provider,
-    model: req.model,
-    apiKey: req.apiKey ?? null,
-    baseUrl: req.baseUrl ?? null,
-    query: req.query,
-    limit: req.limit,
   });
 }
 

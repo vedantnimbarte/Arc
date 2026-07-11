@@ -1,14 +1,13 @@
 import { useEffect } from 'react';
 import { ShieldAlert, ShieldCheck, X } from 'lucide-react';
 import { useTrust } from '../state/trust';
-import { applyProjectConfig } from '../state/projectConfig';
 
 /**
  * Workspace-trust gate. When an opened folder's `.arc/config.toml` wants to
- * spawn MCP servers, register agents, or inject shell env, we park the decision
- * in `useTrust` and prompt here before anything runs. Trusting applies the
- * config and remembers the root; declining leaves it inert. Mirrors the paste
- * warning: Esc declines, ⌘/Ctrl+Enter trusts, Enter alone is inert.
+ * inject shell env, we park the decision in `useTrust` and prompt here before
+ * anything applies it. Trusting remembers the root; declining leaves it inert.
+ * Mirrors the paste warning: Esc declines, ⌘/Ctrl+Enter trusts, Enter alone is
+ * inert.
  */
 export function TrustPrompt() {
   const pending = useTrust((s) => s.pending);
@@ -22,9 +21,7 @@ export function TrustPrompt() {
         respond(false);
       } else if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
         e.preventDefault();
-        const p = useTrust.getState().pending;
         respond(true);
-        if (p) applyProjectConfig(p.cfg);
       }
     };
     window.addEventListener('keydown', onKey, true);
@@ -35,17 +32,11 @@ export function TrustPrompt() {
 
   const { root, cfg } = pending;
   const items: string[] = [];
-  if (cfg.mcp_servers?.length)
-    items.push(`${cfg.mcp_servers.length} MCP server${cfg.mcp_servers.length > 1 ? 's' : ''} (runs commands)`);
-  if (cfg.agents?.length)
-    items.push(`${cfg.agents.length} agent persona${cfg.agents.length > 1 ? 's' : ''}`);
   const envCount = Object.keys(cfg.env ?? {}).length;
   if (envCount) items.push(`${envCount} environment variable${envCount > 1 ? 's' : ''}`);
 
   const onTrust = () => {
-    const p = useTrust.getState().pending;
     respond(true);
-    if (p) applyProjectConfig(p.cfg);
   };
 
   return (

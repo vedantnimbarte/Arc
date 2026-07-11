@@ -1,6 +1,6 @@
 //! Per-project `.arc/` config — a small TOML file living at the workspace
-//! root that lets a project nail down its preferred shell, theme, default
-//! environment variables, custom agents, and MCP server registrations.
+//! root that lets a project nail down its preferred shell, theme, and default
+//! environment variables.
 //!
 //! Schema (current = 1):
 //!
@@ -13,17 +13,6 @@
 //! [env]
 //! DEBUG = "true"
 //! DATABASE_URL = "postgres://localhost/dev"
-//!
-//! [[agents]]
-//! id = "review-buddy"
-//! label = "Review Buddy"
-//! prompt = "You review code carefully…"
-//!
-//! [[mcp_servers]]
-//! id = "github"
-//! command = ["mcp-server-github"]
-//! # OR
-//! # url = "https://example.com/mcp"
 //!
 //! [terminal]
 //! default_shell = "bash"
@@ -66,12 +55,6 @@ pub struct ProjectConfig {
     /// NOT mutate the parent process's environment.
     #[serde(default)]
     pub env: HashMap<String, String>,
-    /// Custom chat agents available alongside the built-in personas.
-    #[serde(default)]
-    pub agents: Vec<AgentDef>,
-    /// MCP servers auto-connected when the workspace opens.
-    #[serde(default)]
-    pub mcp_servers: Vec<McpServerDef>,
     pub terminal: Option<TerminalCfg>,
     pub theme: Option<ThemeCfg>,
 }
@@ -80,36 +63,6 @@ pub struct ProjectConfig {
 #[serde(default, rename_all = "snake_case")]
 pub struct WorkspaceMeta {
     pub name: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub struct AgentDef {
-    pub id: String,
-    pub label: String,
-    pub prompt: String,
-    /// Optional default model in `<preset>:<model>` form. When set, the
-    /// chat picker snaps to this when the agent is selected.
-    #[serde(default)]
-    pub model: Option<String>,
-}
-
-/// MCP server entry — `command` for stdio, `url` for Streamable HTTP. Exactly
-/// one of the two should be set. The loader doesn't enforce this (the caller
-/// validates when it actually connects), so a half-filled entry is preserved
-/// rather than dropped.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub struct McpServerDef {
-    pub id: String,
-    #[serde(default)]
-    pub command: Option<Vec<String>>,
-    #[serde(default)]
-    pub url: Option<String>,
-    #[serde(default)]
-    pub env: HashMap<String, String>,
-    #[serde(default)]
-    pub headers: HashMap<String, String>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -190,13 +143,6 @@ schema = 1
 name = "demo"
 [env]
 DEBUG = "true"
-[[agents]]
-id = "reviewer"
-label = "Reviewer"
-prompt = "Review carefully."
-[[mcp_servers]]
-id = "github"
-command = ["mcp-github"]
 [terminal]
 default_shell = "bash"
 [theme]
@@ -208,13 +154,6 @@ id = "catppuccin-mocha"
         assert_eq!(cfg.schema, 1);
         assert_eq!(cfg.workspace.as_ref().and_then(|w| w.name.as_deref()), Some("demo"));
         assert_eq!(cfg.env.get("DEBUG").map(String::as_str), Some("true"));
-        assert_eq!(cfg.agents.len(), 1);
-        assert_eq!(cfg.agents[0].id, "reviewer");
-        assert_eq!(cfg.mcp_servers.len(), 1);
-        assert_eq!(
-            cfg.mcp_servers[0].command.as_deref().map(|v| v[0].as_str()),
-            Some("mcp-github")
-        );
         assert_eq!(cfg.terminal.unwrap().default_shell.as_deref(), Some("bash"));
         assert_eq!(cfg.theme.unwrap().id.as_deref(), Some("catppuccin-mocha"));
     }
@@ -227,7 +166,6 @@ id = "catppuccin-mocha"
         let cfg = load(&root).unwrap().unwrap();
         assert_eq!(cfg.schema, SCHEMA_VERSION);
         assert!(cfg.env.is_empty());
-        assert!(cfg.agents.is_empty());
     }
 
     #[test]

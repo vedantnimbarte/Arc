@@ -89,47 +89,10 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2a4385e2e34eb35d6b3efe798b9eb88096925d87726c0798709bf56d9ed84af3"
 
 [[package]]
-name = "arc-agent-runtime"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "arc-filesystem",
- "arc-git",
- "async-trait",
- "reqwest 0.12.28",
- "serde",
- "serde_json",
- "thiserror 1.0.69",
- "tokio",
- "tracing",
- "uuid",
-]
-
-[[package]]
-name = "arc-ai-runtime"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "async-trait",
- "bytes",
- "chrono",
- "eventsource-stream",
- "futures-util",
- "reqwest 0.12.28",
- "serde",
- "serde_json",
- "thiserror 1.0.69",
- "tokio",
- "tracing",
-]
-
-[[package]]
 name = "arc-desktop"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "arc-agent-runtime",
- "arc-ai-runtime",
  "arc-filesystem",
  "arc-git",
  "arc-git-host",
@@ -139,14 +102,10 @@ dependencies = [
  "arc-pty",
  "arc-session-manager",
  "arc-ssh",
- "async-trait",
  "dashmap",
- "eventsource-stream",
  "fontdb",
- "futures-util",
  "keyring",
  "open",
- "reqwest 0.12.28",
  "rfd",
  "serde",
  "serde_json",
@@ -1672,17 +1631,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8be9f3dfaaffdae2972880079a491a1a8bb7cbed0b8dd7a347f668b4150a3b93"
 dependencies = [
  "event-listener",
- "pin-project-lite",
-]
-
-[[package]]
-name = "eventsource-stream"
-version = "0.2.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "74fef4569247a5f429d9156b9d0a2599914385dd189c539334c625d8099d90ab"
-dependencies = [
- "futures-core",
- "nom",
  "pin-project-lite",
 ]
 
