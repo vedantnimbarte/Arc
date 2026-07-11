@@ -2,21 +2,17 @@ import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import type { ProjectConfig } from '../lib/tauri';
 
-// Workspace trust (VS Code's lesson): a repo's `.arc/config.toml` can spawn
-// MCP child processes, register agent personas, and inject shell env — all of
-// which run attacker code the moment you open a cloned folder. Nothing from a
-// config is applied until the user explicitly trusts that root.
+// Workspace trust (VS Code's lesson): a repo's `.arc/config.toml` can inject
+// shell env into terminals — which runs attacker-influenced values the moment
+// you open a cloned folder. Nothing from a config is applied until the user
+// explicitly trusts that root.
 
-/** True when the config carries anything that can execute code or alter the
- *  shell/agent environment — the only cases that need a trust decision. A
- *  config with just a theme / workspace name is harmless and never prompts. */
+/** True when the config carries anything that can alter the shell environment
+ *  — the only case that needs a trust decision. A config with just a theme /
+ *  workspace name is harmless and never prompts. */
 export function configNeedsTrust(cfg: ProjectConfig | null): boolean {
   if (!cfg) return false;
-  return (
-    (cfg.mcp_servers?.length ?? 0) > 0 ||
-    (cfg.agents?.length ?? 0) > 0 ||
-    Object.keys(cfg.env ?? {}).length > 0
-  );
+  return Object.keys(cfg.env ?? {}).length > 0;
 }
 
 interface Pending {

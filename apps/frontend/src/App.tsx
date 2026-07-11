@@ -8,7 +8,6 @@ import { SshSessionLogPanel } from './components/ssh/SshSessionLogDrawer';
 import { useSsh } from './state/ssh';
 import { TabBar } from './components/TabBar';
 import { WindowResizeHandles } from './components/WindowResizeHandles';
-import { ChatPanel } from './components/ChatPanel';
 import { StatusBar } from './components/StatusBar';
 import { CommandPalette } from './components/CommandPalette';
 import { CommandHistoryPalette } from './components/CommandHistoryPalette';
@@ -19,9 +18,7 @@ import { SearchPalette } from './components/SearchPalette';
 import { ShortcutsDialog } from './components/ShortcutsDialog';
 import { PaneTreeView } from './components/PaneTreeView';
 import { useWorkspace } from './state/workspace';
-import { useFiles, CHAT_DEFAULT, SIDEBAR_RAIL_WIDTH, defaultWidthForView } from './state/files';
-import { useChat } from './state/chat';
-import { useSelection, type SelectionInfo } from './state/selection';
+import { useFiles, SIDEBAR_RAIL_WIDTH, defaultWidthForView } from './state/files';
 import {
   actionFor,
   ACTION_META,
@@ -39,8 +36,6 @@ import { FolderOpen, FolderTree, GitPullRequest, ListOrdered } from 'lucide-reac
 // project-config store fresh. Doesn't render anything itself.
 import './state/projectConfig';
 import { fsPickFolder, ptyListAiClis, settingsWindowOpen, type AiCliId } from './lib/tauri';
-import type { ChatIntent } from './components/ChatPanel';
-import { AskAiFloater } from './components/AskAiFloater';
 import { PasteWarning } from './components/PasteWarning';
 import { TrustPrompt } from './components/TrustPrompt';
 
@@ -57,7 +52,6 @@ export default function App() {
   const launchAiCli = useWorkspace((s) => s.launchAiCli);
   const newTerminal = useWorkspace((s) => s.newTerminal);
   const hydrate = useWorkspace((s) => s.hydrate);
-  const hydrateChat = useChat((s) => s.hydrate);
   const activeTab = tabs.find((t) => t.id === activeTabId);
 
   // Host-div registry — one stable DOM node per tab id. The tab's content
@@ -158,30 +152,17 @@ export default function App() {
   const [blocksOpen, setBlocksOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
-  // Chat panel is now a floating popover instead of a docked sidebar.
-  const [chatOpen, setChatOpen] = useState(false);
-  // One-shot action requested from a global keyboard shortcut. The
-  // timestamp lets ChatPanel re-fire on consecutive identical intents.
-  const [chatIntent, setChatIntent] = useState<ChatIntent | null>(null);
   const sidebarCollapsed = useFiles((s) => s.collapsed);
   const sidebarWidth = useFiles((s) => s.sidebarWidth);
   const sidebarView = useFiles((s) => s.sidebarView);
   const toggleSidebar = useFiles((s) => s.toggleCollapsed);
   const setSidebarWidth = useFiles((s) => s.setSidebarWidth);
-  const chatWidth = useFiles((s) => s.chatWidth);
-  const setChatWidth = useFiles((s) => s.setChatWidth);
 
   // Load persisted tabs + active tab from SQLite (or legacy localStorage)
   // before the renderer settles. hydrate() is idempotent.
   useEffect(() => {
     void hydrate();
   }, [hydrate]);
-
-  // Restore chat sessions + messages from SQLite (with one-shot legacy
-  // localStorage migration). Idempotent.
-  useEffect(() => {
-    void hydrateChat();
-  }, [hydrateChat]);
 
   // Restore saved SSH hosts + keys. Idempotent — store guards on `hydrated`.
   useEffect(() => {
@@ -191,29 +172,8 @@ export default function App() {
   const sshLogPanelOpen = useSsh((s) => s.logPanelOpen);
   const setSshLogPanelOpen = useSsh((s) => s.setLogPanelOpen);
 
-  // Settings + secrets are hydrated by Root in main.tsx (shared across
-  // the main and Settings windows).
-
-  // Shared action for the "Ask ARC AI" floating button + ⌘⇧A shortcut.
-  // Reads the current selection from `useSelection`, stages it as a
-  // `pendingContext` for the next chat send, opens the chat popover, and
-  // starts a fresh session if the chat was closed.
-  const askArcAi = useRef<(info?: SelectionInfo) => void>(() => {});
-  askArcAi.current = (info?: SelectionInfo) => {
-    const sel = info ?? useSelection.getState().current;
-    if (!sel || !sel.text.trim()) return;
-    const wasClosed = !chatOpen;
-    setChatOpen(true);
-    if (wasClosed) setChatIntent({ type: 'new-session', at: Date.now() });
-    useChat.getState().addPendingContext({
-      source: sel.source,
-      label: sel.label,
-      text: sel.text,
-    });
-    // The chip now owns the snapshot; clearing the live selection also
-    // hides the floating pill.
-    useSelection.getState().clear();
-  };
+  // Settings are hydrated by Root in main.tsx (shared across the main and
+  // Settings windows).
 
   // Single dispatch table for ActionId — shared between global keyboard
   // shortcuts and the ⌘K command palette so adding an action in shortcuts.ts
@@ -262,21 +222,6 @@ export default function App() {
       case 'open-shortcuts':
         setShortcutsOpen(true);
         return;
-      case 'toggle-chat':
-        setChatOpen((o) => !o);
-        return;
-      case 'new-chat':
-        setChatOpen(true);
-        setChatIntent({ type: 'new-session', at: Date.now() });
-        return;
-      case 'toggle-agent-picker':
-        setChatOpen(true);
-        setChatIntent({ type: 'toggle-agents', at: Date.now() });
-        return;
-      case 'open-chat-sessions':
-        setChatOpen(true);
-        setChatIntent({ type: 'toggle-sessions', at: Date.now() });
-        return;
       case 'show-explorer':
         useFiles.getState().showSidebarView('files');
         return;
@@ -285,9 +230,6 @@ export default function App() {
         return;
       case 'toggle-ssh-panel':
         useFiles.getState().toggleSidebarView('ssh');
-        return;
-      case 'ask-arc-ai':
-        askArcAi.current();
         return;
       case 'launch-claude-cli':
         void launchCli('claude-cli');
@@ -304,26 +246,8 @@ export default function App() {
     }
   };
 
-  // Open the chat popover on request from components that don't hold
-  // setChatOpen — e.g. FileTree's "Attach to Agent", which also dispatches
-  // `arc:attach-file` for ChatPanel to stage the file as a context chip.
-  useEffect(() => {
-    const onOpenChat = () => setChatOpen(true);
-    window.addEventListener('arc:open-chat', onOpenChat);
-    return () => window.removeEventListener('arc:open-chat', onOpenChat);
-  }, []);
-
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      // Esc closes the chat popover when it has focus / is visible
-      if (e.key === 'Escape' && chatOpen) {
-        const target = e.target as HTMLElement | null;
-        const tag = target?.tagName?.toLowerCase();
-        if (tag !== 'input' && tag !== 'textarea') {
-          setChatOpen(false);
-          return;
-        }
-      }
       const action = actionFor(e);
       if (!action) return;
       e.preventDefault();
@@ -331,7 +255,7 @@ export default function App() {
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [chatOpen]);
+  }, []);
 
   // Seed the command-palette registry with every ActionId. Other features
   // can register their own ad-hoc actions on top of these.
@@ -423,7 +347,7 @@ export default function App() {
           onOpenSearch={() => setSearchOpen(true)}
         />
 
-        {/* Layout: file-tree | main | chat sidebar | SSH sidebar */}
+        {/* Layout: file-tree | main | SSH sidebar */}
         <div className="relative flex min-h-0 flex-1 px-3 pb-3 pt-1">
           <div className="material-content flex min-h-0 w-full overflow-hidden rounded-window shadow-panel ring-1 ring-border-subtle">
             {/* Collapsed mini-rail — a thin vertical icon strip that slides in
@@ -470,42 +394,12 @@ export default function App() {
                   active tab's host div in. */}
               <PaneTreeView hostsRef={hostsRef} stageRef={stageRef} />
             </main>
-
-            {/* AI chat secondary sidebar — same pattern as SSH sidebar. */}
-            {chatOpen && (
-              <ResizeHandle
-                edge="right"
-                getWidth={() => useFiles.getState().chatWidth}
-                onResize={setChatWidth}
-                resetWidth={CHAT_DEFAULT}
-              />
-            )}
-            <aside
-              className="shrink-0 overflow-hidden transition-[width] duration-300 ease-apple"
-              style={{ width: chatOpen ? chatWidth : 0 }}
-              aria-hidden={!chatOpen}
-            >
-              <div
-                className="material-sidebar h-full border-l border-border-hairline"
-                style={{ width: chatWidth }}
-              >
-                <ChatPanel
-                  onClose={() => setChatOpen(false)}
-                  intent={chatIntent}
-                  onIntentConsumed={() => setChatIntent(null)}
-                />
-              </div>
-            </aside>
           </div>
 
           {sshLogPanelOpen && <SshSessionLogPanel onClose={() => setSshLogPanelOpen(false)} />}
         </div>
 
-        <StatusBar
-          chatOpen={chatOpen}
-          onToggleChat={() => setChatOpen((o) => !o)}
-          onOpenShortcuts={() => setShortcutsOpen(true)}
-        />
+        <StatusBar onOpenShortcuts={() => setShortcutsOpen(true)} />
       </div>
 
       <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} />
@@ -517,7 +411,6 @@ export default function App() {
       <PrPanel />
       <SearchPalette open={searchOpen} onClose={() => setSearchOpen(false)} />
       <ShortcutsDialog open={shortcutsOpen} onClose={() => setShortcutsOpen(false)} />
-      <AskAiFloater onAsk={() => askArcAi.current()} />
       <PasteWarning />
       <TrustPrompt />
 
@@ -588,12 +481,11 @@ class TabErrorBoundary extends Component<
 }
 
 const CATEGORY_TO_GROUP: Record<
-  'Workspace' | 'Terminal' | 'Assistant' | 'SSH' | 'AI CLIs' | 'Help',
+  'Workspace' | 'Terminal' | 'SSH' | 'AI CLIs' | 'Help',
   CommandGroup
 > = {
   Workspace: 'Workspace',
   Terminal: 'Terminal',
-  Assistant: 'Assistant',
   SSH: 'SSH',
   'AI CLIs': 'AI CLIs',
   Help: 'Help',

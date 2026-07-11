@@ -31,9 +31,8 @@ describe('normalizeOrder', () => {
 
 describe('resolveRailViews', () => {
   it('omits hidden views', () => {
-    const ids = resolveRailViews([], ['ssh', 'agents']).map((v) => v.id);
+    const ids = resolveRailViews([], ['ssh']).map((v) => v.id);
     expect(ids).not.toContain('ssh');
-    expect(ids).not.toContain('agents');
     expect(ids).toContain('files');
   });
 

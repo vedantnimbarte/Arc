@@ -12,21 +12,16 @@ export type ActionId =
   | 'open-command-history'
   | 'open-command-blocks'
   | 'open-search'
-  | 'toggle-chat'
-  | 'new-chat'
-  | 'toggle-agent-picker'
-  | 'open-chat-sessions'
   | 'open-shortcuts'
   | 'show-explorer'
   | 'show-source-control'
   | 'toggle-ssh-panel'
-  | 'ask-arc-ai'
   | 'launch-claude-cli'
   | 'launch-codex-cli'
   | 'launch-opencode-cli'
   | 'launch-kimi-code-cli';
 
-export type ActionCategory = 'Workspace' | 'Terminal' | 'Assistant' | 'SSH' | 'AI CLIs' | 'Help';
+export type ActionCategory = 'Workspace' | 'Terminal' | 'SSH' | 'AI CLIs' | 'Help';
 
 export interface ActionMeta {
   id: ActionId;
@@ -79,7 +74,7 @@ export const ACTION_META: Record<ActionId, ActionMeta> = {
   'open-command-blocks': {
     id: 'open-command-blocks',
     label: 'Command Blocks',
-    description: 'Browse recent commands as blocks; explain failures with AI.',
+    description: 'Browse recent commands as blocks with their output.',
     category: 'Terminal',
   },
   'open-search': {
@@ -93,30 +88,6 @@ export const ACTION_META: Record<ActionId, ActionMeta> = {
     label: 'Keyboard Shortcuts',
     description: 'Open the shortcuts cheat-sheet / editor.',
     category: 'Help',
-  },
-  'toggle-chat': {
-    id: 'toggle-chat',
-    label: 'Toggle Assistant',
-    description: 'Show or hide the assistant popover.',
-    category: 'Assistant',
-  },
-  'new-chat': {
-    id: 'new-chat',
-    label: 'New Chat Session',
-    description: 'Start a fresh chat conversation.',
-    category: 'Assistant',
-  },
-  'toggle-agent-picker': {
-    id: 'toggle-agent-picker',
-    label: 'Toggle Agent Picker',
-    description: 'Show or hide the agent picker inside the assistant.',
-    category: 'Assistant',
-  },
-  'open-chat-sessions': {
-    id: 'open-chat-sessions',
-    label: 'Chat History',
-    description: 'Browse past chat sessions.',
-    category: 'Assistant',
   },
   'show-explorer': {
     id: 'show-explorer',
@@ -135,12 +106,6 @@ export const ACTION_META: Record<ActionId, ActionMeta> = {
     label: 'Toggle SSH Panel',
     description: 'Open or close the SSH host & key manager.',
     category: 'SSH',
-  },
-  'ask-arc-ai': {
-    id: 'ask-arc-ai',
-    label: 'Ask ARC AI',
-    description: 'Send the current selection to ARC AI as context.',
-    category: 'Assistant',
   },
   'launch-claude-cli': {
     id: 'launch-claude-cli',
@@ -176,15 +141,10 @@ export const ACTION_ORDER: ActionId[] = [
   'open-command-history',
   'open-command-blocks',
   'open-search',
-  'toggle-chat',
-  'new-chat',
-  'toggle-agent-picker',
-  'open-chat-sessions',
   'open-shortcuts',
   'show-explorer',
   'show-source-control',
   'toggle-ssh-panel',
-  'ask-arc-ai',
   'launch-claude-cli',
   'launch-codex-cli',
   'launch-opencode-cli',
@@ -208,12 +168,7 @@ export const DEFAULT_BINDINGS: Record<ActionId, KeyBinding | null> = {
   'open-shortcuts': { code: 'Slash', shift: true, alt: false, ...mod() },
   'show-explorer': { code: 'KeyE', shift: true, alt: false, ...mod() },
   'show-source-control': { code: 'KeyG', shift: true, alt: false, ...mod() },
-  'toggle-chat': { code: 'KeyJ', shift: false, alt: false, ...mod() },
-  'new-chat': { code: 'KeyN', shift: true, alt: false, ...mod() },
-  'toggle-agent-picker': { code: 'Slash', shift: false, alt: false, ...mod() },
-  'open-chat-sessions': { code: 'KeyL', shift: true, alt: false, ...mod() },
   'toggle-ssh-panel': { code: 'KeyS', shift: true, alt: false, ...mod() },
-  'ask-arc-ai': { code: 'KeyA', shift: true, alt: false, ...mod() },
   // AI CLI launchers ship unbound by default — users can assign keys via the
   // shortcuts dialog, and they're discoverable through the TabBar dropdown
   // and the new-tab popover regardless.
@@ -374,7 +329,6 @@ export type ReferenceCategory =
   | 'Editor'
   | 'Terminal'
   | 'File Tree'
-  | 'Assistant'
   | 'Source Control'
   | 'Navigation';
 
@@ -396,7 +350,6 @@ export const REFERENCE_CATEGORIES: ReferenceCategory[] = [
   'Editor',
   'Terminal',
   'File Tree',
-  'Assistant',
   'Source Control',
   'Navigation',
 ];
@@ -407,12 +360,6 @@ export const REFERENCE_SHORTCUTS: ReferenceShortcut[] = [
     keys: combo(MOD_KEY, 'S'),
     label: 'Save File',
     description: 'Write the active editor tab to disk.',
-    category: 'Editor',
-  },
-  {
-    keys: combo(MOD_KEY, 'K'),
-    label: 'Inline AI Edit',
-    description: 'Rewrite the selected code with AI, then review the diff. Toggle in Settings → Editor.',
     category: 'Editor',
   },
   {
@@ -470,25 +417,6 @@ export const REFERENCE_SHORTCUTS: ReferenceShortcut[] = [
     label: 'Change Directory',
     description: 'Paste `cd <folder>` into the active terminal.',
     category: 'File Tree',
-  },
-  // Assistant (chat composer)
-  {
-    keys: 'Enter',
-    label: 'Send Message',
-    description: 'Send the current chat message.',
-    category: 'Assistant',
-  },
-  {
-    keys: combo(SHIFT_KEY, 'Enter'),
-    label: 'New Line',
-    description: 'Insert a line break without sending.',
-    category: 'Assistant',
-  },
-  {
-    keys: 'Tab',
-    label: 'Accept Suggestion',
-    description: 'Accept the highlighted @mention or / command.',
-    category: 'Assistant',
   },
   // Source Control
   {

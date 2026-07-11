@@ -312,13 +312,6 @@ export function FileTree() {
     void navigator.clipboard.writeText(rel);
   }, [root]);
 
-  const ctxAttachToAgent = useCallback((path: string) => {
-    // Stage the file as a chat context chip (ChatPanel listens for this) and
-    // open the chat popover (App listens for arc:open-chat).
-    window.dispatchEvent(new CustomEvent('arc:attach-file', { detail: { path } }));
-    window.dispatchEvent(new Event('arc:open-chat'));
-  }, []);
-
   const ctxNewFile = useCallback((entry: FsEntry) => {
     const parentPath = entry.kind === 'dir' ? entry.path : parentDir(entry.path);
     setCreating({ parentPath, kind: 'file', value: '' });
@@ -522,7 +515,6 @@ export function FileTree() {
           onNewFolder={() => { ctxNewFolder(contextMenu.entry); }}
           onCopyPath={() => { ctxCopyPath(contextMenu.entry.path); }}
           onCopyRelativePath={() => { ctxCopyRelativePath(contextMenu.entry.path); }}
-          onAttachToAgent={() => { ctxAttachToAgent(contextMenu.entry.path); }}
           onRename={() => { ctxRename(contextMenu.entry); }}
           onDelete={() => { ctxDelete(contextMenu.entry); }}
           onOpenFile={() => { openFile(contextMenu.entry.path); }}
@@ -578,7 +570,6 @@ function ContextMenu({
   onNewFolder,
   onCopyPath,
   onCopyRelativePath,
-  onAttachToAgent,
   onRename,
   onDelete,
   onOpenFile,
@@ -595,7 +586,6 @@ function ContextMenu({
   onNewFolder: () => void;
   onCopyPath: () => void;
   onCopyRelativePath: () => void;
-  onAttachToAgent: () => void;
   onRename: () => void;
   onDelete: () => void;
   onOpenFile: () => void;
@@ -674,8 +664,6 @@ function ContextMenu({
           {sep}
           {item('Copy Path', onCopyPath)}
           {!isRoot && item('Copy Relative Path', onCopyRelativePath)}
-          {sep}
-          {item('Attach to Agent', onAttachToAgent)}
           {!isRoot && (
             <>
               {sep}
@@ -694,8 +682,6 @@ function ContextMenu({
           {sep}
           {item('Copy Path', onCopyPath)}
           {item('Copy Relative Path', onCopyRelativePath)}
-          {sep}
-          {item('Attach to Agent', onAttachToAgent)}
           {sep}
           {item('Rename', onRename)}
           {item('Delete', onDelete, true)}

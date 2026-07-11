@@ -209,7 +209,6 @@ const GROUP_ORDER: CommandGroup[] = [
   'Terminal',
   'Editor',
   'View',
-  'Assistant',
   'Git',
   'SSH',
   'AI CLIs',
