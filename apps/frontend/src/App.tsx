@@ -42,6 +42,7 @@ import { ptyListAiClis, settingsWindowOpen, type AiCliId } from './lib/tauri';
 import type { ChatIntent } from './components/ChatPanel';
 import { AskAiFloater } from './components/AskAiFloater';
 import { PasteWarning } from './components/PasteWarning';
+import { TrustPrompt } from './components/TrustPrompt';
 
 // CodeMirror is heavy — defer its bundle until a file is actually opened.
 const Editor = lazy(() =>
@@ -506,6 +507,7 @@ export default function App() {
       <ShortcutsDialog open={shortcutsOpen} onClose={() => setShortcutsOpen(false)} />
       <AskAiFloater onAsk={() => askArcAi.current()} />
       <PasteWarning />
+      <TrustPrompt />
 
       {/* Offscreen host stack. Tab content lives here until a leaf claims it
           via DOM reparenting. `display:none` keeps the size measurer happy

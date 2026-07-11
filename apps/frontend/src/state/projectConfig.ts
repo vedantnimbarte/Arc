@@ -7,6 +7,7 @@ import {
 } from '../lib/tauri';
 import { useAgents, type Agent } from './agents';
 import { useFiles } from './files';
+import { useTrust, configNeedsTrust } from './trust';
 
 /** Map a `.arc/config.toml` agent onto the UI's Agent shape. Ids are prefixed
  *  so they can't collide with built-ins or user customs. */
@@ -25,8 +26,12 @@ function toAgent(a: ProjectConfig['agents'][number]): Agent {
 
 /** Push a freshly-loaded config into its consumers: register project agents
  *  and auto-connect declared MCP servers. Both are best-effort — a failure in
- *  one server/agent must not block the others or the config load itself. */
-function applyProjectConfig(cfg: ProjectConfig | null): void {
+ *  one server/agent must not block the others or the config load itself.
+ *
+ *  SECURITY: only call this for a trusted root. Both spawning MCP servers and
+ *  registering agent prompts run repo-supplied content; the caller gates on
+ *  `useTrust`. Exported so `<TrustPrompt>` can apply after the user consents. */
+export function applyProjectConfig(cfg: ProjectConfig | null): void {
   useAgents.getState().setProjectAgents((cfg?.agents ?? []).map(toAgent));
   for (const s of cfg?.mcp_servers ?? []) {
     // stdio (command) takes precedence over HTTP (url) when both are set.
@@ -77,7 +82,15 @@ export const useProjectConfig = create<ProjectConfigState>((set, get) => ({
     try {
       const cfg = await projectConfigLoad(root);
       set({ config: cfg, loading: false });
-      applyProjectConfig(cfg);
+      // Never apply repo-supplied MCP servers / agents / env from an untrusted
+      // folder — that's drive-by RCE on `git clone && open`. Prompt instead;
+      // `<TrustPrompt>` re-applies once the user consents.
+      if (configNeedsTrust(cfg) && !useTrust.getState().isTrusted(root)) {
+        applyProjectConfig(null);
+        useTrust.getState().request(root, cfg!);
+      } else {
+        applyProjectConfig(cfg);
+      }
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       console.warn('[project-config] load failed:', message);

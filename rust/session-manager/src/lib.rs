@@ -9,7 +9,7 @@
 //! The store is cheaply cloneable (it's just a wrapped `SqlitePool`), so it
 //! can be `.manage()`d in Tauri and handed to commands as `State<SessionStore>`.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use sqlx::sqlite::{
     SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions, SqliteSynchronous,
@@ -68,6 +68,33 @@ impl SessionStore {
         let path = dir.join("arc.db");
         tracing::info!(?path, "opening session store");
         Self::open_at(&path).await
+    }
+
+    /// Like `open_default`, but never fails the app launch on a bad database.
+    /// If the file is corrupt or a migration can't apply (e.g. a half-written
+    /// db from a killed launch, or a downgrade), quarantine it and start fresh
+    /// rather than panic. Returns the path we moved aside, if any, so the
+    /// caller can tell the user their local history was reset.
+    pub async fn open_default_or_recover() -> Result<(Self, Option<PathBuf>)> {
+        let mut dir = dirs::data_dir().ok_or(Error::NoDataDir)?;
+        dir.push("arc");
+        tokio::fs::create_dir_all(&dir).await?;
+        let path = dir.join("arc.db");
+        match Self::open_at(&path).await {
+            Ok(store) => Ok((store, None)),
+            Err(err) => {
+                tracing::error!(?path, %err, "session store unusable; quarantining and recreating");
+                let quarantine = dir.join("arc.db.corrupt");
+                // Move the db and its WAL/SHM sidecars aside. Best-effort:
+                // missing sidecars are fine, and a leftover quarantine from a
+                // prior recovery is simply overwritten.
+                let _ = tokio::fs::rename(&path, &quarantine).await;
+                let _ = tokio::fs::rename(dir.join("arc.db-wal"), dir.join("arc.db-wal.corrupt")).await;
+                let _ = tokio::fs::rename(dir.join("arc.db-shm"), dir.join("arc.db-shm.corrupt")).await;
+                let store = Self::open_at(&path).await?;
+                Ok((store, Some(quarantine)))
+            }
+        }
     }
 
     pub async fn open_at(path: &Path) -> Result<Self> {

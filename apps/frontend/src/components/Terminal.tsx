@@ -21,6 +21,7 @@ import { createPathLinkProvider } from '../lib/links';
 import { notifyCommandFinished } from '../lib/notify';
 import { NewTabSplash } from './NewTabSplash';
 import { useFiles } from '../state/files';
+import { useTrust } from '../state/trust';
 import { detectRiskyPaste, usePaste } from '../state/paste';
 import { useSelection } from '../state/selection';
 import { useSettings } from '../state/settings';
@@ -393,7 +394,10 @@ export function Terminal({ sessionKey }: Props) {
         // file-tree-keyed store) so it's race-free against the home reset.
         let projectEnv: Record<string, string> | null = null;
         const cwd = initialCwd.current;
-        if (cwd) {
+        // Only inject `.arc/config.toml` env from a folder the user has
+        // trusted (state/trust.ts). Untrusted repo env is drive-by RCE via
+        // PROMPT_COMMAND / BASH_ENV / LD_PRELOAD, so we don't even load it.
+        if (cwd && useTrust.getState().isTrusted(cwd)) {
           try {
             const pc = await projectConfigLoad(cwd);
             if (pc?.env && Object.keys(pc.env).length > 0) projectEnv = pc.env;
