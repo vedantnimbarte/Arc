@@ -5,12 +5,14 @@ import {
   ChevronsDownUp,
   FilePlus,
   FolderPlus,
+  FolderOpen,
   Search,
   AlertCircle,
   X,
 } from 'lucide-react';
 import {
   fsDefaultRoot,
+  fsPickFolder,
   fsReadDir,
   fsWatchStart,
   fsWatchStop,
@@ -388,6 +390,17 @@ export function FileTree() {
           {root ? basename(root) : '—'}
         </span>
 
+        <HeaderIconButton
+          onClick={() => {
+            void fsPickFolder(root).then((dir) => {
+              if (dir) setRoot(dir);
+            });
+          }}
+          ariaLabel="Open folder"
+          title="Open Folder…"
+        >
+          <FolderOpen size={12} strokeWidth={2.1} />
+        </HeaderIconButton>
         <HeaderIconButton
           onClick={newFileAtRoot}
           disabled={!root}
