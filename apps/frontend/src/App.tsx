@@ -34,14 +34,15 @@ import { WorktreePanel } from './components/git/WorktreePanel';
 import { CherryPickDialog } from './components/git/CherryPickDialog';
 import { RebasePanel } from './components/git/RebasePanel';
 import { PrPanel } from './components/git/PrPanel';
-import { FolderTree, GitPullRequest, ListOrdered } from 'lucide-react';
+import { FolderOpen, FolderTree, GitPullRequest, ListOrdered } from 'lucide-react';
 // Side-effect import: subscribes to file-tree root changes and keeps the
 // project-config store fresh. Doesn't render anything itself.
 import './state/projectConfig';
-import { ptyListAiClis, settingsWindowOpen, type AiCliId } from './lib/tauri';
+import { fsPickFolder, ptyListAiClis, settingsWindowOpen, type AiCliId } from './lib/tauri';
 import type { ChatIntent } from './components/ChatPanel';
 import { AskAiFloater } from './components/AskAiFloater';
 import { PasteWarning } from './components/PasteWarning';
+import { TrustPrompt } from './components/TrustPrompt';
 
 // CodeMirror is heavy — defer its bundle until a file is actually opened.
 const Editor = lazy(() =>
@@ -356,6 +357,18 @@ export default function App() {
   useEffect(() => {
     const extras: CommandAction[] = [
       {
+        id: 'workspace.open-folder',
+        title: 'Open Folder…',
+        group: 'Workspace',
+        keywords: ['open', 'folder', 'root', 'project', 'directory', 'workspace'],
+        icon: FolderOpen,
+        run: () => {
+          void fsPickFolder(useFiles.getState().root).then((dir) => {
+            if (dir) useFiles.getState().setRoot(dir);
+          });
+        },
+      },
+      {
         id: 'git.manage-worktrees',
         title: 'Manage Worktrees',
         group: 'Git',
@@ -506,6 +519,7 @@ export default function App() {
       <ShortcutsDialog open={shortcutsOpen} onClose={() => setShortcutsOpen(false)} />
       <AskAiFloater onAsk={() => askArcAi.current()} />
       <PasteWarning />
+      <TrustPrompt />
 
       {/* Offscreen host stack. Tab content lives here until a leaf claims it
           via DOM reparenting. `display:none` keeps the size measurer happy

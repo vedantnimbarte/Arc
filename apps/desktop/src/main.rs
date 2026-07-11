@@ -248,8 +248,24 @@ fn main() {
         .setup(|app| {
             // Open the SQLite store before the window appears so the first
             // `session_load` call from the frontend always has a pool ready.
-            let store = tauri::async_runtime::block_on(SessionStore::open_default())
-                .expect("opening session store");
+            // A corrupt / half-migrated db must not brick the app: recover by
+            // quarantining the bad file and starting fresh. Only a genuinely
+            // unwritable data dir (disk full / permissions) fails here, and
+            // there's nothing to persist to in that case anyway.
+            let (store, recovered) =
+                match tauri::async_runtime::block_on(SessionStore::open_default_or_recover()) {
+                    Ok(v) => v,
+                    Err(err) => {
+                        tracing::error!(%err, "cannot open or recreate session store; exiting");
+                        // ponytail: no writable data dir => nothing to persist;
+                        // clean exit beats a panic dialog. Upgrade to a native
+                        // error dialog if users ever actually hit this.
+                        std::process::exit(1);
+                    }
+                };
+            if let Some(path) = recovered {
+                tracing::warn!(?path, "previous database was unreadable; started fresh (old file kept alongside)");
+            }
 
             // Honour the user's window-state preference. We had the plugin
             // skip the auto-restore for "main" above; do it here only when

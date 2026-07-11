@@ -104,8 +104,15 @@ impl PtyManager {
         cmd.env("TERM", "xterm-256color");
         cmd.env("COLORTERM", "truecolor");
         // Project config env wins over inherited vars (applied last).
+        // Defense-in-depth: even for a trusted repo, refuse the env keys that
+        // execute code at shell/loader startup — a config has no legit reason
+        // to set these, and they'd turn env injection back into RCE.
         if let Some(ref env) = opts.env {
             for (k, v) in env {
+                if is_denied_env_key(k) {
+                    tracing::warn!(key = %k, "dropping unsafe project-config env key");
+                    continue;
+                }
                 cmd.env(k, v);
             }
         }
@@ -378,6 +385,46 @@ fn default_shell() -> String {
 
 fn home_var() -> &'static str {
     if cfg!(windows) { "USERPROFILE" } else { "HOME" }
+}
+
+/// Env keys a `.arc/config.toml` may never set into a spawned shell: each one
+/// causes code to run at loader/shell startup, so allowing them would turn
+/// project-config env injection into arbitrary code execution regardless of
+/// workspace trust. Case-insensitive; the dynamic-loader `LD_*`/`DYLD_*`
+/// families are matched by prefix.
+fn is_denied_env_key(key: &str) -> bool {
+    const DENIED: &[&str] = &[
+        "BASH_ENV",       // sourced by non-interactive bash
+        "ENV",            // sourced by sh/dash
+        "PROMPT_COMMAND", // executed before each bash prompt
+        "PS0",            // executed after reading a command
+        "NODE_OPTIONS",   // can --require an arbitrary module
+        "PYTHONSTARTUP",  // sourced by interactive python
+        "PERL5OPT",       // can -M load a module
+        "GIT_SSH",        // run as the ssh transport
+        "GIT_SSH_COMMAND",
+    ];
+    let up = key.to_ascii_uppercase();
+    up.starts_with("LD_") || up.starts_with("DYLD_") || DENIED.contains(&up.as_str())
+}
+
+#[cfg(test)]
+mod env_denylist_tests {
+    use super::is_denied_env_key;
+
+    #[test]
+    fn blocks_exec_on_startup_keys() {
+        for k in ["LD_PRELOAD", "ld_preload", "DYLD_INSERT_LIBRARIES", "BASH_ENV", "PROMPT_COMMAND", "NODE_OPTIONS"] {
+            assert!(is_denied_env_key(k), "{k} should be denied");
+        }
+    }
+
+    #[test]
+    fn allows_ordinary_project_env() {
+        for k in ["PATH", "RUST_LOG", "MY_API_URL", "EDITOR", "LANG"] {
+            assert!(!is_denied_env_key(k), "{k} should be allowed");
+        }
+    }
 }
 
 /// One shell discovered on the user's `PATH`. Returned by [`discover_shells`].
