@@ -408,7 +408,11 @@ export default function App() {
             <main className="relative min-w-0 flex-1 overflow-hidden p-1.5">
               {/* Split-pane tree — each leaf hosts a tab and can be split
                   right/down into a new pane, with draggable dividers. */}
-              <PaneTreeView hostsRef={hostsRef} stageRef={stageRef} />
+              <PaneTreeView
+                hostsRef={hostsRef}
+                stageRef={stageRef}
+                onOpenCommandPalette={() => setPaletteOpen(true)}
+              />
             </main>
           </div>
 

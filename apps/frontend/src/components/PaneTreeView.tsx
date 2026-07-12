@@ -1,8 +1,8 @@
 import { Group, Panel, Separator, type Layout } from 'react-resizable-panels';
-import { Terminal as TerminalIcon } from 'lucide-react';
 import { findLeaf, useWorkspace, type PaneNode, type PaneSplit } from '../state/workspace';
 import { PaneLeafView } from './PaneLeafView';
 import { PaneHeader } from './PaneHeader';
+import { EmptyWorkspace } from './EmptyWorkspace';
 import { cn } from '../lib/cn';
 
 interface Props {
@@ -10,6 +10,8 @@ interface Props {
    *  visible leaf the right host node to reparent. */
   hostsRef: React.MutableRefObject<Map<string, HTMLDivElement>>;
   stageRef: React.RefObject<HTMLDivElement>;
+  /** Opens the ⌘K palette — passed to the empty-workspace launcher. */
+  onOpenCommandPalette?: () => void;
 }
 
 /**
@@ -17,26 +19,14 @@ interface Props {
  * Groups; leaves get a tab strip plus a content slot that DOM-reparents the
  * active tab's host div in.
  */
-export function PaneTreeView({ hostsRef, stageRef }: Props) {
+export function PaneTreeView({ hostsRef, stageRef, onOpenCommandPalette }: Props) {
   const layout = useWorkspace((s) => s.layout);
-  const newTerminal = useWorkspace((s) => s.newTerminal);
   const maximizedPaneId = useWorkspace((s) => s.maximizedPaneId);
 
   // Closing/moving the last tab can leave the active workspace with an empty
-  // leaf — offer a way back instead of a blank pane.
+  // leaf — show the launcher instead of a blank pane.
   if (layout.kind === 'leaf' && layout.tabIds.length === 0) {
-    return (
-      <div className="flex h-full w-full flex-col items-center justify-center gap-3 text-center">
-        <TerminalIcon size={26} strokeWidth={1.5} className="text-fg-subtle" />
-        <div className="font-display text-[13px] text-fg-muted">This workspace is empty</div>
-        <button
-          onClick={() => void newTerminal()}
-          className="rounded-md bg-accent/90 px-3 py-1.5 font-display text-[11.5px] font-medium text-bg-base transition-colors hover:bg-accent"
-        >
-          New terminal
-        </button>
-      </div>
-    );
+    return <EmptyWorkspace onOpenCommandPalette={onOpenCommandPalette} />;
   }
 
   // Maximize: when a leaf is zoomed (and still exists in this workspace),
