@@ -379,6 +379,10 @@ export function Terminal({ sessionKey }: Props) {
             /* leave null — only absolute cd targets will resolve */
           }
         }
+        // Track this tab's cwd centrally so the grid's per-cell branch pill can
+        // resolve a repo. Updated below on every OSC 7 / cd. Seed immediately.
+        const setTabCwd = (path: string) => useWorkspace.getState().setTabCwd(sessionKey, path);
+        if (shellCwd) setTabCwd(shellCwd);
 
         // OSC 7 — modern shells emit `\e]7;file://host/path\e\\` whenever
         // their CWD changes. We sync the file tree root to it so the tree
@@ -396,6 +400,7 @@ export function Terminal({ sessionKey }: Props) {
           if (path) {
             shellCwd = path;
             useFiles.getState().setRoot(path);
+            setTabCwd(path);
           }
           return true; // we handled the OSC
         });
@@ -468,6 +473,7 @@ export function Terminal({ sessionKey }: Props) {
             await fsReadDir(resolved);
             shellCwd = resolved;
             useFiles.getState().setRoot(resolved);
+            setTabCwd(resolved);
           } catch {
             /* path didn't exist or wasn't a dir — shell will have errored too */
           }

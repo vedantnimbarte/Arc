@@ -13,10 +13,22 @@ import { useFiles } from './files';
 import { useReveal } from './reveal';
 import { nextGroupColor, type TabGroupColorId } from '../lib/tabGroups';
 
+/** A named container of tabs. Switching the active workspace changes which
+ *  tabs the grid shows; every other workspace's tabs stay mounted (PTYs alive)
+ *  offscreen. Metadata only — membership lives on `tab.workspaceId`. Persisted
+ *  additively inside the layout envelope, so no schema change is needed. */
+export interface WorkspaceMeta {
+  id: string;
+  name: string;
+}
+
 export interface Tab {
   id: string;
   title: string;
   kind: 'terminal' | 'editor' | 'preview' | 'apiclient' | 'ssh' | 'diff';
+  /** Which workspace this tab belongs to. Every tab has one after hydrate;
+   *  new tabs inherit the active workspace (stamped in `addTab`). */
+  workspaceId?: string;
   /** Group this tab belongs to (Chrome-style tab grouping), or undefined for
    *  a free tab. Membership is a within-leaf concept: a group's tabs always
    *  live in one leaf and render contiguously. Persisted via the layout
@@ -24,6 +36,10 @@ export interface Tab {
   groupId?: string;
   /** PTY id for terminal tabs. Transient — stripped from persisted state. */
   ptyId?: string;
+  /** Best-effort current working directory of a terminal tab, tracked live
+   *  from OSC 7 / cd-sniffing. Powers the per-cell git-branch pill in the
+   *  grid. Transient — not persisted (whitelisted out by `toTabInputs`). */
+  cwd?: string;
   /** Absolute path for editor tabs (read on mount). */
   filePath?: string;
   /** URL loaded by a preview tab. Persisted so the iframe restores on
@@ -108,6 +124,12 @@ export interface SerializedLayout {
   /** tabId → groupId membership map. Kept beside `groups` (rather than on the
    *  tab rows) so a single column round-trips the whole grouping. */
   groupAssignments?: Record<string, string>;
+  /** Workspace metadata + the active one. Additive (v:1) so older binaries
+   *  ignore it and newer ones restore the workspace set. */
+  workspaces?: WorkspaceMeta[];
+  activeWorkspaceId?: string;
+  /** tabId → workspaceId membership. Same pattern as `groupAssignments`. */
+  tabWorkspaces?: Record<string, string>;
 }
 
 interface WorkspaceState {
@@ -124,6 +146,10 @@ interface WorkspaceState {
   tabDirty: Record<string, boolean>;
   /** Chrome-style tab groups. Metadata only — membership is on the tabs. */
   tabGroups: TabGroup[];
+  /** All workspaces (named tab containers). Always ≥1 after hydrate. */
+  workspaces: WorkspaceMeta[];
+  /** The workspace whose tabs the grid currently shows. */
+  activeWorkspaceId: string;
   /** SQLite session id; null until `hydrate()` has run. Used as the key for
    *  every persistence write. */
   sessionId: string | null;
@@ -161,6 +187,19 @@ interface WorkspaceState {
    *  whole workspace. */
   closeGroup: (groupId: string) => void;
   setTabPtyId: (id: string, ptyId: string | undefined) => void;
+  setTabCwd: (id: string, cwd: string) => void;
+  // ─── Workspaces ─────────────────────────────────────────────────────────
+  /** Create a new workspace, switch to it, and open a fresh terminal in it.
+   *  Returns the new workspace id. */
+  createWorkspace: (name?: string) => string;
+  renameWorkspace: (id: string, name: string) => void;
+  /** Delete a workspace and close all its tabs (killing their PTYs). No-op if
+   *  it's the only workspace. */
+  deleteWorkspace: (id: string) => void;
+  /** Make `id` the active workspace (grid shows its tabs). */
+  switchWorkspace: (id: string) => void;
+  /** Move a tab into another workspace. */
+  moveTabToWorkspace: (tabId: string, workspaceId: string) => void;
   setTabDirty: (id: string, dirty: boolean) => void;
   /** Find an existing editor tab for `path`, or create one and focus it.
    *  When `forceNew` is true a new tab is always created (used by the
@@ -239,7 +278,20 @@ const LEGACY_LS_KEY = 'arc-workspace';
 const DEBOUNCE_MS = 250;
 
 /** A single default tab — used when neither SQLite nor localStorage has any. */
-const DEFAULT_TAB: Tab = { id: 'term-1', title: 'shell', kind: 'terminal' };
+const DEFAULT_WORKSPACE_ID = 'ws-1';
+const DEFAULT_WORKSPACE: WorkspaceMeta = { id: DEFAULT_WORKSPACE_ID, name: 'Workspace 1' };
+const DEFAULT_TAB: Tab = {
+  id: 'term-1',
+  title: 'shell',
+  kind: 'terminal',
+  workspaceId: DEFAULT_WORKSPACE_ID,
+};
+
+let workspaceIdCounter = 0;
+function newWorkspaceId(): string {
+  workspaceIdCounter += 1;
+  return `ws-${Date.now()}-${workspaceIdCounter}`;
+}
 
 // ─── Pure layout helpers ─────────────────────────────────────────────────
 //
@@ -534,11 +586,15 @@ export const useWorkspace = create<WorkspaceState>()((set, get) => ({
   activeTabId: null,
   tabDirty: {},
   tabGroups: [],
+  workspaces: [DEFAULT_WORKSPACE],
+  activeWorkspaceId: DEFAULT_WORKSPACE_ID,
   sessionId: null,
   hydrated: false,
   wingmanPrompt: null,
-  addTab: (tab) =>
+  addTab: (incoming) =>
     set((s) => {
+      // Every new tab joins the active workspace unless it already declares one.
+      const tab: Tab = { ...incoming, workspaceId: incoming.workspaceId ?? s.activeWorkspaceId };
       // New tab always lands in the currently-focused leaf so opening a
       // file while a split pane is focused keeps the new tab adjacent to
       // the user's attention.
@@ -746,6 +802,88 @@ export const useWorkspace = create<WorkspaceState>()((set, get) => ({
     set((s) => ({
       tabs: s.tabs.map((t) => (t.id === id ? { ...t, ptyId } : t)),
     })),
+  setTabCwd: (id, cwd) =>
+    set((s) => {
+      const tab = s.tabs.find((t) => t.id === id);
+      if (!tab || tab.cwd === cwd) return s; // no-op — avoids churn on repeat OSC 7
+      return { tabs: s.tabs.map((t) => (t.id === id ? { ...t, cwd } : t)) };
+    }),
+
+  // ─── Workspaces ─────────────────────────────────────────────────────────
+  createWorkspace: (name) => {
+    const id = newWorkspaceId();
+    const s = get();
+    const finalName = name?.trim() || `Workspace ${s.workspaces.length + 1}`;
+    // Switch first so the terminal we open below lands in the new workspace
+    // (addTab stamps the active workspace) and the grid shows it immediately.
+    set({
+      workspaces: [...s.workspaces, { id, name: finalName }],
+      activeWorkspaceId: id,
+    });
+    void get().newTerminal();
+    return id;
+  },
+
+  renameWorkspace: (id, name) =>
+    set((s) => {
+      const trimmed = name.trim();
+      if (!trimmed) return s;
+      return { workspaces: s.workspaces.map((w) => (w.id === id ? { ...w, name: trimmed } : w)) };
+    }),
+
+  deleteWorkspace: (id) => {
+    const s = get();
+    if (s.workspaces.length <= 1) return; // always keep at least one workspace
+    const removedTabIds = new Set(
+      s.tabs.filter((t) => t.workspaceId === id).map((t) => t.id),
+    );
+    const remaining = s.tabs.filter((t) => !removedTabIds.has(t.id));
+    const workspaces = s.workspaces.filter((w) => w.id !== id);
+    const activeWorkspaceId = s.activeWorkspaceId === id ? workspaces[0]!.id : s.activeWorkspaceId;
+    // Removing the tabs from the list unmounts their Terminal components, whose
+    // cleanup kills the PTY — no explicit kill needed here.
+    const pruned = pruneLayout(s.layout, removedTabIds);
+    const layout = pruned ?? singleLeafLayout(remaining.map((t) => t.id), remaining[0]?.id ?? null);
+    const focusedPaneId = findLeaf(layout, s.focusedPaneId) ? s.focusedPaneId : allLeaves(layout)[0]!.id;
+    const nextDirty = { ...s.tabDirty };
+    for (const tid of removedTabIds) delete nextDirty[tid];
+    const firstInActive = remaining.find((t) => t.workspaceId === activeWorkspaceId) ?? null;
+    set({
+      tabs: remaining,
+      workspaces,
+      activeWorkspaceId,
+      layout,
+      focusedPaneId,
+      activeTabId: firstInActive?.id ?? remaining[0]?.id ?? null,
+      tabDirty: nextDirty,
+      tabGroups: pruneEmptyGroups(s.tabGroups, remaining),
+    });
+    // Never leave the app with zero tabs — seed one in the now-active workspace.
+    if (remaining.length === 0) void get().newTerminal();
+  },
+
+  switchWorkspace: (id) =>
+    set((s) => {
+      if (id === s.activeWorkspaceId || !s.workspaces.some((w) => w.id === id)) return s;
+      const first = s.tabs.find((t) => t.workspaceId === id) ?? null;
+      return { activeWorkspaceId: id, activeTabId: first?.id ?? s.activeTabId };
+    }),
+
+  moveTabToWorkspace: (tabId, workspaceId) =>
+    set((s) => {
+      const tab = s.tabs.find((t) => t.id === tabId);
+      if (!tab || tab.workspaceId === workspaceId || !s.workspaces.some((w) => w.id === workspaceId)) {
+        return s;
+      }
+      const tabs = s.tabs.map((t) => (t.id === tabId ? { ...t, workspaceId } : t));
+      // If the moved tab was the active one, hand focus to another tab that's
+      // still in the active workspace (or null if none remain there).
+      let activeTabId = s.activeTabId;
+      if (s.activeTabId === tabId && workspaceId !== s.activeWorkspaceId) {
+        activeTabId = tabs.find((t) => t.workspaceId === s.activeWorkspaceId)?.id ?? null;
+      }
+      return { tabs, activeTabId };
+    }),
   setTabDirty: (id, dirty) =>
     set((s) => {
       if (!!s.tabDirty[id] === dirty) return s; // no-op
@@ -1056,7 +1194,12 @@ export const useWorkspace = create<WorkspaceState>()((set, get) => ({
     // doesn't render empty, but skip SQLite entirely.
     if (!isTauri) {
       const legacy = readLegacyLocalStorage();
-      const tabs = legacy?.tabs ?? [DEFAULT_TAB];
+      // Stamp the default workspace on every tab so the grid's workspace
+      // filter shows them (legacy/browser tabs carry no workspaceId).
+      const tabs = (legacy?.tabs ?? [DEFAULT_TAB]).map((t) => ({
+        ...t,
+        workspaceId: t.workspaceId ?? DEFAULT_WORKSPACE_ID,
+      }));
       const activeTabId = legacy?.activeTabId ?? tabs[0]?.id ?? null;
       const leaf = singleLeafLayout(
         tabs.map((t) => t.id),
@@ -1067,6 +1210,8 @@ export const useWorkspace = create<WorkspaceState>()((set, get) => ({
         activeTabId,
         layout: leaf,
         focusedPaneId: leaf.id,
+        workspaces: [DEFAULT_WORKSPACE],
+        activeWorkspaceId: DEFAULT_WORKSPACE_ID,
         sessionId: null,
         hydrated: true,
       });
@@ -1172,6 +1317,31 @@ export const useWorkspace = create<WorkspaceState>()((set, get) => ({
         focusedPaneId = leaf.id;
       }
 
+      // Workspaces: restore the persisted set (or seed a default), then pin
+      // every tab to a valid workspace. Independent of layout validity.
+      const workspaces =
+        parsed && parsed.workspaces.length > 0 ? parsed.workspaces : [DEFAULT_WORKSPACE];
+      const workspaceIds = new Set(workspaces.map((w) => w.id));
+      let activeWorkspaceId =
+        parsed?.activeWorkspaceId && workspaceIds.has(parsed.activeWorkspaceId)
+          ? parsed.activeWorkspaceId
+          : workspaces[0]!.id;
+      const tabWorkspaces = parsed?.tabWorkspaces ?? {};
+      tabs = tabs.map((t) => {
+        const wid = tabWorkspaces[t.id];
+        return { ...t, workspaceId: wid && workspaceIds.has(wid) ? wid : activeWorkspaceId };
+      });
+      // A restored active workspace with no tabs would show an empty grid on
+      // launch — fall back to whichever workspace actually has tabs.
+      if (!tabs.some((t) => t.workspaceId === activeWorkspaceId)) {
+        const populated = workspaces.find((w) => tabs.some((t) => t.workspaceId === w.id));
+        if (populated) activeWorkspaceId = populated.id;
+      }
+      // Keep activeTabId inside the active workspace.
+      if (!tabs.some((t) => t.id === activeTabId && t.workspaceId === activeWorkspaceId)) {
+        activeTabId = tabs.find((t) => t.workspaceId === activeWorkspaceId)?.id ?? activeTabId;
+      }
+
       // Migration's done — never read the LS key again.
       if (legacy) localStorage.removeItem(LEGACY_LS_KEY);
 
@@ -1184,7 +1354,7 @@ export const useWorkspace = create<WorkspaceState>()((set, get) => ({
           loaded.session.id,
           tabs,
           activeTabId,
-          serializeLayout(layout, focusedPaneId, tabGroups, tabs),
+          serializeLayout(layout, focusedPaneId, tabGroups, tabs, workspaces, activeWorkspaceId),
         );
       }
 
@@ -1194,6 +1364,8 @@ export const useWorkspace = create<WorkspaceState>()((set, get) => ({
         layout,
         focusedPaneId,
         tabGroups,
+        workspaces,
+        activeWorkspaceId,
         sessionId: loaded.session.id,
         hydrated: true,
       });
@@ -1226,7 +1398,14 @@ useWorkspace.subscribe((state, prev) => {
   const sessionId = state.sessionId;
   const tabs = state.tabs;
   const activeTabId = state.activeTabId;
-  const layoutJson = serializeLayout(state.layout, state.focusedPaneId, state.tabGroups, tabs);
+  const layoutJson = serializeLayout(
+    state.layout,
+    state.focusedPaneId,
+    state.tabGroups,
+    tabs,
+    state.workspaces,
+    state.activeWorkspaceId,
+  );
   saveTimer = setTimeout(() => {
     void persistTabs(sessionId, tabs, activeTabId, layoutJson).catch((err) =>
       console.error('[workspace] persist failed:', err),
@@ -1267,6 +1446,7 @@ async function persistTabs(
 function tabSliceEqual(a: WorkspaceState, b: WorkspaceState): boolean {
   if (a.activeTabId !== b.activeTabId) return false;
   if (a.focusedPaneId !== b.focusedPaneId) return false;
+  if (a.activeWorkspaceId !== b.activeWorkspaceId) return false;
   if (a.tabs.length !== b.tabs.length) return false;
   for (let i = 0; i < a.tabs.length; i++) {
     const x = a.tabs[i]!;
@@ -1279,13 +1459,25 @@ function tabSliceEqual(a: WorkspaceState, b: WorkspaceState): boolean {
       x.previewUrl !== y.previewUrl ||
       x.apiClientState !== y.apiClientState ||
       x.sshHostId !== y.sshHostId ||
-      x.groupId !== y.groupId
+      x.groupId !== y.groupId ||
+      x.workspaceId !== y.workspaceId
     ) {
       return false;
     }
   }
+  if (!workspacesEqual(a.workspaces, b.workspaces)) return false;
   if (!tabGroupsEqual(a.tabGroups, b.tabGroups)) return false;
   return layoutEqual(a.layout, b.layout);
+}
+
+/** Structural compare of the workspace metadata so create/rename/delete all
+ *  trigger a persist. */
+function workspacesEqual(a: WorkspaceMeta[], b: WorkspaceMeta[]): boolean {
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) {
+    if (a[i]!.id !== b[i]!.id || a[i]!.name !== b[i]!.name) return false;
+  }
+  return true;
 }
 
 /** Structural compare of the group metadata so collapse/rename/recolour all
@@ -1332,15 +1524,28 @@ function serializeLayout(
   focusedPaneId: string,
   groups: TabGroup[],
   tabs: Tab[],
+  workspaces: WorkspaceMeta[],
+  activeWorkspaceId: string,
 ): string {
   // Build the membership map from the live tabs so it can never drift from
   // `tab.groupId`. Only emit assignments for groups we're actually persisting.
   const groupIds = new Set(groups.map((g) => g.id));
   const groupAssignments: Record<string, string> = {};
+  const tabWorkspaces: Record<string, string> = {};
   for (const t of tabs) {
     if (t.groupId && groupIds.has(t.groupId)) groupAssignments[t.id] = t.groupId;
+    if (t.workspaceId) tabWorkspaces[t.id] = t.workspaceId;
   }
-  const env: SerializedLayout = { v: 1, root: layout, focusedPaneId, groups, groupAssignments };
+  const env: SerializedLayout = {
+    v: 1,
+    root: layout,
+    focusedPaneId,
+    groups,
+    groupAssignments,
+    workspaces,
+    activeWorkspaceId,
+    tabWorkspaces,
+  };
   return JSON.stringify(env);
 }
 
@@ -1354,6 +1559,9 @@ function parsePersistedLayout(
   focusedPaneId: string;
   groups: TabGroup[];
   assignments: Record<string, string>;
+  workspaces: WorkspaceMeta[];
+  activeWorkspaceId: string | null;
+  tabWorkspaces: Record<string, string>;
 } | null {
   if (!raw) return null;
   try {
@@ -1369,10 +1577,30 @@ function parsePersistedLayout(
       focusedPaneId: parsed.focusedPaneId,
       groups: coerceGroups(parsed.groups),
       assignments: coerceAssignments(parsed.groupAssignments),
+      workspaces: coerceWorkspaces(parsed.workspaces),
+      activeWorkspaceId:
+        typeof parsed.activeWorkspaceId === 'string' ? parsed.activeWorkspaceId : null,
+      tabWorkspaces: coerceAssignments(parsed.tabWorkspaces),
     };
   } catch {
     return null;
   }
+}
+
+/** Coerce persisted workspace metadata into the in-memory shape, dropping any
+ *  malformed entries. */
+function coerceWorkspaces(raw: unknown): WorkspaceMeta[] {
+  if (!Array.isArray(raw)) return [];
+  const out: WorkspaceMeta[] = [];
+  const seen = new Set<string>();
+  for (const w of raw) {
+    if (!w || typeof w !== 'object') continue;
+    const { id, name } = w as { id?: unknown; name?: unknown };
+    if (typeof id !== 'string' || seen.has(id)) continue;
+    seen.add(id);
+    out.push({ id, name: typeof name === 'string' && name.trim() ? name : 'Workspace' });
+  }
+  return out;
 }
 
 const VALID_GROUP_COLORS: ReadonlySet<string> = new Set([

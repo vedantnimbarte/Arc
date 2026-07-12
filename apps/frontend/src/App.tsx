@@ -16,7 +16,7 @@ import { Sidebar, SidebarMiniRail } from './components/Sidebar';
 import { ResizeHandle } from './components/ResizeHandle';
 import { SearchPalette } from './components/SearchPalette';
 import { ShortcutsDialog } from './components/ShortcutsDialog';
-import { PaneTreeView } from './components/PaneTreeView';
+import { GridView } from './components/GridView';
 import { useWorkspace } from './state/workspace';
 import { useFiles, SIDEBAR_RAIL_WIDTH, defaultWidthForView } from './state/files';
 import {
@@ -355,7 +355,6 @@ export default function App() {
               console.error('[settings] open window failed:', err),
             )
           }
-          onOpenSearch={() => setSearchOpen(true)}
         />
 
         {/* Layout: file-tree | main | SSH sidebar */}
@@ -400,10 +399,9 @@ export default function App() {
             )}
 
             <main className="relative min-w-0 flex-1 overflow-hidden">
-              {/* Recursive pane tree — splits become PanelGroups, leaves
-                  get a tab strip plus a content slot that reparents the
-                  active tab's host div in. */}
-              <PaneTreeView hostsRef={hostsRef} stageRef={stageRef} />
+              {/* Auto-balanced grid — every open tab is a visible cell that
+                  reparents its host div in. Replaces the tabbed/split view. */}
+              <GridView hostsRef={hostsRef} stageRef={stageRef} />
             </main>
           </div>
 
@@ -452,8 +450,7 @@ function PortalSlot({ host, children }: { host: HTMLDivElement; children: React.
 /**
  * Catches render-time exceptions from a tab's content (Terminal / Editor) so
  * one crashing pane can't unmount the whole portal list and blank the app.
- * xterm.js in particular can throw from its async render loop when the WebGL
- * renderer is left in a broken state.
+ * xterm.js in particular can throw from its async render loop.
  */
 class TabErrorBoundary extends Component<
   { tabId: string; children: ReactNode },
