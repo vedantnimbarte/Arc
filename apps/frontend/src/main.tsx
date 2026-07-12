@@ -1,6 +1,7 @@
 import React, { Component, Suspense, useEffect, type ErrorInfo, type ReactNode } from 'react';
 import ReactDOM from 'react-dom/client';
 import App from './App';
+import { Splash } from './components/Splash';
 import { SettingsPage } from './components/SettingsPage';
 import { rehydrateSettingsFromBroadcast, useSettings } from './state/settings';
 import { onSettingsChanged } from './lib/tauri';
@@ -47,7 +48,12 @@ function Root() {
         <GitPage />
       </Suspense>
     );
-  return <App />;
+  return (
+    <>
+      <App />
+      <Splash />
+    </>
+  );
 }
 
 /**
