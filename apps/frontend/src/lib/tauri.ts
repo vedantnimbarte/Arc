@@ -691,10 +691,6 @@ export interface PersistedSettings {
   /** Re-open the main window at its last position/size (handled by
    *  `tauri-plugin-window-state`). The Rust side reads this on launch. */
   restoreWindowState?: boolean;
-  /** Use the WebGL renderer for newly-opened terminal tabs. Falls back to
-   *  the default canvas/DOM renderer on context-loss or when WebGL is
-   *  unsupported. */
-  terminalWebgl?: boolean;
   /** Enable Vim keybindings in the CodeMirror editor. */
   editorVimMode?: boolean;
   /** Enable Language Server Protocol features (diagnostics, hover, completion)

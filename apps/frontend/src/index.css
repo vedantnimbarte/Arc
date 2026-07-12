@@ -465,10 +465,10 @@ html:not(.dark) [class^="text-white/"] {
   color: rgba(0, 0, 0, 0.62);
 }
 
-/* xterm — pulls in the macOS Terminal.app feel: generous padding, transparent */
+/* xterm — fill the pane edge-to-edge (no inset), transparent viewport */
 .xterm {
   height: 100%;
-  padding: 16px 20px;
+  padding: 0;
 }
 .xterm .xterm-viewport {
   background: transparent !important;

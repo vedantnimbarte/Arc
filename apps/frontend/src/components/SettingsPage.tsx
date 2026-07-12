@@ -26,7 +26,7 @@ import {
   ArrowDown,
   Activity,
 } from 'lucide-react';
-import { useSettings } from '../state/settings';
+import { flushSettingsSave, useSettings } from '../state/settings';
 import { FontPicker } from './FontPicker';
 import { useFiles, type SidebarView } from '../state/files';
 import { useSidebarLayout } from '../state/sidebarLayout';
@@ -72,7 +72,6 @@ export function SettingsPage() {
     fontSize,
     launchAtLogin,
     restoreWindowState,
-    terminalWebgl,
     editorVimMode,
     editorLsp,
     notifyLongCommands,
@@ -85,7 +84,6 @@ export function SettingsPage() {
     setFontSize,
     setLaunchAtLogin,
     setRestoreWindowState,
-    setTerminalWebgl,
     setEditorVimMode,
     setEditorLsp,
     setNotifyLongCommands,
@@ -109,7 +107,11 @@ export function SettingsPage() {
 
   const close = () => {
     if (!isTauri) return;
-    void getCurrentWindow().close().catch(() => {});
+    // Persist any pending (debounced) change before the window is destroyed,
+    // otherwise a quick toggle-then-close is lost.
+    void flushSettingsSave()
+      .catch(() => {})
+      .finally(() => void getCurrentWindow().close().catch(() => {}));
   };
 
   useEffect(() => {
@@ -183,8 +185,6 @@ export function SettingsPage() {
                   shells={shells}
                   defaultShell={defaultShell}
                   onPickShell={setDefaultShell}
-                  terminalWebgl={terminalWebgl}
-                  onTerminalWebglChange={setTerminalWebgl}
                   notifyLongCommands={notifyLongCommands}
                   notifyThresholdSecs={notifyThresholdSecs}
                   notifySound={notifySound}
@@ -1097,8 +1097,6 @@ function TerminalPane({
   shells,
   defaultShell,
   onPickShell,
-  terminalWebgl,
-  onTerminalWebglChange,
   notifyLongCommands,
   notifyThresholdSecs,
   notifySound,
@@ -1109,8 +1107,6 @@ function TerminalPane({
   shells: ShellInfo[] | null;
   defaultShell: string | null;
   onPickShell: (shell: string | null) => void;
-  terminalWebgl: boolean;
-  onTerminalWebglChange: (on: boolean) => void;
   notifyLongCommands: boolean;
   notifyThresholdSecs: number;
   notifySound: boolean;
@@ -1121,18 +1117,6 @@ function TerminalPane({
   return (
     <div className="space-y-7">
       <ShellPicker shells={shells} defaultShell={defaultShell} onPick={onPickShell} />
-
-      <Section
-        title="Renderer"
-        hint="WebGL is faster and smoother on most machines. Falls back to the canvas renderer automatically when WebGL isn't available. Applies to newly-opened terminal tabs."
-      >
-        <ToggleRow
-          label="Use WebGL renderer"
-          hint="Accelerated drawing via GPU. Disable if you see glitches or your GPU is flaky."
-          checked={terminalWebgl}
-          onChange={() => onTerminalWebglChange(!terminalWebgl)}
-        />
-      </Section>
 
       <Section
         title="Notifications"

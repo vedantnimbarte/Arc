@@ -61,24 +61,6 @@ export function Terminal({ sessionKey }: Props) {
     let unlistens: Array<() => void> = [];
     let ptyId: PtyId | null = null;
     let disposed = false;
-    // Tracked so we can dispose the WebGL addon ourselves before the
-    // terminal is torn down. xterm's AddonManager will otherwise cascade
-    // into WebglAddon.dispose() after its renderer has already been
-    // released by context-loss or canvas detach, which throws
-    // `Cannot read properties of undefined (reading '_isDisposed')`
-    // and crashes the React tree.
-    let webglAddon: { dispose: () => void } | null = null;
-    let webglDisposed = false;
-    const disposeWebgl = () => {
-      if (webglDisposed || !webglAddon) return;
-      webglDisposed = true;
-      try {
-        webglAddon.dispose();
-      } catch {
-        /* renderer already gone */
-      }
-      webglAddon = null;
-    };
 
     const initialSettings = useSettings.getState();
     const initialFont = getFont(initialSettings.fontId);
@@ -132,31 +114,6 @@ export function Terminal({ sessionKey }: Props) {
       // container.
       while (container.firstChild) container.removeChild(container.firstChild);
       term.open(container);
-
-      // Optional WebGL renderer. xterm requires it to be loaded *after*
-      // `open()` because it needs a live canvas to grab a GL context from.
-      // The setting captures the user's preference at mount time; switching
-      // it in Settings applies to subsequently-opened tabs.
-      if (initialSettings.terminalWebgl) {
-        void (async () => {
-          try {
-            const { WebglAddon } = await import('@xterm/addon-webgl');
-            if (disposed) return;
-            const webgl = new WebglAddon();
-            // Dispose on context loss so xterm transparently falls back to
-            // its canvas renderer instead of freezing the pane. Route
-            // through disposeWebgl so the cleanup path can't double-dispose
-            // (which throws inside xterm's AddonManager).
-            webgl.onContextLoss(() => disposeWebgl());
-            term.loadAddon(webgl);
-            webglAddon = webgl;
-          } catch (err) {
-            // GPU lacks WebGL2, driver crashed, etc. — terminal keeps working
-            // with the default renderer.
-            console.warn('[terminal] WebGL renderer unavailable:', err);
-          }
-        })();
-      }
       safeFit();
     };
 
@@ -606,9 +563,9 @@ export function Terminal({ sessionKey }: Props) {
     // When the tab's host div is reparented from the offscreen stage back
     // into a visible leaf (tab switch / pane move), PaneLeafView dispatches
     // `arc:host-shown` on the host. ResizeObserver doesn't always fire for
-    // display:none→visible transitions, and the WebGL renderer can hold a
-    // stale-sized canvas, leaving only a sliver of the prompt visible.
-    // Force a fit + full refresh on the next frame so layout has settled.
+    // display:none→visible transitions, leaving the terminal on a stale size
+    // (only a sliver of the prompt visible). Force a fit + full refresh on the
+    // next frame so layout has settled.
     const host = container.parentElement;
     const onHostShown = () => {
       requestAnimationFrame(() => {
@@ -641,9 +598,6 @@ export function Terminal({ sessionKey }: Props) {
       unlistens.forEach((u) => u());
       if (ptyId) void ptyKill(ptyId).catch(() => {});
       useWorkspace.getState().setTabPtyId(sessionKey, undefined);
-      // Tear the WebGL addon down ourselves first; otherwise xterm's
-      // AddonManager runs it after the canvas is gone and throws.
-      disposeWebgl();
       try {
         term.dispose();
       } catch {
@@ -654,7 +608,7 @@ export function Terminal({ sessionKey }: Props) {
   }, [sessionKey]);
 
   return (
-    <div className="relative h-full w-full">
+    <div className="relative h-full w-full bg-bg-base">
       <div
         ref={containerRef}
         className="selectable h-full w-full"
