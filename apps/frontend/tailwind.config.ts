@@ -136,6 +136,12 @@ export default {
           from: { opacity: '0', transform: 'translateX(10px) scale(0.98)' },
           to: { opacity: '1', transform: 'translateX(0) scale(1)' },
         },
+        // A pane arriving from a split — a quick settle so the new terminal
+        // reads as "opening" rather than snapping in.
+        'pane-in': {
+          from: { opacity: '0', transform: 'scale(0.985)' },
+          to: { opacity: '1', transform: 'scale(1)' },
+        },
       },
       animation: {
         'pulse-soft': 'pulse-soft 2.4s cubic-bezier(0.4, 0, 0.6, 1) infinite',
@@ -144,6 +150,7 @@ export default {
         'shimmer-cursor': 'shimmer-cursor 1.2s ease-in-out infinite',
         'sheet-in': 'sheet-in 0.32s cubic-bezier(0.22, 1, 0.36, 1) both',
         'popover-in': 'popover-in 0.28s cubic-bezier(0.22, 1, 0.36, 1) both',
+        'pane-in': 'pane-in 0.2s cubic-bezier(0.22, 1, 0.36, 1) both',
       },
       transitionTimingFunction: {
         'out-soft': 'cubic-bezier(0.16, 1, 0.3, 1)',

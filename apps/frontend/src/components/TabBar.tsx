@@ -30,6 +30,12 @@ import {
 
 const isTauri = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
 
+/** Last path segment of a cwd, forward or back slashes. */
+function basename(p: string): string {
+  const parts = p.split(/[\\/]+/).filter(Boolean);
+  return parts[parts.length - 1] ?? p;
+}
+
 interface Props {
   onOpenSettings: () => void;
 }
@@ -45,6 +51,7 @@ export function TabBar({
     openPreview,
     openApiClient,
   } = useWorkspace();
+  const activeTab = useWorkspace((s) => s.tabs.find((t) => t.id === s.activeTabId) ?? null);
   const sidebarCollapsed = useFiles((s) => s.collapsed);
   const toggleSidebar = useFiles((s) => s.toggleCollapsed);
   const root = useFiles((s) => s.root);
@@ -173,8 +180,23 @@ export function TabBar({
     <>
     <div
       data-tauri-drag-region="deep"
-      className="material-toolbar relative flex h-12 shrink-0 items-center gap-2 pl-3"
+      className="material-toolbar relative flex h-9 shrink-0 items-center gap-2 pl-3"
     >
+      {/* Focused pane's title, centered. Absolutely positioned + click-through
+          so it never shifts the side clusters or eats the window-drag region. */}
+      {activeTab && (
+        <div className="pointer-events-none absolute inset-y-0 left-1/2 flex max-w-[44%] -translate-x-1/2 items-center gap-1.5 px-3">
+          <span className="truncate font-display text-[12px] font-medium tracking-tight text-fg-base/85">
+            {activeTab.title}
+          </span>
+          {activeTab.cwd && (
+            <span className="shrink truncate font-display text-[11.5px] text-fg-subtle">
+              · {basename(activeTab.cwd)}
+            </span>
+          )}
+        </div>
+      )}
+
       {/* Sidebar toggle — left rail, mirrors macOS toolbar control */}
       <button
         onClick={toggleSidebar}

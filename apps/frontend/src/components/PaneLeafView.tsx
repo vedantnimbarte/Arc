@@ -1,5 +1,6 @@
-import { useLayoutEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { findLeaf, useWorkspace } from '../state/workspace';
+import { dropPaneRect, setPaneRect } from '../lib/paneMetrics';
 import { DropZoneOverlay, type DropZone } from './DropZoneOverlay';
 
 interface Props {
@@ -37,6 +38,7 @@ export function PaneLeafView({ paneId, hostsRef, stageRef, header }: Props) {
   const leaf = useWorkspace((s) => findLeaf(s.layout, paneId));
   const moveTabToPane = useWorkspace((s) => s.moveTabToPane);
   const splitPaneWithTab = useWorkspace((s) => s.splitPaneWithTab);
+  const rootRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
   // `enterCount` tracks dragenter/dragleave depth — pure dragleave fires
   // for every child boundary crossed, so we only clear the overlay when
@@ -85,6 +87,22 @@ export function PaneLeafView({ paneId, hostsRef, stageRef, header }: Props) {
     };
   }, [paneId, activeTabId, activeHost, hostsRef, stageRef]);
 
+  // Track this pane's pixel size so new-tab splits can pick the dwindle
+  // direction (split along the longer side).
+  useEffect(() => {
+    const el = rootRef.current;
+    if (!el) return;
+    const obs = new ResizeObserver(() => {
+      const r = el.getBoundingClientRect();
+      setPaneRect(paneId, r.width, r.height);
+    });
+    obs.observe(el);
+    return () => {
+      obs.disconnect();
+      dropPaneRect(paneId);
+    };
+  }, [paneId]);
+
   const hasTabDrag = (e: React.DragEvent) => e.dataTransfer.types.includes('arc/tab');
 
   const computeZone = (clientX: number, clientY: number): DropZone => {
@@ -109,7 +127,10 @@ export function PaneLeafView({ paneId, hostsRef, stageRef, header }: Props) {
   };
 
   return (
-    <div className="flex h-full min-h-0 w-full flex-col">
+    <div
+      ref={rootRef}
+      className="flex h-full min-h-0 w-full animate-pane-in flex-col overflow-hidden rounded-lg bg-bg-base ring-1 ring-border-subtle"
+    >
       {header}
       <div
         ref={contentRef}
