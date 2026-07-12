@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { ChevronDown, ChevronRight, Search as SearchIcon, X } from 'lucide-react';
 import { fsSearch, isTauri, type SearchHit } from '../lib/tauri';
 import { useFiles } from '../state/files';
+import { useSettings } from '../state/settings';
 import { useWorkspace } from '../state/workspace';
 import { fileIcon } from '../lib/fileIcons';
 import { cn } from '../lib/cn';
@@ -58,6 +59,7 @@ function highlight(text: string, query: string): React.ReactNode {
 export function SearchView() {
   const root = useFiles((s) => s.root);
   const openFile = useWorkspace((s) => s.openFile);
+  const ignoreDirs = useSettings((s) => s.searchIgnoreDirs);
 
   const [query, setQuery] = useState('');
   const [rows, setRows] = useState<SearchHit[]>([]);
@@ -78,13 +80,13 @@ export function SearchView() {
     }
     setLoading(true);
     const handle = window.setTimeout(() => {
-      fsSearch(root, q, SEARCH_LIMIT)
+      fsSearch(root, q, SEARCH_LIMIT, ignoreDirs)
         .then((r) => setRows(r))
         .catch(() => setRows([]))
         .finally(() => setLoading(false));
     }, DEBOUNCE_MS);
     return () => window.clearTimeout(handle);
-  }, [query, root]);
+  }, [query, root, ignoreDirs]);
 
   const groups = useMemo(() => {
     const m = new Map<string, SearchHit[]>();

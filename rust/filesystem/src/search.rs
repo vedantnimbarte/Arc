@@ -56,12 +56,27 @@ const MAX_SNIPPET_CHARS: usize = 180;
 
 /// Run `query` against every text file under `root`. Returns up to `limit`
 /// hits sorted by descending score, ties broken by path.
-pub fn search(root: impl AsRef<Path>, query: &str, limit: usize) -> Result<Vec<SearchHit>> {
+///
+/// `ignore` is the list of directory names to skip (case-insensitive). It's
+/// owned by the frontend setting; an empty list falls back to the built-in
+/// [`SKIP`] defaults so a missing/unhydrated setting never floods results.
+pub fn search(
+    root: impl AsRef<Path>,
+    query: &str,
+    limit: usize,
+    ignore: &[String],
+) -> Result<Vec<SearchHit>> {
     let query = query.trim();
     if query.is_empty() {
         return Ok(Vec::new());
     }
     let needle = query.to_lowercase();
+
+    let skip: Vec<String> = if ignore.is_empty() {
+        SKIP.iter().map(|s| s.to_string()).collect()
+    } else {
+        ignore.to_vec()
+    };
 
     let mut hits: Vec<SearchHit> = Vec::new();
     let walker = WalkDir::new(root.as_ref())
@@ -70,7 +85,7 @@ pub fn search(root: impl AsRef<Path>, query: &str, limit: usize) -> Result<Vec<S
         .into_iter()
         .filter_entry(|e| {
             let name = e.file_name().to_string_lossy();
-            !SKIP.iter().any(|s| name.eq_ignore_ascii_case(s))
+            !skip.iter().any(|s| name.eq_ignore_ascii_case(s))
         });
 
     for entry in walker.flatten() {
@@ -210,7 +225,7 @@ mod tests {
         fs::create_dir_all(root.join("node_modules/x")).unwrap();
         fs::write(root.join("node_modules/x/y.js"), "// hello_world is everywhere\n").unwrap();
 
-        let hits = search(&root, "hello_world", 10).unwrap();
+        let hits = search(&root, "hello_world", 10, &[]).unwrap();
         // node_modules entry should be excluded; two real hits.
         assert!(hits.len() == 2, "got {} hits", hits.len());
         for h in &hits {
@@ -219,11 +234,28 @@ mod tests {
     }
 
     #[test]
+    fn custom_ignore_list_overrides_defaults() {
+        let root = tempdir();
+        fs::write(root.join("a.rs"), "hello_world\n").unwrap();
+        // A default-skipped dir the user chose NOT to ignore -> searchable.
+        fs::create_dir_all(root.join("node_modules")).unwrap();
+        fs::write(root.join("node_modules/n.js"), "hello_world\n").unwrap();
+        // A dir the user DID add to the ignore list -> excluded.
+        fs::create_dir_all(root.join("mydeps")).unwrap();
+        fs::write(root.join("mydeps/m.js"), "hello_world\n").unwrap();
+
+        let ignore = vec!["mydeps".to_string()];
+        let hits = search(&root, "hello_world", 10, &ignore).unwrap();
+        assert!(hits.iter().any(|h| h.path.contains("node_modules")));
+        assert!(hits.iter().all(|h| !h.path.contains("mydeps")));
+    }
+
+    #[test]
     fn empty_query_returns_empty() {
         let root = tempdir();
         fs::write(root.join("a.rs"), "anything").unwrap();
-        assert!(search(&root, "", 10).unwrap().is_empty());
-        assert!(search(&root, "   ", 10).unwrap().is_empty());
+        assert!(search(&root, "", 10, &[]).unwrap().is_empty());
+        assert!(search(&root, "   ", 10, &[]).unwrap().is_empty());
     }
 
     #[test]
@@ -231,7 +263,7 @@ mod tests {
         let root = tempdir();
         fs::write(root.join("hello.txt"), "totally unrelated content\n").unwrap();
         fs::write(root.join("other.txt"), "hello hello\n").unwrap();
-        let hits = search(&root, "hello", 10).unwrap();
+        let hits = search(&root, "hello", 10, &[]).unwrap();
         assert!(hits.len() >= 1);
         // hello.txt wins because its filename matches (boost +10).
         assert_eq!(hits[0].name, "hello.txt");

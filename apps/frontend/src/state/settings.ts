@@ -19,6 +19,30 @@ import {
 } from '../themes';
 import { loadInstalledThemes } from '../lib/themeMarketplace';
 
+/** Folder names excluded from file search by default. Mirrors the Rust
+ *  crate's built-in skip list; the setting is fully editable, so the frontend
+ *  owns the source of truth and passes the active list to `fs_search`. */
+export const DEFAULT_SEARCH_IGNORE_DIRS = [
+  'node_modules',
+  'target',
+  '.git',
+  '.hg',
+  '.svn',
+  'dist',
+  'build',
+  '.next',
+  '.nuxt',
+  '.turbo',
+  '__pycache__',
+  '.venv',
+  'venv',
+  '.tox',
+  '.cargo',
+  '.idea',
+  '.vscode',
+  'vendor',
+];
+
 export interface Settings {
   /** Path to the shell binary new terminals should spawn. `null` means
    *  "let the Rust side pick the OS default" (COMSPEC on Windows,
@@ -52,6 +76,8 @@ export interface Settings {
   notifyThresholdSecs: number;
   /** Play the OS notification sound alongside the toast. */
   notifySound: boolean;
+  /** Folder names excluded from file search (Ctrl+P). Fully editable. */
+  searchIgnoreDirs: string[];
   /** True once hydrateSettings() has applied stored values. */
   settingsHydrated: boolean;
   setDefaultShell: (shell: string | null) => void;
@@ -71,6 +97,7 @@ export interface Settings {
   setNotifyLongCommands: (on: boolean) => void;
   setNotifyThresholdSecs: (secs: number) => void;
   setNotifySound: (on: boolean) => void;
+  setSearchIgnoreDirs: (dirs: string[]) => void;
   hydrateSettings: () => Promise<void>;
 }
 
@@ -87,6 +114,7 @@ const DEFAULTS = {
   notifyLongCommands: true,
   notifyThresholdSecs: 30,
   notifySound: false,
+  searchIgnoreDirs: DEFAULT_SEARCH_IGNORE_DIRS,
 };
 
 const MIN_NOTIFY_SECS = 5;
@@ -144,6 +172,7 @@ export const useSettings = create<Settings>()((set, get) => ({
   setNotifyLongCommands: (on) => set({ notifyLongCommands: on }),
   setNotifyThresholdSecs: (secs) => set({ notifyThresholdSecs: clampNotifySecs(secs) }),
   setNotifySound: (on) => set({ notifySound: on }),
+  setSearchIgnoreDirs: (dirs) => set({ searchIgnoreDirs: dirs }),
 
   hydrateSettings: async () => {
     if (get().settingsHydrated) return;
@@ -264,6 +293,11 @@ function applyStored(
         : current.notifyThresholdSecs,
     notifySound:
       typeof stored.notifySound === 'boolean' ? stored.notifySound : current.notifySound,
+    searchIgnoreDirs:
+      Array.isArray(stored.searchIgnoreDirs) &&
+      stored.searchIgnoreDirs.every((d) => typeof d === 'string')
+        ? stored.searchIgnoreDirs
+        : current.searchIgnoreDirs,
   };
 }
 
@@ -281,6 +315,7 @@ function toPersistedSettings(s: Settings): PersistedSettings {
     notifyLongCommands: s.notifyLongCommands,
     notifyThresholdSecs: s.notifyThresholdSecs,
     notifySound: s.notifySound,
+    searchIgnoreDirs: s.searchIgnoreDirs,
   };
 }
 

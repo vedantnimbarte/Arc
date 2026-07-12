@@ -171,8 +171,9 @@ export async function fsListFiles(
   root: string,
   query: string,
   limit: number,
+  ignoreDirs: string[],
 ): Promise<FileItem[]> {
-  return invoke<FileItem[]>('fs_list_files', { root, query, limit });
+  return invoke<FileItem[]>('fs_list_files', { root, query, limit, ignoreDirs });
 }
 
 export async function fsReadFile(path: string): Promise<string> {
@@ -211,8 +212,13 @@ export interface SearchHit {
   score: number;
 }
 
-export async function fsSearch(root: string, query: string, limit: number): Promise<SearchHit[]> {
-  return invoke<SearchHit[]>('fs_search', { root, query, limit });
+export async function fsSearch(
+  root: string,
+  query: string,
+  limit: number,
+  ignoreDirs: string[],
+): Promise<SearchHit[]> {
+  return invoke<SearchHit[]>('fs_search', { root, query, limit, ignoreDirs });
 }
 
 /**
@@ -702,6 +708,9 @@ export interface PersistedSettings {
   notifyThresholdSecs?: number;
   /** Play the OS notification sound. */
   notifySound?: boolean;
+  /** Folder names excluded from file search. Fully user-editable; seeded with
+   *  sensible defaults (node_modules, .venv, target, …). */
+  searchIgnoreDirs?: string[];
 }
 
 /** Returns the stored settings blob, or `null` on first launch. */

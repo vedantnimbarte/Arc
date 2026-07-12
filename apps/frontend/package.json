@@ -49,6 +49,7 @@
     "dompurify": "^3.4.5",
     "lucide-react": "^0.451.0",
     "marked": "^18.0.4",
+    "motion": "^12.42.2",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "react-resizable-panels": "^4.11.1",

@@ -47,11 +47,20 @@ pub fn list_files(
     root: impl AsRef<Path>,
     query: &str,
     limit: usize,
+    ignore: &[String],
 ) -> Result<Vec<FileItem>> {
     let root = root.as_ref();
     let needle = query.trim().to_lowercase();
     let mut scored: Vec<(i32, FileItem)> = Vec::new();
     let mut walked = 0usize;
+
+    // Empty override falls back to the built-in defaults so an unhydrated
+    // setting never floods the picker with dependency folders.
+    let skip: Vec<String> = if ignore.is_empty() {
+        SKIP.iter().map(|s| s.to_string()).collect()
+    } else {
+        ignore.to_vec()
+    };
 
     let walker = WalkDir::new(root)
         .follow_links(false)
@@ -59,7 +68,7 @@ pub fn list_files(
         .into_iter()
         .filter_entry(|e| {
             let name = e.file_name().to_string_lossy();
-            !SKIP.iter().any(|s| name.eq_ignore_ascii_case(s))
+            !skip.iter().any(|s| name.eq_ignore_ascii_case(s))
         });
 
     for entry in walker.flatten() {

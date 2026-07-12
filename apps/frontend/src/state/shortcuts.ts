@@ -185,7 +185,7 @@ export const DEFAULT_BINDINGS: Record<ActionId, KeyBinding | null> = {
   'new-terminal': { code: 'KeyT', shift: false, alt: false, ...mod() },
   'open-settings': { code: 'Comma', shift: false, alt: false, ...mod() },
   'toggle-sidebar': { code: 'KeyB', shift: false, alt: false, ...mod() },
-  'open-command-palette': { code: 'KeyK', shift: false, alt: false, ...mod() },
+  'open-command-palette': { code: 'KeyP', shift: true, alt: false, ...mod() },
   'open-command-history': { code: 'KeyR', shift: false, alt: false, ...mod() },
   'open-command-blocks': { code: 'KeyR', shift: true, alt: false, ...mod() },
   'open-search': { code: 'KeyP', shift: false, alt: false, ...mod() },
