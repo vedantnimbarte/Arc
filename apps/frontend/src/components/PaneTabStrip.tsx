@@ -283,12 +283,12 @@ export function PaneTabStrip({ paneId, variant = 'leaf' }: Props) {
       data-tauri-drag-region="false"
       onMouseDown={() => setFocusedPane(paneId)}
       className={cn(
-        'scrollbar-none flex shrink-0 items-center gap-1 overflow-x-auto',
+        'scrollbar-none flex items-center gap-1 overflow-x-auto overflow-y-hidden',
         'transition-colors duration-150',
         variant === 'topbar'
           ? 'h-[40px] min-w-0'
           : cn(
-              'h-11 border-b px-2',
+              'h-11 shrink-0 border-b px-2',
               isFocused
                 ? 'border-border-hairline bg-bg-chrome/30'
                 : 'border-border-hairline/60 bg-transparent',

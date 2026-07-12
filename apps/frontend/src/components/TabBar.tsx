@@ -2,14 +2,12 @@ import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import {
   Plus,
-  X,
   Terminal as TerminalIcon,
   FileCode,
   FolderOpen,
   Settings as SettingsIcon,
   PanelLeftClose,
   PanelLeftOpen,
-  Search,
   Bot,
   GitBranch,
   Monitor,
@@ -19,8 +17,8 @@ import {
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { useWorkspace } from '../state/workspace';
 import { useFiles } from '../state/files';
+import { WorkspaceSwitcher } from './WorkspaceSwitcher';
 import { cn } from '../lib/cn';
-import { PaneTabStrip } from './PaneTabStrip';
 import {
   fsPickFolder,
   fsWriteFile,
@@ -34,31 +32,19 @@ const isTauri = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window
 
 interface Props {
   onOpenSettings: () => void;
-  onOpenSearch: () => void;
 }
 
 export function TabBar({
   onOpenSettings,
-  onOpenSearch,
 }: Props) {
   const {
-    tabs,
-    activeTabId,
-    setActive,
-    closeTab,
     openFile,
     launchAiCli,
     launchWingman,
     newTerminal,
     openPreview,
     openApiClient,
-    tabDirty,
   } = useWorkspace();
-  // Topbar carries the workspace's tab strip when there are no splits.
-  // With splits, each pane keeps its own header so users can see what's
-  // open in panes that don't hold focus.
-  const layout = useWorkspace((s) => s.layout);
-  const topbarLeafId = layout.kind === 'leaf' ? layout.id : null;
   const sidebarCollapsed = useFiles((s) => s.collapsed);
   const toggleSidebar = useFiles((s) => s.toggleCollapsed);
   const root = useFiles((s) => s.root);
@@ -183,18 +169,6 @@ export function TabBar({
   };
   const hasWingman = aiClis.some((c) => c.id === 'wingman-cli');
 
-  const requestClose = (id: string, title: string) => {
-    // Workspace invariant: at least one tab is always open. The store also
-    // guards this, but we no-op early so the dirty-confirm prompt doesn't
-    // fire pointlessly.
-    if (tabs.length <= 1) return;
-    if (tabDirty[id]) {
-      const ok = window.confirm(`"${title}" has unsaved changes. Discard them?`);
-      if (!ok) return;
-    }
-    closeTab(id);
-  };
-
   return (
     <>
     <div
@@ -216,26 +190,22 @@ export function TabBar({
         )}
       </button>
 
-      {/* Tab strip — browser-style pills aligned to the left rail. Subtle
-          vertical separator hairline before the row gives the topbar two
-          distinct zones (chrome controls / tabs). */}
+      {/* Separator before the workspace switcher. */}
       <div className="ml-0.5 h-5 w-px bg-white/[0.06]" aria-hidden />
 
-      {/* Tab strip (single-leaf workspaces only — split layouts keep their
-          own per-pane strips) sits inline before the + button so the whole
-          chrome lives on one row. */}
-      <div className="flex min-w-0 flex-1 items-center pl-1">
-        {topbarLeafId && (
-          <PaneTabStrip paneId={topbarLeafId} variant="topbar" />
-        )}
+      {/* The workspace renders every tab as a grid cell (no tab strip). The
+          switcher changes/manages workspaces; the + adds a new cell. The
+          flex-1 keeps them left-aligned and preserves the window-drag region. */}
+      <div className="flex min-w-0 flex-1 items-center gap-1.5 pl-1">
+        <WorkspaceSwitcher />
         <button
           ref={plusRef}
           onClick={() => setMenuOpen((o) => !o)}
           className="group ml-0.5 flex h-[28px] w-[28px] shrink-0 items-center justify-center rounded-[7px] text-fg-subtle transition-all duration-200 ease-apple hover:bg-white/[0.06] hover:text-fg-base active:bg-white/[0.10]"
-          aria-label="New tab"
+          aria-label="New cell"
           aria-expanded={menuOpen}
           aria-haspopup="menu"
-          title="New tab"
+          title="New cell"
         >
           <Plus
             size={13}
@@ -245,30 +215,7 @@ export function TabBar({
         </button>
       </div>
 
-      {/* Right cluster — search affordance, AI toggle, settings. The search
-          pill mirrors the Arc/Chrome address-bar shape so it reads as the
-          single entry point for "find anything in this workspace". */}
-      <button
-        onClick={onOpenSearch}
-        className={cn(
-          'group flex h-[28px] w-[160px] shrink-0 items-center gap-1.5 rounded-[7px] px-2',
-          'border border-white/[0.04] bg-black/[0.18] text-fg-subtle',
-          'transition-all duration-150 ease-apple',
-          'hover:border-white/[0.08] hover:bg-black/[0.28] hover:text-fg-muted',
-          'focus-within:border-accent/40 focus-within:bg-black/[0.32] focus-within:shadow-focus',
-        )}
-        aria-label="Search files"
-        title="Search files (⌘P)"
-      >
-        <Search size={11} strokeWidth={2.1} className="shrink-0" />
-        <span className="flex-1 truncate text-left font-display text-[11.5px] tracking-tight">
-          Search
-        </span>
-        <kbd className="hidden font-mono text-[9.5px] tracking-tight text-fg-subtle/70 group-hover:inline">
-          ⌘P
-        </kbd>
-      </button>
-
+      {/* Right cluster — git, AI toggle, settings. */}
       <div className="ml-0.5 flex items-center gap-0.5 pr-2">
         {isGitRepo && (
           <button
@@ -316,7 +263,7 @@ export function TabBar({
           ref={menuRef}
           role="menu"
           style={{ position: 'fixed', top: menuPos.top, left: menuPos.left }}
-          className="material-sheet z-50 w-52 animate-popover-in overflow-hidden rounded-md shadow-sheet ring-1 ring-white/10"
+          className="material-sheet z-50 w-52 animate-popover-in overflow-hidden rounded-md bg-bg-panel shadow-sheet ring-1 ring-white/10"
         >
           <button
             role="menuitem"

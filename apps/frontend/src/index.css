@@ -390,6 +390,14 @@
   html:not(.dark) .md-preview input[type='checkbox'] { accent-color: #3873d6; }
 }
 
+/* Fully hide the scrollbar (used by the horizontally-scrolling tab strip). */
+.scrollbar-none {
+  scrollbar-width: none;
+}
+.scrollbar-none::-webkit-scrollbar {
+  display: none;
+}
+
 /* macOS-style overlay scrollbars: invisible until scroll, then thin pill */
 ::-webkit-scrollbar {
   width: 9px;
@@ -465,10 +473,10 @@ html:not(.dark) [class^="text-white/"] {
   color: rgba(0, 0, 0, 0.62);
 }
 
-/* xterm — pulls in the macOS Terminal.app feel: generous padding, transparent */
+/* xterm — fill the pane edge-to-edge (no inset), transparent viewport */
 .xterm {
   height: 100%;
-  padding: 16px 20px;
+  padding: 0;
 }
 .xterm .xterm-viewport {
   background: transparent !important;

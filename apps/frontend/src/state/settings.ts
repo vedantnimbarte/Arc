@@ -39,8 +39,6 @@ export interface Settings {
   /** Persist the main window's last position and size across launches. The
    *  Rust side reads this at startup; toggling takes effect after restart. */
   restoreWindowState: boolean;
-  /** Use the WebGL renderer for newly-opened terminal tabs. */
-  terminalWebgl: boolean;
   /** Enable Vim keybindings in the CodeMirror editor. Multi-cursor is always
    *  on; this gates the modal Vim layer specifically. */
   editorVimMode: boolean;
@@ -68,7 +66,6 @@ export interface Settings {
    *  in-app preference flip. */
   setLaunchAtLogin: (on: boolean) => Promise<void>;
   setRestoreWindowState: (on: boolean) => void;
-  setTerminalWebgl: (on: boolean) => void;
   setEditorVimMode: (on: boolean) => void;
   setEditorLsp: (on: boolean) => void;
   setNotifyLongCommands: (on: boolean) => void;
@@ -85,7 +82,6 @@ const DEFAULTS = {
   fontSize: DEFAULT_FONT_SIZE,
   launchAtLogin: false,
   restoreWindowState: true,
-  terminalWebgl: false,
   editorVimMode: false,
   editorLsp: false,
   notifyLongCommands: true,
@@ -143,7 +139,6 @@ export const useSettings = create<Settings>()((set, get) => ({
     }
   },
   setRestoreWindowState: (on) => set({ restoreWindowState: on }),
-  setTerminalWebgl: (on) => set({ terminalWebgl: on }),
   setEditorVimMode: (on) => set({ editorVimMode: on }),
   setEditorLsp: (on) => set({ editorLsp: on }),
   setNotifyLongCommands: (on) => set({ notifyLongCommands: on }),
@@ -253,10 +248,6 @@ function applyStored(
       typeof stored.restoreWindowState === 'boolean'
         ? stored.restoreWindowState
         : current.restoreWindowState,
-    terminalWebgl:
-      typeof stored.terminalWebgl === 'boolean'
-        ? stored.terminalWebgl
-        : current.terminalWebgl,
     editorVimMode:
       typeof stored.editorVimMode === 'boolean'
         ? stored.editorVimMode
@@ -285,7 +276,6 @@ function toPersistedSettings(s: Settings): PersistedSettings {
     fontSize: s.fontSize,
     launchAtLogin: s.launchAtLogin,
     restoreWindowState: s.restoreWindowState,
-    terminalWebgl: s.terminalWebgl,
     editorVimMode: s.editorVimMode,
     editorLsp: s.editorLsp,
     notifyLongCommands: s.notifyLongCommands,
@@ -308,6 +298,18 @@ useSettings.subscribe((state) => {
       .catch((err) => console.error('[settings] SQLite save failed:', err));
   }, 500);
 });
+
+/** Flush any pending debounced save immediately. The Settings window is
+ *  destroyed (not hidden) on close, which drops the 500ms `setTimeout` — a
+ *  quick toggle-then-close would otherwise never persist. Call this and await
+ *  it before closing the window. */
+export async function flushSettingsSave(): Promise<void> {
+  if (!isTauri || suppressSave || settingsSaveTimer === undefined) return;
+  clearTimeout(settingsSaveTimer);
+  settingsSaveTimer = undefined;
+  await sessionSettingsSave(toPersistedSettings(useSettings.getState()));
+  await settingsBroadcastChanged().catch(() => {});
+}
 
 /** Re-pull settings from SQLite without writing back. Called when the
  *  other window broadcasts a change. */
@@ -336,7 +338,6 @@ export async function rehydrateSettingsFromBroadcast(): Promise<void> {
     const sameStartup =
       (stored.launchAtLogin ?? current.launchAtLogin) === current.launchAtLogin &&
       (stored.restoreWindowState ?? current.restoreWindowState) === current.restoreWindowState &&
-      (stored.terminalWebgl ?? current.terminalWebgl) === current.terminalWebgl &&
       (stored.editorVimMode ?? current.editorVimMode) === current.editorVimMode;
     if (sameAppearance && sameTheme && sameFont && sameShell && sameStartup) return;
 
