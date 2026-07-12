@@ -261,11 +261,15 @@ export default function App() {
     const onKey = (e: KeyboardEvent) => {
       const action = actionFor(e);
       if (!action) return;
+      // Capture phase + stopPropagation so app shortcuts win over a focused
+      // terminal (xterm) or editor (CodeMirror) — otherwise the terminal eats
+      // control chars like Ctrl+P (^P) before the app ever sees them.
       e.preventDefault();
+      e.stopPropagation();
       dispatchActionRef.current(action);
     };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
+    window.addEventListener('keydown', onKey, true);
+    return () => window.removeEventListener('keydown', onKey, true);
   }, []);
 
   // Seed the command-palette registry with every ActionId. Other features
