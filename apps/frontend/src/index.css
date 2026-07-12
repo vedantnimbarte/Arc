@@ -204,6 +204,25 @@
     background: rgba(248, 248, 250, 0.90);
   }
 
+  /* Flat workspace-rail icon. Colour identity comes from a per-hue tint set
+     via CSS vars (no glass); the squircle radius + active border animate. */
+  .ws-icon {
+    background: var(--ws-bg, rgba(255, 255, 255, 0.05));
+    border: 1px solid var(--ws-bd, transparent);
+    transition:
+      background 0.18s cubic-bezier(0.4, 0, 0.2, 1),
+      border-color 0.18s cubic-bezier(0.4, 0, 0.2, 1),
+      color 0.18s cubic-bezier(0.4, 0, 0.2, 1),
+      border-radius 0.22s cubic-bezier(0.22, 1, 0.36, 1),
+      transform 0.15s ease;
+  }
+  .ws-icon:hover {
+    background: var(--ws-bg-hover, rgba(255, 255, 255, 0.09));
+  }
+  .ws-icon:active {
+    transform: scale(0.94);
+  }
+
   /* Subtle dot grid behind the terminal — kept very faint so the macOS
      graphite reads as the dominant texture. */
   .dot-grid {

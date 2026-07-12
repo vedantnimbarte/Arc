@@ -5,19 +5,16 @@ import {
   Terminal as TerminalIcon,
   FileCode,
   FolderOpen,
-  Settings as SettingsIcon,
   PanelLeftClose,
   PanelLeftOpen,
   Bot,
   GitBranch,
   Monitor,
   Send,
-  ServerIcon,
 } from 'lucide-react';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { useWorkspace } from '../state/workspace';
 import { useFiles } from '../state/files';
-import { WorkspaceSwitcher } from './WorkspaceSwitcher';
 import { cn } from '../lib/cn';
 import {
   fsPickFolder,
@@ -36,13 +33,7 @@ function basename(p: string): string {
   return parts[parts.length - 1] ?? p;
 }
 
-interface Props {
-  onOpenSettings: () => void;
-}
-
-export function TabBar({
-  onOpenSettings,
-}: Props) {
+export function TabBar() {
   const {
     openFile,
     launchAiCli,
@@ -55,8 +46,6 @@ export function TabBar({
   const sidebarCollapsed = useFiles((s) => s.collapsed);
   const toggleSidebar = useFiles((s) => s.toggleCollapsed);
   const root = useFiles((s) => s.root);
-  const toggleSshView = useFiles((s) => s.toggleSidebarView);
-  const sshActive = useFiles((s) => s.sidebarView === 'ssh' && !s.collapsed);
 
   const [menuOpen, setMenuOpen] = useState(false);
   const [menuPos, setMenuPos] = useState<{ top: number; left: number } | null>(null);
@@ -212,14 +201,10 @@ export function TabBar({
         )}
       </button>
 
-      {/* Separator before the workspace switcher. */}
-      <div className="ml-0.5 h-5 w-px bg-white/[0.06]" aria-hidden />
-
-      {/* The workspace renders every tab as a grid cell (no tab strip). The
-          switcher changes/manages workspaces; the + adds a new cell. The
-          flex-1 keeps them left-aligned and preserves the window-drag region. */}
+      {/* The workspace renders every tab as a grid cell (no tab strip); the +
+          adds a new cell. The flex-1 keeps it left-aligned and preserves the
+          window-drag region. Workspace switching lives in the left rail. */}
       <div className="flex min-w-0 flex-1 items-center gap-1.5 pl-1">
-        <WorkspaceSwitcher />
         <button
           ref={plusRef}
           onClick={() => setMenuOpen((o) => !o)}
@@ -237,7 +222,8 @@ export function TabBar({
         </button>
       </div>
 
-      {/* Right cluster — git, AI toggle, settings. */}
+      {/* Right cluster — git history. SSH lives in the ⌘K palette / ⌘⇧S;
+          settings lives in the workspace rail. */}
       <div className="ml-0.5 flex items-center gap-0.5 pr-2">
         {isGitRepo && (
           <button
@@ -249,32 +235,6 @@ export function TabBar({
             <GitBranch size={13} strokeWidth={1.9} />
           </button>
         )}
-        <button
-          onClick={() => toggleSshView('ssh')}
-          aria-pressed={sshActive}
-          className={cn(
-            'group flex h-8 w-8 items-center justify-center rounded-md transition-all duration-200 ease-apple active:bg-white/[0.12]',
-            sshActive
-              ? 'bg-accent-soft text-accent-bright shadow-[inset_0_0_0_1px_rgba(220,224,232,0.18)]'
-              : 'text-fg-muted hover:bg-white/[0.08] hover:text-fg-base',
-          )}
-          aria-label="Toggle SSH sidebar"
-          title="SSH (⌘⇧S)"
-        >
-          <ServerIcon size={13} strokeWidth={1.9} />
-        </button>
-        <button
-          onClick={onOpenSettings}
-          className="group flex h-8 w-8 items-center justify-center rounded-md text-fg-muted transition-all duration-200 ease-apple hover:bg-white/[0.08] hover:text-fg-base active:bg-white/[0.12]"
-          aria-label="Open settings"
-          title="Settings (⌘,)"
-        >
-          <SettingsIcon
-            size={13}
-            strokeWidth={1.9}
-            className="transition-transform duration-500 ease-apple group-hover:rotate-45"
-          />
-        </button>
       </div>
 
       {isTauri && <WindowControls />}
