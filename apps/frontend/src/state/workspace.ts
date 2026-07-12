@@ -21,6 +21,12 @@ import { nextGroupColor, type TabGroupColorId } from '../lib/tabGroups';
 export interface WorkspaceMeta {
   id: string;
   name: string;
+  /** Optional emoji shown on the rail icon. Falls back to the name's initials
+   *  when unset. */
+  icon?: string;
+  /** Optional colour for the rail icon, from the shared tab-group palette.
+   *  Auto-assigned on create; user-overridable via the icon picker. */
+  color?: TabGroupColorId;
 }
 
 export interface Tab {
@@ -206,6 +212,8 @@ interface WorkspaceState {
    *  Returns the new workspace id. */
   createWorkspace: (name?: string) => string;
   renameWorkspace: (id: string, name: string) => void;
+  /** Set a workspace's rail icon (emoji) and/or colour. */
+  setWorkspaceIcon: (id: string, patch: { icon?: string; color?: TabGroupColorId }) => void;
   /** Delete a workspace and close all its tabs (killing their PTYs). No-op if
    *  it's the only workspace. */
   deleteWorkspace: (id: string) => void;
@@ -881,12 +889,15 @@ export const useWorkspace = create<WorkspaceState>()((set, get) => ({
     const id = newWorkspaceId();
     const s = get();
     const finalName = name?.trim() || `Workspace ${s.workspaces.length + 1}`;
+    const color = nextGroupColor(
+      s.workspaces.map((w) => w.color).filter(Boolean) as TabGroupColorId[],
+    );
     // Park the current workspace's layout, then switch to a fresh empty leaf.
     // The newTerminal() below appends into that leaf (addTab targets the
     // focused pane of the now-active workspace).
     const empty = singleLeafLayout([], null);
     set({
-      workspaces: [...s.workspaces, { id, name: finalName }],
+      workspaces: [...s.workspaces, { id, name: finalName, color }],
       activeWorkspaceId: id,
       layoutStash: {
         ...s.layoutStash,
@@ -906,6 +917,11 @@ export const useWorkspace = create<WorkspaceState>()((set, get) => ({
       if (!trimmed) return s;
       return { workspaces: s.workspaces.map((w) => (w.id === id ? { ...w, name: trimmed } : w)) };
     }),
+
+  setWorkspaceIcon: (id, patch) =>
+    set((s) => ({
+      workspaces: s.workspaces.map((w) => (w.id === id ? { ...w, ...patch } : w)),
+    })),
 
   deleteWorkspace: (id) => {
     const s = get();
@@ -1617,7 +1633,14 @@ function tabSliceEqual(a: WorkspaceState, b: WorkspaceState): boolean {
 function workspacesEqual(a: WorkspaceMeta[], b: WorkspaceMeta[]): boolean {
   if (a.length !== b.length) return false;
   for (let i = 0; i < a.length; i++) {
-    if (a[i]!.id !== b[i]!.id || a[i]!.name !== b[i]!.name) return false;
+    if (
+      a[i]!.id !== b[i]!.id ||
+      a[i]!.name !== b[i]!.name ||
+      a[i]!.icon !== b[i]!.icon ||
+      a[i]!.color !== b[i]!.color
+    ) {
+      return false;
+    }
   }
   return true;
 }
@@ -1737,10 +1760,22 @@ function coerceWorkspaces(raw: unknown): WorkspaceMeta[] {
   const seen = new Set<string>();
   for (const w of raw) {
     if (!w || typeof w !== 'object') continue;
-    const { id, name } = w as { id?: unknown; name?: unknown };
+    const { id, name, icon, color } = w as {
+      id?: unknown;
+      name?: unknown;
+      icon?: unknown;
+      color?: unknown;
+    };
     if (typeof id !== 'string' || seen.has(id)) continue;
     seen.add(id);
-    out.push({ id, name: typeof name === 'string' && name.trim() ? name : 'Workspace' });
+    out.push({
+      id,
+      name: typeof name === 'string' && name.trim() ? name : 'Workspace',
+      ...(typeof icon === 'string' && icon ? { icon } : {}),
+      ...(typeof color === 'string' && VALID_GROUP_COLORS.has(color)
+        ? { color: color as TabGroupColorId }
+        : {}),
+    });
   }
   return out;
 }
