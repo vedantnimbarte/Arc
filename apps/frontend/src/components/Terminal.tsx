@@ -43,6 +43,13 @@ export function Terminal({ sessionKey }: Props) {
   // ponytail: hard-off; reintroduce a setting here if it's ever wanted back.
   const [showSplash, setShowSplash] = useState(false);
 
+  // Clear the running dot if the pane is closed mid-command (OSC 133 `D` may
+  // never arrive when the PTY is killed).
+  useEffect(
+    () => () => useWorkspace.getState().setTabRunning(sessionKey, false),
+    [sessionKey],
+  );
+
   const pasteRecentCommand = (command: string) => {
     const ptyId = useWorkspace.getState().tabs.find((t) => t.id === sessionKey)?.ptyId;
     if (ptyId) void ptyWrite(ptyId, command).catch(() => {});
@@ -126,6 +133,21 @@ export function Terminal({ sessionKey }: Props) {
       }
     };
     ensureOpen();
+
+    // The mono web font can still be loading when xterm first measures its
+    // cell size, which leaves the cursor drawn a few columns into the prompt
+    // until a resize re-fits (intermittent, default-font). Once the fonts are
+    // ready, force a fresh char-size measurement (a no-op letterSpacing toggle
+    // makes xterm re-measure) and re-fit so the cursor lines up with the glyphs.
+    if (typeof document !== 'undefined' && document.fonts?.ready) {
+      void document.fonts.ready.then(() => {
+        if (disposed) return;
+        const ls = term.options.letterSpacing ?? 0;
+        term.options.letterSpacing = ls === 0 ? 0.01 : 0;
+        term.options.letterSpacing = ls;
+        safeFit();
+      });
+    }
 
     // Live-update font + theme when the user changes them in Settings.
     const unsubAppearance = useSettings.subscribe((s, prev) => {
@@ -246,8 +268,11 @@ export function Terminal({ sessionKey }: Props) {
             osc.capturing = true;
             osc.buf = '';
             cmdStartMs = Date.now();
+            // A command is now executing — light the pane's status dot.
+            useWorkspace.getState().setTabRunning(sessionKey, true);
           } else if (verb === 'D') {
             osc.capturing = false;
+            useWorkspace.getState().setTabRunning(sessionKey, false);
             const exitStr = fields[1];
             const exit = exitStr === undefined ? null : Number.parseInt(exitStr, 10);
             const code = Number.isFinite(exit as number) ? (exit as number) : null;
