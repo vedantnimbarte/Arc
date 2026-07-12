@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { CornerDownLeft, File, Search } from 'lucide-react';
-import { fsSearch, isTauri, type SearchHit } from '../lib/tauri';
+import { CornerDownLeft, File, FilePlus, FolderPlus, Search } from 'lucide-react';
+import { fsListFiles, fsWriteFile, fsCreateDir, isTauri, type FileItem } from '../lib/tauri';
 import { useFiles } from '../state/files';
+import { useSettings } from '../state/settings';
 import { useWorkspace } from '../state/workspace';
 import { cn } from '../lib/cn';
 
@@ -11,20 +12,19 @@ interface Props {
 }
 
 /**
- * ⌘P-style file content search. Walks the current workspace root,
- * substring-matches the query against text files, opens the picked
- * result as an editor tab.
- *
- * V0: substring + filename-boost scoring. No persistent index.
+ * ⌘P-style file quick-open. Matches the query against file names (and their
+ * relative paths) under the workspace root — not file contents — and opens the
+ * picked file as an editor tab. Honors the search-ignore-dirs setting.
  */
 export function SearchPalette({ open, onClose }: Props) {
   const [query, setQuery] = useState('');
-  const [rows, setRows] = useState<SearchHit[]>([]);
+  const [rows, setRows] = useState<FileItem[]>([]);
   const [selected, setSelected] = useState(0);
   const [loading, setLoading] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const root = useFiles((s) => s.root);
   const openFile = useWorkspace((s) => s.openFile);
+  const ignoreDirs = useSettings((s) => s.searchIgnoreDirs);
 
   // Debounce searches; the walk is fast but firing one per keystroke on
   // a slow disk is wasteful.
@@ -39,7 +39,7 @@ export function SearchPalette({ open, onClose }: Props) {
     let cancelled = false;
     setLoading(true);
     const t = setTimeout(() => {
-      void fsSearch(root, q, 50)
+      void fsListFiles(root, q, 50, ignoreDirs)
         .then((r) => {
           if (!cancelled) {
             setRows(r);
@@ -58,7 +58,7 @@ export function SearchPalette({ open, onClose }: Props) {
       cancelled = true;
       clearTimeout(t);
     };
-  }, [open, query, root]);
+  }, [open, query, root, ignoreDirs]);
 
   useEffect(() => {
     if (open) {
@@ -71,7 +71,7 @@ export function SearchPalette({ open, onClose }: Props) {
   }, [open]);
 
   const pick = useCallback(
-    (hit: SearchHit) => {
+    (hit: FileItem) => {
       openFile(hit.path);
       onClose();
     },
@@ -80,17 +80,60 @@ export function SearchPalette({ open, onClose }: Props) {
 
   const visible = useMemo(() => rows.slice(0, 50), [rows]);
 
+  // The query doubles as the name/relative path for creation (VSCode-style).
+  const name = query.trim();
+  const creatable = !!name && !!root && isTauri;
+
+  const createFile = useCallback(async () => {
+    if (!name || !root) return;
+    const sep = root.includes('\\') ? '\\' : '/';
+    const full = `${root}${sep}${name}`;
+    try {
+      // Nested names (e.g. "src/foo.ts") need their parent dirs; create_dir_all
+      // makes any missing ancestors.
+      const cut = Math.max(full.lastIndexOf('/'), full.lastIndexOf('\\'));
+      const parent = full.slice(0, cut);
+      if (parent && parent !== root) await fsCreateDir(parent);
+      await fsWriteFile(full, '');
+      openFile(full);
+    } catch (e) {
+      console.error('[SearchPalette] create file failed:', e);
+    }
+    onClose();
+  }, [name, root, openFile, onClose]);
+
+  const createFolder = useCallback(async () => {
+    if (!name || !root) return;
+    const sep = root.includes('\\') ? '\\' : '/';
+    try {
+      await fsCreateDir(`${root}${sep}${name}`);
+    } catch (e) {
+      console.error('[SearchPalette] create folder failed:', e);
+    }
+    onClose();
+  }, [name, root, onClose]);
+
+  // Create rows sit after the file hits; keyboard selection spans both.
+  const createBase = visible.length;
+  const total = creatable ? visible.length + 2 : visible.length;
+
   const onKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Escape') {
       e.preventDefault();
       onClose();
     } else if (e.key === 'Enter') {
       e.preventDefault();
-      const hit = visible[selected];
-      if (hit) pick(hit);
+      if (selected < visible.length) {
+        const hit = visible[selected];
+        if (hit) pick(hit);
+      } else if (creatable && selected === createBase) {
+        void createFile();
+      } else if (creatable) {
+        void createFolder();
+      }
     } else if (e.key === 'ArrowDown') {
       e.preventDefault();
-      setSelected((s) => Math.min(s + 1, visible.length - 1));
+      setSelected((s) => Math.min(s + 1, total - 1));
     } else if (e.key === 'ArrowUp') {
       e.preventDefault();
       setSelected((s) => Math.max(s - 1, 0));
@@ -115,7 +158,7 @@ export function SearchPalette({ open, onClose }: Props) {
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             onKeyDown={onKeyDown}
-            placeholder="search files in workspace…"
+            placeholder="search files by name…"
             className="flex-1 bg-transparent font-display text-[13px] text-fg-base placeholder:text-fg-subtle focus:outline-none"
             autoComplete="off"
             spellCheck={false}
@@ -132,60 +175,83 @@ export function SearchPalette({ open, onClose }: Props) {
               type to search files in {root ?? 'the workspace'}
             </div>
           )}
-          {query.trim() && !loading && visible.length === 0 && (
+          {query.trim() && !loading && visible.length === 0 && !creatable && (
             <div className="px-4 py-6 text-center font-display text-[11.5px] italic text-fg-subtle">
               no matches for “{query}”
             </div>
           )}
           {visible.map((hit, idx) => (
             <button
-              key={`${hit.path}:${hit.line}`}
+              key={hit.path}
               onMouseEnter={() => setSelected(idx)}
               onClick={() => pick(hit)}
               className={cn(
-                'flex w-full items-start gap-2.5 px-3.5 py-1.5 text-left transition-colors',
+                'flex w-full items-center gap-2.5 px-3.5 py-1.5 text-left transition-colors',
                 idx === selected
                   ? 'bg-accent-soft ring-1 ring-inset ring-border-strong'
                   : 'hover:bg-white/[0.045]',
               )}
             >
-              <File size={11} strokeWidth={1.8} className="mt-1 shrink-0 text-fg-subtle" />
-              <div className="min-w-0 flex-1">
-                <div className="flex items-baseline gap-2">
-                  <span className="truncate font-display text-[12.5px] font-medium text-fg-base/90">
-                    {hit.name}
-                  </span>
-                  <span className="truncate font-mono text-[10px] text-fg-subtle">
-                    {trimPath(hit.path, root)}:{hit.line}
-                  </span>
-                </div>
-                <div className="mt-0.5 truncate font-mono text-[11px] text-fg-muted">
-                  {hit.snippet || '…'}
-                </div>
-              </div>
+              <File size={11} strokeWidth={1.8} className="shrink-0 text-fg-subtle" />
+              <span className="shrink-0 truncate font-display text-[12.5px] font-medium text-fg-base/90">
+                {hit.name}
+              </span>
+              <span className="truncate font-mono text-[10px] text-fg-subtle">
+                {parentDir(hit.rel)}
+              </span>
               {idx === selected && (
-                <CornerDownLeft size={11} strokeWidth={2.1} className="mt-1.5 shrink-0 text-fg-muted" />
+                <CornerDownLeft size={11} strokeWidth={2.1} className="ml-auto shrink-0 text-fg-muted" />
               )}
             </button>
           ))}
+
+          {creatable && (
+            <div className={visible.length ? 'mt-1 border-t border-border-hairline pt-1' : ''}>
+              {(
+                [
+                  { idx: createBase, Icon: FilePlus, verb: 'Create file', run: createFile },
+                  { idx: createBase + 1, Icon: FolderPlus, verb: 'Create folder', run: createFolder },
+                ] as const
+              ).map(({ idx, Icon, verb, run }) => (
+                <button
+                  key={verb}
+                  onMouseEnter={() => setSelected(idx)}
+                  onClick={() => void run()}
+                  className={cn(
+                    'flex w-full items-center gap-2.5 px-3.5 py-2 text-left transition-colors',
+                    idx === selected
+                      ? 'bg-accent-soft ring-1 ring-inset ring-border-strong'
+                      : 'hover:bg-white/[0.045]',
+                  )}
+                >
+                  <Icon size={12} strokeWidth={1.8} className="shrink-0 text-fg-subtle" />
+                  <span className="shrink-0 font-display text-[12.5px] font-medium text-fg-base/90">
+                    {verb}
+                  </span>
+                  <span className="truncate font-mono text-[11px] text-fg-muted">{name}</span>
+                  {idx === selected && (
+                    <CornerDownLeft size={11} strokeWidth={2.1} className="ml-auto shrink-0 text-fg-muted" />
+                  )}
+                </button>
+              ))}
+            </div>
+          )}
         </div>
 
         <div className="flex items-center justify-between border-t border-border-hairline px-3.5 py-1.5 font-display text-[10px] text-fg-subtle">
           <span>
             <kbd className="font-mono">↑↓</kbd> select · <kbd className="font-mono">return</kbd> open · <kbd className="font-mono">esc</kbd> close
           </span>
-          <span className="tabular-nums">{visible.length} hits</span>
+          <span className="tabular-nums">{visible.length} files</span>
         </div>
       </div>
     </div>
   );
 }
 
-/** Shorten an absolute path by stripping the workspace root prefix. */
-function trimPath(p: string, root: string | null): string {
-  if (!root) return p;
-  if (p.startsWith(root)) {
-    return p.slice(root.length).replace(/^[\\/]+/, '');
-  }
-  return p;
+/** The containing folder of a relative path ("src/a/b.ts" -> "src/a"),
+ *  or "" for a file at the workspace root. */
+function parentDir(rel: string): string {
+  const cut = rel.lastIndexOf('/');
+  return cut === -1 ? '' : rel.slice(0, cut);
 }

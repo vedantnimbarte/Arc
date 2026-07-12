@@ -26,7 +26,11 @@ import {
   ArrowDown,
   Activity,
 } from 'lucide-react';
-import { flushSettingsSave, useSettings } from '../state/settings';
+import {
+  DEFAULT_SEARCH_IGNORE_DIRS,
+  flushSettingsSave,
+  useSettings,
+} from '../state/settings';
 import { FontPicker } from './FontPicker';
 import { useFiles, type SidebarView } from '../state/files';
 import { useSidebarLayout } from '../state/sidebarLayout';
@@ -1054,6 +1058,13 @@ function SidebarSettingsPane() {
         </div>
       </Section>
 
+      <Section
+        title="File Search"
+        hint="Folders excluded from file search (Ctrl+P). Add names to skip; remove any to make it searchable."
+      >
+        <SearchIgnoreEditor />
+      </Section>
+
       <Section title="Reset">
         <button
           type="button"
@@ -1064,6 +1075,92 @@ function SidebarSettingsPane() {
           Reset to defaults
         </button>
       </Section>
+    </div>
+  );
+}
+
+function SearchIgnoreEditor() {
+  const dirs = useSettings((s) => s.searchIgnoreDirs);
+  const setDirs = useSettings((s) => s.setSearchIgnoreDirs);
+  const [draft, setDraft] = useState('');
+
+  const add = () => {
+    const name = draft.trim().replace(/[/\\]/g, '');
+    if (!name) return;
+    // Case-insensitive dedupe — folder-name matching is case-insensitive.
+    if (!dirs.some((d) => d.toLowerCase() === name.toLowerCase())) {
+      setDirs([...dirs, name]);
+    }
+    setDraft('');
+  };
+
+  const remove = (name: string) => setDirs(dirs.filter((d) => d !== name));
+
+  const isDefault =
+    dirs.length === DEFAULT_SEARCH_IGNORE_DIRS.length &&
+    dirs.every((d, i) => d === DEFAULT_SEARCH_IGNORE_DIRS[i]);
+
+  return (
+    <div className="space-y-2.5">
+      <div className="flex flex-wrap gap-1.5">
+        {dirs.length === 0 && (
+          <span className="font-display text-[11.5px] italic text-fg-subtle">
+            Nothing ignored — search will include every folder.
+          </span>
+        )}
+        {dirs.map((name) => (
+          <span
+            key={name}
+            className="inline-flex items-center gap-1 rounded-md border border-border-subtle bg-bg-base/50 py-1 pl-2 pr-1 font-mono text-[11px] text-fg-base"
+          >
+            {name}
+            <button
+              type="button"
+              onClick={() => remove(name)}
+              title={`Stop ignoring ${name}`}
+              className="grid h-4 w-4 place-items-center rounded text-fg-subtle transition-colors hover:bg-bg-hover hover:text-fg-base"
+            >
+              <X size={11} strokeWidth={2.2} />
+            </button>
+          </span>
+        ))}
+      </div>
+
+      <div className="flex items-center gap-2">
+        <input
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') {
+              e.preventDefault();
+              add();
+            }
+          }}
+          placeholder="folder name, e.g. coverage"
+          spellCheck={false}
+          autoComplete="off"
+          className="w-56 rounded-lg border border-border-subtle bg-bg-base/60 px-2.5 py-1.5 font-mono text-[12px] text-fg-base placeholder:text-fg-subtle focus:border-border-strong focus:outline-none"
+        />
+        <button
+          type="button"
+          onClick={add}
+          disabled={!draft.trim()}
+          className="inline-flex items-center gap-1.5 rounded-lg border border-border-subtle bg-bg-base/60 px-2.5 py-1.5 font-display text-[12px] font-medium tracking-tight text-fg-base transition-colors hover:bg-bg-hover disabled:cursor-not-allowed disabled:opacity-45"
+        >
+          <Plus size={13} strokeWidth={2} />
+          Add
+        </button>
+        {!isDefault && (
+          <button
+            type="button"
+            onClick={() => setDirs([...DEFAULT_SEARCH_IGNORE_DIRS])}
+            className="inline-flex items-center gap-1.5 rounded-lg px-2 py-1.5 font-display text-[11.5px] text-fg-muted transition-colors hover:text-fg-base"
+          >
+            <RotateCcw size={12} strokeWidth={2} />
+            Reset list
+          </button>
+        )}
+      </div>
     </div>
   );
 }

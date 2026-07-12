@@ -74,8 +74,9 @@ pub async fn fs_list_files(
     root: String,
     query: String,
     limit: usize,
+    ignore_dirs: Vec<String>,
 ) -> Result<Vec<FileItem>, String> {
-    tokio::task::spawn_blocking(move || arc_filesystem::list_files(&root, &query, limit))
+    tokio::task::spawn_blocking(move || arc_filesystem::list_files(&root, &query, limit, &ignore_dirs))
         .await
         .map_err(|e| format!("list task: {e}"))?
         .map_err(|e| e.to_string())
@@ -112,7 +113,12 @@ pub async fn fs_watch_stop(state: State<'_, WatchState>, watch_id: String) -> Re
 }
 
 #[tauri::command]
-pub async fn fs_search(root: String, query: String, limit: usize) -> Result<Vec<SearchHit>, String> {
+pub async fn fs_search(
+    root: String,
+    query: String,
+    limit: usize,
+    ignore_dirs: Vec<String>,
+) -> Result<Vec<SearchHit>, String> {
     // Prefer the persistent index if one's been built. Otherwise fall back
     // to the walk-based search — same shape of result either way, so the
     // frontend palette is none the wiser.
@@ -126,8 +132,12 @@ pub async fn fs_search(root: String, query: String, limit: usize) -> Result<Vec<
     .map_err(|e| e.to_string())?;
 
     if let Some(hits) = from_index {
+        // The index was built with the crate's built-in skip list, so defaults
+        // are already excluded. Post-filter honors *added* custom ignores; a
+        // removed default won't resurface here without rebuilding the index.
         return Ok(hits
             .into_iter()
+            .filter(|h| !path_has_ignored_dir(&h.path, &ignore_dirs))
             .map(|h| SearchHit {
                 path: h.path,
                 name: h.name,
@@ -141,10 +151,21 @@ pub async fn fs_search(root: String, query: String, limit: usize) -> Result<Vec<
             .collect());
     }
 
-    tokio::task::spawn_blocking(move || arc_filesystem::search_files(&root, &query, limit))
-        .await
-        .map_err(|e| format!("search task: {e}"))?
-        .map_err(|e| e.to_string())
+    tokio::task::spawn_blocking(move || {
+        arc_filesystem::search_files(&root, &query, limit, &ignore_dirs)
+    })
+    .await
+    .map_err(|e| format!("search task: {e}"))?
+    .map_err(|e| e.to_string())
+}
+
+/// True if any path segment matches an ignored directory name (case-insensitive).
+fn path_has_ignored_dir(path: &str, ignore: &[String]) -> bool {
+    if ignore.is_empty() {
+        return false;
+    }
+    path.split(['/', '\\'])
+        .any(|seg| ignore.iter().any(|ig| seg.eq_ignore_ascii_case(ig)))
 }
 
 #[tauri::command]
