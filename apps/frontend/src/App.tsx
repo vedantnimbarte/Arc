@@ -17,6 +17,7 @@ import { ResizeHandle } from './components/ResizeHandle';
 import { SearchPalette } from './components/SearchPalette';
 import { ShortcutsDialog } from './components/ShortcutsDialog';
 import { PaneTreeView } from './components/PaneTreeView';
+import { WorkspaceRail } from './components/WorkspaceRail';
 import { useWorkspace } from './state/workspace';
 import { useFiles, SIDEBAR_RAIL_WIDTH, defaultWidthForView } from './state/files';
 import {
@@ -159,6 +160,10 @@ export default function App() {
   const sidebarView = useFiles((s) => s.sidebarView);
   const toggleSidebar = useFiles((s) => s.toggleCollapsed);
   const setSidebarWidth = useFiles((s) => s.setSidebarWidth);
+  const openSettings = () =>
+    void settingsWindowOpen().catch((err) =>
+      console.error('[settings] open window failed:', err),
+    );
 
   // Load persisted tabs + active tab from SQLite (or legacy localStorage)
   // before the renderer settles. hydrate() is idempotent.
@@ -352,14 +357,12 @@ export default function App() {
     <div className="relative flex h-full w-full flex-col overflow-hidden bg-bg-base text-fg-base">
       <div className="desktop-wash" aria-hidden />
 
-      <div className="relative z-10 flex h-full w-full flex-col">
-        <TabBar
-          onOpenSettings={() =>
-            void settingsWindowOpen().catch((err) =>
-              console.error('[settings] open window failed:', err),
-            )
-          }
-        />
+      <div className="relative z-10 flex h-full w-full">
+        {/* Discord/Slack-style workspace rail — leftmost full-height column. */}
+        <WorkspaceRail onOpenSettings={openSettings} />
+
+        <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+        <TabBar />
 
         {/* Layout: file-tree | main | SSH sidebar */}
         <div className="relative flex min-h-0 flex-1 px-3 pb-3 pt-1">
@@ -405,7 +408,11 @@ export default function App() {
             <main className="relative min-w-0 flex-1 overflow-hidden p-1.5">
               {/* Split-pane tree — each leaf hosts a tab and can be split
                   right/down into a new pane, with draggable dividers. */}
-              <PaneTreeView hostsRef={hostsRef} stageRef={stageRef} />
+              <PaneTreeView
+                hostsRef={hostsRef}
+                stageRef={stageRef}
+                onOpenCommandPalette={() => setPaletteOpen(true)}
+              />
             </main>
           </div>
 
@@ -413,6 +420,7 @@ export default function App() {
         </div>
 
         <StatusBar onOpenShortcuts={() => setShortcutsOpen(true)} />
+        </div>
       </div>
 
       <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} />
