@@ -16,7 +16,7 @@ import { Sidebar, SidebarMiniRail } from './components/Sidebar';
 import { ResizeHandle } from './components/ResizeHandle';
 import { SearchPalette } from './components/SearchPalette';
 import { ShortcutsDialog } from './components/ShortcutsDialog';
-import { GridView } from './components/GridView';
+import { PaneTreeView } from './components/PaneTreeView';
 import { useWorkspace } from './state/workspace';
 import { useFiles, SIDEBAR_RAIL_WIDTH, defaultWidthForView } from './state/files';
 import {
@@ -402,10 +402,10 @@ export default function App() {
               />
             )}
 
-            <main className="relative min-w-0 flex-1 overflow-hidden">
-              {/* Auto-balanced grid — every open tab is a visible cell that
-                  reparents its host div in. Replaces the tabbed/split view. */}
-              <GridView hostsRef={hostsRef} stageRef={stageRef} />
+            <main className="relative min-w-0 flex-1 overflow-hidden p-1.5">
+              {/* Split-pane tree — each leaf hosts a tab and can be split
+                  right/down into a new pane, with draggable dividers. */}
+              <PaneTreeView hostsRef={hostsRef} stageRef={stageRef} />
             </main>
           </div>
 

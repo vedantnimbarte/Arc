@@ -1,18 +1,9 @@
 import { Group, Panel, Separator, type Layout } from 'react-resizable-panels';
-import { useWorkspace, type PaneNode, type PaneSplit } from '../state/workspace';
+import { Terminal as TerminalIcon } from 'lucide-react';
+import { findLeaf, useWorkspace, type PaneNode, type PaneSplit } from '../state/workspace';
 import { PaneLeafView } from './PaneLeafView';
-import { PaneTabStrip } from './PaneTabStrip';
+import { PaneHeader } from './PaneHeader';
 import { cn } from '../lib/cn';
-
-/**
- * In a single-leaf workspace the tab strip lives in the application
- * toolbar; rendering a second per-pane strip would duplicate it. When the
- * workspace is split, every leaf carries its own strip again so users can
- * still see what's in panes that don't hold focus.
- */
-function shouldShowLeafHeader(layout: PaneNode): boolean {
-  return layout.kind !== 'leaf';
-}
 
 interface Props {
   /** Shared host-div registry held by App.tsx so this tree can hand each
@@ -28,14 +19,44 @@ interface Props {
  */
 export function PaneTreeView({ hostsRef, stageRef }: Props) {
   const layout = useWorkspace((s) => s.layout);
-  const showHeader = shouldShowLeafHeader(layout);
+  const newTerminal = useWorkspace((s) => s.newTerminal);
+  const maximizedPaneId = useWorkspace((s) => s.maximizedPaneId);
+
+  // Closing/moving the last tab can leave the active workspace with an empty
+  // leaf — offer a way back instead of a blank pane.
+  if (layout.kind === 'leaf' && layout.tabIds.length === 0) {
+    return (
+      <div className="flex h-full w-full flex-col items-center justify-center gap-3 text-center">
+        <TerminalIcon size={26} strokeWidth={1.5} className="text-fg-subtle" />
+        <div className="font-display text-[13px] text-fg-muted">This workspace is empty</div>
+        <button
+          onClick={() => void newTerminal()}
+          className="rounded-md bg-accent/90 px-3 py-1.5 font-display text-[11.5px] font-medium text-bg-base transition-colors hover:bg-accent"
+        >
+          New terminal
+        </button>
+      </div>
+    );
+  }
+
+  // Maximize: when a leaf is zoomed (and still exists in this workspace),
+  // render only it, full-size — grid-style.
+  const maxLeaf = maximizedPaneId ? findLeaf(layout, maximizedPaneId) : null;
+  if (maxLeaf) {
+    return (
+      <PaneLeafView
+        paneId={maxLeaf.id}
+        hostsRef={hostsRef}
+        stageRef={stageRef}
+        header={<PaneHeader paneId={maxLeaf.id} />}
+      />
+    );
+  }
+
+  // Every leaf shows its own strip — it carries the tab list plus the
+  // split/close controls, and there's no tab strip in the app toolbar.
   return (
-    <PaneNodeView
-      node={layout}
-      hostsRef={hostsRef}
-      stageRef={stageRef}
-      showHeader={showHeader}
-    />
+    <PaneNodeView node={layout} hostsRef={hostsRef} stageRef={stageRef} showHeader />
   );
 }
 
@@ -56,7 +77,7 @@ function PaneNodeView({
         paneId={node.id}
         hostsRef={hostsRef}
         stageRef={stageRef}
-        header={showHeader ? <PaneTabStrip paneId={node.id} /> : null}
+        header={showHeader ? <PaneHeader paneId={node.id} /> : null}
       />
     );
   }
@@ -145,12 +166,12 @@ function SplitChild({
       {!isLast && (
         <Separator
           className={cn(
-            'group relative shrink-0 bg-transparent transition-colors duration-150',
-            // Thin tinted line + a wider invisible grab band so 4px clicks land
-            // without dominating the look.
+            'group relative shrink-0 rounded-full bg-transparent transition-colors duration-150',
+            // A small gap between panes; a rounded accent pill appears on hover
+            // / drag so the resize affordance reads without a heavy divider.
             direction === 'horizontal'
-              ? 'w-px hover:bg-accent/35 data-[dragging=true]:bg-accent/50'
-              : 'h-px hover:bg-accent/35 data-[dragging=true]:bg-accent/50',
+              ? 'mx-1 w-1 hover:bg-accent/30 data-[dragging=true]:bg-accent/50'
+              : 'my-1 h-1 hover:bg-accent/30 data-[dragging=true]:bg-accent/50',
           )}
         >
           <span
@@ -158,8 +179,8 @@ function SplitChild({
             className={cn(
               'absolute',
               direction === 'horizontal'
-                ? '-left-[3px] right-[-3px] top-0 bottom-0'
-                : '-top-[3px] bottom-[-3px] left-0 right-0',
+                ? '-left-[4px] right-[-4px] top-0 bottom-0'
+                : '-top-[4px] bottom-[-4px] left-0 right-0',
             )}
           />
         </Separator>
