@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { dwindleSide } from '../lib/paneMetrics';
 import {
   fsDefaultRoot,
   isTauri,
@@ -135,15 +136,27 @@ export interface SerializedLayout {
 interface WorkspaceState {
   tabs: Tab[];
   activeTabId: string | null;
-  /** Root of the pane-layout tree. Always non-null after hydrate. */
+  /** Root of the pane-layout tree for the ACTIVE workspace. Always non-null
+   *  after hydrate. Each workspace owns its own split layout; the inactive
+   *  ones are parked in `layoutStash`. */
   layout: PaneNode;
   /** Which leaf currently has keyboard focus. Mirrors the leaf's
    *  `activeTabId` into `activeTabId` above for legacy consumers. */
   focusedPaneId: string;
+  /** Parked layouts for the non-active workspaces, keyed by workspace id.
+   *  In-memory only (not persisted) — on reload each non-active workspace
+   *  reseeds a single-leaf layout from its tabs on first switch. */
+  layoutStash: Record<string, { layout: PaneNode; focusedPaneId: string }>;
+  /** When set, this leaf is zoomed to fill the whole area (grid-style
+   *  maximize). Transient UI state — not persisted; cleared on switch. */
+  maximizedPaneId: string | null;
   /** Per-tab dirty flag — set by the Editor when its buffer diverges
    *  from the last-saved content on disk. Kept off the Tab itself so
    *  it doesn't get accidentally persisted. */
   tabDirty: Record<string, boolean>;
+  /** Per-tab "a command is running" flag, driven by OSC 133 C/D markers.
+   *  Transient (not persisted) — powers the pane header's status dot. */
+  tabRunning: Record<string, boolean>;
   /** Chrome-style tab groups. Metadata only — membership is on the tabs. */
   tabGroups: TabGroup[];
   /** All workspaces (named tab containers). Always ≥1 after hydrate. */
@@ -201,6 +214,7 @@ interface WorkspaceState {
   /** Move a tab into another workspace. */
   moveTabToWorkspace: (tabId: string, workspaceId: string) => void;
   setTabDirty: (id: string, dirty: boolean) => void;
+  setTabRunning: (id: string, running: boolean) => void;
   /** Find an existing editor tab for `path`, or create one and focus it.
    *  When `forceNew` is true a new tab is always created (used by the
    *  Duplicate-tab action so the user gets a second view of the file).
@@ -270,6 +284,8 @@ interface WorkspaceState {
   /** Persist the result of a resize-handle drag. Receives the split node's
    *  id and new sizes in child order. */
   setSplitSizes: (splitId: string, sizes: number[]) => void;
+  /** Toggle grid-style maximize for a leaf: fills the area, hiding siblings. */
+  toggleMaximizePane: (paneId: string) => void;
   /** One-time load from SQLite at app startup. Idempotent. */
   hydrate: () => Promise<void>;
 }
@@ -319,6 +335,34 @@ function singleLeafLayout(tabIds: string[], activeTabId: string | null): PaneLea
     tabIds: [...tabIds],
     activeTabId,
   };
+}
+
+/** Total number of tab ids referenced across all leaves. */
+function countLayoutTabs(node: PaneNode): number {
+  return allLeaves(node).reduce((n, l) => n + l.tabIds.length, 0);
+}
+
+/** Restore a workspace's layout from a stashed entry, or seed a fresh
+ *  single-leaf layout from its tabs when there's no valid stash (e.g. after a
+ *  reload, where only the active workspace's layout is persisted). */
+function restoreWorkspaceLayout(
+  stashed: { layout: PaneNode; focusedPaneId: string } | undefined,
+  wsTabs: Tab[],
+): { layout: PaneNode; focusedPaneId: string; activeTabId: string | null } {
+  if (
+    stashed &&
+    layoutCoversTabs(stashed.layout, wsTabs) &&
+    countLayoutTabs(stashed.layout) === wsTabs.length
+  ) {
+    const focused = findLeaf(stashed.layout, stashed.focusedPaneId) ?? allLeaves(stashed.layout)[0]!;
+    return {
+      layout: stashed.layout,
+      focusedPaneId: focused.id,
+      activeTabId: focused.activeTabId ?? wsTabs[0]?.id ?? null,
+    };
+  }
+  const seed = singleLeafLayout(wsTabs.map((t) => t.id), wsTabs[0]?.id ?? null);
+  return { layout: seed, focusedPaneId: seed.id, activeTabId: wsTabs[0]?.id ?? null };
 }
 
 /** Depth-first search for a leaf with the given id. */
@@ -584,7 +628,10 @@ export const useWorkspace = create<WorkspaceState>()((set, get) => ({
   ...seedState(),
   tabs: [],
   activeTabId: null,
+  layoutStash: {},
+  maximizedPaneId: null,
   tabDirty: {},
+  tabRunning: {},
   tabGroups: [],
   workspaces: [DEFAULT_WORKSPACE],
   activeWorkspaceId: DEFAULT_WORKSPACE_ID,
@@ -609,10 +656,24 @@ export const useWorkspace = create<WorkspaceState>()((set, get) => ({
           focusedPaneId: reseeded.id,
         };
       }
+      // Tiling model: every pane holds exactly one terminal. An empty leaf
+      // (fresh workspace) takes the tab directly; an occupied one splits along
+      // its longer side (dwindle) so the new tab opens as a sibling pane.
+      if (leaf.tabIds.length === 0) {
+        return {
+          tabs: [...s.tabs, tab],
+          activeTabId: tab.id,
+          layout: appendTabToLeaf(s.layout, leaf.id, tab.id),
+        };
+      }
+      const side = dwindleSide(leaf.id);
+      const newLayout = splitLeafForTab(s.layout, leaf.id, side, tab.id);
+      const newLeaf = findLeafContaining(newLayout, tab.id);
       return {
         tabs: [...s.tabs, tab],
         activeTabId: tab.id,
-        layout: appendTabToLeaf(s.layout, leaf.id, tab.id),
+        layout: newLayout,
+        focusedPaneId: newLeaf?.id ?? s.focusedPaneId,
       };
     }),
   closeTab: (id) =>
@@ -627,12 +688,18 @@ export const useWorkspace = create<WorkspaceState>()((set, get) => ({
       const pruned = pruneLayout(s.layout, new Set([id]));
       const { [id]: _omit, ...nextDirty } = s.tabDirty;
       if (!pruned) {
-        // Shouldn't happen given the `tabs.length <= 1` guard above, but
-        // belt-and-suspenders: if the prune nuked the tree, re-seed.
-        const fresh = singleLeafLayout(remaining.map((t) => t.id), remaining[0]?.id ?? null);
+        // The active workspace's tree emptied (closed its last tab while other
+        // workspaces still hold tabs). Reseed from the active workspace's
+        // remaining tabs only — an empty result leaves an empty leaf, which
+        // PaneTreeView renders as an empty-workspace prompt.
+        const activeRemaining = remaining.filter((t) => t.workspaceId === s.activeWorkspaceId);
+        const fresh = singleLeafLayout(
+          activeRemaining.map((t) => t.id),
+          activeRemaining[0]?.id ?? null,
+        );
         return {
           tabs: remaining,
-          activeTabId: remaining[0]?.id ?? null,
+          activeTabId: activeRemaining[0]?.id ?? null,
           layout: fresh,
           focusedPaneId: fresh.id,
           tabDirty: nextDirty,
@@ -814,11 +881,20 @@ export const useWorkspace = create<WorkspaceState>()((set, get) => ({
     const id = newWorkspaceId();
     const s = get();
     const finalName = name?.trim() || `Workspace ${s.workspaces.length + 1}`;
-    // Switch first so the terminal we open below lands in the new workspace
-    // (addTab stamps the active workspace) and the grid shows it immediately.
+    // Park the current workspace's layout, then switch to a fresh empty leaf.
+    // The newTerminal() below appends into that leaf (addTab targets the
+    // focused pane of the now-active workspace).
+    const empty = singleLeafLayout([], null);
     set({
       workspaces: [...s.workspaces, { id, name: finalName }],
       activeWorkspaceId: id,
+      layoutStash: {
+        ...s.layoutStash,
+        [s.activeWorkspaceId]: { layout: s.layout, focusedPaneId: s.focusedPaneId },
+      },
+      layout: empty,
+      focusedPaneId: empty.id,
+      activeTabId: null,
     });
     void get().newTerminal();
     return id;
@@ -837,36 +913,67 @@ export const useWorkspace = create<WorkspaceState>()((set, get) => ({
     const removedTabIds = new Set(
       s.tabs.filter((t) => t.workspaceId === id).map((t) => t.id),
     );
-    const remaining = s.tabs.filter((t) => !removedTabIds.has(t.id));
-    const workspaces = s.workspaces.filter((w) => w.id !== id);
-    const activeWorkspaceId = s.activeWorkspaceId === id ? workspaces[0]!.id : s.activeWorkspaceId;
     // Removing the tabs from the list unmounts their Terminal components, whose
     // cleanup kills the PTY — no explicit kill needed here.
-    const pruned = pruneLayout(s.layout, removedTabIds);
-    const layout = pruned ?? singleLeafLayout(remaining.map((t) => t.id), remaining[0]?.id ?? null);
-    const focusedPaneId = findLeaf(layout, s.focusedPaneId) ? s.focusedPaneId : allLeaves(layout)[0]!.id;
+    const remaining = s.tabs.filter((t) => !removedTabIds.has(t.id));
+    const workspaces = s.workspaces.filter((w) => w.id !== id);
     const nextDirty = { ...s.tabDirty };
     for (const tid of removedTabIds) delete nextDirty[tid];
-    const firstInActive = remaining.find((t) => t.workspaceId === activeWorkspaceId) ?? null;
+    const stash = { ...s.layoutStash };
+    delete stash[id];
+
+    if (s.activeWorkspaceId !== id) {
+      // Deleting a background workspace: the active layout is untouched (none
+      // of its tabs live there).
+      set({
+        tabs: remaining,
+        workspaces,
+        layoutStash: stash,
+        tabDirty: nextDirty,
+        tabGroups: pruneEmptyGroups(s.tabGroups, remaining),
+      });
+      return;
+    }
+
+    // Deleting the active workspace: activate another and restore its layout.
+    const activeWorkspaceId = workspaces[0]!.id;
+    const targetTabs = remaining.filter((t) => t.workspaceId === activeWorkspaceId);
+    const restored = restoreWorkspaceLayout(stash[activeWorkspaceId], targetTabs);
+    delete stash[activeWorkspaceId];
     set({
       tabs: remaining,
       workspaces,
       activeWorkspaceId,
-      layout,
-      focusedPaneId,
-      activeTabId: firstInActive?.id ?? remaining[0]?.id ?? null,
+      layout: restored.layout,
+      focusedPaneId: restored.focusedPaneId,
+      activeTabId: restored.activeTabId,
+      layoutStash: stash,
       tabDirty: nextDirty,
       tabGroups: pruneEmptyGroups(s.tabGroups, remaining),
     });
     // Never leave the app with zero tabs — seed one in the now-active workspace.
-    if (remaining.length === 0) void get().newTerminal();
+    if (targetTabs.length === 0) void get().newTerminal();
   },
 
   switchWorkspace: (id) =>
     set((s) => {
       if (id === s.activeWorkspaceId || !s.workspaces.some((w) => w.id === id)) return s;
-      const first = s.tabs.find((t) => t.workspaceId === id) ?? null;
-      return { activeWorkspaceId: id, activeTabId: first?.id ?? s.activeTabId };
+      // Park the current layout; restore the target's (or reseed from its tabs).
+      const stash = {
+        ...s.layoutStash,
+        [s.activeWorkspaceId]: { layout: s.layout, focusedPaneId: s.focusedPaneId },
+      };
+      const targetTabs = s.tabs.filter((t) => t.workspaceId === id);
+      const restored = restoreWorkspaceLayout(stash[id], targetTabs);
+      delete stash[id];
+      return {
+        activeWorkspaceId: id,
+        layout: restored.layout,
+        focusedPaneId: restored.focusedPaneId,
+        activeTabId: restored.activeTabId ?? s.activeTabId,
+        layoutStash: stash,
+        maximizedPaneId: null,
+      };
     }),
 
   moveTabToWorkspace: (tabId, workspaceId) =>
@@ -876,13 +983,24 @@ export const useWorkspace = create<WorkspaceState>()((set, get) => ({
         return s;
       }
       const tabs = s.tabs.map((t) => (t.id === tabId ? { ...t, workspaceId } : t));
-      // If the moved tab was the active one, hand focus to another tab that's
-      // still in the active workspace (or null if none remain there).
+      // The tab leaves the active workspace's layout. Prune it out; if that
+      // empties the tree, reseed from whatever's left in the active workspace.
+      const activeTabs = tabs.filter((t) => t.workspaceId === s.activeWorkspaceId);
+      const pruned =
+        pruneLayout(s.layout, new Set([tabId])) ??
+        singleLeafLayout(activeTabs.map((t) => t.id), activeTabs[0]?.id ?? null);
+      const focusedPaneId = findLeaf(pruned, s.focusedPaneId)
+        ? s.focusedPaneId
+        : allLeaves(pruned)[0]!.id;
+      // Drop the target's stashed layout so it reseeds (now including the moved
+      // tab) the next time that workspace becomes active.
+      const stash = { ...s.layoutStash };
+      delete stash[workspaceId];
       let activeTabId = s.activeTabId;
-      if (s.activeTabId === tabId && workspaceId !== s.activeWorkspaceId) {
-        activeTabId = tabs.find((t) => t.workspaceId === s.activeWorkspaceId)?.id ?? null;
+      if (s.activeTabId === tabId) {
+        activeTabId = findLeaf(pruned, focusedPaneId)!.activeTabId ?? activeTabs[0]?.id ?? null;
       }
-      return { tabs, activeTabId };
+      return { tabs, layout: pruned, focusedPaneId, layoutStash: stash, activeTabId };
     }),
   setTabDirty: (id, dirty) =>
     set((s) => {
@@ -891,6 +1009,14 @@ export const useWorkspace = create<WorkspaceState>()((set, get) => ({
       if (dirty) next[id] = true;
       else delete next[id];
       return { tabDirty: next };
+    }),
+  setTabRunning: (id, running) =>
+    set((s) => {
+      if (!!s.tabRunning[id] === running) return s; // no-op
+      const next = { ...s.tabRunning };
+      if (running) next[id] = true;
+      else delete next[id];
+      return { tabRunning: next };
     }),
   openFile: (path, title, opts) => {
     // Track for the new-tab splash's "recent files" column (Tier 1.2).
@@ -1074,6 +1200,7 @@ export const useWorkspace = create<WorkspaceState>()((set, get) => ({
       const newTab: Tab = {
         id: newTabId,
         title: source.title,
+        workspaceId: source.workspaceId,
         kind: 'editor',
         filePath: source.filePath,
       };
@@ -1083,6 +1210,7 @@ export const useWorkspace = create<WorkspaceState>()((set, get) => ({
       const newTab: Tab = {
         id: newTabId,
         title: source.title,
+        workspaceId: source.workspaceId,
         kind: 'preview',
         previewUrl: source.previewUrl,
       };
@@ -1095,6 +1223,7 @@ export const useWorkspace = create<WorkspaceState>()((set, get) => ({
       const newTab: Tab = {
         id: newTabId,
         title: source.title,
+        workspaceId: source.workspaceId,
         kind: 'apiclient',
       };
       set((s) => ({ tabs: [...s.tabs, newTab] }));
@@ -1103,6 +1232,7 @@ export const useWorkspace = create<WorkspaceState>()((set, get) => ({
       const newTab: Tab = {
         id: newTabId,
         title: source.title,
+        workspaceId: source.workspaceId,
         kind: 'terminal',
         shellOverride: source.shellOverride,
       };
@@ -1187,6 +1317,8 @@ export const useWorkspace = create<WorkspaceState>()((set, get) => ({
     set((s) => ({
       layout: updateSplitSizes(s.layout, splitId, sizes),
     })),
+  toggleMaximizePane: (paneId) =>
+    set((s) => ({ maximizedPaneId: s.maximizedPaneId === paneId ? null : paneId })),
   hydrate: async () => {
     if (get().hydrated) return;
 
@@ -1287,38 +1419,23 @@ export const useWorkspace = create<WorkspaceState>()((set, get) => ({
         activeTabId = DEFAULT_TAB.id;
       }
 
-      // Layout: prefer the persisted JSON, else synthesize a single-leaf
-      // layout containing every loaded tab in order.
-      let layout: PaneNode;
-      let focusedPaneId: string;
-      let tabGroups: TabGroup[] = [];
       const parsed = parsePersistedLayout(loaded.session.pane_layout);
-      if (parsed && layoutCoversTabs(parsed.root, tabs)) {
-        layout = parsed.root;
-        focusedPaneId = parsed.focusedPaneId;
-        if (!findLeaf(layout, focusedPaneId)) {
-          focusedPaneId = allLeaves(layout)[0]!.id;
-        }
-        // Re-attach group membership: only honour assignments that point at a
-        // group we actually loaded and a tab that still exists, then drop any
-        // group left with no members.
+
+      // Re-attach group membership: only honour assignments that point at a
+      // group we actually loaded and a tab that still exists, then drop any
+      // group left with no members. Independent of layout validity.
+      let tabGroups: TabGroup[] = [];
+      if (parsed) {
         const groupIds = new Set(parsed.groups.map((g) => g.id));
         tabs = tabs.map((t) => {
           const gid = parsed.assignments[t.id];
           return gid && groupIds.has(gid) ? { ...t, groupId: gid } : t;
         });
         tabGroups = pruneEmptyGroups(parsed.groups, tabs);
-      } else {
-        const leaf = singleLeafLayout(
-          tabs.map((t) => t.id),
-          activeTabId,
-        );
-        layout = leaf;
-        focusedPaneId = leaf.id;
       }
 
       // Workspaces: restore the persisted set (or seed a default), then pin
-      // every tab to a valid workspace. Independent of layout validity.
+      // every tab to a valid workspace.
       const workspaces =
         parsed && parsed.workspaces.length > 0 ? parsed.workspaces : [DEFAULT_WORKSPACE];
       const workspaceIds = new Set(workspaces.map((w) => w.id));
@@ -1331,8 +1448,8 @@ export const useWorkspace = create<WorkspaceState>()((set, get) => ({
         const wid = tabWorkspaces[t.id];
         return { ...t, workspaceId: wid && workspaceIds.has(wid) ? wid : activeWorkspaceId };
       });
-      // A restored active workspace with no tabs would show an empty grid on
-      // launch — fall back to whichever workspace actually has tabs.
+      // A restored active workspace with no tabs would show empty on launch —
+      // fall back to whichever workspace actually has tabs.
       if (!tabs.some((t) => t.workspaceId === activeWorkspaceId)) {
         const populated = workspaces.find((w) => tabs.some((t) => t.workspaceId === w.id));
         if (populated) activeWorkspaceId = populated.id;
@@ -1340,6 +1457,31 @@ export const useWorkspace = create<WorkspaceState>()((set, get) => ({
       // Keep activeTabId inside the active workspace.
       if (!tabs.some((t) => t.id === activeTabId && t.workspaceId === activeWorkspaceId)) {
         activeTabId = tabs.find((t) => t.workspaceId === activeWorkspaceId)?.id ?? activeTabId;
+      }
+
+      // Layout for the ACTIVE workspace only. Reuse the persisted tree when it
+      // covers exactly the active workspace's tabs (the common single-workspace
+      // case); otherwise seed a single-leaf layout. Non-active workspaces reseed
+      // lazily on first switch — their layouts aren't persisted.
+      const activeTabs = tabs.filter((t) => t.workspaceId === activeWorkspaceId);
+      let layout: PaneNode;
+      let focusedPaneId: string;
+      if (
+        parsed &&
+        layoutCoversTabs(parsed.root, activeTabs) &&
+        countLayoutTabs(parsed.root) === activeTabs.length
+      ) {
+        layout = parsed.root;
+        focusedPaneId = findLeaf(layout, parsed.focusedPaneId)
+          ? parsed.focusedPaneId
+          : allLeaves(layout)[0]!.id;
+      } else {
+        const leaf = singleLeafLayout(
+          activeTabs.map((t) => t.id),
+          activeTabId,
+        );
+        layout = leaf;
+        focusedPaneId = leaf.id;
       }
 
       // Migration's done — never read the LS key again.
