@@ -102,9 +102,17 @@ const gitChangeGutter = gutter({
 
 const gitGutterTheme = EditorView.baseTheme({
   '.cm-git-gutter': { width: '3px', padding: '0' },
-  '.cm-git-change': { width: '3px', height: '100%', borderRadius: '1px' },
-  '.cm-git-added': { backgroundColor: MOCHA.green },
-  '.cm-git-modified': { backgroundColor: MOCHA.yellow },
+  // A soft same-hue bloom (matching the app's shadow-glow-sm idiom) lifts the
+  // bar off the graphite without shouting — kept faint per the house restraint.
+  '.cm-git-change': { width: '3px', height: '100%', borderRadius: '2px' },
+  '.cm-git-added': {
+    backgroundColor: MOCHA.green,
+    boxShadow: '0 0 6px -1px rgba(166, 227, 161, 0.5)',
+  },
+  '.cm-git-modified': {
+    backgroundColor: MOCHA.yellow,
+    boxShadow: '0 0 6px -1px rgba(249, 226, 175, 0.5)',
+  },
 });
 
 /** The full gutter extension: state field + gutter + theme. */

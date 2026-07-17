@@ -1439,7 +1439,7 @@ function SecretsPane() {
   };
 
   const inputCls =
-    'flex-1 rounded-squircle border border-border-subtle bg-bg-subtle px-3 py-2 font-mono text-[12px] text-fg-base placeholder:text-fg-subtle focus:outline-none';
+    'flex-1 rounded-squircle border border-border-subtle bg-bg-subtle px-3 py-2 font-mono text-[12px] text-fg-base placeholder:text-fg-subtle transition-colors focus:border-border-strong focus:outline-none';
 
   return (
     <div className="space-y-7">

@@ -507,14 +507,14 @@ function BroadcastBar() {
   };
 
   return (
-    <div className="border-t border-border-hairline bg-bg-chrome/30 px-3 py-2.5">
+    <div className="animate-view-in border-t border-border-hairline bg-bg-chrome/30 px-3 py-2.5">
       <div className="mb-1.5 flex items-center gap-1.5">
-        <Radio size={11} className="text-accent" />
+        <Radio size={11} className="animate-pulse-soft text-accent" />
         <span className="font-mono text-[9.5px] uppercase tracking-widest2 text-fg-muted">
           Broadcast → {liveCount} session{liveCount !== 1 ? 's' : ''}
         </span>
       </div>
-      <div className="flex items-center gap-2 rounded-squircle border border-border-subtle bg-bg-subtle px-2.5 py-1.5">
+      <div className="flex items-center gap-2 rounded-squircle border border-border-subtle bg-bg-subtle px-2.5 py-1.5 transition-colors focus-within:border-border-strong">
         <input
           value={cmd}
           onChange={(e) => setCmd(e.target.value)}
