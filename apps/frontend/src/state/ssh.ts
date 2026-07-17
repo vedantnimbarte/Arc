@@ -13,6 +13,7 @@ import {
   sshKeyImport,
   sshKeyList,
   sshSessionLogs,
+  sshWrite,
   type SshHost,
   type SshHostInput,
   type SshId,
@@ -118,6 +119,10 @@ interface SshStateShape extends SshUiState {
     onData: (chunk: Uint8Array) => void,
   ) => Promise<SshId>;
   disconnect: (sessionId: SshId) => Promise<void>;
+  /** Write `data` to every currently-connected session (fan-out command
+   *  broadcast). Per-session failures are swallowed so one dead channel
+   *  doesn't block the rest. Returns the number of sessions written to. */
+  broadcast: (data: string) => Promise<number>;
   loadHostLogs: (hostId: string) => Promise<SshSessionLogRow[]>;
 
   // ─── Lifecycle ───────────────────────────────────────────────────────
@@ -307,6 +312,13 @@ export const useSsh = create<SshStateShape>((set, get) => ({
         liveByHost: removeKey(s.liveByHost, cur.hostId, sessionId),
       };
     });
+  },
+
+  broadcast: async (data) => {
+    if (!isTauri) return 0;
+    const live = Object.values(get().sessions).filter((s) => s.status === 'connected');
+    await Promise.all(live.map((s) => sshWrite(s.id, data).catch(() => {})));
+    return live.length;
   },
 
   loadHostLogs: async (hostId) => {

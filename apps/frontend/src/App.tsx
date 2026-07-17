@@ -28,6 +28,7 @@ import {
   type ActionId,
 } from './state/shortcuts';
 import { useCommands, type CommandAction, type CommandGroup } from './state/commands';
+import { useTaskCommands } from './state/tasks';
 import { WorktreePanel } from './components/git/WorktreePanel';
 import { CherryPickDialog } from './components/git/CherryPickDialog';
 import { WingmanPromptDialog } from './components/WingmanPromptDialog';
@@ -56,6 +57,9 @@ export default function App() {
   const newTerminal = useWorkspace((s) => s.newTerminal);
   const hydrate = useWorkspace((s) => s.hydrate);
   const activeTab = tabs.find((t) => t.id === activeTabId);
+
+  // Register the project's package.json scripts as ⌘K "Run: <script>" commands.
+  useTaskCommands();
 
   // Host-div registry — one stable DOM node per tab id. The tab's content
   // (Terminal / Editor) is portaled into its host once and stays there for

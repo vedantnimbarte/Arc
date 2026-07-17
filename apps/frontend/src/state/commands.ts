@@ -11,6 +11,7 @@ import type { LucideIcon } from 'lucide-react';
 export type CommandGroup =
   | 'Workspace'
   | 'Terminal'
+  | 'Tasks'
   | 'Editor'
   | 'Git'
   | 'SSH'

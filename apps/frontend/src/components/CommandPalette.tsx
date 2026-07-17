@@ -207,6 +207,7 @@ export function CommandPalette({ open, onClose }: Props) {
 const GROUP_ORDER: CommandGroup[] = [
   'Workspace',
   'Terminal',
+  'Tasks',
   'Editor',
   'View',
   'Git',
