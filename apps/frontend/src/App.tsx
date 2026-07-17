@@ -8,7 +8,6 @@ import { SshSessionLogPanel } from './components/ssh/SshSessionLogDrawer';
 import { useSsh } from './state/ssh';
 import { TabBar } from './components/TabBar';
 import { WindowResizeHandles } from './components/WindowResizeHandles';
-import { StatusBar } from './components/StatusBar';
 import { CommandPalette } from './components/CommandPalette';
 import { CommandHistoryPalette } from './components/CommandHistoryPalette';
 import { CommandBlocks } from './components/CommandBlocks';
@@ -422,9 +421,13 @@ export default function App() {
 
           {sshLogPanelOpen && <SshSessionLogPanel onClose={() => setSshLogPanelOpen(false)} />}
         </div>
-
-        <StatusBar onOpenShortcuts={() => setShortcutsOpen(true)} />
         </div>
+      </div>
+
+      {/* Floating version badge — bottom-right, non-interactive. Replaces the
+          old status bar's version pill now that the bottom chrome is gone. */}
+      <div className="pointer-events-none fixed bottom-2 right-3.5 z-20 select-none font-mono text-[10px] tracking-tight tabular-nums text-fg-subtle/55">
+        arc 0.0.1
       </div>
 
       <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} />
