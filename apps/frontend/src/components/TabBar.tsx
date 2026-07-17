@@ -11,10 +11,13 @@ import {
   GitBranch,
   Monitor,
   Send,
+  Keyboard,
 } from 'lucide-react';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { useWorkspace } from '../state/workspace';
 import { useFiles } from '../state/files';
+import { runCommand } from '../state/commands';
+import { formatBinding, getBinding } from '../state/shortcuts';
 import { cn } from '../lib/cn';
 import {
   fsPickFolder,
@@ -201,6 +204,18 @@ export function TabBar() {
         )}
       </button>
 
+      {/* AI CLI launcher + keyboard shortcuts — relocated here from the old
+          bottom status bar, sitting between the sidebar toggle and the +. */}
+      <AiCliMenuButton clis={aiClis} onLaunch={(cli) => void launchAiCli(cli)} />
+      <button
+        onClick={() => void runCommand('shortcut.open-shortcuts')}
+        className="group flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-fg-muted transition-all duration-200 ease-apple hover:bg-white/[0.08] hover:text-fg-base active:bg-white/[0.12]"
+        aria-label="Keyboard shortcuts"
+        title={`Keyboard shortcuts (${formatBinding(getBinding('open-shortcuts'))})`}
+      >
+        <Keyboard size={14} strokeWidth={1.9} />
+      </button>
+
       {/* The workspace renders every tab as a grid cell (no tab strip); the +
           adds a new cell. The flex-1 keeps it left-aligned and preserves the
           window-drag region. Workspace switching lives in the left rail. */}
@@ -334,6 +349,129 @@ export function TabBar() {
         openFile(path);
       }}
     />
+    </>
+  );
+}
+
+/**
+ * Toolbar AI CLI launcher — an icon that opens a downward dropdown of the
+ * detected coding CLIs (Claude Code / Codex / OpenCode / …). Relocated from
+ * the old bottom status bar. Portaled to body so the toolbar's backdrop-filter
+ * doesn't trap the menu.
+ */
+function AiCliMenuButton({
+  clis,
+  onLaunch,
+}: {
+  clis: AiCliInfo[];
+  onLaunch: (cli: AiCliInfo) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [pos, setPos] = useState<{ top: number; left: number } | null>(null);
+  const btnRef = useRef<HTMLButtonElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+
+  useLayoutEffect(() => {
+    if (!open) {
+      setPos(null);
+      return;
+    }
+    const update = () => {
+      const r = btnRef.current?.getBoundingClientRect();
+      if (!r) return;
+      setPos({ top: r.bottom + 4, left: r.left });
+    };
+    update();
+    window.addEventListener('resize', update);
+    window.addEventListener('scroll', update, true);
+    return () => {
+      window.removeEventListener('resize', update);
+      window.removeEventListener('scroll', update, true);
+    };
+  }, [open]);
+
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e: MouseEvent) => {
+      const t = e.target as Node | null;
+      if (!t) return;
+      if (menuRef.current?.contains(t) || btnRef.current?.contains(t)) return;
+      setOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setOpen(false);
+    };
+    window.addEventListener('mousedown', onDown);
+    window.addEventListener('keydown', onKey);
+    return () => {
+      window.removeEventListener('mousedown', onDown);
+      window.removeEventListener('keydown', onKey);
+    };
+  }, [open]);
+
+  return (
+    <>
+      <button
+        ref={btnRef}
+        onClick={() => setOpen((o) => !o)}
+        aria-label="Launch AI CLI"
+        aria-expanded={open}
+        aria-haspopup="menu"
+        title={
+          clis.length > 0
+            ? `Launch AI CLI (${clis.length} installed)`
+            : 'Launch AI CLI (none detected on PATH)'
+        }
+        className={cn(
+          'group flex h-8 w-8 shrink-0 items-center justify-center rounded-md transition-all duration-200 ease-apple',
+          open
+            ? 'bg-white/[0.10] text-fg-base'
+            : clis.length === 0
+              ? 'text-fg-subtle/60 hover:bg-white/[0.08] hover:text-fg-muted active:bg-white/[0.12]'
+              : 'text-fg-muted hover:bg-white/[0.08] hover:text-fg-base active:bg-white/[0.12]',
+        )}
+      >
+        <Bot size={14} strokeWidth={1.9} />
+      </button>
+
+      {open && pos && typeof document !== 'undefined' &&
+        createPortal(
+          <div
+            ref={menuRef}
+            role="menu"
+            style={{ position: 'fixed', top: pos.top, left: pos.left }}
+            className="material-sheet z-50 w-48 animate-popover-in overflow-hidden rounded-md shadow-sheet ring-1 ring-white/10"
+          >
+            {clis.length === 0 ? (
+              <div className="px-3 py-3 font-display text-[11.5px] leading-snug text-fg-muted">
+                <div className="mb-1 font-medium text-fg-base">No AI CLIs found</div>
+                <div className="text-fg-subtle">
+                  Install <code className="font-mono">claude</code>,{' '}
+                  <code className="font-mono">codex</code>, or{' '}
+                  <code className="font-mono">opencode</code> on your{' '}
+                  <code className="font-mono">PATH</code>.
+                </div>
+              </div>
+            ) : (
+              clis.map((cli) => (
+                <button
+                  key={cli.id}
+                  role="menuitem"
+                  onClick={() => {
+                    onLaunch(cli);
+                    setOpen(false);
+                  }}
+                  className="flex w-full items-center gap-2 px-3 py-2 text-left font-display text-[12px] text-fg-base/90 transition-colors hover:bg-white/[0.06]"
+                  title={cli.path}
+                >
+                  <Bot size={12} strokeWidth={2} className="text-fg-subtle" />
+                  <span className="flex-1 truncate">{cli.label}</span>
+                </button>
+              ))
+            )}
+          </div>,
+          document.body,
+        )}
     </>
   );
 }
