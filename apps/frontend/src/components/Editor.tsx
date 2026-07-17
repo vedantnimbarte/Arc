@@ -20,7 +20,8 @@ import {
   Columns2,
 } from 'lucide-react';
 import { fileIcon, MOCHA } from '../lib/fileIcons';
-import { fsReadFile, fsWriteFile, isTauri } from '../lib/tauri';
+import { fsReadFile, fsWriteFile, gitBlame, gitDiff, isTauri, type GitBlameLine } from '../lib/tauri';
+import { changedLinesFromDiff, gitDiffGutter, setGitChanges } from '../lib/gitGutter';
 import { attachLsp, pathToFileUri, type LspAttachment } from '../lib/lspClient';
 import { lspServerFor } from '../lib/lspServers';
 import { useFiles } from '../state/files';
@@ -86,6 +87,12 @@ export function Editor({ filePath, tabId }: Props) {
   const [status, setStatus] = useState<Status>({ kind: 'loading' });
   const [dirty, setDirty] = useState(false);
   const [mode, setModeState] = useState<Mode>('code');
+  /** git blame keyed by 1-based line number, and the caret's current line —
+   *  together they drive the inline "author · when" label in the header.
+   *  ponytail: line map is snapshotted at load/save, so it drifts as you type
+   *  until the next save re-blames. */
+  const [blameLines, setBlameLines] = useState<Map<number, GitBlameLine>>(new Map());
+  const [currentLine, setCurrentLine] = useState(1);
 
   const isMarkdown = useMemo(() => /\.(md|markdown|mdx)$/i.test(filePath), [filePath]);
 
@@ -121,6 +128,41 @@ export function Editor({ filePath, tabId }: Props) {
     [renderPreview],
   );
 
+  /** Reload the git diff gutter for the open file (changes vs HEAD). No-op
+   *  outside Tauri or when the file isn't in a repo — clears markers on error. */
+  const refreshGitGutter = useCallback(async () => {
+    if (!isTauri) return;
+    const view = viewRef.current;
+    if (!view) return;
+    const root = useFiles.getState().root;
+    if (!root) return;
+    try {
+      const diff = await gitDiff(root, 'head', filePath);
+      view.dispatch({ effects: setGitChanges.of(changedLinesFromDiff(diff)) });
+    } catch {
+      view.dispatch({ effects: setGitChanges.of(new Map()) });
+    }
+  }, [filePath]);
+
+  /** Reload git blame for the open file, keyed by line number. Clears on
+   *  error (not a repo / uncommitted file / git missing). */
+  const refreshBlame = useCallback(async () => {
+    if (!isTauri) return;
+    const root = useFiles.getState().root;
+    if (!root) {
+      setBlameLines(new Map());
+      return;
+    }
+    try {
+      const lines = await gitBlame(root, filePath);
+      const map = new Map<number, GitBlameLine>();
+      for (const l of lines) map.set(l.line_number, l);
+      setBlameLines(map);
+    } catch {
+      setBlameLines(new Map());
+    }
+  }, [filePath]);
+
   /** Stable ref so the keymap closure always sees the latest save fn. */
   const saveRef = useRef<() => Promise<void>>(async () => {});
 
@@ -137,10 +179,12 @@ export function Editor({ filePath, tabId }: Props) {
       setDirty(false);
       setTabDirty(tabId, false);
       setStatus({ kind: 'saved', at: Date.now() });
+      void refreshGitGutter();
+      void refreshBlame();
     } catch (err) {
       setStatus({ kind: 'error', message: String(err) });
     }
-  }, [filePath, tabId, setTabDirty]);
+  }, [filePath, tabId, setTabDirty, refreshGitGutter, refreshBlame]);
 
   // Mount: read file → build editor.
   useEffect(() => {
@@ -149,6 +193,8 @@ export function Editor({ filePath, tabId }: Props) {
     setDirty(false);
     modeRef.current = 'code';
     setModeState('code');
+    setBlameLines(new Map());
+    setCurrentLine(1);
     setTabDirty(tabId, false);
 
     const boot = async () => {
@@ -196,6 +242,9 @@ export function Editor({ filePath, tabId }: Props) {
               rectangularSelection(),
               crosshairCursor(),
               EditorView.lineWrapping,
+              // Git diff gutter — thin bar marking lines changed vs HEAD.
+              // Populated by refreshGitGutter() on ready + after each save.
+              gitDiffGutter(),
               // Register as the PRIMARY (non-fallback) highlighter. basicSetup
               // also ships `defaultHighlightStyle` as a fallback; if ours were
               // also `{ fallback: true }` the two would tie and the
@@ -217,6 +266,10 @@ export function Editor({ filePath, tabId }: Props) {
               langCompartment.current.of([]),
               lspCompartment.current.of([]),
               EditorView.updateListener.of((u) => {
+                // Track the caret's line so the header can show its blame.
+                if (u.selectionSet || u.docChanged) {
+                  setCurrentLine(u.state.doc.lineAt(u.state.selection.main.head).number);
+                }
                 if (u.docChanged) {
                   const current = u.state.doc.toString();
                   currentSourceRef.current = current;
@@ -260,6 +313,11 @@ export function Editor({ filePath, tabId }: Props) {
         }
 
         if (!disposed) setStatus({ kind: 'ready' });
+        // Paint the git gutter + load blame for the freshly-loaded file.
+        if (!disposed) {
+          void refreshGitGutter();
+          void refreshBlame();
+        }
 
         // Attach a language server if LSP is enabled and one is registered for
         // this file's language. Failures degrade to a plain editor (attachLsp
@@ -396,6 +454,7 @@ export function Editor({ filePath, tabId }: Props) {
   }, [mode, status.kind]);
 
   const { Icon, color } = fileIcon(basename(filePath));
+  const lineBlame = blameLines.get(currentLine);
   const showCode = mode === 'code' || mode === 'split';
   const showPreview = mode === 'preview' || mode === 'split';
 
@@ -416,6 +475,14 @@ export function Editor({ filePath, tabId }: Props) {
         <span className="hidden truncate font-mono text-[10px] text-fg-subtle md:inline" title={filePath}>
           · {filePath}
         </span>
+        {lineBlame && (
+          <span
+            className="hidden min-w-0 shrink truncate font-mono text-[10px] text-fg-subtle lg:inline"
+            title={lineBlame.content ? `${lineBlame.short} · ${lineBlame.content}` : lineBlame.short}
+          >
+            · {lineBlame.author}, {relTimeFromUnix(lineBlame.time)}
+          </span>
+        )}
 
         <div className="ml-auto flex items-center gap-1">
           {isMarkdown && (
@@ -594,6 +661,20 @@ function ErrorBlock({ filePath, message }: { filePath: string; message: string }
       </span>
     </div>
   );
+}
+
+/** Compact "3d ago"-style label from a unix-seconds timestamp. */
+function relTimeFromUnix(sec: number): string {
+  const diff = Date.now() / 1000 - sec;
+  if (diff < 60) return 'just now';
+  const m = Math.floor(diff / 60);
+  if (m < 60) return `${m}m ago`;
+  const h = Math.floor(diff / 3600);
+  if (h < 24) return `${h}h ago`;
+  const d = Math.floor(diff / 86400);
+  if (d < 30) return `${d}d ago`;
+  if (d < 365) return `${Math.floor(d / 30)}mo ago`;
+  return `${Math.floor(d / 365)}y ago`;
 }
 
 function basename(p: string): string {

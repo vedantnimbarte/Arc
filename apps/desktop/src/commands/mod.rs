@@ -8,6 +8,7 @@ pub mod lsp;
 pub mod network;
 pub mod project_config;
 pub mod pty;
+pub mod secrets;
 pub mod session;
 pub mod ssh;
 pub mod window;

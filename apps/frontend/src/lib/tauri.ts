@@ -1225,6 +1225,31 @@ export async function gitHostTokenDelete(provider: string): Promise<void> {
   await invoke('git_host_token_delete', { provider });
 }
 
+// ─── Secrets vault (OS keychain) ─────────────────────────────────────────
+// Values are stored in the OS credential vault; only names are enumerable.
+
+/** Names of stored secrets (never the values). */
+export async function secretList(): Promise<string[]> {
+  if (!isTauri) return [];
+  return invoke<string[]>('secret_list');
+}
+
+/** Store or overwrite a secret value in the OS keychain. */
+export async function secretSet(name: string, value: string): Promise<void> {
+  await invoke('secret_set', { name, value });
+}
+
+/** Read a secret's value, or null if it isn't set. */
+export async function secretGet(name: string): Promise<string | null> {
+  if (!isTauri) return null;
+  return invoke<string | null>('secret_get', { name });
+}
+
+/** Remove a secret from the vault. */
+export async function secretDelete(name: string): Promise<void> {
+  await invoke('secret_delete', { name });
+}
+
 export async function gitHostPrList(
   path: string,
   filter: GitHostPrListFilter,

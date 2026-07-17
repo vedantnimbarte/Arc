@@ -64,6 +64,11 @@ export interface Tab {
    *  subcommand (`pilot run <goal>`) or headless `--print <prompt>`. Transient,
    *  like `shellOverride`. */
   shellArgs?: string[];
+  /** One-shot command written to the tab's PTY once the shell spawns — used
+   *  by the task runner to run a `package.json` script in a fresh shell.
+   *  Transient (whitelisted out of persistence), like `shellOverride`, so a
+   *  restored tab comes back as a plain shell rather than re-running. */
+  runCommand?: string;
   /** SSH host id for `kind: 'ssh'` tabs. Persisted so an SSH tab restores
    *  after relaunch — the tab opens in `idle` state and the user clicks
    *  Reconnect to redial. */
@@ -254,6 +259,10 @@ interface WorkspaceState {
    *  Resets the file-tree root to home first so the spawning PTY inherits
    *  it as CWD and both panes stay in sync. */
   newTerminal: (override?: Partial<Pick<Tab, 'title' | 'shellOverride'>>) => Promise<string>;
+  /** Open a terminal tab that runs `command` in a fresh shell (task runner).
+   *  The command is typed into the PTY once the shell is ready, so the shell
+   *  stays open with the output visible afterward. */
+  runTask: (command: string, title?: string) => Promise<string>;
   /** Open a new preview tab. Optional `url` pre-fills the URL bar so deep-
    *  link callers (e.g. "preview this dev server") can navigate immediately. */
   openPreview: (url?: string) => string;
@@ -1138,6 +1147,18 @@ export const useWorkspace = create<WorkspaceState>()((set, get) => ({
       title: override?.title ?? 'shell',
       kind: 'terminal',
       shellOverride: override?.shellOverride,
+    };
+    get().addTab(tab);
+    return id;
+  },
+  runTask: async (command, title) => {
+    await resetRootToHome();
+    const id = `task-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+    const tab: Tab = {
+      id,
+      title: title ?? command,
+      kind: 'terminal',
+      runCommand: command,
     };
     get().addTab(tab);
     return id;

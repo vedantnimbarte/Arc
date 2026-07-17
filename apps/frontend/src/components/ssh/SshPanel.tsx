@@ -7,6 +7,8 @@ import {
   Server,
   Sparkles,
   ArrowDownToLine,
+  Radio,
+  SendHorizontal,
   X,
 } from 'lucide-react';
 import { useSsh } from '../../state/ssh';
@@ -148,6 +150,7 @@ export function SshPanel({ onClose }: { onClose?: () => void }) {
             )}
           </div>
 
+          <BroadcastBar />
           <SectionFooter hostCount={hosts.length} keyCount={keys.length} />
         </>
       )}
@@ -477,6 +480,67 @@ function KeyList({ keys, hosts, hydrated, onGenerate, onImport }: KeyListProps) 
         );
       })}
     </ul>
+  );
+}
+
+// ─── Broadcast bar ──────────────────────────────────────────────────────────
+//
+// Fan-out command entry: sends one line to every connected SSH session at
+// once. Only rendered when at least one session is live.
+
+function BroadcastBar() {
+  const sessions = useSsh((s) => s.sessions);
+  const broadcast = useSsh((s) => s.broadcast);
+  const [cmd, setCmd] = useState('');
+
+  const liveCount = useMemo(
+    () => Object.values(sessions).filter((s) => s.status === 'connected').length,
+    [sessions],
+  );
+  if (liveCount === 0) return null;
+
+  const send = () => {
+    const text = cmd.trim();
+    if (!text) return;
+    void broadcast(`${text}\r`);
+    setCmd('');
+  };
+
+  return (
+    <div className="border-t border-border-hairline bg-bg-chrome/30 px-3 py-2.5">
+      <div className="mb-1.5 flex items-center gap-1.5">
+        <Radio size={11} className="text-accent" />
+        <span className="font-mono text-[9.5px] uppercase tracking-widest2 text-fg-muted">
+          Broadcast → {liveCount} session{liveCount !== 1 ? 's' : ''}
+        </span>
+      </div>
+      <div className="flex items-center gap-2 rounded-squircle border border-border-subtle bg-bg-subtle px-2.5 py-1.5">
+        <input
+          value={cmd}
+          onChange={(e) => setCmd(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') {
+              e.preventDefault();
+              send();
+            }
+          }}
+          placeholder="command to all sessions…"
+          className="flex-1 bg-transparent font-mono text-[12px] text-fg-base placeholder:text-fg-subtle focus:outline-none"
+          spellCheck={false}
+          autoComplete="off"
+        />
+        <button
+          type="button"
+          onClick={send}
+          disabled={!cmd.trim()}
+          title="Send to all connected sessions"
+          className="flex h-6 items-center gap-1 rounded-md px-2 font-display text-[11px] font-medium text-fg-base transition-colors hover:bg-bg-hover disabled:opacity-40"
+        >
+          <SendHorizontal size={11} />
+          send
+        </button>
+      </div>
+    </div>
   );
 }
 

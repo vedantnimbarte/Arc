@@ -316,11 +316,25 @@ export function Terminal({ sessionKey }: Props) {
       // with no output at all, the user is left staring at an empty pane and
       // has no idea what went wrong — surface a clear diagnostic in that case.
       let sawAnyData = false;
+      // Task runner: a one-shot command typed into the shell once it's alive.
+      // Set from the tab below; fired on the first output chunk (the shell has
+      // booted by then) after a short delay so the prompt is drawn first.
+      // ponytail: first-output + 250ms heuristic; gate on the OSC 133 `A`
+      // prompt marker instead if a slow shell ever races it.
+      let pendingRunCommand: string | null = null;
+      let ranPending = false;
       const onPtyChunk = (chunk: Uint8Array) => {
         sawAnyData = true;
         const text = decoder.decode(chunk, { stream: true });
         handleChunkText(text);
         term.write(text);
+        if (pendingRunCommand && !ranPending) {
+          ranPending = true;
+          const cmd = pendingRunCommand;
+          setTimeout(() => {
+            if (!disposed && ptyId) void ptyWrite(ptyId, `${cmd}\r`).catch(() => {});
+          }, 250);
+        }
       };
 
       try {
@@ -332,6 +346,7 @@ export function Terminal({ sessionKey }: Props) {
         // the global default shell.
         const tab = useWorkspace.getState().tabs.find((t) => t.id === sessionKey);
         const chosenShell = tab?.shellOverride ?? useSettings.getState().defaultShell;
+        pendingRunCommand = tab?.runCommand ?? null;
         // Layer any `.arc/config.toml` env for the terminal's actual cwd on
         // top of the inherited process env. Loaded per-cwd (not from the
         // file-tree-keyed store) so it's race-free against the home reset.

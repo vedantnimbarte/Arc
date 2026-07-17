@@ -25,6 +25,7 @@ import {
   ArrowUp,
   ArrowDown,
   Activity,
+  KeyRound,
 } from 'lucide-react';
 import {
   DEFAULT_SEARCH_IGNORE_DIRS,
@@ -38,6 +39,9 @@ import { normalizeOrder, PINNED_VIEW, SIDEBAR_VIEW_BY_ID } from '../lib/sidebarV
 import {
   isTauri,
   ptyListShells,
+  secretDelete,
+  secretList,
+  secretSet,
   type ShellInfo,
 } from '../lib/tauri';
 import { cn } from '../lib/cn';
@@ -65,7 +69,15 @@ import {
 } from '../state/shortcuts';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 
-type Pane = 'appearance' | 'themes' | 'shortcuts' | 'terminal' | 'editor' | 'sidebar' | 'about';
+type Pane =
+  | 'appearance'
+  | 'themes'
+  | 'shortcuts'
+  | 'terminal'
+  | 'editor'
+  | 'sidebar'
+  | 'secrets'
+  | 'about';
 
 export function SettingsPage() {
   const {
@@ -155,6 +167,7 @@ export function SettingsPage() {
             <SidebarRow icon={TerminalIcon} label="Terminal" active={pane === 'terminal'} onClick={() => setPane('terminal')} />
             <SidebarRow icon={FileCode2} label="Editor" active={pane === 'editor'} onClick={() => setPane('editor')} />
             <SidebarRow icon={PanelLeft} label="Sidebar" active={pane === 'sidebar'} onClick={() => setPane('sidebar')} />
+            <SidebarRow icon={KeyRound} label="Secrets" active={pane === 'secrets'} onClick={() => setPane('secrets')} />
             <SidebarRow icon={Info} label="About" active={pane === 'about'} onClick={() => setPane('about')} />
           </nav>
 
@@ -206,6 +219,7 @@ export function SettingsPage() {
                 />
               )}
               {pane === 'sidebar' && <SidebarSettingsPane />}
+              {pane === 'secrets' && <SecretsPane />}
               {pane === 'about' && <AboutPane />}
             </div>
           )}
@@ -1375,6 +1389,137 @@ function ShellRow({
 
 const APP_VERSION = '0.0.1';
 const REPO_URL = 'https://github.com/vedant-nimbarte/arc-terminal';
+
+function SecretsPane() {
+  const [names, setNames] = useState<string[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [name, setName] = useState('');
+  const [value, setValue] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const load = async () => {
+    try {
+      setNames(await secretList());
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setLoading(false);
+    }
+  };
+  useEffect(() => {
+    void load();
+  }, []);
+
+  const add = async () => {
+    const n = name.trim();
+    if (!n || !value) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await secretSet(n, value);
+      setName('');
+      setValue('');
+      await load();
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const remove = async (n: string) => {
+    setError(null);
+    try {
+      await secretDelete(n);
+      await load();
+    } catch (e) {
+      setError(String(e));
+    }
+  };
+
+  const inputCls =
+    'flex-1 rounded-squircle border border-border-subtle bg-bg-subtle px-3 py-2 font-mono text-[12px] text-fg-base placeholder:text-fg-subtle focus:outline-none';
+
+  return (
+    <div className="space-y-7">
+      <Section
+        title="Secrets"
+        hint="Stored in your OS credential vault (Keychain / Credential Manager / secret-service). Values never touch disk in plaintext, and are never shown or listed here — only names are."
+      >
+        {!isTauri ? (
+          <p className="font-mono text-[11px] text-fg-subtle">
+            The secrets vault requires the desktop app.
+          </p>
+        ) : (
+          <div className="space-y-4">
+            <div className="flex flex-col gap-2 sm:flex-row">
+              <input
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                placeholder="NAME"
+                spellCheck={false}
+                autoComplete="off"
+                className={inputCls}
+              />
+              <input
+                value={value}
+                onChange={(e) => setValue(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault();
+                    void add();
+                  }
+                }}
+                placeholder="value"
+                type="password"
+                spellCheck={false}
+                autoComplete="off"
+                className={inputCls}
+              />
+              <button
+                type="button"
+                onClick={() => void add()}
+                disabled={busy || !name.trim() || !value}
+                className="flex items-center justify-center gap-1 rounded-squircle bg-accent/90 px-4 py-2 font-display text-[12px] font-medium text-bg-base transition hover:bg-accent disabled:opacity-40"
+              >
+                <Plus size={13} /> Save
+              </button>
+            </div>
+
+            {error && <p className="font-mono text-[11px] text-status-err">{error}</p>}
+
+            {loading ? (
+              <p className="font-mono text-[11px] text-fg-subtle">loading…</p>
+            ) : names.length === 0 ? (
+              <p className="font-mono text-[11px] text-fg-subtle">No secrets yet.</p>
+            ) : (
+              <ul className="flex flex-col gap-px">
+                {names.map((n) => (
+                  <li
+                    key={n}
+                    className="flex items-center justify-between rounded-squircle px-3 py-2 hover:bg-bg-hover"
+                  >
+                    <span className="flex items-center gap-2 font-mono text-[12px] text-fg-base">
+                      <Lock size={12} className="text-fg-subtle" /> {n}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => void remove(n)}
+                      className="rounded px-1.5 py-px font-mono text-[10px] text-fg-subtle transition-colors hover:bg-bg-hover hover:text-status-err"
+                    >
+                      remove
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        )}
+      </Section>
+    </div>
+  );
+}
 
 function AboutPane() {
   const openExternal = (url: string) => {
