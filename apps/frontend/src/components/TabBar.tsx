@@ -5,8 +5,8 @@ import {
   Terminal as TerminalIcon,
   FileCode,
   FolderOpen,
-  PanelLeftClose,
-  PanelLeftOpen,
+  PanelRightClose,
+  PanelRightOpen,
   Bot,
   GitBranch,
   Monitor,
@@ -198,9 +198,9 @@ export function TabBar() {
         title={sidebarCollapsed ? 'Show sidebar (⌘B)' : 'Hide sidebar (⌘B)'}
       >
         {sidebarCollapsed ? (
-          <PanelLeftOpen size={14} strokeWidth={1.9} />
+          <PanelRightOpen size={14} strokeWidth={1.9} />
         ) : (
-          <PanelLeftClose size={14} strokeWidth={1.9} />
+          <PanelRightClose size={14} strokeWidth={1.9} />
         )}
       </button>
 

@@ -408,12 +408,13 @@ export function SidebarMiniRail() {
                 : 'text-fg-muted hover:bg-white/[0.045] hover:text-fg-base',
             )}
           >
-            {/* Left ribbon marks the active view — the vertical analogue of the
+            {/* Ribbon marks the active view — on the outer (right) edge now
+                that the sidebar is docked right; the vertical analogue of the
                 horizontal rail's sliding indicator. */}
             {active && (
               <span
                 aria-hidden
-                className="pointer-events-none absolute -left-2 top-1/2 h-3.5 w-[2px] -translate-y-1/2 rounded-r-full bg-accent-bright/70"
+                className="pointer-events-none absolute -right-2 top-1/2 h-3.5 w-[2px] -translate-y-1/2 rounded-l-full bg-accent-bright/70"
               />
             )}
             <Icon size={13} strokeWidth={2} />
