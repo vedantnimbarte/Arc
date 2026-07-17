@@ -16,6 +16,7 @@ import { ResizeHandle } from './components/ResizeHandle';
 import { SearchPalette } from './components/SearchPalette';
 import { ShortcutsDialog } from './components/ShortcutsDialog';
 import { PaneTreeView } from './components/PaneTreeView';
+import { ArcAiBar } from './components/ArcAiBar';
 import { WorkspaceRail } from './components/WorkspaceRail';
 import { useWorkspace } from './state/workspace';
 import { useFiles, SIDEBAR_RAIL_WIDTH, defaultWidthForView } from './state/files';
@@ -367,47 +368,9 @@ export default function App() {
         <div className="flex min-h-0 min-w-0 flex-1 flex-col">
         <TabBar />
 
-        {/* Layout: file-tree | main | SSH sidebar */}
-        <div className="relative flex min-h-0 flex-1 px-3 pb-3 pt-1">
+        {/* Layout: main | file-tree (right side) */}
+        <div className="relative flex min-h-0 flex-1 px-3 pb-2 pt-1">
           <div className="material-content flex min-h-0 w-full overflow-hidden rounded-window shadow-panel ring-1 ring-border-subtle">
-            {/* Collapsed mini-rail — a thin vertical icon strip that slides in
-                as the sidebar collapses; clicking an icon expands + switches. */}
-            <aside
-              className="shrink-0 overflow-hidden transition-[width] duration-300 ease-apple"
-              style={{ width: sidebarCollapsed ? SIDEBAR_RAIL_WIDTH : 0 }}
-              aria-hidden={!sidebarCollapsed}
-            >
-              <div
-                className="material-sidebar h-full border-r border-border-hairline"
-                style={{ width: SIDEBAR_RAIL_WIDTH }}
-              >
-                <SidebarMiniRail />
-              </div>
-            </aside>
-
-            {/* File-tree wrapper — animates width to 0 on collapse. */}
-            <aside
-              className="shrink-0 overflow-hidden transition-[width] duration-300 ease-apple"
-              style={{ width: sidebarCollapsed ? 0 : sidebarWidth }}
-              aria-hidden={sidebarCollapsed}
-            >
-              <div
-                className="material-sidebar h-full border-r border-border-hairline"
-                style={{ width: sidebarWidth }}
-              >
-                <Sidebar />
-              </div>
-            </aside>
-
-            {!sidebarCollapsed && (
-              <ResizeHandle
-                edge="left"
-                getWidth={() => useFiles.getState().sidebarWidth}
-                onResize={setSidebarWidth}
-                resetWidth={defaultWidthForView(sidebarView)}
-              />
-            )}
-
             <main className="relative min-w-0 flex-1 overflow-hidden p-1.5">
               {/* Split-pane tree — each leaf hosts a tab and can be split
                   right/down into a new pane, with draggable dividers. */}
@@ -421,13 +384,47 @@ export default function App() {
 
           {sshLogPanelOpen && <SshSessionLogPanel onClose={() => setSshLogPanelOpen(false)} />}
         </div>
-        </div>
-      </div>
 
-      {/* Floating version badge — bottom-right, non-interactive. Replaces the
-          old status bar's version pill now that the bottom chrome is gone. */}
-      <div className="pointer-events-none fixed bottom-2 right-3.5 z-20 select-none font-mono text-[10px] tracking-tight tabular-nums text-fg-subtle/55">
-        arc 0.0.1
+        {/* Bottom dock — centered Arc AI composer + version bottom-right. */}
+        <ArcAiBar />
+        </div>
+
+        {/* File-tree sidebar — full-height column on the right edge, mirroring
+            the workspace rail on the left. Lives at the top-level flex row so
+            it spans the whole window height (alongside the tab bar + dock),
+            not just the pane panel. */}
+        {!sidebarCollapsed && (
+          <ResizeHandle
+            edge="right"
+            getWidth={() => useFiles.getState().sidebarWidth}
+            onResize={setSidebarWidth}
+            resetWidth={defaultWidthForView(sidebarView)}
+          />
+        )}
+        <aside
+          className="shrink-0 overflow-hidden transition-[width] duration-300 ease-apple"
+          style={{ width: sidebarCollapsed ? SIDEBAR_RAIL_WIDTH : 0 }}
+          aria-hidden={!sidebarCollapsed}
+        >
+          <div
+            className="material-sidebar h-full border-l border-border-hairline"
+            style={{ width: SIDEBAR_RAIL_WIDTH }}
+          >
+            <SidebarMiniRail />
+          </div>
+        </aside>
+        <aside
+          className="shrink-0 overflow-hidden transition-[width] duration-300 ease-apple"
+          style={{ width: sidebarCollapsed ? 0 : sidebarWidth }}
+          aria-hidden={sidebarCollapsed}
+        >
+          <div
+            className="material-sidebar h-full border-l border-border-hairline"
+            style={{ width: sidebarWidth }}
+          >
+            <Sidebar />
+          </div>
+        </aside>
       </div>
 
       <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} />
