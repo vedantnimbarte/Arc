@@ -111,6 +111,27 @@ export function Terminal({ sessionKey }: Props) {
     // undefined renderer). ensureOpen() runs once the host is shown — see the
     // `arc:host-shown` handler and ResizeObserver below.
     let opened = false;
+    // Anything written before `ensureOpen()` runs would reach an xterm with no
+    // renderer, and the next `syncScrollArea` reads `dimensions` on undefined
+    // — the crash the comment above describes. Buffer instead and flush once
+    // the terminal is really open.
+    //
+    // Every write goes through `write`/`writeln` for that reason. It is not
+    // only the browser-only banner: that one is just the reliable reproducer,
+    // because it writes synchronously while the host is still parked in the
+    // hidden stage. PTY output normally arrives late enough to be safe, but a
+    // spawn that fails immediately hits the same window in the real app.
+    const pending: string[] = [];
+    const write = (data: string) => {
+      if (disposed) return;
+      if (!opened) {
+        pending.push(data);
+        return;
+      }
+      term.write(data);
+    };
+    const writeln = (data: string) => write(`${data}\r\n`);
+
     const ensureOpen = () => {
       if (opened || disposed) return;
       if (container.offsetWidth === 0 || container.offsetHeight === 0) return;
@@ -122,6 +143,22 @@ export function Terminal({ sessionKey }: Props) {
       while (container.firstChild) container.removeChild(container.firstChild);
       term.open(container);
       safeFit();
+      // Drain on the next frame, not in this tick. `open()` does not guarantee
+      // the renderer exists yet, and writing into that gap is the same
+      // `dimensions`-on-undefined crash this buffer exists to avoid — PTY
+      // output only ever worked because it arrived a frame or more later.
+      // Drained in arrival order so a buffered banner reads as it would live.
+      if (pending.length > 0) {
+        requestAnimationFrame(() => {
+          if (disposed) return;
+          const queued = pending.splice(0, pending.length);
+          try {
+            for (const chunk of queued) term.write(chunk);
+          } catch {
+            /* renderer torn down between the frame and here */
+          }
+        });
+      }
     };
 
     const safeFit = () => {
@@ -141,11 +178,23 @@ export function Terminal({ sessionKey }: Props) {
     // makes xterm re-measure) and re-fit so the cursor lines up with the glyphs.
     if (typeof document !== 'undefined' && document.fonts?.ready) {
       void document.fonts.ready.then(() => {
-        if (disposed) return;
-        const ls = term.options.letterSpacing ?? 0;
-        term.options.letterSpacing = ls === 0 ? 0.01 : 0;
-        term.options.letterSpacing = ls;
-        safeFit();
+        // `opened` matters as much as `disposed`: re-measuring pokes the
+        // renderer, and before `term.open()` there isn't one — xterm then
+        // throws on `dimensions` of undefined. There is also nothing to
+        // re-measure yet, and `ensureOpen` fits on open anyway.
+        //
+        // This became reachable when the webfonts moved into the bundle:
+        // `fonts.ready` used to resolve after a CDN round-trip, by which time
+        // the host had been shown, and now it can resolve first.
+        if (disposed || !opened) return;
+        try {
+          const ls = term.options.letterSpacing ?? 0;
+          term.options.letterSpacing = ls === 0 ? 0.01 : 0;
+          term.options.letterSpacing = ls;
+          safeFit();
+        } catch {
+          /* renderer torn down between the guard and here */
+        }
       });
     }
 
@@ -217,9 +266,9 @@ export function Terminal({ sessionKey }: Props) {
 
     const boot = async () => {
       if (!isTauri) {
-        term.writeln('\x1b[38;2;212;214;220m  arc \x1b[0m\x1b[2mrunning outside Tauri — PTY disabled.\x1b[0m');
-        term.writeln('\x1b[2m       Run \x1b[0m\x1b[38;2;212;214;220mpnpm tauri:dev\x1b[0m\x1b[2m to attach a real shell.\x1b[0m');
-        term.write('\r\n\x1b[38;2;212;214;220m›\x1b[0m ');
+        writeln('\x1b[38;2;212;214;220m  arc \x1b[0m\x1b[2mrunning outside Tauri — PTY disabled.\x1b[0m');
+        writeln('\x1b[2m       Run \x1b[0m\x1b[38;2;212;214;220mpnpm tauri:dev\x1b[0m\x1b[2m to attach a real shell.\x1b[0m');
+        write('\r\n\x1b[38;2;212;214;220m›\x1b[0m ');
         return;
       }
       // ─── OSC 133 shell-integration tracking ────────────────────────────
@@ -327,7 +376,7 @@ export function Terminal({ sessionKey }: Props) {
         sawAnyData = true;
         const text = decoder.decode(chunk, { stream: true });
         handleChunkText(text);
-        term.write(text);
+        write(text);
         if (pendingRunCommand && !ranPending) {
           ranPending = true;
           const cmd = pendingRunCommand;
@@ -385,18 +434,18 @@ export function Terminal({ sessionKey }: Props) {
           await onPtyExit(ptyId, (code) => {
             if (!sawAnyData) {
               const cwd = initialCwd.current ?? '(default)';
-              term.writeln(
+              writeln(
                 `\x1b[38;2;255;82;82m  shell exited immediately with code ${code ?? '?'}.\x1b[0m`,
               );
-              term.writeln(`\x1b[2m  cwd:   ${cwd}\x1b[0m`);
-              term.writeln(
+              writeln(`\x1b[2m  cwd:   ${cwd}\x1b[0m`);
+              writeln(
                 `\x1b[2m  shell: ${useSettings.getState().defaultShell ?? '(system default)'}\x1b[0m`,
               );
-              term.writeln(
+              writeln(
                 `\x1b[2m  Press ⌘T for a fresh tab, or open Settings → Terminal to pick a different shell.\x1b[0m`,
               );
             } else {
-              term.writeln(`\r\n\x1b[38;2;99;99;102m[exit ${code ?? '?'}]\x1b[0m`);
+              writeln(`\r\n\x1b[38;2;99;99;102m[exit ${code ?? '?'}]\x1b[0m`);
             }
           }),
         );
@@ -594,7 +643,7 @@ export function Terminal({ sessionKey }: Props) {
           if (ptyId) ptyResize(ptyId, cols, rows).catch(() => {});
         });
       } catch (err) {
-        term.writeln(`\x1b[38;2;255;69;58m  failed to spawn pty: ${err}\x1b[0m`);
+        writeln(`\x1b[38;2;255;69;58m  failed to spawn pty: ${err}\x1b[0m`);
       }
     };
 
