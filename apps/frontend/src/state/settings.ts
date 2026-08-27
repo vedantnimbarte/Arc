@@ -69,6 +69,13 @@ export interface Settings {
   /** Enable LSP features (diagnostics, hover, completion) in the editor.
    *  Off by default — requires the relevant language servers on PATH. */
   editorLsp: boolean;
+  /** Address of a `wingman serve` daemon, e.g. `http://127.0.0.1:8787`. Empty
+   *  disables the Wingman integration entirely.
+   *
+   *  The bearer token is deliberately NOT stored here — settings are plain
+   *  rows in SQLite, so it lives in the OS credential vault instead (see
+   *  `WINGMAN_TOKEN_KEY`). */
+  wingmanUrl: string;
   /** Fire a system notification when an OSC133-tracked command runs longer
    *  than `notifyThresholdSecs` and the window is unfocused (Tier 1.5). */
   notifyLongCommands: boolean;
@@ -94,6 +101,7 @@ export interface Settings {
   setRestoreWindowState: (on: boolean) => void;
   setEditorVimMode: (on: boolean) => void;
   setEditorLsp: (on: boolean) => void;
+  setWingmanUrl: (url: string) => void;
   setNotifyLongCommands: (on: boolean) => void;
   setNotifyThresholdSecs: (secs: number) => void;
   setNotifySound: (on: boolean) => void;
@@ -111,6 +119,7 @@ const DEFAULTS = {
   restoreWindowState: true,
   editorVimMode: false,
   editorLsp: false,
+  wingmanUrl: '',
   notifyLongCommands: true,
   notifyThresholdSecs: 30,
   notifySound: false,
@@ -169,6 +178,7 @@ export const useSettings = create<Settings>()((set, get) => ({
   setRestoreWindowState: (on) => set({ restoreWindowState: on }),
   setEditorVimMode: (on) => set({ editorVimMode: on }),
   setEditorLsp: (on) => set({ editorLsp: on }),
+  setWingmanUrl: (url) => set({ wingmanUrl: url }),
   setNotifyLongCommands: (on) => set({ notifyLongCommands: on }),
   setNotifyThresholdSecs: (secs) => set({ notifyThresholdSecs: clampNotifySecs(secs) }),
   setNotifySound: (on) => set({ notifySound: on }),
@@ -283,6 +293,8 @@ function applyStored(
         : current.editorVimMode,
     editorLsp:
       typeof stored.editorLsp === 'boolean' ? stored.editorLsp : current.editorLsp,
+    wingmanUrl:
+      typeof stored.wingmanUrl === 'string' ? stored.wingmanUrl : current.wingmanUrl,
     notifyLongCommands:
       typeof stored.notifyLongCommands === 'boolean'
         ? stored.notifyLongCommands
@@ -312,6 +324,7 @@ function toPersistedSettings(s: Settings): PersistedSettings {
     restoreWindowState: s.restoreWindowState,
     editorVimMode: s.editorVimMode,
     editorLsp: s.editorLsp,
+    wingmanUrl: s.wingmanUrl,
     notifyLongCommands: s.notifyLongCommands,
     notifyThresholdSecs: s.notifyThresholdSecs,
     notifySound: s.notifySound,

@@ -12,3 +12,4 @@ pub mod secrets;
 pub mod session;
 pub mod ssh;
 pub mod window;
+pub mod wingman;

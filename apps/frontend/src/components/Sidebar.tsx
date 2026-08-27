@@ -13,6 +13,7 @@ import { FileTree } from './FileTree';
 import { SourceControl } from './SourceControl';
 import { SearchView } from './SearchView';
 import { OutlineView } from './OutlineView';
+import { WingmanPanel } from './wingman/WingmanPanel';
 import { SshPanel } from './ssh/SshPanel';
 import { fsReveal, fsWatchStart, fsWatchStop, isTauri, settingsWindowOpen } from '../lib/tauri';
 import { useFiles, type SidebarView } from '../state/files';
@@ -139,6 +140,8 @@ export function Sidebar() {
             <SearchView />
           ) : view === 'outline' ? (
             <OutlineView />
+          ) : view === 'wingman' ? (
+            <WingmanPanel />
           ) : (
             <SshPanel onClose={() => setSidebarView('files')} />
           )}

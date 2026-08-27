@@ -80,6 +80,7 @@ fn main() {
         .manage(PtyState::default())
         .manage(SshState::default())
         .manage(WatchState::default())
+        .manage(commands::wingman::WingmanState::default())
         .invoke_handler(tauri::generate_handler![
             commands::pty::pty_spawn,
             commands::pty::pty_write,
@@ -208,6 +209,26 @@ fn main() {
             commands::window::settings_window_open,
             commands::window::settings_broadcast_changed,
             commands::window::git_window_open,
+            commands::wingman::wingman_configure,
+            commands::wingman::wingman_health,
+            commands::wingman::wingman_projects,
+            commands::wingman::wingman_board,
+            commands::wingman::wingman_board_add_card,
+            commands::wingman::wingman_board_dispatch,
+            commands::wingman::wingman_board_archive,
+            commands::wingman::wingman_board_delete_card,
+            commands::wingman::wingman_pilot_runs,
+            commands::wingman::wingman_pilot_run,
+            commands::wingman::wingman_pilot_control,
+            commands::wingman::wingman_sessions,
+            commands::wingman::wingman_session_transcript,
+            commands::wingman::wingman_create_session,
+            commands::wingman::wingman_delete_session,
+            commands::wingman::wingman_diff,
+            commands::wingman::wingman_explain,
+            commands::wingman::wingman_cost,
+            commands::wingman::wingman_turn_start,
+            commands::wingman::wingman_events_subscribe,
         ])
         .setup(|app| {
             // Open the SQLite store before the window appears so the first

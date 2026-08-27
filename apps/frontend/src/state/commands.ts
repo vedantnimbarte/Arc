@@ -16,6 +16,7 @@ export type CommandGroup =
   | 'Git'
   | 'SSH'
   | 'AI CLIs'
+  | 'Wingman'
   | 'View'
   | 'Help';
 
