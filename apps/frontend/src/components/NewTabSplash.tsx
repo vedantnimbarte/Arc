@@ -89,12 +89,12 @@ function SplashColumn({
 }) {
   return (
     <div className="rounded-xl border border-border-hairline bg-bg-chrome/40 p-3 backdrop-blur-md">
-      <div className="mb-2 flex items-center gap-1.5 px-1 font-display text-[10.5px] font-semibold uppercase tracking-wider text-fg-subtle">
+      <div className="mb-2 flex items-center gap-1.5 px-1 font-display text-2xs font-semibold uppercase tracking-wider text-fg-subtle">
         <Icon size={11} strokeWidth={2.2} />
         {title}
       </div>
       {empty ? (
-        <div className="px-1 py-2 font-display text-[11px] italic text-fg-subtle">nothing yet</div>
+        <div className="px-1 py-2 font-display text-xs italic text-fg-subtle">nothing yet</div>
       ) : (
         <div className="flex flex-col gap-0.5">{children}</div>
       )}
@@ -121,7 +121,7 @@ function SplashRow({
       onClick={onClick}
       title={title}
       className={cn(
-        'flex items-center gap-1.5 rounded-md px-2 py-1 text-left text-[11.5px] text-fg-base/85 transition-colors hover:bg-white/[0.06] hover:text-fg-base',
+        'flex items-center gap-1.5 rounded-md px-2 py-1 text-left text-xs text-fg-base/85 transition-colors hover:bg-surface-2 hover:text-fg-base',
         mono && 'font-mono',
       )}
     >

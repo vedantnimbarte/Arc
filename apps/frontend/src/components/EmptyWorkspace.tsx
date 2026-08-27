@@ -127,17 +127,17 @@ export function EmptyWorkspace({ onOpenCommandPalette }: Props) {
                 setEditPos({ x: r.left + r.width / 2 - 124, y: r.bottom + 6 });
               }}
               title="Edit workspace"
-              className="group mb-2.5 flex items-center gap-2 rounded-lg border border-border-hairline bg-white/[0.02] py-1.5 pl-1.5 pr-2.5 transition-colors hover:border-border-subtle hover:bg-white/[0.05]"
+              className="group mb-2.5 flex items-center gap-2 rounded-lg border border-border-hairline bg-surface-1 py-1.5 pl-1.5 pr-2.5 transition-colors hover:border-border-subtle hover:bg-surface-1"
             >
               <span
-                className="flex h-6 w-6 items-center justify-center rounded-md font-display text-[11px] font-semibold text-fg-base"
+                className="flex h-6 w-6 items-center justify-center rounded-md font-display text-xs font-semibold text-fg-base"
                 style={{
                   backgroundColor: rgba(groupColorDef(active.color ?? DEFAULT_WORKSPACE_COLOR).hex, 0.18),
                 }}
               >
-                {active.icon ? <span className="text-[13px]">{active.icon}</span> : initials(active.name)}
+                {active.icon ? <span className="text-base">{active.icon}</span> : initials(active.name)}
               </span>
-              <span className="font-display text-[12px] font-medium tracking-tight text-fg-base">
+              <span className="font-display text-sm font-medium tracking-tight text-fg-base">
                 {active.name}
               </span>
               <Pencil
@@ -147,7 +147,7 @@ export function EmptyWorkspace({ onOpenCommandPalette }: Props) {
               />
             </button>
           )}
-          <h1 className="font-display text-[19px] font-semibold tracking-tight text-fg-base">
+          <h1 className="font-display text-xl font-semibold tracking-tight text-fg-base">
             Pick a tool to get started
           </h1>
         </header>
@@ -160,19 +160,19 @@ export function EmptyWorkspace({ onOpenCommandPalette }: Props) {
               <button
                 key={t.title}
                 onClick={t.run}
-                className="group relative flex h-[112px] flex-col items-start justify-between rounded-xl border border-border-hairline bg-white/[0.02] p-3.5 text-left transition-colors hover:border-border-subtle hover:bg-white/[0.045]"
+                className="group relative flex h-[112px] flex-col items-start justify-between rounded-xl border border-border-hairline bg-surface-1 p-3.5 text-left transition-colors hover:border-border-subtle hover:bg-surface-1"
               >
                 <t.icon size={20} strokeWidth={1.8} style={{ color: hex }} />
                 {t.kbd && (
-                  <kbd className="absolute right-3 top-3 rounded bg-white/[0.06] px-1 font-mono text-[9px] text-fg-subtle">
+                  <kbd className="absolute right-3 top-3 rounded bg-surface-2 px-1 font-mono text-2xs text-fg-subtle">
                     {t.kbd}
                   </kbd>
                 )}
                 <div>
-                  <div className="font-display text-[13px] font-semibold tracking-tight text-fg-base">
+                  <div className="font-display text-base font-semibold tracking-tight text-fg-base">
                     {t.title}
                   </div>
-                  <div className="text-[11px] text-fg-muted">{t.hint}</div>
+                  <div className="text-xs text-fg-muted">{t.hint}</div>
                 </div>
               </button>
             );
@@ -189,7 +189,7 @@ export function EmptyWorkspace({ onOpenCommandPalette }: Props) {
                   key={cli.id}
                   onClick={() => void launchAiCli(cli)}
                   title={cli.path}
-                  className="flex items-center gap-2 rounded-lg border border-border-hairline bg-white/[0.02] px-3 py-2 text-[12px] font-medium text-fg-base/90 transition-colors hover:border-border-subtle hover:bg-white/[0.05]"
+                  className="flex items-center gap-2 rounded-lg border border-border-hairline bg-surface-1 px-3 py-2 text-sm font-medium text-fg-base/90 transition-colors hover:border-border-subtle hover:bg-surface-1"
                 >
                   <Bot size={13} strokeWidth={1.9} className="text-accent-bright" />
                   <span className="truncate">{cli.label}</span>
@@ -197,7 +197,7 @@ export function EmptyWorkspace({ onOpenCommandPalette }: Props) {
               ))}
             </div>
           ) : (
-            <p className="text-[11.5px] text-fg-subtle">
+            <p className="text-xs text-fg-subtle">
               No AI CLIs found on your PATH. Install Claude Code, Codex, or OpenCode to launch one here.
             </p>
           )}
@@ -233,7 +233,7 @@ export function EmptyWorkspace({ onOpenCommandPalette }: Props) {
                       key={path}
                       onClick={() => openFile(path)}
                       title={path}
-                      className="flex items-center gap-2 rounded-md px-2 py-1.5 text-left text-[12px] text-fg-base/85 transition-colors hover:bg-white/[0.06] hover:text-fg-base"
+                      className="flex items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm text-fg-base/85 transition-colors hover:bg-surface-2 hover:text-fg-base"
                     >
                       <Icon size={13} strokeWidth={1.8} style={{ color }} className="shrink-0" />
                       <span className="truncate">{name}</span>
@@ -252,7 +252,7 @@ export function EmptyWorkspace({ onOpenCommandPalette }: Props) {
           <div
             data-edit-popover
             style={{ position: 'fixed', top: editPos.y, left: editPos.x }}
-            className="material-sheet z-50 w-[248px] animate-popover-in rounded-md bg-bg-panel p-3 shadow-sheet ring-1 ring-white/10"
+            className="material-sheet z-50 w-[248px] animate-popover-in rounded-md bg-bg-panel p-3 shadow-sheet ring-1 ring-edge-2"
           >
             <WorkspaceEditPanel workspaceId={active.id} onDone={() => setEditPos(null)} />
           </div>,
@@ -264,7 +264,7 @@ export function EmptyWorkspace({ onOpenCommandPalette }: Props) {
 
 function SectionLabel({ icon: Icon, children }: { icon?: LucideIcon; children: React.ReactNode }) {
   return (
-    <div className="mb-2 flex items-center gap-1.5 font-display text-[10px] font-semibold uppercase tracking-[0.14em] text-fg-subtle/80">
+    <div className="mb-2 flex items-center gap-1.5 font-display text-2xs font-semibold uppercase tracking-[0.14em] text-fg-subtle/80">
       {Icon && <Icon size={11} strokeWidth={2.2} />}
       {children}
     </div>
@@ -286,13 +286,13 @@ function UtilityRow({
     <button
       onClick={onClick}
       className={cn(
-        'group flex items-center gap-2 rounded-md px-2 py-1.5 text-left text-[12px]',
-        'text-fg-base/85 transition-colors hover:bg-white/[0.06] hover:text-fg-base',
+        'group flex items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm',
+        'text-fg-base/85 transition-colors hover:bg-surface-2 hover:text-fg-base',
       )}
     >
       <Icon size={13} strokeWidth={1.9} className="text-fg-subtle group-hover:text-fg-muted" />
       <span className="flex-1">{label}</span>
-      {kbd && <kbd className="font-mono text-[9.5px] text-fg-subtle">{kbd}</kbd>}
+      {kbd && <kbd className="font-mono text-2xs text-fg-subtle">{kbd}</kbd>}
     </button>
   );
 }

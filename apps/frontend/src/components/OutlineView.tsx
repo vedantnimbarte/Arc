@@ -104,13 +104,13 @@ export function OutlineView() {
       {/* Header */}
       <div className="flex h-11 shrink-0 items-center gap-1.5 border-b border-border-hairline px-2.5">
         <span
-          className="min-w-0 flex-1 truncate font-display text-[12px] font-medium tracking-tight text-fg-base/90"
+          className="min-w-0 flex-1 truncate font-display text-sm font-medium tracking-tight text-fg-base/90"
           title={filePath ?? ''}
         >
           {filePath ? basename(filePath) : 'Outline'}
         </span>
         {symbols.length > 0 && (
-          <span className="shrink-0 rounded-full bg-white/[0.05] px-1.5 font-mono text-[9.5px] tabular-nums text-fg-muted">
+          <span className="shrink-0 rounded-full bg-surface-1 px-1.5 font-mono text-2xs tabular-nums text-fg-muted">
             {symbols.length}
           </span>
         )}
@@ -122,7 +122,7 @@ export function OutlineView() {
           title="Refresh"
           className={cn(
             'flex h-6 w-6 items-center justify-center rounded-md text-fg-muted transition-all duration-150 ease-apple',
-            'hover:bg-white/[0.08] hover:text-fg-base active:scale-[0.92]',
+            'hover:bg-surface-2 hover:text-fg-base active:scale-[0.92]',
             'disabled:opacity-40 disabled:hover:bg-transparent',
           )}
         >
@@ -137,7 +137,7 @@ export function OutlineView() {
             value={filter}
             onChange={(e) => setFilter(e.target.value)}
             placeholder="Filter symbols"
-            className="selectable w-full rounded-md border border-white/[0.05] bg-black/[0.22] px-2 py-1 font-display text-[12px] tracking-tight text-fg-base placeholder:text-fg-subtle focus:border-accent/40 focus:shadow-focus focus:outline-none"
+            className="selectable w-full rounded-md border border-edge-1 bg-scrim-1 px-2 py-1 font-display text-sm tracking-tight text-fg-base placeholder:text-fg-subtle focus:border-accent/40 focus:shadow-focus focus:outline-none"
           />
         </div>
       )}
@@ -145,23 +145,23 @@ export function OutlineView() {
       {/* Symbols */}
       <div className="selectable flex-1 overflow-auto px-1.5 py-1.5">
         {!isTauri && (
-          <p className="px-2 py-1.5 font-display text-[10.5px] leading-relaxed text-fg-subtle">
+          <p className="px-2 py-1.5 font-display text-2xs leading-relaxed text-fg-subtle">
             <span className="text-status-warn">web preview</span> — outline needs the
             desktop app.
           </p>
         )}
         {isTauri && !filePath && (
-          <p className="px-2 py-1.5 font-display text-[11px] leading-relaxed text-fg-subtle">
+          <p className="px-2 py-1.5 font-display text-xs leading-relaxed text-fg-subtle">
             Open a file to see its outline.
           </p>
         )}
         {error && (
-          <p className="px-2 py-1.5 font-display text-[10.5px] leading-relaxed text-status-err/90">
+          <p className="px-2 py-1.5 font-display text-2xs leading-relaxed text-status-err/90">
             {error}
           </p>
         )}
         {filePath && !error && !loading && symbols.length === 0 && (
-          <p className="px-2 py-1.5 font-display text-[11px] leading-relaxed text-fg-subtle">
+          <p className="px-2 py-1.5 font-display text-xs leading-relaxed text-fg-subtle">
             No symbols found in this file.
           </p>
         )}
@@ -172,13 +172,13 @@ export function OutlineView() {
               key={`${sym.line}-${sym.name}-${i}`}
               type="button"
               onClick={() => filePath && openFile(filePath, undefined, { line: sym.line })}
-              className="group flex h-[26px] w-full items-center gap-1.5 rounded-md pr-2 font-display text-[12.5px] tracking-tight transition-colors duration-100 hover:bg-white/[0.045]"
+              className="group flex h-[26px] w-full items-center gap-1.5 rounded-md pr-2 font-display text-sm tracking-tight transition-colors duration-100 hover:bg-surface-1"
               style={{ paddingLeft: 8 + Math.min(sym.depth, 6) * 12 }}
               title={`${sym.kind} · line ${sym.line}`}
             >
               <Icon size={12} strokeWidth={1.9} className="shrink-0 text-fg-subtle" />
               <span className="truncate text-fg-base/85 group-hover:text-fg-base">{sym.name}</span>
-              <span className="ml-auto shrink-0 font-mono text-[9.5px] tabular-nums text-fg-subtle/70">
+              <span className="ml-auto shrink-0 font-mono text-2xs tabular-nums text-fg-subtle/70">
                 {sym.line}
               </span>
             </button>

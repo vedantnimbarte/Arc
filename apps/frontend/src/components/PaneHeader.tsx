@@ -159,11 +159,11 @@ export function PaneHeader({ paneId }: Props) {
 
       {/* name · folder */}
       <div className="flex min-w-0 items-baseline gap-1.5">
-        <span className="truncate font-display text-[12px] font-medium tracking-tight text-fg-base/90">
+        <span className="truncate font-display text-sm font-medium tracking-tight text-fg-base/90">
           {tab.title}
         </span>
         {folder && (
-          <span className="shrink-0 truncate font-display text-[11.5px] text-fg-subtle">
+          <span className="shrink-0 truncate font-display text-xs text-fg-subtle">
             · {folder}
           </span>
         )}
@@ -173,7 +173,7 @@ export function PaneHeader({ paneId }: Props) {
         {/* Branch pill only when there's room — it's the first thing to yield. */}
         {branch && !compact && (
           <span
-            className="flex items-center gap-1 rounded-full bg-white/[0.06] px-1.5 py-0.5 font-mono text-[10px] text-fg-muted"
+            className="flex items-center gap-1 rounded-full bg-surface-2 px-1.5 py-0.5 font-mono text-2xs text-fg-muted"
             title={`On branch ${branch}`}
           >
             <GitBranch size={9} strokeWidth={2.2} className="shrink-0" />
@@ -195,8 +195,8 @@ export function PaneHeader({ paneId }: Props) {
               setMenuAnchor((m) => (m ? null : { x: r.right, y: r.bottom + 4 }));
             }}
             className={cn(
-              'flex h-[22px] w-[22px] items-center justify-center rounded transition-colors hover:bg-white/10 hover:text-fg-base',
-              menuAnchor ? 'bg-white/10 text-fg-base' : 'text-fg-subtle',
+              'flex h-[22px] w-[22px] items-center justify-center rounded transition-colors hover:bg-surface-3 hover:text-fg-base',
+              menuAnchor ? 'bg-surface-3 text-fg-base' : 'text-fg-subtle',
             )}
           >
             <MoreHorizontal size={14} strokeWidth={2} />
@@ -264,11 +264,11 @@ function OverflowMenu({
     <div
       role="menu"
       style={{ position: 'fixed', top: y, left, width: WIDTH }}
-      className="material-sheet z-[60] animate-popover-in overflow-hidden rounded-md bg-bg-panel py-1 shadow-sheet ring-1 ring-white/10"
+      className="material-sheet z-[60] animate-popover-in overflow-hidden rounded-md bg-bg-panel py-1 shadow-sheet ring-1 ring-edge-2"
       onMouseDown={(e) => e.stopPropagation()}
     >
       {branch && (
-        <div className="flex items-center gap-1.5 px-3 pb-1 pt-0.5 font-mono text-[10px] text-fg-subtle">
+        <div className="flex items-center gap-1.5 px-3 pb-1 pt-0.5 font-mono text-2xs text-fg-subtle">
           <GitBranch size={9} strokeWidth={2.2} className="shrink-0" />
           <span className="truncate">{branch}</span>
         </div>
@@ -281,7 +281,7 @@ function OverflowMenu({
             a.run();
             onClose();
           }}
-          className="flex w-full items-center gap-2.5 px-3 py-1.5 text-left font-display text-[12px] text-fg-base/90 transition-colors hover:bg-white/[0.06]"
+          className="flex w-full items-center gap-2.5 px-3 py-1.5 text-left font-display text-sm text-fg-base/90 transition-colors hover:bg-surface-2"
         >
           <a.Icon size={13} strokeWidth={2} className="shrink-0 text-fg-subtle" />
           <span className="flex-1 truncate">{a.label}</span>
@@ -310,7 +310,7 @@ function HeaderButton({
         e.stopPropagation();
         onClick();
       }}
-      className="flex h-[22px] w-[22px] items-center justify-center rounded text-fg-subtle transition-colors hover:bg-white/10 hover:text-fg-base"
+      className="flex h-[22px] w-[22px] items-center justify-center rounded text-fg-subtle transition-colors hover:bg-surface-3 hover:text-fg-base"
     >
       {children}
     </button>

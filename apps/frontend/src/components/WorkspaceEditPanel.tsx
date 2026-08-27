@@ -43,7 +43,7 @@ export function WorkspaceEditPanel({
 
   return (
     <>
-      <label className="mb-1 block font-display text-[9.5px] uppercase tracking-wider text-fg-subtle/80">
+      <label className="mb-1 block font-display text-2xs uppercase tracking-wider text-fg-subtle/80">
         Name
       </label>
       <input
@@ -60,10 +60,10 @@ export function WorkspaceEditPanel({
           }
         }}
         placeholder="Workspace name"
-        className="mb-3 w-full rounded border border-accent/45 bg-bg-base/80 px-2 py-1 font-display text-[12px] tracking-tight text-fg-base focus:shadow-focus focus:outline-none"
+        className="mb-3 w-full rounded border border-accent/45 bg-bg-base/80 px-2 py-1 font-display text-sm tracking-tight text-fg-base focus:shadow-focus focus:outline-none"
       />
 
-      <label className="mb-1 block font-display text-[9.5px] uppercase tracking-wider text-fg-subtle/80">
+      <label className="mb-1 block font-display text-2xs uppercase tracking-wider text-fg-subtle/80">
         Icon
       </label>
       <div className="grid grid-cols-7 gap-1">
@@ -71,8 +71,8 @@ export function WorkspaceEditPanel({
           onClick={() => setWorkspaceIcon(workspaceId, { icon: undefined })}
           title="No emoji (use initials)"
           className={cn(
-            'flex h-7 items-center justify-center rounded text-[10px] font-medium transition-colors hover:bg-white/[0.08] hover:text-fg-base',
-            workspace.icon ? 'text-fg-subtle' : 'bg-white/[0.08] text-fg-base',
+            'flex h-7 items-center justify-center rounded text-2xs font-medium transition-colors hover:bg-surface-2 hover:text-fg-base',
+            workspace.icon ? 'text-fg-subtle' : 'bg-surface-2 text-fg-base',
           )}
         >
           Aa
@@ -82,8 +82,8 @@ export function WorkspaceEditPanel({
             key={emoji}
             onClick={() => setWorkspaceIcon(workspaceId, { icon: emoji })}
             className={cn(
-              'flex h-7 items-center justify-center rounded text-[16px] transition-colors hover:bg-white/[0.08]',
-              workspace.icon === emoji && 'bg-white/[0.10]',
+              'flex h-7 items-center justify-center rounded text-lg transition-colors hover:bg-surface-2',
+              workspace.icon === emoji && 'bg-surface-3',
             )}
           >
             {emoji}
@@ -91,7 +91,7 @@ export function WorkspaceEditPanel({
         ))}
       </div>
 
-      <label className="mb-1 mt-3 block font-display text-[9.5px] uppercase tracking-wider text-fg-subtle/80">
+      <label className="mb-1 mt-3 block font-display text-2xs uppercase tracking-wider text-fg-subtle/80">
         Colour
       </label>
       <div className="flex items-center justify-between px-0.5">

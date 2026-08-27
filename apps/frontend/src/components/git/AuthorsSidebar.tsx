@@ -36,22 +36,22 @@ export function AuthorsSidebar({ authors, selected, onToggle, onClear, loading }
 
   return (
     <aside className="material-sidebar flex h-full w-[252px] shrink-0 flex-col border-r border-border-subtle">
-      <div className="flex items-center gap-1.5 px-4 pb-2 pt-3 font-display text-[10px] uppercase tracking-widest2 text-fg-subtle">
+      <div className="flex items-center gap-1.5 px-4 pb-2 pt-3 font-display text-2xs uppercase tracking-widest2 text-fg-subtle">
         <Users size={11} strokeWidth={2.1} />
         <span>Authors</span>
-        <span className="ml-auto rounded-full bg-white/[0.04] px-1.5 py-[1px] font-mono text-[9.5px] tabular-nums normal-case tracking-normal text-fg-muted">
+        <span className="ml-auto rounded-full bg-surface-1 px-1.5 py-[1px] font-mono text-2xs tabular-nums normal-case tracking-normal text-fg-muted">
           {authors.length}
         </span>
       </div>
 
       <div className="px-3 pb-2">
-        <div className="group flex items-center gap-2 rounded-full bg-white/[0.04] px-3 py-1.5 ring-1 ring-inset ring-white/[0.05] transition-all duration-200 focus-within:bg-white/[0.06] focus-within:ring-accent/30">
+        <div className="group flex items-center gap-2 rounded-full bg-surface-1 px-3 py-1.5 ring-1 ring-inset ring-edge-1 transition-all duration-200 focus-within:bg-surface-2 focus-within:ring-accent/30">
           <Search size={11} strokeWidth={2.2} className="text-fg-subtle transition-colors group-focus-within:text-accent-bright" />
           <input
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             placeholder="filter authors…"
-            className="flex-1 bg-transparent font-display text-[11.5px] text-fg-base placeholder:text-fg-subtle/70 focus:outline-none"
+            className="flex-1 bg-transparent font-display text-xs text-fg-base placeholder:text-fg-subtle/70 focus:outline-none"
             spellCheck={false}
             autoComplete="off"
           />
@@ -72,7 +72,7 @@ export function AuthorsSidebar({ authors, selected, onToggle, onClear, loading }
           <button
             onClick={onClear}
             className={cn(
-              'flex w-full items-center justify-between rounded-lg px-3 py-1.5 text-left font-display text-[10.5px] transition-all duration-200',
+              'flex w-full items-center justify-between rounded-lg px-3 py-1.5 text-left font-display text-2xs transition-all duration-200',
               'bg-accent-soft text-fg-muted ring-1 ring-inset ring-accent/15',
               'hover:bg-accent/[0.12] hover:text-fg-base',
             )}
@@ -85,10 +85,10 @@ export function AuthorsSidebar({ authors, selected, onToggle, onClear, loading }
 
       <div className="flex min-h-0 flex-1 flex-col gap-px overflow-y-auto px-2 pb-2">
         {loading && (
-          <div className="px-3 py-4 font-display text-[11px] text-fg-subtle">loading…</div>
+          <div className="px-3 py-4 font-display text-xs text-fg-subtle">loading…</div>
         )}
         {!loading && filtered.length === 0 && (
-          <div className="px-3 py-4 font-display text-[11px] text-fg-subtle">
+          <div className="px-3 py-4 font-display text-xs text-fg-subtle">
             {authors.length === 0 ? 'no commits yet' : `no match for "${query}"`}
           </div>
         )}
@@ -103,16 +103,16 @@ export function AuthorsSidebar({ authors, selected, onToggle, onClear, loading }
                 'group relative flex items-center gap-2.5 rounded-lg px-2 py-1.5 text-left transition-all duration-150',
                 isSel
                   ? 'bg-gradient-to-r from-accent/[0.16] to-accent/[0.06] text-fg-base ring-1 ring-inset ring-accent/20'
-                  : 'text-fg-muted hover:bg-white/[0.045] hover:text-fg-base',
+                  : 'text-fg-muted hover:bg-surface-1 hover:text-fg-base',
               )}
               title={`${a.name} <${a.email}>`}
             >
               <Avatar name={a.name} email={a.email} selected={isSel} />
-              <span className="min-w-0 flex-1 truncate font-display text-[12px]">{a.name || a.email}</span>
+              <span className="min-w-0 flex-1 truncate font-display text-sm">{a.name || a.email}</span>
               <span
                 className={cn(
-                  'shrink-0 rounded-full px-1.5 py-[1px] font-mono text-[9.5px] tabular-nums transition-colors',
-                  isSel ? 'bg-white/[0.08] text-fg-base' : 'text-fg-subtle group-hover:bg-white/[0.04]',
+                  'shrink-0 rounded-full px-1.5 py-[1px] font-mono text-2xs tabular-nums transition-colors',
+                  isSel ? 'bg-surface-2 text-fg-base' : 'text-fg-subtle group-hover:bg-surface-1',
                 )}
               >
                 {a.commits}
@@ -122,7 +122,7 @@ export function AuthorsSidebar({ authors, selected, onToggle, onClear, loading }
         })}
       </div>
 
-      <div className="border-t border-border-subtle px-4 py-2 font-display text-[10px] tabular-nums text-fg-subtle">
+      <div className="border-t border-border-subtle px-4 py-2 font-display text-2xs tabular-nums text-fg-subtle">
         <span className="text-fg-muted">{total}</span>{' '}
         <span className="opacity-70">{total === 1 ? 'commit' : 'commits'} total</span>
       </div>
@@ -152,7 +152,7 @@ function Avatar({ name, email, selected }: { name: string; email: string; select
   return (
     <span
       className={cn(
-        'relative flex h-6 w-6 shrink-0 items-center justify-center rounded-full font-display text-[9.5px] font-semibold text-black/85 transition-all duration-200',
+        'relative flex h-6 w-6 shrink-0 items-center justify-center rounded-full font-display text-2xs font-semibold text-black/85 transition-all duration-200',
         selected
           ? 'ring-2 ring-accent/50 ring-offset-1 ring-offset-bg-base shadow-glow-sm'
           : 'ring-1 ring-inset ring-black/20',

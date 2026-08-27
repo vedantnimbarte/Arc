@@ -136,7 +136,7 @@ export function Preview({ tabId }: Props) {
           <RotateCw size={13} strokeWidth={2.1} />
         </IconButton>
 
-        <div className="flex flex-1 items-center gap-1.5 rounded-md border border-white/[0.05] bg-black/[0.22] px-2 py-1 focus-within:border-accent/40 focus-within:shadow-focus">
+        <div className="flex flex-1 items-center gap-1.5 rounded-md border border-edge-1 bg-scrim-1 px-2 py-1 focus-within:border-accent/40 focus-within:shadow-focus">
           <Globe size={11} strokeWidth={2.1} className="shrink-0 text-fg-subtle" />
           <input
             value={inputUrl}
@@ -145,7 +145,7 @@ export function Preview({ tabId }: Props) {
             spellCheck={false}
             autoCapitalize="off"
             autoCorrect="off"
-            className="selectable min-w-0 flex-1 bg-transparent font-mono text-[11.5px] tracking-tight text-fg-base placeholder:text-fg-subtle focus:outline-none"
+            className="selectable min-w-0 flex-1 bg-transparent font-mono text-xs tracking-tight text-fg-base placeholder:text-fg-subtle focus:outline-none"
           />
           <button
             ref={pickerAnchorRef}
@@ -153,7 +153,7 @@ export function Preview({ tabId }: Props) {
             onClick={() => setPickerOpen((o) => !o)}
             aria-label="Detect ports"
             title="Detect ports"
-            className="flex h-4 w-4 items-center justify-center rounded text-fg-subtle transition-colors hover:bg-white/[0.10] hover:text-fg-base"
+            className="flex h-4 w-4 items-center justify-center rounded text-fg-subtle transition-colors hover:bg-surface-3 hover:text-fg-base"
           >
             <ChevronDown size={10} strokeWidth={2.4} />
           </button>
@@ -287,21 +287,21 @@ function PortPicker({ anchor, onClose, onPick }: PortPickerProps) {
       role="menu"
       aria-label="Detected ports"
       style={{ position: 'fixed', left: pos.left, top: pos.top }}
-      className="material-sheet z-50 w-60 animate-popover-in overflow-hidden rounded-md p-1.5 shadow-sheet ring-1 ring-white/10"
+      className="material-sheet z-50 w-60 animate-popover-in overflow-hidden rounded-md p-1.5 shadow-sheet ring-1 ring-edge-2"
     >
       <div className="flex items-center justify-between px-2 py-1">
-        <span className="font-display text-[10px] uppercase tracking-wider text-fg-subtle/80">
+        <span className="font-display text-2xs uppercase tracking-wider text-fg-subtle/80">
           {hit ? hit.framework : 'Detecting…'}
         </span>
         {probing && (
-          <span className="font-display text-[9.5px] text-fg-subtle">probing…</span>
+          <span className="font-display text-2xs text-fg-subtle">probing…</span>
         )}
       </div>
 
       {live.length > 0 && (
         <>
-          <div className="my-0.5 border-t border-white/[0.05]" />
-          <div className="px-2 pb-0.5 pt-1 font-display text-[9px] uppercase tracking-wider text-fg-subtle/70">
+          <div className="my-0.5 border-t border-edge-1" />
+          <div className="px-2 pb-0.5 pt-1 font-display text-2xs uppercase tracking-wider text-fg-subtle/70">
             Live
           </div>
           {live.map((p) => (
@@ -312,8 +312,8 @@ function PortPicker({ anchor, onClose, onPick }: PortPickerProps) {
 
       {defaults.length > 0 && (
         <>
-          <div className="my-0.5 border-t border-white/[0.05]" />
-          <div className="px-2 pb-0.5 pt-1 font-display text-[9px] uppercase tracking-wider text-fg-subtle/70">
+          <div className="my-0.5 border-t border-edge-1" />
+          <div className="px-2 pb-0.5 pt-1 font-display text-2xs uppercase tracking-wider text-fg-subtle/70">
             Common
           </div>
           {defaults.map((p) => (
@@ -340,7 +340,7 @@ function PortRow({
       role="menuitem"
       onClick={onClick}
       className={cn(
-        'flex w-full items-center gap-2 rounded px-2 py-1.5 text-left font-mono text-[11.5px] transition-colors hover:bg-white/[0.06]',
+        'flex w-full items-center gap-2 rounded px-2 py-1.5 text-left font-mono text-xs transition-colors hover:bg-surface-2',
         live ? 'text-fg-base' : 'text-fg-muted',
       )}
     >
@@ -348,12 +348,12 @@ function PortRow({
         aria-hidden
         className={cn(
           'h-1.5 w-1.5 rounded-full',
-          live ? 'bg-emerald-400 shadow-[0_0_6px_rgba(52,211,153,0.6)]' : 'bg-white/[0.18]',
+          live ? 'bg-emerald-400 shadow-[0_0_6px_rgba(52,211,153,0.6)]' : 'bg-surface-3',
         )}
       />
       <span className="flex-1">localhost:{port}</span>
       {live && (
-        <span className="font-display text-[9.5px] uppercase tracking-wider text-emerald-300/80">
+        <span className="font-display text-2xs uppercase tracking-wider text-emerald-300/80">
           live
         </span>
       )}
@@ -383,7 +383,7 @@ function IconButton({
       disabled={disabled}
       aria-label={ariaLabel}
       title={title}
-      className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-fg-muted transition-colors duration-150 hover:bg-white/[0.08] hover:text-fg-base disabled:opacity-40 disabled:hover:bg-transparent"
+      className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-fg-muted transition-colors duration-150 hover:bg-surface-2 hover:text-fg-base disabled:opacity-40 disabled:hover:bg-transparent"
     >
       {children}
     </button>
@@ -395,14 +395,14 @@ function EmptyState({ onPickPort }: { onPickPort: () => void }) {
     <div className="flex h-full w-full flex-col items-center justify-center gap-3 text-center">
       <Globe size={28} strokeWidth={1.5} className="text-fg-subtle" />
       <div className="space-y-1">
-        <p className="font-display text-[13px] text-fg-base">No URL loaded</p>
-        <p className="max-w-xs font-display text-[11.5px] leading-relaxed text-fg-muted">
+        <p className="font-display text-base text-fg-base">No URL loaded</p>
+        <p className="max-w-xs font-display text-xs leading-relaxed text-fg-muted">
           Type a URL above and press Enter, or pick a running dev-server port.
         </p>
       </div>
       <button
         onClick={onPickPort}
-        className="rounded-md bg-white/[0.06] px-3 py-1.5 font-display text-[11.5px] text-fg-base transition-colors hover:bg-white/[0.10]"
+        className="rounded-md bg-surface-2 px-3 py-1.5 font-display text-xs text-fg-base transition-colors hover:bg-surface-3"
       >
         Detect ports
       </button>

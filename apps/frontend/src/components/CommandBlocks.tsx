@@ -81,12 +81,12 @@ export function CommandBlocks({ open, onClose }: Props) {
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-start justify-center bg-black/40 backdrop-blur-sm"
+      className="fixed inset-0 z-50 flex items-start justify-center bg-scrim-2 backdrop-blur-sm"
       onClick={onClose}
     >
       <div
         onClick={(e) => e.stopPropagation()}
-        className="material-sheet mt-[10vh] flex max-h-[80vh] w-[720px] max-w-[94vw] animate-sheet-in flex-col overflow-hidden rounded-window shadow-sheet ring-1 ring-white/10"
+        className="material-sheet mt-[10vh] flex max-h-[80vh] w-[720px] max-w-[94vw] animate-sheet-in flex-col overflow-hidden rounded-window shadow-sheet ring-1 ring-edge-2"
       >
         <div className="flex items-center gap-2 border-b border-border-hairline px-3.5 py-2.5">
           <SquareTerminal size={13} strokeWidth={2.1} className="text-fg-subtle" />
@@ -96,16 +96,16 @@ export function CommandBlocks({ open, onClose }: Props) {
             onChange={(e) => setQuery(e.target.value)}
             onKeyDown={(e) => e.key === 'Escape' && onClose()}
             placeholder="filter command blocks…"
-            className="flex-1 bg-transparent font-display text-[13px] text-fg-base placeholder:text-fg-subtle focus:outline-none"
+            className="flex-1 bg-transparent font-display text-base text-fg-base placeholder:text-fg-subtle focus:outline-none"
             autoComplete="off"
             spellCheck={false}
           />
-          <kbd className="font-mono text-[10px] text-fg-subtle">esc</kbd>
+          <kbd className="font-mono text-2xs text-fg-subtle">esc</kbd>
         </div>
 
         <div className="flex-1 overflow-y-auto p-2">
           {rows.length === 0 && (
-            <div className="flex items-center justify-center gap-1.5 px-4 py-8 font-display text-[11.5px] italic text-fg-subtle">
+            <div className="flex items-center justify-center gap-1.5 px-4 py-8 font-display text-xs italic text-fg-subtle">
               {isTauri ? (
                 <>
                   <Search size={11} strokeWidth={2} />
@@ -145,16 +145,16 @@ export function CommandBlocks({ open, onClose }: Props) {
                       <span className="w-3 shrink-0" />
                     )}
                     <StatusBadge ok={ok} failed={failed} code={row.exit_code} />
-                    <span className="min-w-0 flex-1 truncate font-mono text-[12px] text-fg-base/90">
+                    <span className="min-w-0 flex-1 truncate font-mono text-sm text-fg-base/90">
                       {row.command}
                     </span>
                   </button>
-                  <span className="shrink-0 font-mono text-[10px] text-fg-subtle">
+                  <span className="shrink-0 font-mono text-2xs text-fg-subtle">
                     {formatAge(row.started_at)}
                   </span>
                   <button
                     onClick={() => void pasteInto(row.command)}
-                    className="inline-flex shrink-0 items-center gap-1 rounded-md border border-border-subtle px-1.5 py-0.5 font-display text-[10.5px] text-fg-muted transition-colors hover:border-border-strong hover:text-fg-base"
+                    className="inline-flex shrink-0 items-center gap-1 rounded-md border border-border-subtle px-1.5 py-0.5 font-display text-2xs text-fg-muted transition-colors hover:border-border-strong hover:text-fg-base"
                     title="Paste into the active terminal"
                   >
                     <CornerDownLeft size={10} strokeWidth={2.2} />
@@ -164,7 +164,7 @@ export function CommandBlocks({ open, onClose }: Props) {
 
                 {isOpen && hasOutput && (
                   <div className="border-t border-border-hairline px-2.5 py-2">
-                    <pre className="max-h-48 overflow-auto whitespace-pre-wrap break-words font-mono text-[11px] leading-relaxed text-fg-muted">
+                    <pre className="max-h-48 overflow-auto whitespace-pre-wrap break-words font-mono text-xs leading-relaxed text-fg-muted">
                       {row.output_excerpt}
                     </pre>
                   </div>
@@ -174,7 +174,7 @@ export function CommandBlocks({ open, onClose }: Props) {
           })}
         </div>
 
-        <div className="flex items-center justify-between border-t border-border-hairline px-3.5 py-1.5 font-display text-[10px] text-fg-subtle">
+        <div className="flex items-center justify-between border-t border-border-hairline px-3.5 py-1.5 font-display text-2xs text-fg-subtle">
           <span>
             <kbd className="font-mono">esc</kbd> close · click a block to expand output
           </span>
@@ -188,21 +188,21 @@ export function CommandBlocks({ open, onClose }: Props) {
 function StatusBadge({ ok, failed, code }: { ok: boolean; failed: boolean; code: number | null }) {
   if (ok)
     return (
-      <span className="shrink-0 rounded px-1 font-mono text-[10px] text-status-ok" title="exit 0">
+      <span className="shrink-0 rounded px-1 font-mono text-2xs text-status-ok" title="exit 0">
         ✓
       </span>
     );
   if (failed)
     return (
       <span
-        className="shrink-0 rounded bg-status-err/15 px-1 font-mono text-[10px] text-status-err"
+        className="shrink-0 rounded bg-status-err/15 px-1 font-mono text-2xs text-status-err"
         title={`exit ${code}`}
       >
         {code}
       </span>
     );
   return (
-    <span className="shrink-0 rounded px-1 font-mono text-[10px] text-fg-subtle" title="no exit code (no shell integration)">
+    <span className="shrink-0 rounded px-1 font-mono text-2xs text-fg-subtle" title="no exit code (no shell integration)">
       ·
     </span>
   );

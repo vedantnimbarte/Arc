@@ -270,7 +270,7 @@ function SidebarRail({
         style={{ left: indicator.left, width: indicator.width }}
         className={cn(
           'pointer-events-none absolute top-1/2 z-0 h-[22px] -translate-y-1/2 rounded-md',
-          'bg-white/[0.06] ring-1 ring-inset ring-accent/15 shadow-[inset_0_1px_0_0_rgba(255,255,255,0.05)]',
+          'bg-surface-2 ring-1 ring-inset ring-accent/15 shadow-[inset_0_1px_0_0_rgba(255,255,255,0.05)]',
           'transition-opacity duration-200 motion-reduce:transition-none',
           indicator.ready ? 'opacity-100' : 'opacity-0',
         )}
@@ -308,7 +308,7 @@ function SidebarRail({
               'focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-accent/40',
               active
                 ? 'px-1.5 text-accent-bright'
-                : 'w-[22px] justify-center text-fg-muted hover:bg-white/[0.045] hover:text-fg-base',
+                : 'w-[22px] justify-center text-fg-muted hover:bg-surface-1 hover:text-fg-base',
             )}
           >
             <span className="relative flex h-3 w-3 shrink-0 items-center justify-center">
@@ -340,7 +340,7 @@ function SidebarRail({
                 active ? 'ml-1 grid-cols-[1fr] opacity-100' : 'ml-0 grid-cols-[0fr] opacity-0',
               )}
             >
-              <span className="overflow-hidden whitespace-nowrap font-display text-[10px] font-medium tracking-tight">
+              <span className="overflow-hidden whitespace-nowrap font-display text-2xs font-medium tracking-tight">
                 {label}
               </span>
             </span>
@@ -404,8 +404,8 @@ export function SidebarMiniRail() {
               'transition-all duration-200 ease-out-soft active:scale-95 motion-reduce:transition-none',
               'focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-accent/40',
               active
-                ? 'bg-white/[0.06] text-accent-bright ring-1 ring-inset ring-accent/15 shadow-[inset_0_1px_0_0_rgba(255,255,255,0.05)]'
-                : 'text-fg-muted hover:bg-white/[0.045] hover:text-fg-base',
+                ? 'bg-surface-2 text-accent-bright ring-1 ring-inset ring-accent/15 shadow-[inset_0_1px_0_0_rgba(255,255,255,0.05)]'
+                : 'text-fg-muted hover:bg-surface-1 hover:text-fg-base',
             )}
           >
             {/* Ribbon marks the active view — on the outer (right) edge now
@@ -586,11 +586,11 @@ function RailContextMenu({
       style={{ left: pos.x, top: pos.y }}
       role="menu"
       aria-label="View actions"
-      className="fixed z-[9999] min-w-[172px] rounded-xl border border-white/[0.09] bg-[#1b1b1d] p-1.5 shadow-2xl shadow-black/70 animate-view-in motion-reduce:animate-none"
+      className="fixed z-[9999] min-w-[172px] rounded-xl border border-edge-2 bg-[#1b1b1d] p-1.5 shadow-2xl shadow-black/70 animate-view-in motion-reduce:animate-none"
     >
       {items.map((item, i) =>
         item.separator ? (
-          <div key={`sep-${i}`} className="my-1 border-t border-white/[0.07]" />
+          <div key={`sep-${i}`} className="my-1 border-t border-edge-2" />
         ) : (
           <button
             key={item.label}
@@ -600,7 +600,7 @@ function RailContextMenu({
               item.onClick();
               onClose();
             }}
-            className="flex w-full items-center rounded-md px-3 py-[5px] font-display text-[12.5px] tracking-tight text-fg-base/90 transition-colors duration-100 hover:bg-white/[0.07] hover:text-fg-base"
+            className="flex w-full items-center rounded-md px-3 py-[5px] font-display text-sm tracking-tight text-fg-base/90 transition-colors duration-100 hover:bg-surface-2 hover:text-fg-base"
           >
             {item.label}
           </button>

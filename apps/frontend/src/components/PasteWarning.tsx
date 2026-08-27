@@ -38,22 +38,22 @@ export function PasteWarning() {
 
   return (
     <div
-      className="fixed inset-0 z-[60] flex items-start justify-center bg-black/40 backdrop-blur-sm"
+      className="fixed inset-0 z-[60] flex items-start justify-center bg-scrim-2 backdrop-blur-sm"
       onClick={() => respond(false)}
     >
       <div
         onClick={(e) => e.stopPropagation()}
-        className="material-sheet mt-[12vh] flex w-[560px] max-w-[92vw] animate-sheet-in flex-col overflow-hidden rounded-window shadow-sheet ring-1 ring-white/10"
+        className="material-sheet mt-[12vh] flex w-[560px] max-w-[92vw] animate-sheet-in flex-col overflow-hidden rounded-window shadow-sheet ring-1 ring-edge-2"
       >
         <div className="flex items-center justify-between border-b border-border-hairline px-4 py-2.5">
-          <div className="flex items-center gap-2 font-display text-[12.5px] font-semibold tracking-tight text-fg-base">
+          <div className="flex items-center gap-2 font-display text-sm font-semibold tracking-tight text-fg-base">
             <AlertTriangle size={12} strokeWidth={2.1} className="text-amber-400" />
             Review paste before running
           </div>
           <button
             onClick={() => respond(false)}
             title="Cancel (esc)"
-            className="rounded p-1 text-fg-subtle transition-colors hover:bg-white/[0.06] hover:text-fg-base"
+            className="rounded p-1 text-fg-subtle transition-colors hover:bg-surface-2 hover:text-fg-base"
           >
             <X size={11} strokeWidth={2.2} />
           </button>
@@ -64,12 +64,12 @@ export function PasteWarning() {
           {flags.map((f, i) => (
             <span
               key={i}
-              className="inline-flex items-center gap-1.5 rounded-md bg-amber-400/[0.12] px-2 py-1 font-display text-[10.5px] font-medium text-amber-300 ring-1 ring-amber-400/25"
+              className="inline-flex items-center gap-1.5 rounded-md bg-amber-400/[0.12] px-2 py-1 font-display text-2xs font-medium text-amber-300 ring-1 ring-amber-400/25"
               title={f.match || undefined}
             >
               {f.label}
               {f.match && (
-                <code className="rounded bg-black/25 px-1 font-mono text-[9.5px] text-amber-200/90">
+                <code className="rounded bg-scrim-1 px-1 font-mono text-2xs text-amber-200/90">
                   {f.match.length > 40 ? `${f.match.slice(0, 40)}…` : f.match}
                 </code>
               )}
@@ -79,25 +79,25 @@ export function PasteWarning() {
 
         {/* Content preview */}
         <div className="max-h-[40vh] overflow-auto bg-bg-base/40 px-4 py-3">
-          <pre className="whitespace-pre-wrap break-words font-mono text-[11.5px] leading-relaxed text-fg-base/90">
+          <pre className="whitespace-pre-wrap break-words font-mono text-xs leading-relaxed text-fg-base/90">
             {preview}
           </pre>
         </div>
 
         <div className="flex items-center justify-between border-t border-border-hairline bg-bg-base/30 px-4 py-2">
-          <div className="font-display text-[10.5px] text-fg-subtle">
+          <div className="font-display text-2xs text-fg-subtle">
             shift-paste skips this check next time
           </div>
           <div className="flex items-center gap-2">
             <button
               onClick={() => respond(false)}
-              className="rounded px-2.5 py-1 font-display text-[11px] text-fg-muted hover:bg-white/[0.05] hover:text-fg-base"
+              className="rounded px-2.5 py-1 font-display text-xs text-fg-muted hover:bg-surface-1 hover:text-fg-base"
             >
               cancel
             </button>
             <button
               onClick={() => respond(true)}
-              className="flex items-center gap-1.5 rounded bg-amber-400/15 px-3 py-1 font-display text-[11px] font-medium text-amber-200 ring-1 ring-amber-400/40 transition-colors hover:bg-amber-400/25"
+              className="flex items-center gap-1.5 rounded bg-amber-400/15 px-3 py-1 font-display text-xs font-medium text-amber-200 ring-1 ring-amber-400/40 transition-colors hover:bg-amber-400/25"
               title="Paste anyway (⌘↵)"
             >
               <ClipboardPaste size={10} strokeWidth={2.2} />

@@ -50,12 +50,12 @@ export function ImportKeyDialog({ onClose }: ImportKeyDialogProps) {
   return (
     <div className="absolute inset-0 z-10 flex flex-col bg-bg-panel/95 backdrop-blur-md animate-fade-in">
       <div className="border-b border-border-subtle px-4 py-2.5">
-        <div className="font-display text-[12px] text-fg-base">Import existing key</div>
+        <div className="font-display text-sm text-fg-base">Import existing key</div>
       </div>
 
       <div className="flex-1 overflow-y-auto px-4 py-3">
         <div className="mb-3">
-          <div className="mb-1 font-mono text-[9.5px] uppercase tracking-widest2 text-fg-subtle">
+          <div className="mb-1 font-mono text-2xs uppercase tracking-widest2 text-fg-subtle">
             Path to private key
           </div>
           <div className="flex items-center gap-1 rounded-squircle border border-border-subtle bg-bg-subtle px-2 py-1.5 focus-within:border-accent">
@@ -70,7 +70,7 @@ export function ImportKeyDialog({ onClose }: ImportKeyDialogProps) {
                 }
               }}
               placeholder="/Users/you/.ssh/id_ed25519"
-              className="flex-1 bg-transparent font-mono text-[12px] text-fg-base placeholder:text-fg-subtle focus:outline-none"
+              className="flex-1 bg-transparent font-mono text-sm text-fg-base placeholder:text-fg-subtle focus:outline-none"
             />
             <button
               type="button"
@@ -84,19 +84,19 @@ export function ImportKeyDialog({ onClose }: ImportKeyDialogProps) {
         </div>
 
         <div className="mb-3">
-          <div className="mb-1 font-mono text-[9.5px] uppercase tracking-widest2 text-fg-subtle">
+          <div className="mb-1 font-mono text-2xs uppercase tracking-widest2 text-fg-subtle">
             Name
           </div>
           <input
             value={name}
             onChange={(e) => setName(e.target.value)}
             placeholder="id_ed25519"
-            className="w-full rounded-squircle border border-border-subtle bg-bg-subtle px-2 py-1.5 font-mono text-[12px] text-fg-base focus:border-accent focus:outline-none"
+            className="w-full rounded-squircle border border-border-subtle bg-bg-subtle px-2 py-1.5 font-mono text-sm text-fg-base focus:border-accent focus:outline-none"
           />
         </div>
 
         <div className="mb-3">
-          <div className="mb-1 flex items-center justify-between font-mono text-[9.5px] uppercase tracking-widest2 text-fg-subtle">
+          <div className="mb-1 flex items-center justify-between font-mono text-2xs uppercase tracking-widest2 text-fg-subtle">
             <span>Passphrase</span>
             <span className="text-fg-subtle">if encrypted</span>
           </div>
@@ -105,12 +105,12 @@ export function ImportKeyDialog({ onClose }: ImportKeyDialogProps) {
             value={passphrase}
             onChange={(e) => setPassphrase(e.target.value)}
             placeholder="leave blank if unencrypted"
-            className="w-full rounded-squircle border border-border-subtle bg-bg-subtle px-2 py-1.5 font-mono text-[12px] text-fg-base placeholder:text-fg-subtle focus:border-accent focus:outline-none"
+            className="w-full rounded-squircle border border-border-subtle bg-bg-subtle px-2 py-1.5 font-mono text-sm text-fg-base placeholder:text-fg-subtle focus:border-accent focus:outline-none"
           />
         </div>
 
         {err && (
-          <div className="rounded border border-status-err/40 bg-status-err/10 px-2 py-1.5 font-mono text-[11px] text-status-err">
+          <div className="rounded border border-status-err/40 bg-status-err/10 px-2 py-1.5 font-mono text-xs text-status-err">
             {err}
           </div>
         )}
@@ -120,7 +120,7 @@ export function ImportKeyDialog({ onClose }: ImportKeyDialogProps) {
         <button
           type="button"
           onClick={onClose}
-          className="rounded-squircle px-3 py-1.5 font-display text-[11.5px] text-fg-muted transition hover:bg-bg-hover hover:text-fg-base"
+          className="rounded-squircle px-3 py-1.5 font-display text-xs text-fg-muted transition hover:bg-bg-hover hover:text-fg-base"
         >
           Cancel
         </button>
@@ -129,7 +129,7 @@ export function ImportKeyDialog({ onClose }: ImportKeyDialogProps) {
           onClick={submit}
           disabled={busy || !path.trim() || !name.trim()}
           className={cn(
-            'rounded-squircle px-3 py-1.5 font-display text-[11.5px] transition',
+            'rounded-squircle px-3 py-1.5 font-display text-xs transition',
             !busy && path.trim() && name.trim()
               ? 'bg-accent/90 text-bg-base hover:bg-accent'
               : 'cursor-not-allowed border border-border-subtle text-fg-subtle',

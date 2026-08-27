@@ -158,15 +158,15 @@ function statusChipTone(letter: string): {
       };
     case '?':
       return {
-        bg: 'bg-white/[0.05]',
+        bg: 'bg-surface-1',
         text: 'text-fg-muted',
-        ring: 'ring-white/[0.07]',
+        ring: 'ring-edge-2',
       };
     default:
       return {
-        bg: 'bg-white/[0.05]',
+        bg: 'bg-surface-1',
         text: 'text-fg-muted',
-        ring: 'ring-white/[0.07]',
+        ring: 'ring-edge-2',
       };
   }
 }
@@ -703,7 +703,7 @@ export function SourceControl() {
         </button>
         <button
           onClick={() => { if (isTauri && root) setBranchPanelOpen((o) => !o); }}
-          className="min-w-0 flex-1 truncate text-left font-display text-[12px] font-medium tracking-tight text-fg-base/95 hover:text-fg-base"
+          className="min-w-0 flex-1 truncate text-left font-display text-sm font-medium tracking-tight text-fg-base/95 hover:text-fg-base"
           title={
             info?.branch
               ? `${info.branch}${info.upstream ? ` → ${info.upstream}` : ''} — click to manage branches`
@@ -714,7 +714,7 @@ export function SourceControl() {
         </button>
         {/* Ahead/behind chevrons — only render the side that's non-zero. */}
         {info && (info.ahead > 0 || info.behind > 0) && (
-          <div className="flex items-center gap-1 rounded-md bg-white/[0.04] px-1.5 py-[2px] font-mono text-[9.5px] tabular-nums text-fg-muted ring-1 ring-inset ring-white/[0.05]">
+          <div className="flex items-center gap-1 rounded-md bg-surface-1 px-1.5 py-[2px] font-mono text-2xs tabular-nums text-fg-muted ring-1 ring-inset ring-edge-1">
             {info.behind > 0 && (
               <span className="flex items-center gap-[1px]" title={`${info.behind} behind`}>
                 <ArrowDownToLine size={9} strokeWidth={2.4} />
@@ -731,7 +731,7 @@ export function SourceControl() {
         )}
         {total > 0 && (
           <span
-            className="flex h-[17px] min-w-[18px] items-center justify-center rounded-full bg-white/[0.05] px-[5px] font-mono text-[9.5px] font-semibold tabular-nums text-fg-base/85 ring-1 ring-inset ring-white/[0.06]"
+            className="flex h-[17px] min-w-[18px] items-center justify-center rounded-full bg-surface-1 px-[5px] font-mono text-2xs font-semibold tabular-nums text-fg-base/85 ring-1 ring-inset ring-edge-1"
             title={`${total} change${total === 1 ? '' : 's'}`}
           >
             {total > 99 ? '99+' : total}
@@ -746,7 +746,7 @@ export function SourceControl() {
               title="Fetch"
               className={cn(
                 'flex h-6 w-6 items-center justify-center rounded-md text-fg-muted transition-all duration-150 ease-apple',
-                'hover:bg-white/[0.08] hover:text-fg-base hover:shadow-[inset_0_0_0_1px_rgba(255,255,255,0.05)]',
+                'hover:bg-surface-2 hover:text-fg-base hover:shadow-[inset_0_0_0_1px_rgba(255,255,255,0.05)]',
                 'active:scale-[0.92] disabled:opacity-40',
               )}
             >
@@ -758,7 +758,7 @@ export function SourceControl() {
               title="Pull"
               className={cn(
                 'flex h-6 w-6 items-center justify-center rounded-md text-fg-muted transition-all duration-150 ease-apple',
-                'hover:bg-white/[0.08] hover:text-fg-base hover:shadow-[inset_0_0_0_1px_rgba(255,255,255,0.05)]',
+                'hover:bg-surface-2 hover:text-fg-base hover:shadow-[inset_0_0_0_1px_rgba(255,255,255,0.05)]',
                 'active:scale-[0.92] disabled:opacity-40',
               )}
             >
@@ -770,7 +770,7 @@ export function SourceControl() {
               title="Push"
               className={cn(
                 'flex h-6 w-6 items-center justify-center rounded-md text-fg-muted transition-all duration-150 ease-apple',
-                'hover:bg-white/[0.08] hover:text-fg-base hover:shadow-[inset_0_0_0_1px_rgba(255,255,255,0.05)]',
+                'hover:bg-surface-2 hover:text-fg-base hover:shadow-[inset_0_0_0_1px_rgba(255,255,255,0.05)]',
                 'active:scale-[0.92] disabled:opacity-40',
               )}
             >
@@ -783,7 +783,7 @@ export function SourceControl() {
           disabled={!isTauri || !root || loading}
           className={cn(
             'flex h-6 w-6 items-center justify-center rounded-md text-fg-muted transition-all duration-150 ease-apple',
-            'hover:bg-white/[0.08] hover:text-fg-base hover:shadow-[inset_0_0_0_1px_rgba(255,255,255,0.05)]',
+            'hover:bg-surface-2 hover:text-fg-base hover:shadow-[inset_0_0_0_1px_rgba(255,255,255,0.05)]',
             'active:scale-[0.92]',
             'disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:shadow-none',
           )}
@@ -823,7 +823,7 @@ export function SourceControl() {
 
       {/* Remote op result banner */}
       {remoteMsg && (
-        <div className="flex shrink-0 items-start gap-2 border-b border-border-hairline bg-white/[0.03] px-3 py-1.5 font-mono text-[10.5px] text-fg-muted">
+        <div className="flex shrink-0 items-start gap-2 border-b border-border-hairline bg-surface-1 px-3 py-1.5 font-mono text-2xs text-fg-muted">
           <span className="flex-1 break-all">{remoteMsg}</span>
           <button onClick={() => setRemoteMsg(null)} className="shrink-0 text-fg-subtle hover:text-fg-base"><X size={11} /></button>
         </div>
@@ -831,7 +831,7 @@ export function SourceControl() {
 
       {/* Branch management panel */}
       {branchPanelOpen && (
-        <div className="shrink-0 border-b border-border-hairline bg-white/[0.02] px-2.5 py-2">
+        <div className="shrink-0 border-b border-border-hairline bg-surface-1 px-2.5 py-2">
           {/* Create branch */}
           <div className="mb-2 flex gap-1.5">
             <input
@@ -839,25 +839,25 @@ export function SourceControl() {
               onChange={(e) => setNewBranchName(e.target.value)}
               onKeyDown={(e) => { if (e.key === 'Enter') void handleBranchCreate(true); }}
               placeholder="new-branch-name"
-              className="flex-1 rounded-md bg-white/[0.05] px-2 py-1 font-mono text-[11px] text-fg-base placeholder:text-fg-subtle outline-none focus:ring-1 focus:ring-accent/40"
+              className="flex-1 rounded-md bg-surface-1 px-2 py-1 font-mono text-xs text-fg-base placeholder:text-fg-subtle outline-none focus:ring-1 focus:ring-accent/40"
             />
             <button
               onClick={() => void handleBranchCreate(true)}
               disabled={!newBranchName.trim() || busy}
               title="Create & switch"
-              className="flex h-6 items-center gap-1 rounded-md bg-accent/10 px-2 font-sans text-[10px] text-accent hover:bg-accent/20 disabled:opacity-40"
+              className="flex h-6 items-center gap-1 rounded-md bg-accent/10 px-2 font-sans text-2xs text-accent hover:bg-accent/20 disabled:opacity-40"
             >
               <Plus size={10} strokeWidth={2.5} /> Create
             </button>
           </div>
           {/* Branch list */}
           {branchesLoading ? (
-            <p className="px-1 font-sans text-[10px] text-fg-subtle">Loading…</p>
+            <p className="px-1 font-sans text-2xs text-fg-subtle">Loading…</p>
           ) : (
             <ul className="max-h-40 overflow-y-auto space-y-px">
               {branches.filter((b) => !b.remote).map((b) => (
-                <li key={b.name} className="group flex items-center gap-1.5 rounded px-1 py-[3px] hover:bg-white/[0.04]">
-                  <span className={cn('flex-1 truncate font-mono text-[11px]', b.current ? 'text-accent' : 'text-fg-base')}>
+                <li key={b.name} className="group flex items-center gap-1.5 rounded px-1 py-[3px] hover:bg-surface-1">
+                  <span className={cn('flex-1 truncate font-mono text-xs', b.current ? 'text-accent' : 'text-fg-base')}>
                     {b.current && <span className="mr-1 text-accent">*</span>}{b.name}
                   </span>
                   {renamingBranch === b.name ? (
@@ -867,7 +867,7 @@ export function SourceControl() {
                         value={renameValue}
                         onChange={(e) => setRenameValue(e.target.value)}
                         onKeyDown={(e) => { if (e.key === 'Enter') void handleBranchRename(b.name); if (e.key === 'Escape') { setRenamingBranch(null); setRenameValue(''); } }}
-                        className="w-28 rounded bg-white/[0.07] px-1.5 py-0.5 font-mono text-[11px] outline-none focus:ring-1 focus:ring-accent/40"
+                        className="w-28 rounded bg-surface-2 px-1.5 py-0.5 font-mono text-xs outline-none focus:ring-1 focus:ring-accent/40"
                       />
                       <button onClick={() => void handleBranchRename(b.name)} className="text-accent hover:text-accent-bright"><Check size={10} strokeWidth={2.5} /></button>
                       <button onClick={() => { setRenamingBranch(null); setRenameValue(''); }} className="text-fg-subtle hover:text-fg-base"><X size={10} /></button>
@@ -895,19 +895,19 @@ export function SourceControl() {
         <div className="shrink-0 border-b border-border-hairline">
           <button
             onClick={() => setStashOpen((o) => !o)}
-            className="flex w-full items-center gap-1.5 px-2.5 py-1.5 text-left hover:bg-white/[0.03]"
+            className="flex w-full items-center gap-1.5 px-2.5 py-1.5 text-left hover:bg-surface-1"
           >
             {stashOpen ? <ChevronDown size={10} strokeWidth={2} className="text-fg-subtle" /> : <ChevronRight size={10} strokeWidth={2} className="text-fg-subtle" />}
             <Archive size={11} strokeWidth={2} className="text-fg-muted" />
-            <span className="flex-1 font-sans text-[11px] text-fg-muted">Stash</span>
+            <span className="flex-1 font-sans text-xs text-fg-muted">Stash</span>
             {stashes.length > 0 && (
-              <span className="rounded-full bg-white/[0.06] px-1.5 font-mono text-[9.5px] text-fg-subtle">{stashes.length}</span>
+              <span className="rounded-full bg-surface-2 px-1.5 font-mono text-2xs text-fg-subtle">{stashes.length}</span>
             )}
             <button
               onClick={(e) => { e.stopPropagation(); void handleStashPush(); }}
               disabled={stashBusy}
               title="Stash all changes"
-              className="flex h-5 items-center gap-0.5 rounded px-1.5 font-sans text-[10px] text-fg-muted hover:bg-white/[0.08] hover:text-fg-base disabled:opacity-40"
+              className="flex h-5 items-center gap-0.5 rounded px-1.5 font-sans text-2xs text-fg-muted hover:bg-surface-2 hover:text-fg-base disabled:opacity-40"
             >
               <Plus size={9} strokeWidth={2.5} /> Stash
             </button>
@@ -915,13 +915,13 @@ export function SourceControl() {
           {stashOpen && (
             <div className="px-2 pb-1.5">
               {stashes.length === 0 ? (
-                <p className="px-1 font-sans text-[10px] text-fg-subtle/60">No stashes</p>
+                <p className="px-1 font-sans text-2xs text-fg-subtle/60">No stashes</p>
               ) : (
                 <ul className="space-y-px">
                   {stashes.map((s) => (
-                    <li key={s.index} className="group flex items-center gap-1.5 rounded px-1 py-[3px] hover:bg-white/[0.04]">
-                      <span className="w-5 shrink-0 font-mono text-[9.5px] text-fg-subtle/60">{s.index}</span>
-                      <span className="flex-1 truncate font-sans text-[11px] text-fg-base/80">{s.message}</span>
+                    <li key={s.index} className="group flex items-center gap-1.5 rounded px-1 py-[3px] hover:bg-surface-1">
+                      <span className="w-5 shrink-0 font-mono text-2xs text-fg-subtle/60">{s.index}</span>
+                      <span className="flex-1 truncate font-sans text-xs text-fg-base/80">{s.message}</span>
                       <span className="hidden items-center gap-1 group-hover:flex">
                         <button onClick={() => void handleStashPop(s.index)} title="Apply & drop" disabled={stashBusy} className="text-fg-muted hover:text-accent disabled:opacity-40"><ArrowDownToLine size={11} strokeWidth={2} /></button>
                         <button onClick={() => void handleStashDrop(s.index)} title="Drop" disabled={stashBusy} className="text-fg-muted hover:text-red-400 disabled:opacity-40"><Trash2 size={11} strokeWidth={2} /></button>
@@ -940,7 +940,7 @@ export function SourceControl() {
         <div className="shrink-0 border-b border-border-hairline px-2.5 py-2.5">
           <div
             className={cn(
-              'group/composer relative rounded-lg border border-white/[0.05] bg-bg-base/55',
+              'group/composer relative rounded-lg border border-edge-1 bg-bg-base/55',
               'shadow-[inset_0_1px_0_0_rgba(255,255,255,0.035)]',
               'transition-all duration-200 ease-apple',
               'focus-within:border-accent/45 focus-within:bg-bg-base/75 focus-within:shadow-focus',
@@ -959,7 +959,7 @@ export function SourceControl() {
               disabled={busy}
               className={cn(
                 'block w-full resize-none rounded-lg bg-transparent px-2.5 py-2',
-                'font-display text-[12px] leading-snug tracking-tight text-fg-base placeholder:text-fg-subtle/85',
+                'font-display text-sm leading-snug tracking-tight text-fg-base placeholder:text-fg-subtle/85',
                 'outline-none disabled:opacity-60',
               )}
             />
@@ -968,12 +968,12 @@ export function SourceControl() {
               aria-hidden
               className={cn(
                 'pointer-events-none absolute bottom-1.5 right-2 flex items-center gap-1',
-                'font-mono text-[9px] tabular-nums tracking-tight text-fg-subtle/80',
+                'font-mono text-2xs tabular-nums tracking-tight text-fg-subtle/80',
                 'transition-opacity duration-200',
                 message.length > 0 ? 'opacity-100' : 'opacity-0',
               )}
             >
-              <kbd className="rounded bg-white/[0.05] px-1 py-[1px] ring-1 ring-inset ring-white/[0.05]">
+              <kbd className="rounded bg-surface-1 px-1 py-[1px] ring-1 ring-inset ring-edge-1">
                 ⌘⏎
               </kbd>
             </div>
@@ -985,7 +985,7 @@ export function SourceControl() {
               disabled={amendMode ? (!message.trim() || busy) : !canCommit}
               className={cn(
                 'group/btn relative flex h-[28px] flex-1 items-center justify-center gap-1.5 overflow-hidden rounded-lg',
-                'font-display text-[11.5px] font-medium tracking-tight',
+                'font-display text-xs font-medium tracking-tight',
                 'transition-all duration-200 ease-apple',
                 (amendMode ? message.trim() && !busy : canCommit)
                   ? cn(
@@ -995,7 +995,7 @@ export function SourceControl() {
                       'hover:from-white/[0.14] hover:to-white/[0.06] hover:ring-accent/40 hover:shadow-glow-sm',
                       'active:scale-[0.985]',
                     )
-                  : 'bg-white/[0.03] text-fg-subtle ring-1 ring-inset ring-white/[0.04]',
+                  : 'bg-surface-1 text-fg-subtle ring-1 ring-inset ring-edge-1',
               )}
               title={amendMode ? 'Amend last commit (⌘⏎)' : (stagedCount === 0 ? 'Stage a file first' : 'Commit (⌘⏎)')}
             >
@@ -1015,10 +1015,10 @@ export function SourceControl() {
               onClick={() => void handleToggleAmend()}
               title="Amend last commit"
               className={cn(
-                'flex h-[28px] items-center gap-1 rounded-lg px-2 font-sans text-[10px] transition-all',
+                'flex h-[28px] items-center gap-1 rounded-lg px-2 font-sans text-2xs transition-all',
                 amendMode
                   ? 'bg-accent/15 text-accent ring-1 ring-inset ring-accent/30'
-                  : 'bg-white/[0.03] text-fg-subtle ring-1 ring-inset ring-white/[0.05] hover:text-fg-base hover:bg-white/[0.07]',
+                  : 'bg-surface-1 text-fg-subtle ring-1 ring-inset ring-edge-1 hover:text-fg-base hover:bg-surface-2',
               )}
             >
               <Pencil size={9} strokeWidth={2.2} /> Amend
@@ -1027,7 +1027,7 @@ export function SourceControl() {
               <span
                 className={cn(
                   'flex items-center gap-1 rounded-md bg-status-ok/10 px-1.5 py-[3px]',
-                  'font-mono text-[10px] tabular-nums text-status-ok ring-1 ring-inset ring-status-ok/25',
+                  'font-mono text-2xs tabular-nums text-status-ok ring-1 ring-inset ring-status-ok/25',
                   'animate-fade-in',
                 )}
               >
@@ -1042,7 +1042,7 @@ export function SourceControl() {
       {/* Body */}
       <div className="selectable flex-1 overflow-auto px-1.5 py-2">
         {!isTauri && (
-          <div className="mx-1 mb-2 flex items-start gap-2 rounded-lg border border-status-warn/20 bg-status-warn/[0.06] px-2.5 py-2 font-display text-[10.5px] leading-relaxed">
+          <div className="mx-1 mb-2 flex items-start gap-2 rounded-lg border border-status-warn/20 bg-status-warn/[0.06] px-2.5 py-2 font-display text-2xs leading-relaxed">
             <span className="mt-[3px] inline-flex h-1.5 w-1.5 shrink-0 animate-pulse-soft rounded-full bg-status-warn" />
             <span className="min-w-0 text-fg-muted">
               <span className="font-medium text-status-warn">Web preview</span> —
@@ -1051,7 +1051,7 @@ export function SourceControl() {
           </div>
         )}
         {error && (
-          <div className="mx-1 mb-2 flex items-start gap-2 rounded-lg border border-status-err/25 bg-status-err/[0.07] px-2.5 py-2 font-display text-[10.5px] leading-relaxed text-status-err shadow-[inset_0_1px_0_0_rgba(255,82,82,0.05)]">
+          <div className="mx-1 mb-2 flex items-start gap-2 rounded-lg border border-status-err/25 bg-status-err/[0.07] px-2.5 py-2 font-display text-2xs leading-relaxed text-status-err shadow-[inset_0_1px_0_0_rgba(255,82,82,0.05)]">
             <AlertCircle size={12} strokeWidth={2} className="mt-px shrink-0" />
             <span className="min-w-0 break-words text-status-err/90" title={error}>
               {error}
@@ -1182,9 +1182,9 @@ function GitLauncher({
       title={label}
       className={cn(
         'group/launch flex h-[26px] min-w-0 flex-1 items-center justify-center gap-1.5 rounded-md',
-        'border border-white/[0.05] bg-white/[0.02] font-display text-[10.5px] font-medium tracking-tight text-fg-muted',
+        'border border-edge-1 bg-surface-1 font-display text-2xs font-medium tracking-tight text-fg-muted',
         'transition-all duration-150 ease-apple',
-        'hover:border-accent/25 hover:bg-white/[0.05] hover:text-fg-base hover:shadow-[inset_0_1px_0_0_rgba(255,255,255,0.04)]',
+        'hover:border-accent/25 hover:bg-surface-1 hover:text-fg-base hover:shadow-[inset_0_1px_0_0_rgba(255,255,255,0.04)]',
         'active:scale-[0.97]',
       )}
     >
@@ -1231,7 +1231,7 @@ function SectionBlock({
           />
           <span
             className={cn(
-              'truncate font-display text-[9.5px] font-medium uppercase tracking-widest2',
+              'truncate font-display text-2xs font-medium uppercase tracking-widest2',
               accent.label,
             )}
           >
@@ -1240,8 +1240,8 @@ function SectionBlock({
           <span
             className={cn(
               'inline-flex h-[14px] min-w-[15px] items-center justify-center rounded-full px-[4px]',
-              'font-mono text-[9px] font-semibold leading-none tabular-nums tracking-tight',
-              'bg-white/[0.04] text-fg-muted ring-1 ring-inset ring-white/[0.05]',
+              'font-mono text-2xs font-semibold leading-none tabular-nums tracking-tight',
+              'bg-surface-1 text-fg-muted ring-1 ring-inset ring-edge-1',
             )}
           >
             {count}
@@ -1303,7 +1303,7 @@ function SectionAction({
       title={label}
       className={cn(
         'flex h-[18px] w-[18px] items-center justify-center rounded-md text-fg-subtle transition-all duration-150 ease-apple',
-        'hover:bg-white/[0.08] hover:text-fg-base hover:shadow-[inset_0_0_0_1px_rgba(255,255,255,0.05)]',
+        'hover:bg-surface-2 hover:text-fg-base hover:shadow-[inset_0_0_0_1px_rgba(255,255,255,0.05)]',
         'active:scale-[0.9]',
         'disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:shadow-none',
       )}
@@ -1321,11 +1321,11 @@ function EmptyState({ branch }: { branch: string | null }) {
       <div className="relative h-9 w-9">
         <span
           aria-hidden
-          className="absolute inset-0 rounded-full ring-1 ring-white/[0.08]"
+          className="absolute inset-0 rounded-full ring-1 ring-edge-2"
         />
         <span
           aria-hidden
-          className="absolute inset-[6px] rounded-full ring-1 ring-white/[0.06]"
+          className="absolute inset-[6px] rounded-full ring-1 ring-edge-1"
         />
         <span
           aria-hidden
@@ -1339,10 +1339,10 @@ function EmptyState({ branch }: { branch: string | null }) {
         </span>
       </div>
       <div className="space-y-0.5">
-        <p className="font-display text-[11.5px] font-medium tracking-tight text-fg-base/85">
+        <p className="font-display text-xs font-medium tracking-tight text-fg-base/85">
           {branch ? 'Working tree clean' : 'Not a git repository'}
         </p>
-        <p className="font-display text-[10.5px] leading-relaxed text-fg-subtle">
+        <p className="font-display text-2xs leading-relaxed text-fg-subtle">
           {branch
             ? 'Every change committed. Make an edit to see it here.'
             : 'Open a folder under git to enable source control.'}
@@ -1387,9 +1387,9 @@ function ChangeRow({
     <div
       onContextMenu={onContextMenu}
       className={cn(
-        'group/row relative flex h-[28px] w-full items-center gap-1.5 rounded-md pr-1.5 font-display text-[12.5px] tracking-tight',
+        'group/row relative flex h-[28px] w-full items-center gap-1.5 rounded-md pr-1.5 font-display text-sm tracking-tight',
         'transition-colors duration-150 ease-apple',
-        'hover:bg-white/[0.045]',
+        'hover:bg-surface-1',
       )}
     >
       {/* Left accent rail — slides in on hover. A 2px ribbon, scale-y'd from 0
@@ -1420,7 +1420,7 @@ function ChangeRow({
         </span>
         {folder && (
           <span
-            className="truncate text-[10px] text-fg-subtle/85"
+            className="truncate text-2xs text-fg-subtle/85"
             title={folder}
           >
             {folder}
@@ -1448,7 +1448,7 @@ function ChangeRow({
         )}
         {isConflict && onCheckoutOurs && (
           <RowAction
-            icon={<span className="font-mono text-[9px] font-bold">O</span>}
+            icon={<span className="font-mono text-2xs font-bold">O</span>}
             label="Accept Ours"
             disabled={busy}
             onClick={onCheckoutOurs}
@@ -1456,7 +1456,7 @@ function ChangeRow({
         )}
         {isConflict && onCheckoutTheirs && (
           <RowAction
-            icon={<span className="font-mono text-[9px] font-bold">T</span>}
+            icon={<span className="font-mono text-2xs font-bold">T</span>}
             label="Accept Theirs"
             disabled={busy}
             onClick={onCheckoutTheirs}
@@ -1468,7 +1468,7 @@ function ChangeRow({
       <span
         className={cn(
           'flex h-[15px] w-[15px] shrink-0 items-center justify-center rounded-[4px]',
-          'font-mono text-[9px] font-semibold tabular-nums leading-none ring-1 ring-inset',
+          'font-mono text-2xs font-semibold tabular-nums leading-none ring-1 ring-inset',
           chip.bg,
           chip.text,
           chip.ring,
@@ -1502,7 +1502,7 @@ function RowAction({
       className={cn(
         'flex h-[20px] w-[20px] items-center justify-center rounded-md text-fg-muted',
         'transition-all duration-150 ease-apple',
-        'hover:bg-white/[0.10] hover:text-accent-bright hover:shadow-[inset_0_0_0_1px_rgba(255,255,255,0.06)]',
+        'hover:bg-surface-3 hover:text-accent-bright hover:shadow-[inset_0_0_0_1px_rgba(255,255,255,0.06)]',
         'active:scale-[0.9]',
         'disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-fg-muted disabled:hover:shadow-none',
       )}
@@ -1593,10 +1593,10 @@ function ChangeContextMenu({
       }}
       className={cn(
         'group/item flex w-full items-center gap-2.5 rounded-md px-2.5 py-[6px]',
-        'font-display text-[12px] tracking-tight transition-colors duration-100',
+        'font-display text-sm tracking-tight transition-colors duration-100',
         danger
           ? 'text-status-err/85 hover:bg-status-err/[0.10] hover:text-status-err'
-          : 'text-fg-base/85 hover:bg-white/[0.06] hover:text-fg-base',
+          : 'text-fg-base/85 hover:bg-surface-2 hover:text-fg-base',
       )}
     >
       <span
@@ -1631,7 +1631,7 @@ function ChangeContextMenu({
       aria-label={`Source control actions for ${entry.path}`}
     >
       {/* Tiny header strip showing what we're acting on. */}
-      <div className="mx-1 mb-1 mt-0.5 flex items-center gap-1.5 truncate font-display text-[9.5px] uppercase tracking-widest2 text-fg-subtle/80">
+      <div className="mx-1 mb-1 mt-0.5 flex items-center gap-1.5 truncate font-display text-2xs uppercase tracking-widest2 text-fg-subtle/80">
         <span
           aria-hidden
           className={cn(
@@ -1755,7 +1755,7 @@ function DiffViewer({
 
   return createPortal(
     <div
-      className="fixed inset-0 z-[10000] flex items-center justify-center bg-black/55 p-6 backdrop-blur-xs"
+      className="fixed inset-0 z-[10000] flex items-center justify-center bg-scrim-2 p-6 backdrop-blur-xs"
       onMouseDown={(e) => {
         if (e.target === e.currentTarget) onClose();
       }}
@@ -1776,7 +1776,7 @@ function DiffViewer({
           <span
             className={cn(
               'flex shrink-0 items-center gap-1.5 rounded-full px-2 py-[3px] ring-1 ring-inset',
-              'font-display text-[9.5px] font-medium uppercase tracking-widest2',
+              'font-display text-2xs font-medium uppercase tracking-widest2',
               scopeTone.bg,
               scopeTone.text,
               scopeTone.ring,
@@ -1786,7 +1786,7 @@ function DiffViewer({
             {scopeLabel}
           </span>
           <div
-            className="flex min-w-0 flex-1 items-center gap-1 truncate font-display text-[12px] tracking-tight"
+            className="flex min-w-0 flex-1 items-center gap-1 truncate font-display text-sm tracking-tight"
             title={entry.path}
           >
             {folderSegments.length > 0 && (
@@ -1806,7 +1806,7 @@ function DiffViewer({
             <span className="truncate font-medium text-fg-base/95">{fileName}</span>
           </div>
           {stats && (stats.added > 0 || stats.removed > 0) && (
-            <div className="flex shrink-0 items-center gap-1.5 font-mono text-[10px] tabular-nums">
+            <div className="flex shrink-0 items-center gap-1.5 font-mono text-2xs tabular-nums">
               {stats.added > 0 && (
                 <span className="rounded-md bg-status-ok/12 px-1.5 py-[2px] text-status-ok ring-1 ring-inset ring-status-ok/25">
                   +{stats.added}
@@ -1824,7 +1824,7 @@ function DiffViewer({
             className={cn(
               'flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-fg-muted',
               'transition-all duration-150 ease-apple',
-              'hover:bg-white/[0.08] hover:text-fg-base hover:shadow-[inset_0_0_0_1px_rgba(255,255,255,0.06)]',
+              'hover:bg-surface-2 hover:text-fg-base hover:shadow-[inset_0_0_0_1px_rgba(255,255,255,0.06)]',
               'active:scale-[0.92]',
             )}
             aria-label="Close diff"
@@ -1835,7 +1835,7 @@ function DiffViewer({
         </div>
 
         {/* Body */}
-        <div className="selectable min-h-0 flex-1 overflow-auto bg-bg-base/40 font-mono text-[11.5px] leading-[1.55]">
+        <div className="selectable min-h-0 flex-1 overflow-auto bg-bg-base/40 font-mono text-xs leading-[1.55]">
           {loading && (
             <div className="flex items-center gap-2 px-4 py-4 text-fg-subtle">
               <RefreshCw size={11} strokeWidth={2} className="animate-spin-slow" />
@@ -1843,7 +1843,7 @@ function DiffViewer({
             </div>
           )}
           {error && (
-            <div className="m-4 flex items-start gap-2 rounded-lg border border-status-err/25 bg-status-err/[0.07] px-3 py-2.5 font-display text-[11.5px] tracking-tight text-status-err shadow-[inset_0_1px_0_0_rgba(255,82,82,0.05)]">
+            <div className="m-4 flex items-start gap-2 rounded-lg border border-status-err/25 bg-status-err/[0.07] px-3 py-2.5 font-display text-xs tracking-tight text-status-err shadow-[inset_0_1px_0_0_rgba(255,82,82,0.05)]">
               <AlertCircle size={12} strokeWidth={2} className="mt-px shrink-0" />
               <span className="whitespace-pre-wrap break-words">{error}</span>
             </div>
@@ -1853,10 +1853,10 @@ function DiffViewer({
               <div className="flex h-9 w-9 items-center justify-center rounded-full bg-accent-soft ring-1 ring-inset ring-accent/15">
                 <Check size={13} strokeWidth={2.2} className="text-accent-bright/80" />
               </div>
-              <p className="font-display text-[11.5px] font-medium tracking-tight text-fg-base/85">
+              <p className="font-display text-xs font-medium tracking-tight text-fg-base/85">
                 No differences
               </p>
-              <p className="font-display text-[10.5px] text-fg-subtle">
+              <p className="font-display text-2xs text-fg-subtle">
                 This file matches the {scopeLabel.toLowerCase()} reference.
               </p>
             </div>
@@ -1867,7 +1867,7 @@ function DiffViewer({
         </div>
 
         {/* Footer hint */}
-        <div className="flex shrink-0 items-center justify-between gap-2 border-t border-border-hairline bg-bg-chrome/40 px-4 py-2 font-display text-[10px] text-fg-subtle">
+        <div className="flex shrink-0 items-center justify-between gap-2 border-t border-border-hairline bg-bg-chrome/40 px-4 py-2 font-display text-2xs text-fg-subtle">
           <span className="tracking-tight">
             {isUntracked
               ? 'New file — showing contents as additions.'
@@ -1876,7 +1876,7 @@ function DiffViewer({
                 : 'Comparing working tree against index.'}
           </span>
           <span className="flex items-center gap-1 font-mono tabular-nums">
-            <kbd className="rounded bg-white/[0.04] px-1 py-[1px] ring-1 ring-inset ring-white/[0.05]">
+            <kbd className="rounded bg-surface-1 px-1 py-[1px] ring-1 ring-inset ring-edge-1">
               Esc
             </kbd>
             to close
@@ -1898,7 +1898,7 @@ function DiffViewer({
 function DiffLines({ text, untracked }: { text: string; untracked: boolean }) {
   const lines = text.split('\n');
   return (
-    <div className="grid grid-cols-[auto_1fr] font-mono text-[11.5px] leading-[1.55]">
+    <div className="grid grid-cols-[auto_1fr] font-mono text-xs leading-[1.55]">
       {lines.map((line, i) => {
         let kind:
           | 'add'
@@ -1940,8 +1940,8 @@ function DiffLines({ text, untracked }: { text: string; untracked: boolean }) {
           <div key={i} className="contents">
             <span
               className={cn(
-                'select-none px-3 text-right text-[10px] tabular-nums text-fg-subtle/45',
-                'border-r border-white/[0.03]',
+                'select-none px-3 text-right text-2xs tabular-nums text-fg-subtle/45',
+                'border-r border-edge-1',
                 kind === 'hunk' && 'text-accent/60',
                 kind === 'add' && 'bg-status-ok/[0.04]',
                 kind === 'del' && 'bg-status-err/[0.04]',
@@ -1996,7 +1996,7 @@ function DiscardDialog({
 
   return createPortal(
     <div
-      className="fixed inset-0 z-[10000] flex items-center justify-center bg-black/55 p-6 backdrop-blur-xs"
+      className="fixed inset-0 z-[10000] flex items-center justify-center bg-scrim-2 p-6 backdrop-blur-xs"
       onMouseDown={(e) => {
         if (e.target === e.currentTarget) onCancel();
       }}
@@ -2033,16 +2033,16 @@ function DiscardDialog({
               </span>
             </div>
             <div className="min-w-0 flex-1">
-              <p className="font-display text-[13.5px] font-semibold tracking-tight text-fg-base">
+              <p className="font-display text-base font-semibold tracking-tight text-fg-base">
                 {isUntracked ? 'Delete untracked file?' : 'Discard local changes?'}
               </p>
-              <p className="mt-1.5 font-display text-[11.5px] leading-relaxed text-fg-muted">
+              <p className="mt-1.5 font-display text-xs leading-relaxed text-fg-muted">
                 {isUntracked
                   ? 'This file will be permanently removed from disk. It is not in git history and cannot be recovered.'
                   : 'Local edits to this file will be reverted to HEAD. This action cannot be undone.'}
               </p>
               {/* Path chip — mono, tinted, with directory prefix in subtle text. */}
-              <div className="mt-3 flex items-center gap-1 truncate rounded-md bg-bg-base/55 px-2 py-1.5 font-mono text-[10.5px] ring-1 ring-inset ring-white/[0.05]">
+              <div className="mt-3 flex items-center gap-1 truncate rounded-md bg-bg-base/55 px-2 py-1.5 font-mono text-2xs ring-1 ring-inset ring-edge-1">
                 {folder && (
                   <span className="shrink truncate text-fg-subtle/85" title={folder}>
                     {folder}
@@ -2065,9 +2065,9 @@ function DiscardDialog({
           <button
             onClick={onCancel}
             className={cn(
-              'rounded-md px-3.5 py-1.5 font-display text-[11.5px] font-medium tracking-tight text-fg-muted',
+              'rounded-md px-3.5 py-1.5 font-display text-xs font-medium tracking-tight text-fg-muted',
               'transition-all duration-150 ease-apple',
-              'hover:bg-white/[0.06] hover:text-fg-base active:scale-[0.985]',
+              'hover:bg-surface-2 hover:text-fg-base active:scale-[0.985]',
             )}
           >
             Cancel
@@ -2076,7 +2076,7 @@ function DiscardDialog({
             onClick={onConfirm}
             className={cn(
               'group/destruct relative overflow-hidden rounded-md px-3.5 py-1.5',
-              'font-display text-[11.5px] font-semibold tracking-tight text-white',
+              'font-display text-xs font-semibold tracking-tight text-white',
               'bg-gradient-to-b from-status-err/95 to-status-err/75',
               'ring-1 ring-inset ring-status-err/40',
               'shadow-[inset_0_1px_0_0_rgba(255,255,255,0.16),0_1px_2px_0_rgba(0,0,0,0.4)]',

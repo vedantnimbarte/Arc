@@ -108,7 +108,7 @@ export function WorkspaceRail({ onOpenSettings }: { onOpenSettings: () => void }
                 aria-current={isActive}
                 className={cn(
                   'ws-icon flex h-9 w-9 items-center justify-center overflow-hidden',
-                  'font-display text-[12px] font-semibold leading-none tracking-tight',
+                  'font-display text-sm font-semibold leading-none tracking-tight',
                   isActive
                     ? 'rounded-[13px] text-fg-base'
                     : 'rounded-[16px] text-fg-muted hover:rounded-[13px] hover:text-fg-base',
@@ -119,10 +119,10 @@ export function WorkspaceRail({ onOpenSettings }: { onOpenSettings: () => void }
                   ['--ws-bd' as string]: isActive ? rgba(hex, 0.5) : 'transparent',
                 }}
               >
-                {w.icon ? <span className="text-[16px]">{w.icon}</span> : initials(w.name)}
+                {w.icon ? <span className="text-lg">{w.icon}</span> : initials(w.name)}
               </button>
               {count > 0 && (
-                <span className="pointer-events-none absolute -bottom-1 -right-1 flex h-3.5 min-w-3.5 items-center justify-center rounded-full border border-bg-base bg-bg-panel px-1 font-mono text-[8.5px] leading-none text-fg-muted">
+                <span className="pointer-events-none absolute -bottom-1 -right-1 flex h-3.5 min-w-3.5 items-center justify-center rounded-full border border-bg-base bg-bg-panel px-1 font-mono text-2xs leading-none text-fg-muted">
                   {count}
                 </span>
               )}
@@ -142,7 +142,7 @@ export function WorkspaceRail({ onOpenSettings }: { onOpenSettings: () => void }
 
       {/* Foot: settings/profile anchor. */}
       <div className="flex shrink-0 flex-col items-center gap-1 pb-2 pt-1">
-        <div className="mb-0.5 h-px w-5 bg-white/[0.07]" aria-hidden />
+        <div className="mb-0.5 h-px w-5 bg-surface-2" aria-hidden />
         <button
           onClick={onOpenSettings}
           title="Settings"
@@ -161,9 +161,9 @@ export function WorkspaceRail({ onOpenSettings }: { onOpenSettings: () => void }
             data-rail-popover
             role="menu"
             style={{ position: 'fixed', top: menu.y, left: menu.x }}
-            className="material-sheet z-50 w-44 animate-popover-in overflow-hidden rounded-md bg-bg-panel py-1 shadow-sheet ring-1 ring-white/10"
+            className="material-sheet z-50 w-44 animate-popover-in overflow-hidden rounded-md bg-bg-panel py-1 shadow-sheet ring-1 ring-edge-2"
           >
-            <div className="truncate px-3 pb-1 pt-0.5 font-display text-[9.5px] uppercase tracking-wider text-fg-subtle/80">
+            <div className="truncate px-3 pb-1 pt-0.5 font-display text-2xs uppercase tracking-wider text-fg-subtle/80">
               {menuWorkspace.name}
             </div>
             <MenuItem
@@ -173,7 +173,7 @@ export function WorkspaceRail({ onOpenSettings }: { onOpenSettings: () => void }
                 setMenu(null);
               }}
             />
-            <div className="my-1 border-t border-white/[0.05]" />
+            <div className="my-1 border-t border-edge-1" />
             <MenuItem
               label="Delete"
               danger
@@ -196,7 +196,7 @@ export function WorkspaceRail({ onOpenSettings }: { onOpenSettings: () => void }
             <div
               data-rail-popover
               style={{ position: 'fixed', top: edit.y, left: edit.x }}
-              className="material-sheet z-50 w-[248px] animate-popover-in rounded-md bg-bg-panel p-3 shadow-sheet ring-1 ring-white/10"
+              className="material-sheet z-50 w-[248px] animate-popover-in rounded-md bg-bg-panel p-3 shadow-sheet ring-1 ring-edge-2"
             >
               <WorkspaceEditPanel key={w.id} workspaceId={w.id} onDone={() => setEdit(null)} />
             </div>,
@@ -224,10 +224,10 @@ function MenuItem({
       disabled={disabled}
       onClick={onClick}
       className={cn(
-        'flex w-full items-center px-3 py-1.5 text-left font-display text-[12px] tracking-tight transition-colors disabled:pointer-events-none disabled:opacity-40',
+        'flex w-full items-center px-3 py-1.5 text-left font-display text-sm tracking-tight transition-colors disabled:pointer-events-none disabled:opacity-40',
         danger
           ? 'text-rose-300/90 hover:bg-rose-500/15 hover:text-rose-200'
-          : 'text-fg-base/90 hover:bg-white/[0.06]',
+          : 'text-fg-base/90 hover:bg-surface-2',
       )}
     >
       {label}

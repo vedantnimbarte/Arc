@@ -446,52 +446,6 @@ html:not(.dark) ::-webkit-scrollbar-thumb:hover {
   background-color: rgba(0, 0, 0, 0.34) !important;
 }
 
-/* ─── Light-mode swap for `white/<opacity>` utilities ────────────────
-   Components were authored against a dark palette and lean heavily on
-   `bg-white/[X]`, `hover:bg-white/[X]`, `border-white/[X]`, and
-   `ring-white/[X]` to paint soft hover/focus surfaces — invisible on
-   paper. These attribute-substring selectors re-tint them to a dark
-   ink at a similar intensity so the same affordances stay legible in
-   light mode without touching ~100 call sites. Anchored to a leading
-   space or string start to avoid eating prefixed variants
-   (`hover:bg-white/`, `lg:bg-white/`, etc.). */
-html:not(.dark) [class*=" bg-white/"],
-html:not(.dark) [class^="bg-white/"] {
-  background-color: rgba(0, 0, 0, 0.05);
-}
-html:not(.dark) [class*=" hover:bg-white/"]:hover,
-html:not(.dark) [class^="hover:bg-white/"]:hover {
-  background-color: rgba(0, 0, 0, 0.06);
-}
-html:not(.dark) [class*=" active:bg-white/"]:active,
-html:not(.dark) [class^="active:bg-white/"]:active {
-  background-color: rgba(0, 0, 0, 0.10);
-}
-html:not(.dark) [class*=" focus-within:bg-white/"]:focus-within,
-html:not(.dark) [class^="focus-within:bg-white/"]:focus-within {
-  background-color: rgba(0, 0, 0, 0.05);
-}
-html:not(.dark) [class*=" border-white/"],
-html:not(.dark) [class^="border-white/"] {
-  border-color: rgba(0, 0, 0, 0.10);
-}
-html:not(.dark) [class*=" hover:border-white/"]:hover,
-html:not(.dark) [class^="hover:border-white/"]:hover {
-  border-color: rgba(0, 0, 0, 0.18);
-}
-html:not(.dark) [class*=" focus-within:border-white/"]:focus-within,
-html:not(.dark) [class^="focus-within:border-white/"]:focus-within {
-  border-color: rgba(0, 0, 0, 0.18);
-}
-html:not(.dark) [class*=" ring-white/"],
-html:not(.dark) [class^="ring-white/"] {
-  --tw-ring-color: rgba(0, 0, 0, 0.10);
-}
-html:not(.dark) [class*=" text-white/"],
-html:not(.dark) [class^="text-white/"] {
-  color: rgba(0, 0, 0, 0.62);
-}
-
 /* xterm — fill the pane edge-to-edge (no inset), transparent viewport */
 .xterm {
   height: 100%;
@@ -502,4 +456,253 @@ html:not(.dark) [class^="text-white/"] {
 }
 .xterm-screen {
   outline: none !important;
+}
+
+/* ─── Boot splash ───────────────────────────────────────────────────
+   All motion here is CSS on purpose: Splash renders on the boot path,
+   so pulling in a JS animation runtime would put ~460 kB of library in
+   the entry chunk to animate the screen that covers startup. Every
+   animation below is transform/opacity/filter only, so it composites
+   off the main thread. */
+.splash-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: radial-gradient(120% 120% at 50% 42%, #0d0d10 0%, #08080a 100%);
+  user-select: none;
+  opacity: 1;
+  transition:
+    opacity 260ms cubic-bezier(0.22, 1, 0.36, 1),
+    transform 260ms cubic-bezier(0.22, 1, 0.36, 1),
+    filter 260ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+.splash-overlay.is-leaving {
+  opacity: 0;
+  transform: scale(1.04);
+  filter: blur(8px);
+  pointer-events: none;
+}
+
+.splash-aurora {
+  position: absolute;
+  inset: -12%;
+  z-index: 0;
+}
+.splash-orb {
+  position: absolute;
+  border-radius: 50%;
+  opacity: 0.5;
+  filter: blur(64px);
+  mix-blend-mode: screen;
+  will-change: transform;
+}
+.splash-orb-1 { animation: splash-drift-1 23s ease-in-out infinite; }
+.splash-orb-2 { animation: splash-drift-2 27s ease-in-out infinite; }
+.splash-orb-3 { animation: splash-drift-3 31s ease-in-out infinite; }
+
+@keyframes splash-drift-1 {
+  0%, 100% { transform: translate(0, 0) scale(1); }
+  33%      { transform: translate(46px, -34px) scale(1.12); }
+  66%      { transform: translate(-18px, 22px) scale(1.04); }
+}
+@keyframes splash-drift-2 {
+  0%, 100% { transform: translate(0, 0) scale(1); }
+  33%      { transform: translate(-40px, 30px) scale(1.08); }
+  66%      { transform: translate(24px, -16px) scale(1.14); }
+}
+@keyframes splash-drift-3 {
+  0%, 100% { transform: translate(0, 0) scale(1.05); }
+  33%      { transform: translate(28px, -22px) scale(1); }
+  66%      { transform: translate(-34px, 30px) scale(1.1); }
+}
+
+.splash-vignette {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  background: radial-gradient(115% 115% at 50% 46%, rgba(8, 8, 10, 0) 32%, #08080a 76%);
+  pointer-events: none;
+}
+
+.splash-card-wrap {
+  position: relative;
+  z-index: 2;
+  animation: splash-card-in 420ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+@keyframes splash-card-in {
+  from { opacity: 0; transform: scale(0.94) translateY(16px); }
+  to   { opacity: 1; transform: none; }
+}
+
+.splash-card {
+  position: relative;
+  overflow: hidden;
+  width: min(86vw, 384px);
+  padding: 42px 40px 34px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 18px;
+  border-radius: 30px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: linear-gradient(
+    158deg,
+    rgba(255, 255, 255, 0.13) 0%,
+    rgba(255, 255, 255, 0.04) 46%,
+    rgba(255, 255, 255, 0.02) 100%
+  );
+  backdrop-filter: blur(30px) saturate(1.7);
+  -webkit-backdrop-filter: blur(30px) saturate(1.7);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.28),
+    inset 0 -1px 0 rgba(255, 255, 255, 0.05),
+    0 34px 90px -24px rgba(0, 0, 0, 0.8);
+  animation: splash-float 6.5s ease-in-out 1s infinite;
+  will-change: transform;
+}
+@keyframes splash-float {
+  0%, 100% { transform: translateY(0); }
+  50%      { transform: translateY(-7px); }
+}
+
+.splash-sheen {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 55%;
+  height: 100%;
+  background: linear-gradient(
+    105deg,
+    transparent 0%,
+    rgba(255, 255, 255, 0.16) 50%,
+    transparent 100%
+  );
+  mix-blend-mode: screen;
+  pointer-events: none;
+  animation: splash-sheen-sweep 900ms cubic-bezier(0.22, 1, 0.36, 1) 200ms both;
+}
+@keyframes splash-sheen-sweep {
+  from { transform: translateX(-130%) skewX(-16deg); }
+  to   { transform: translateX(130%) skewX(-16deg); }
+}
+
+.splash-logo-wrap {
+  position: relative;
+  display: grid;
+  place-items: center;
+}
+.splash-logo-glow {
+  position: absolute;
+  width: 150px;
+  height: 150px;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(200, 214, 236, 0.28) 0%, rgba(150, 170, 210, 0) 66%);
+  filter: blur(10px);
+}
+.splash-logo {
+  position: relative;
+  width: 92px;
+  height: 92px;
+  animation: splash-logo-in 380ms cubic-bezier(0.22, 1, 0.36, 1) 80ms both;
+}
+@keyframes splash-logo-in {
+  from { opacity: 0; transform: scale(0.9); filter: blur(10px); }
+  to   { opacity: 1; transform: none; filter: blur(0); }
+}
+
+.splash-wordmark {
+  margin: 0;
+  padding-left: 0.34em;
+  display: flex;
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-weight: 600;
+  font-size: 40px;
+  letter-spacing: 0.34em;
+  color: #eef1f6;
+  text-shadow: 0 1px 1px rgba(0, 0, 0, 0.35), 0 0 18px rgba(200, 214, 236, 0.25);
+}
+.splash-wordmark span {
+  animation: splash-letter-in 340ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+@keyframes splash-letter-in {
+  from { opacity: 0; transform: translateY(16px); filter: blur(6px); }
+  to   { opacity: 1; transform: none; filter: blur(0); }
+}
+
+.splash-tagline {
+  margin: 0;
+  font-family: 'Inter', system-ui, sans-serif;
+  font-size: 13px;
+  font-weight: 400;
+  letter-spacing: 0.01em;
+  color: rgba(230, 234, 242, 0.6);
+  text-align: center;
+  animation: splash-rise 320ms cubic-bezier(0.22, 1, 0.36, 1) 200ms both;
+}
+@keyframes splash-rise {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: none; }
+}
+
+.splash-rule {
+  width: 72px;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.28), transparent);
+  animation: splash-rule-in 320ms cubic-bezier(0.22, 1, 0.36, 1) 240ms both;
+}
+@keyframes splash-rule-in {
+  from { opacity: 0; transform: scaleX(0); }
+  to   { opacity: 1; transform: none; }
+}
+
+.splash-ticker {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.28em;
+  text-transform: uppercase;
+  animation: splash-fade-in 300ms ease 280ms both;
+}
+@keyframes splash-fade-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+.splash-ticker-dash { color: rgba(220, 226, 238, 0.24); }
+.splash-ticker-slot {
+  position: relative;
+  width: 96px;
+  height: 16px;
+  overflow: hidden;
+}
+.splash-ticker-slot span {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  color: rgba(232, 236, 244, 0.74);
+  animation: splash-ticker-in 260ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+@keyframes splash-ticker-in {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: none; }
+}
+
+/* Honour the OS reduced-motion setting: keep the fades, drop every
+   transform/blur and all the infinite ambient loops. */
+@media (prefers-reduced-motion: reduce) {
+  .splash-overlay.is-leaving { transform: none; filter: none; }
+  .splash-orb-1, .splash-orb-2, .splash-orb-3,
+  .splash-card, .splash-sheen { animation: none; }
+  .splash-card-wrap, .splash-logo, .splash-wordmark span,
+  .splash-tagline, .splash-rule, .splash-ticker-slot span {
+    animation-name: splash-fade-in;
+  }
 }

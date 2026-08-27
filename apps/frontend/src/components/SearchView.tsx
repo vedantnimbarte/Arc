@@ -112,7 +112,7 @@ export function SearchView() {
     <div className="flex h-full min-w-0 flex-col">
       {/* Header / input */}
       <div className="flex h-11 shrink-0 items-center gap-2 border-b border-border-hairline px-2.5">
-        <div className="flex flex-1 items-center gap-1.5 rounded-md border border-white/[0.05] bg-black/[0.22] px-2 py-1 focus-within:border-accent/40 focus-within:shadow-focus">
+        <div className="flex flex-1 items-center gap-1.5 rounded-md border border-edge-1 bg-scrim-1 px-2 py-1 focus-within:border-accent/40 focus-within:shadow-focus">
           <SearchIcon size={11} strokeWidth={2.1} className="shrink-0 text-fg-subtle" />
           <input
             ref={inputRef}
@@ -125,12 +125,12 @@ export function SearchView() {
               }
             }}
             placeholder="Search in files"
-            className="selectable min-w-0 flex-1 bg-transparent font-display text-[12px] tracking-tight text-fg-base placeholder:text-fg-subtle focus:outline-none"
+            className="selectable min-w-0 flex-1 bg-transparent font-display text-sm tracking-tight text-fg-base placeholder:text-fg-subtle focus:outline-none"
           />
           {query && (
             <button
               onClick={() => setQuery('')}
-              className="flex h-4 w-4 items-center justify-center rounded-full text-fg-subtle transition-colors hover:bg-white/[0.10] hover:text-fg-base"
+              className="flex h-4 w-4 items-center justify-center rounded-full text-fg-subtle transition-colors hover:bg-surface-3 hover:text-fg-base"
               aria-label="Clear search"
             >
               <X size={9} strokeWidth={2.4} />
@@ -141,7 +141,7 @@ export function SearchView() {
 
       {/* Result count */}
       {q && (
-        <div className="shrink-0 border-b border-border-hairline px-3 py-1.5 font-mono text-[10px] uppercase tracking-widest2 text-fg-subtle">
+        <div className="shrink-0 border-b border-border-hairline px-3 py-1.5 font-mono text-2xs uppercase tracking-widest2 text-fg-subtle">
           {loading
             ? 'searching…'
             : rows.length === 0
@@ -153,13 +153,13 @@ export function SearchView() {
       {/* Results */}
       <div className="selectable flex-1 overflow-auto py-1">
         {!isTauri && (
-          <p className="px-3 py-2 font-display text-[10.5px] leading-relaxed text-fg-subtle">
+          <p className="px-3 py-2 font-display text-2xs leading-relaxed text-fg-subtle">
             <span className="text-status-warn">web preview</span> — search needs the
             desktop app.
           </p>
         )}
         {isTauri && !q && (
-          <p className="px-3 py-2 font-display text-[11px] leading-relaxed text-fg-subtle">
+          <p className="px-3 py-2 font-display text-xs leading-relaxed text-fg-subtle">
             Type to search file contents across the workspace.
           </p>
         )}
@@ -172,7 +172,7 @@ export function SearchView() {
               <button
                 type="button"
                 onClick={() => toggleGroup(path)}
-                className="group flex w-full items-center gap-1 rounded-md px-2 py-1 text-left transition-colors hover:bg-white/[0.04]"
+                className="group flex w-full items-center gap-1 rounded-md px-2 py-1 text-left transition-colors hover:bg-surface-1"
                 title={path}
               >
                 {isCollapsed ? (
@@ -181,13 +181,13 @@ export function SearchView() {
                   <ChevronDown size={11} strokeWidth={2.2} className="shrink-0 text-fg-subtle" />
                 )}
                 <Icon size={12} strokeWidth={1.7} style={{ color }} className="shrink-0" />
-                <span className="truncate font-display text-[12px] font-medium tracking-tight text-fg-base/90">
+                <span className="truncate font-display text-sm font-medium tracking-tight text-fg-base/90">
                   {basename(path)}
                 </span>
                 {dir && (
-                  <span className="truncate font-display text-[10px] text-fg-subtle/85">{dir}</span>
+                  <span className="truncate font-display text-2xs text-fg-subtle/85">{dir}</span>
                 )}
-                <span className="ml-auto shrink-0 rounded-full bg-white/[0.05] px-1.5 font-mono text-[9.5px] tabular-nums text-fg-muted">
+                <span className="ml-auto shrink-0 rounded-full bg-surface-1 px-1.5 font-mono text-2xs tabular-nums text-fg-muted">
                   {hits.length}
                 </span>
               </button>
@@ -197,13 +197,13 @@ export function SearchView() {
                     key={`${hit.line}-${i}`}
                     type="button"
                     onClick={() => openFile(hit.path, undefined, { line: hit.line })}
-                    className="group flex w-full items-baseline gap-2 rounded-md py-[3px] pl-7 pr-2 text-left transition-colors hover:bg-white/[0.045]"
+                    className="group flex w-full items-baseline gap-2 rounded-md py-[3px] pl-7 pr-2 text-left transition-colors hover:bg-surface-1"
                     title={`${path}:${hit.line}`}
                   >
-                    <span className="w-8 shrink-0 text-right font-mono text-[10px] tabular-nums text-fg-subtle/70">
+                    <span className="w-8 shrink-0 text-right font-mono text-2xs tabular-nums text-fg-subtle/70">
                       {hit.line}
                     </span>
-                    <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-fg-muted group-hover:text-fg-base/90">
+                    <span className="min-w-0 flex-1 truncate font-mono text-xs text-fg-muted group-hover:text-fg-base/90">
                       {highlight(hit.snippet, q)}
                     </span>
                   </button>

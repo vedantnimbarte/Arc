@@ -377,7 +377,7 @@ export function FileTree() {
       {/* Header */}
       <div className="flex h-11 shrink-0 items-center gap-0.5 border-b border-border-hairline px-2.5">
         <span
-          className="min-w-0 flex-1 truncate pr-1 font-display text-[12px] font-medium tracking-tight text-fg-base/90"
+          className="min-w-0 flex-1 truncate pr-1 font-display text-sm font-medium tracking-tight text-fg-base/90"
           title={root ?? ''}
         >
           {root ? basename(root) : '—'}
@@ -413,7 +413,7 @@ export function FileTree() {
 
         {/* Slim divider keeps the create-pair visually distinct from the
             navigation/utility cluster — same trick the topbar uses. */}
-        <span aria-hidden className="mx-1 h-3.5 w-px bg-white/[0.06]" />
+        <span aria-hidden className="mx-1 h-3.5 w-px bg-surface-2" />
 
         <HeaderIconButton
           onClick={toggleSearch}
@@ -444,7 +444,7 @@ export function FileTree() {
       >
         <div className="min-h-0">
           <div className="flex items-center gap-1.5 px-2.5 py-2">
-            <div className="flex flex-1 items-center gap-1.5 rounded-md border border-white/[0.05] bg-black/[0.22] px-2 py-1 focus-within:border-accent/40 focus-within:shadow-focus">
+            <div className="flex flex-1 items-center gap-1.5 rounded-md border border-edge-1 bg-scrim-1 px-2 py-1 focus-within:border-accent/40 focus-within:shadow-focus">
               <Search size={11} strokeWidth={2.1} className="shrink-0 text-fg-subtle" />
               <input
                 ref={searchInputRef}
@@ -457,12 +457,12 @@ export function FileTree() {
                   }
                 }}
                 placeholder="Filter files"
-                className="selectable min-w-0 flex-1 bg-transparent font-display text-[12px] tracking-tight text-fg-base placeholder:text-fg-subtle focus:outline-none"
+                className="selectable min-w-0 flex-1 bg-transparent font-display text-sm tracking-tight text-fg-base placeholder:text-fg-subtle focus:outline-none"
               />
               {searchQuery && (
                 <button
                   onClick={() => setSearchQuery('')}
-                  className="flex h-4 w-4 items-center justify-center rounded-full text-fg-subtle transition-colors hover:bg-white/[0.10] hover:text-fg-base"
+                  className="flex h-4 w-4 items-center justify-center rounded-full text-fg-subtle transition-colors hover:bg-surface-3 hover:text-fg-base"
                   aria-label="Clear filter"
                 >
                   <X size={9} strokeWidth={2.4} />
@@ -480,7 +480,7 @@ export function FileTree() {
       >
         {rootError && <ErrorRow message={rootError} />}
         {!isTauri && (
-          <div className="px-2 py-1.5 font-display text-[10.5px] leading-relaxed text-fg-subtle">
+          <div className="px-2 py-1.5 font-display text-2xs leading-relaxed text-fg-subtle">
             <span className="text-status-warn">web preview</span> · file
             tree is empty. Launch via <span className="font-mono">pnpm tauri:dev</span>.
           </div>
@@ -632,17 +632,17 @@ function ContextMenu({
       key={label}
       onClick={() => { action(); onClose(); }}
       className={cn(
-        'flex w-full items-center rounded-md px-3 py-[5px] font-display text-[12.5px] tracking-tight transition-colors duration-100',
+        'flex w-full items-center rounded-md px-3 py-[5px] font-display text-sm tracking-tight transition-colors duration-100',
         danger
           ? 'text-red-400 hover:bg-red-500/[0.12]'
-          : 'text-fg-base/90 hover:bg-white/[0.07] hover:text-fg-base',
+          : 'text-fg-base/90 hover:bg-surface-2 hover:text-fg-base',
       )}
     >
       {label}
     </button>
   );
 
-  const sep = <div className="my-[3px] border-t border-white/[0.06]" />;
+  const sep = <div className="my-[3px] border-t border-edge-1" />;
 
   void root; // root is available for future use (e.g. relative path display)
 
@@ -650,7 +650,7 @@ function ContextMenu({
     <div
       ref={menuRef}
       style={{ left: pos.x, top: pos.y }}
-      className="fixed z-[9999] min-w-[196px] rounded-xl border border-white/[0.09] bg-[#1b1b1d] p-1.5 shadow-2xl shadow-black/70"
+      className="fixed z-[9999] min-w-[196px] rounded-xl border border-edge-2 bg-[#1b1b1d] p-1.5 shadow-2xl shadow-black/70"
       role="menu"
       aria-label="File actions"
     >
@@ -726,11 +726,11 @@ function InputDialog({
 
   return createPortal(
     <div
-      className="fixed inset-0 z-[10000] flex items-center justify-center bg-black/50"
+      className="fixed inset-0 z-[10000] flex items-center justify-center bg-scrim-2"
       onMouseDown={(e) => { if (e.target === e.currentTarget) onCancel(); }}
     >
-      <div className="w-80 rounded-xl border border-white/[0.09] bg-[#1c1c1e] p-4 shadow-2xl shadow-black/70">
-        <p className="mb-3 font-display text-[13px] font-medium text-fg-base">{title}</p>
+      <div className="w-80 rounded-xl border border-edge-2 bg-[#1c1c1e] p-4 shadow-2xl shadow-black/70">
+        <p className="mb-3 font-display text-base font-medium text-fg-base">{title}</p>
         <input
           ref={inputRef}
           value={value}
@@ -740,19 +740,19 @@ function InputDialog({
             if (e.key === 'Escape') { e.preventDefault(); onCancel(); }
           }}
           placeholder={placeholder}
-          className="selectable w-full rounded-lg border border-white/[0.07] bg-black/30 px-3 py-1.5 font-display text-[12.5px] text-fg-base placeholder:text-fg-subtle focus:border-accent/50 focus:outline-none"
+          className="selectable w-full rounded-lg border border-edge-2 bg-scrim-2 px-3 py-1.5 font-display text-sm text-fg-base placeholder:text-fg-subtle focus:border-accent/50 focus:outline-none"
         />
         <div className="mt-3 flex justify-end gap-2">
           <button
             onClick={onCancel}
-            className="rounded-md px-3 py-1.5 font-display text-[11.5px] text-fg-muted transition-colors hover:bg-white/[0.06] hover:text-fg-base"
+            className="rounded-md px-3 py-1.5 font-display text-xs text-fg-muted transition-colors hover:bg-surface-2 hover:text-fg-base"
           >
             Cancel
           </button>
           <button
             onClick={confirm}
             disabled={!value.trim()}
-            className="rounded-md bg-accent/90 px-3 py-1.5 font-display text-[11.5px] text-white transition-colors hover:bg-accent disabled:opacity-40"
+            className="rounded-md bg-accent/90 px-3 py-1.5 font-display text-xs text-white transition-colors hover:bg-accent disabled:opacity-40"
           >
             Confirm
           </button>
@@ -785,14 +785,14 @@ function DeleteDialog({
 
   return createPortal(
     <div
-      className="fixed inset-0 z-[10000] flex items-center justify-center bg-black/50"
+      className="fixed inset-0 z-[10000] flex items-center justify-center bg-scrim-2"
       onMouseDown={(e) => { if (e.target === e.currentTarget) onCancel(); }}
     >
-      <div className="w-80 rounded-xl border border-white/[0.09] bg-[#1c1c1e] p-4 shadow-2xl shadow-black/70">
-        <p className="mb-1.5 font-display text-[13px] font-medium text-fg-base">
+      <div className="w-80 rounded-xl border border-edge-2 bg-[#1c1c1e] p-4 shadow-2xl shadow-black/70">
+        <p className="mb-1.5 font-display text-base font-medium text-fg-base">
           Delete &ldquo;{entry.name}&rdquo;?
         </p>
-        <p className="mb-4 font-display text-[11.5px] leading-relaxed text-fg-muted">
+        <p className="mb-4 font-display text-xs leading-relaxed text-fg-muted">
           {entry.kind === 'dir'
             ? 'This will permanently delete the folder and all its contents.'
             : 'This file will be permanently deleted.'}
@@ -800,13 +800,13 @@ function DeleteDialog({
         <div className="flex justify-end gap-2">
           <button
             onClick={onCancel}
-            className="rounded-md px-3 py-1.5 font-display text-[11.5px] text-fg-muted transition-colors hover:bg-white/[0.06] hover:text-fg-base"
+            className="rounded-md px-3 py-1.5 font-display text-xs text-fg-muted transition-colors hover:bg-surface-2 hover:text-fg-base"
           >
             Cancel
           </button>
           <button
             onClick={onConfirm}
-            className="rounded-md bg-red-500/80 px-3 py-1.5 font-display text-[11.5px] text-white transition-colors hover:bg-red-500"
+            className="rounded-md bg-red-500/80 px-3 py-1.5 font-display text-xs text-white transition-colors hover:bg-red-500"
           >
             Delete
           </button>
@@ -865,7 +865,7 @@ function TreeChildren({
 
   if (visible.length === 0) {
     return depth === 0 ? (
-      <div className="px-2 py-1.5 font-display text-[10.5px] italic leading-relaxed text-fg-subtle">
+      <div className="px-2 py-1.5 font-display text-2xs italic leading-relaxed text-fg-subtle">
         {query ? 'no matches' : 'empty folder'}
       </div>
     ) : null;
@@ -1027,8 +1027,8 @@ function TreeNode({
         onDoubleClick={handleDoubleClick}
         onContextMenu={handleContextMenu}
         className={cn(
-          'group relative flex h-[26px] w-full items-center gap-1.5 rounded-md pr-2 font-display text-[12.5px] tracking-tight transition-colors duration-100',
-          'hover:bg-white/[0.045]',
+          'group relative flex h-[26px] w-full items-center gap-1.5 rounded-md pr-2 font-display text-sm tracking-tight transition-colors duration-100',
+          'hover:bg-surface-1',
           entry.hidden && 'opacity-65',
         )}
         style={{ paddingLeft: indent + 6 }}
@@ -1040,7 +1040,7 @@ function TreeNode({
           <span
             key={i}
             aria-hidden
-            className="pointer-events-none absolute top-0 h-full w-px bg-white/[0.05]"
+            className="pointer-events-none absolute top-0 h-full w-px bg-surface-1"
             style={{ left: i * 14 + 11 }}
           />
         ))}
@@ -1077,7 +1077,7 @@ function TreeNode({
 
         {entry.kind === 'symlink' && (
           <span
-            className="ml-auto font-mono text-[9px] uppercase tracking-widest2"
+            className="ml-auto font-mono text-2xs uppercase tracking-widest2"
             style={{ color: MOCHA.overlay1 }}
           >
             ↪
@@ -1089,7 +1089,7 @@ function TreeNode({
         {decoration && (
           <span
             className={cn(
-              'ml-auto pr-1 font-mono text-[10px] font-semibold leading-none',
+              'ml-auto pr-1 font-mono text-2xs font-semibold leading-none',
               decoColor,
             )}
             title={`git: ${gitDecoLabel(decoration)}`}
@@ -1157,9 +1157,9 @@ function HeaderIconButton({
       title={title}
       className={cn(
         'flex h-6 w-6 items-center justify-center rounded-md transition-colors duration-150',
-        'hover:bg-white/[0.08] hover:text-fg-base',
+        'hover:bg-surface-2 hover:text-fg-base',
         'disabled:opacity-40 disabled:hover:bg-transparent',
-        active ? 'bg-white/[0.08] text-fg-base' : 'text-fg-muted',
+        active ? 'bg-surface-2 text-fg-base' : 'text-fg-muted',
       )}
     >
       {children}
@@ -1172,7 +1172,7 @@ function HeaderIconButton({
 function LoadingRow({ indent = 0 }: { indent?: number }) {
   return (
     <div
-      className="flex items-center gap-2 py-1.5 pr-3 font-display text-[11px] text-fg-subtle"
+      className="flex items-center gap-2 py-1.5 pr-3 font-display text-xs text-fg-subtle"
       style={{ paddingLeft: indent * 14 + 14 }}
     >
       <span className="h-1 w-1 animate-pulse-soft rounded-full bg-accent" />
@@ -1185,7 +1185,7 @@ function LoadingRow({ indent = 0 }: { indent?: number }) {
 function ErrorRow({ message, indent = 0 }: { message: string; indent?: number }) {
   return (
     <div
-      className="flex items-start gap-1.5 py-1.5 pr-2 font-display text-[10.5px] leading-relaxed text-status-err"
+      className="flex items-start gap-1.5 py-1.5 pr-2 font-display text-2xs leading-relaxed text-status-err"
       style={{ paddingLeft: indent * 14 + 8 }}
     >
       <AlertCircle size={11} strokeWidth={2} className="mt-0.5 shrink-0" />

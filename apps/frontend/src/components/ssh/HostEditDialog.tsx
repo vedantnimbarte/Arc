@@ -58,7 +58,7 @@ export function HostEditDialog({ existing, onClose }: HostEditDialogProps) {
   return (
     <div className="absolute inset-0 z-10 flex flex-col bg-bg-panel/95 backdrop-blur-md animate-fade-in">
       <div className="border-b border-border-subtle px-4 py-2.5">
-        <div className="font-display text-[12px] text-fg-base">
+        <div className="font-display text-sm text-fg-base">
           {existing ? 'Edit host' : 'Add host'}
         </div>
       </div>
@@ -81,7 +81,7 @@ export function HostEditDialog({ existing, onClose }: HostEditDialogProps) {
           <select
             value={identityId}
             onChange={(e) => setIdentityId(e.target.value)}
-            className="w-full rounded-squircle border border-border-subtle bg-bg-subtle px-2 py-1.5 font-mono text-[12px] text-fg-base focus:border-accent focus:outline-none"
+            className="w-full rounded-squircle border border-border-subtle bg-bg-subtle px-2 py-1.5 font-mono text-sm text-fg-base focus:border-accent focus:outline-none"
           >
             <option value="">(none — connect will fail)</option>
             {keys.map((k) => (
@@ -105,12 +105,12 @@ export function HostEditDialog({ existing, onClose }: HostEditDialogProps) {
             onChange={(e) => setStartupCmd(e.target.value)}
             placeholder="cd /var/www && tail -f deploy.log"
             rows={2}
-            className="w-full resize-none rounded-squircle border border-border-subtle bg-bg-subtle px-2 py-1.5 font-mono text-[12px] text-fg-base placeholder:text-fg-subtle focus:border-accent focus:outline-none"
+            className="w-full resize-none rounded-squircle border border-border-subtle bg-bg-subtle px-2 py-1.5 font-mono text-sm text-fg-base placeholder:text-fg-subtle focus:border-accent focus:outline-none"
           />
         </FormRow>
 
         {err && (
-          <div className="mt-2 rounded border border-status-err/40 bg-status-err/10 px-2 py-1.5 font-mono text-[11px] text-status-err">
+          <div className="mt-2 rounded border border-status-err/40 bg-status-err/10 px-2 py-1.5 font-mono text-xs text-status-err">
             {err}
           </div>
         )}
@@ -119,7 +119,7 @@ export function HostEditDialog({ existing, onClose }: HostEditDialogProps) {
         <button
           type="button"
           onClick={onClose}
-          className="rounded-squircle px-3 py-1.5 font-display text-[11.5px] text-fg-muted transition hover:bg-bg-hover hover:text-fg-base"
+          className="rounded-squircle px-3 py-1.5 font-display text-xs text-fg-muted transition hover:bg-bg-hover hover:text-fg-base"
         >
           Cancel
         </button>
@@ -128,7 +128,7 @@ export function HostEditDialog({ existing, onClose }: HostEditDialogProps) {
           onClick={submit}
           disabled={!valid || busy}
           className={cn(
-            'rounded-squircle px-3 py-1.5 font-display text-[11.5px] transition',
+            'rounded-squircle px-3 py-1.5 font-display text-xs transition',
             valid && !busy
               ? 'bg-accent/90 text-bg-base hover:bg-accent'
               : 'cursor-not-allowed border border-border-subtle text-fg-subtle',
@@ -144,7 +144,7 @@ export function HostEditDialog({ existing, onClose }: HostEditDialogProps) {
 function FormRow({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div className="mb-3 last:mb-0">
-      <div className="mb-1 font-mono text-[9.5px] uppercase tracking-widest2 text-fg-subtle">
+      <div className="mb-1 font-mono text-2xs uppercase tracking-widest2 text-fg-subtle">
         {label}
       </div>
       {children}
@@ -166,7 +166,7 @@ function Input(props: {
       value={props.value}
       onChange={(e) => props.onChange(e.target.value)}
       placeholder={props.placeholder}
-      className="w-full rounded-squircle border border-border-subtle bg-bg-subtle px-2 py-1.5 font-mono text-[12px] text-fg-base placeholder:text-fg-subtle focus:border-accent focus:outline-none"
+      className="w-full rounded-squircle border border-border-subtle bg-bg-subtle px-2 py-1.5 font-mono text-sm text-fg-base placeholder:text-fg-subtle focus:border-accent focus:outline-none"
     />
   );
 }

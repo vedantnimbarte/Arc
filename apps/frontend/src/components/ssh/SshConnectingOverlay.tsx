@@ -46,7 +46,7 @@ export function SshConnectingOverlay({
     >
       {/* Progress dots row */}
       <div className="flex flex-col items-center gap-3">
-        <div className="font-mono text-[9.5px] uppercase tracking-widest2 text-fg-subtle">
+        <div className="font-mono text-2xs uppercase tracking-widest2 text-fg-subtle">
           {progressTitle(progress)}
         </div>
         <div className="flex items-center gap-2.5">
@@ -72,26 +72,26 @@ export function SshConnectingOverlay({
             );
           })}
         </div>
-        <div className="font-mono text-[10px] uppercase tracking-widest2 text-fg-muted">
+        <div className="font-mono text-2xs uppercase tracking-widest2 text-fg-muted">
           {stepLabel}
         </div>
       </div>
 
       {/* Identity card */}
       <div className="flex flex-col items-center gap-1">
-        <div className="font-display text-[15px] text-fg-base">{hostName}</div>
-        <div className="font-mono text-[11px] text-fg-muted">{hostLine}</div>
+        <div className="font-display text-lg text-fg-base">{hostName}</div>
+        <div className="font-mono text-xs text-fg-muted">{hostLine}</div>
       </div>
 
       {/* Last log line */}
-      <div className="h-4 font-mono text-[10.5px] text-fg-subtle">
+      <div className="h-4 font-mono text-2xs text-fg-subtle">
         {lastLine ? `${lastLine.level}  ${lastLine.msg}` : 'opening…'}
       </div>
 
       <button
         type="button"
         onClick={onCancel}
-        className="flex items-center gap-1.5 rounded-squircle border border-border-subtle px-3 py-1 font-display text-[11.5px] text-fg-muted transition hover:bg-bg-hover hover:text-fg-base"
+        className="flex items-center gap-1.5 rounded-squircle border border-border-subtle px-3 py-1 font-display text-xs text-fg-muted transition hover:bg-bg-hover hover:text-fg-base"
       >
         <X className="h-3.5 w-3.5" />
         Cancel

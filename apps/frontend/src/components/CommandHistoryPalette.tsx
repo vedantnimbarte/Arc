@@ -102,12 +102,12 @@ export function CommandHistoryPalette({ open, onClose }: Props) {
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-start justify-center bg-black/40 backdrop-blur-sm"
+      className="fixed inset-0 z-50 flex items-start justify-center bg-scrim-2 backdrop-blur-sm"
       onClick={onClose}
     >
       <div
         onClick={(e) => e.stopPropagation()}
-        className="material-sheet mt-[14vh] flex w-[640px] max-w-[92vw] animate-sheet-in flex-col overflow-hidden rounded-window shadow-sheet ring-1 ring-white/10"
+        className="material-sheet mt-[14vh] flex w-[640px] max-w-[92vw] animate-sheet-in flex-col overflow-hidden rounded-window shadow-sheet ring-1 ring-edge-2"
       >
         <div className="flex items-center gap-2 border-b border-border-hairline px-3.5 py-2.5">
           <History size={13} strokeWidth={2.1} className="text-fg-subtle" />
@@ -117,16 +117,16 @@ export function CommandHistoryPalette({ open, onClose }: Props) {
             onChange={(e) => setQuery(e.target.value)}
             onKeyDown={onKeyDown}
             placeholder="search command history…"
-            className="flex-1 bg-transparent font-display text-[13px] text-fg-base placeholder:text-fg-subtle focus:outline-none"
+            className="flex-1 bg-transparent font-display text-base text-fg-base placeholder:text-fg-subtle focus:outline-none"
             autoComplete="off"
             spellCheck={false}
           />
-          <kbd className="font-mono text-[10px] text-fg-subtle">esc</kbd>
+          <kbd className="font-mono text-2xs text-fg-subtle">esc</kbd>
         </div>
 
         <div className="max-h-[420px] overflow-y-auto py-1">
           {visible.length === 0 && (
-            <div className="flex items-center justify-center gap-1.5 px-4 py-6 font-display text-[11.5px] italic text-fg-subtle">
+            <div className="flex items-center justify-center gap-1.5 px-4 py-6 font-display text-xs italic text-fg-subtle">
               {isTauri ? (
                 <>
                   <Search size={11} strokeWidth={2} />
@@ -146,13 +146,13 @@ export function CommandHistoryPalette({ open, onClose }: Props) {
                 'flex w-full items-start gap-2.5 px-3.5 py-1.5 text-left transition-colors',
                 idx === selected
                   ? 'bg-accent-soft ring-1 ring-inset ring-border-strong'
-                  : 'hover:bg-white/[0.045]',
+                  : 'hover:bg-surface-1',
               )}
             >
-              <span className="mt-0.5 w-[42px] shrink-0 truncate font-mono text-[10px] text-fg-subtle">
+              <span className="mt-0.5 w-[42px] shrink-0 truncate font-mono text-2xs text-fg-subtle">
                 {formatAge(row.started_at)}
               </span>
-              <span className="min-w-0 flex-1 truncate font-mono text-[12px] text-fg-base/90">
+              <span className="min-w-0 flex-1 truncate font-mono text-sm text-fg-base/90">
                 {row.command}
               </span>
               {idx === selected && (
@@ -162,7 +162,7 @@ export function CommandHistoryPalette({ open, onClose }: Props) {
           ))}
         </div>
 
-        <div className="flex items-center justify-between border-t border-border-hairline px-3.5 py-1.5 font-display text-[10px] text-fg-subtle">
+        <div className="flex items-center justify-between border-t border-border-hairline px-3.5 py-1.5 font-display text-2xs text-fg-subtle">
           <span>
             <kbd className="font-mono">↑↓</kbd> select · <kbd className="font-mono">return</kbd> paste · <kbd className="font-mono">esc</kbd> close
           </span>

@@ -78,12 +78,12 @@ export function PrPanel() {
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-start justify-center bg-black/40 backdrop-blur-sm"
+      className="fixed inset-0 z-50 flex items-start justify-center bg-scrim-2 backdrop-blur-sm"
       onClick={close}
     >
       <div
         onClick={(e) => e.stopPropagation()}
-        className="material-sheet mt-[6vh] flex h-[80vh] w-[860px] max-w-[96vw] animate-sheet-in flex-col overflow-hidden rounded-window shadow-sheet ring-1 ring-white/10"
+        className="material-sheet mt-[6vh] flex h-[80vh] w-[860px] max-w-[96vw] animate-sheet-in flex-col overflow-hidden rounded-window shadow-sheet ring-1 ring-edge-2"
       >
         <Header
           slug={slug}
@@ -144,11 +144,11 @@ function Header({
 }) {
   return (
     <div className="flex items-center justify-between border-b border-border-hairline px-4 py-2.5">
-      <div className="flex items-center gap-2 font-display text-[12.5px] font-semibold tracking-tight text-fg-base">
+      <div className="flex items-center gap-2 font-display text-sm font-semibold tracking-tight text-fg-base">
         {onBack && (
           <button
             onClick={onBack}
-            className="rounded p-1 text-fg-muted transition-colors hover:bg-white/[0.06] hover:text-fg-base"
+            className="rounded p-1 text-fg-muted transition-colors hover:bg-surface-2 hover:text-fg-base"
             title="Back to list"
           >
             <ArrowLeft size={12} strokeWidth={2.2} />
@@ -157,7 +157,7 @@ function Header({
         <GitPullRequest size={12} strokeWidth={2.1} className="text-fg-muted" />
         {view.kind === 'create' ? 'New Pull Request' : 'Pull Requests'}
         {slug && (
-          <span className="font-mono text-[10px] font-normal text-fg-subtle">
+          <span className="font-mono text-2xs font-normal text-fg-subtle">
             · {slug.owner}/{slug.name}
           </span>
         )}
@@ -166,7 +166,7 @@ function Header({
         {onCreate && (
           <button
             onClick={onCreate}
-            className="flex items-center gap-1 rounded bg-accent-soft px-2 py-0.5 font-display text-[10.5px] font-medium text-fg-base ring-1 ring-accent/45 hover:bg-accent/20"
+            className="flex items-center gap-1 rounded bg-accent-soft px-2 py-0.5 font-display text-2xs font-medium text-fg-base ring-1 ring-accent/45 hover:bg-accent/20"
           >
             <Plus size={10} strokeWidth={2.4} />
             new PR
@@ -175,7 +175,7 @@ function Header({
         <button
           onClick={onClose}
           title="Close (esc)"
-          className="rounded p-1 text-fg-subtle transition-colors hover:bg-white/[0.06] hover:text-fg-base"
+          className="rounded p-1 text-fg-subtle transition-colors hover:bg-surface-2 hover:text-fg-base"
         >
           <X size={11} strokeWidth={2.2} />
         </button>
@@ -186,7 +186,7 @@ function Header({
 
 function EmptyMessage({ children }: { children: React.ReactNode }) {
   return (
-    <div className="flex flex-1 items-center justify-center px-6 py-10 text-center font-display text-[11.5px] italic text-fg-subtle">
+    <div className="flex flex-1 items-center justify-center px-6 py-10 text-center font-display text-xs italic text-fg-subtle">
       {children}
     </div>
   );
@@ -214,10 +214,10 @@ function TokenPane({ onSaved }: { onSaved: () => void }) {
   return (
     <div className="flex flex-1 flex-col items-center justify-center gap-3 px-8 py-10">
       <KeyRound size={20} strokeWidth={1.8} className="text-fg-muted" />
-      <div className="text-center font-display text-[12.5px] text-fg-base">
+      <div className="text-center font-display text-sm text-fg-base">
         Add a GitHub personal access token
       </div>
-      <div className="max-w-md text-center font-display text-[11px] leading-relaxed text-fg-muted">
+      <div className="max-w-md text-center font-display text-xs leading-relaxed text-fg-muted">
         Create one at{' '}
         <span className="font-mono">github.com/settings/tokens</span> with the{' '}
         <span className="font-mono">repo</span> scope (classic) or read+write access to pull
@@ -228,15 +228,15 @@ function TokenPane({ onSaved }: { onSaved: () => void }) {
         value={token}
         onChange={(e) => setToken(e.target.value)}
         placeholder="ghp_..."
-        className="w-[420px] max-w-full rounded border border-border-subtle bg-bg-base/60 px-3 py-1.5 font-mono text-[12px] text-fg-base placeholder:text-fg-subtle focus:border-accent/45 focus:outline-none"
+        className="w-[420px] max-w-full rounded border border-border-subtle bg-bg-base/60 px-3 py-1.5 font-mono text-sm text-fg-base placeholder:text-fg-subtle focus:border-accent/45 focus:outline-none"
         autoFocus
         spellCheck={false}
       />
-      {err && <div className="font-mono text-[10.5px] text-red-300">{err}</div>}
+      {err && <div className="font-mono text-2xs text-red-300">{err}</div>}
       <button
         onClick={() => void save()}
         disabled={!token.trim() || busy}
-        className="rounded bg-accent-soft px-4 py-1.5 font-display text-[11.5px] font-medium text-fg-base ring-1 ring-accent/45 hover:bg-accent/20 disabled:opacity-50"
+        className="rounded bg-accent-soft px-4 py-1.5 font-display text-xs font-medium text-fg-base ring-1 ring-accent/45 hover:bg-accent/20 disabled:opacity-50"
       >
         {busy ? 'saving…' : 'save token'}
       </button>
@@ -290,14 +290,14 @@ function ListView({ root, onPick }: { root: string; onPick: (n: number) => void 
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder="filter by title / author / #number"
-            className="flex-1 bg-transparent font-display text-[11.5px] text-fg-base placeholder:text-fg-subtle focus:outline-none"
+            className="flex-1 bg-transparent font-display text-xs text-fg-base placeholder:text-fg-subtle focus:outline-none"
             spellCheck={false}
           />
         </div>
         <button
           onClick={() => void load()}
           disabled={loading}
-          className="rounded p-1 text-fg-subtle transition-colors hover:bg-white/[0.06] hover:text-fg-base disabled:opacity-50"
+          className="rounded p-1 text-fg-subtle transition-colors hover:bg-surface-2 hover:text-fg-base disabled:opacity-50"
           title="Refresh"
         >
           <RefreshCw size={11} strokeWidth={2.1} className={loading ? 'animate-spin' : ''} />
@@ -305,19 +305,19 @@ function ListView({ root, onPick }: { root: string; onPick: (n: number) => void 
       </div>
 
       {err && (
-        <div className="border-b border-border-hairline bg-red-500/[0.06] px-4 py-2 font-mono text-[11px] text-red-300">
+        <div className="border-b border-border-hairline bg-red-500/[0.06] px-4 py-2 font-mono text-xs text-red-300">
           {err}
         </div>
       )}
 
       <div className="flex-1 overflow-y-auto">
         {loading && visible.length === 0 && (
-          <div className="px-4 py-10 text-center font-display text-[11.5px] italic text-fg-subtle">
+          <div className="px-4 py-10 text-center font-display text-xs italic text-fg-subtle">
             loading PRs…
           </div>
         )}
         {!loading && visible.length === 0 && (
-          <div className="px-4 py-10 text-center font-display text-[11.5px] italic text-fg-subtle">
+          <div className="px-4 py-10 text-center font-display text-xs italic text-fg-subtle">
             no PRs match
           </div>
         )}
@@ -348,10 +348,10 @@ function FilterToggle({
           key={o.id}
           onClick={() => onChange(o.id)}
           className={cn(
-            'rounded px-2 py-0.5 font-display text-[10.5px] font-medium tracking-tight transition-colors',
+            'rounded px-2 py-0.5 font-display text-2xs font-medium tracking-tight transition-colors',
             value === o.id
               ? 'bg-accent-soft text-fg-base ring-1 ring-accent/45'
-              : 'text-fg-subtle hover:bg-white/[0.05] hover:text-fg-base',
+              : 'text-fg-subtle hover:bg-surface-1 hover:text-fg-base',
           )}
         >
           {o.label}
@@ -365,17 +365,17 @@ function PrRow({ pr, onClick }: { pr: GitHostPrSummary; onClick: () => void }) {
   return (
     <button
       onClick={onClick}
-      className="flex w-full items-start gap-3 border-b border-border-hairline/60 px-4 py-2 text-left transition-colors last:border-b-0 hover:bg-white/[0.04]"
+      className="flex w-full items-start gap-3 border-b border-border-hairline/60 px-4 py-2 text-left transition-colors last:border-b-0 hover:bg-surface-1"
     >
       <StateIcon state={pr.state} draft={pr.draft} />
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-2">
-          <span className="truncate font-display text-[12.5px] font-medium tracking-tight text-fg-base">
+          <span className="truncate font-display text-sm font-medium tracking-tight text-fg-base">
             {pr.title}
           </span>
-          <span className="font-mono text-[10.5px] text-fg-subtle">#{pr.number}</span>
+          <span className="font-mono text-2xs text-fg-subtle">#{pr.number}</span>
         </div>
-        <div className="mt-0.5 truncate font-display text-[10.5px] text-fg-subtle">
+        <div className="mt-0.5 truncate font-display text-2xs text-fg-subtle">
           {pr.head} → {pr.base} · by {pr.author} · {formatRelative(pr.updated_at)}
         </div>
       </div>
@@ -421,7 +421,7 @@ function DetailView({ root, number }: { root: string; number: number }) {
   if (err) {
     return (
       <div className="flex flex-1 items-center justify-center px-6">
-        <div className="max-w-md font-mono text-[11px] text-red-300">{err}</div>
+        <div className="max-w-md font-mono text-xs text-red-300">{err}</div>
       </div>
     );
   }
@@ -434,12 +434,12 @@ function DetailView({ root, number }: { root: string; number: number }) {
           <StateIcon state={pr.state} draft={pr.draft} />
           <div className="min-w-0 flex-1">
             <div className="flex items-baseline gap-2">
-              <span className="font-display text-[14px] font-semibold text-fg-base">
+              <span className="font-display text-lg font-semibold text-fg-base">
                 {pr.title}
               </span>
-              <span className="font-mono text-[11px] text-fg-subtle">#{pr.number}</span>
+              <span className="font-mono text-xs text-fg-subtle">#{pr.number}</span>
             </div>
-            <div className="mt-0.5 font-display text-[11px] text-fg-muted">
+            <div className="mt-0.5 font-display text-xs text-fg-muted">
               <span className="font-mono">{pr.head}</span> →{' '}
               <span className="font-mono">{pr.base}</span> · by {pr.author}
             </div>
@@ -448,14 +448,14 @@ function DetailView({ root, number }: { root: string; number: number }) {
             href={pr.html_url}
             target="_blank"
             rel="noreferrer"
-            className="flex items-center gap-1 rounded border border-border-subtle px-2 py-1 font-display text-[10.5px] text-fg-muted hover:border-border-strong hover:text-fg-base"
+            className="flex items-center gap-1 rounded border border-border-subtle px-2 py-1 font-display text-2xs text-fg-muted hover:border-border-strong hover:text-fg-base"
           >
             <ExternalLink size={10} strokeWidth={2.1} />
             github
           </a>
         </div>
         {pr.body && (
-          <pre className="mt-2 max-h-32 overflow-y-auto whitespace-pre-wrap rounded bg-black/20 p-2 font-display text-[11px] leading-relaxed text-fg-base/90">
+          <pre className="mt-2 max-h-32 overflow-y-auto whitespace-pre-wrap rounded bg-scrim-1 p-2 font-display text-xs leading-relaxed text-fg-base/90">
             {pr.body}
           </pre>
         )}
@@ -471,12 +471,12 @@ function DetailView({ root, number }: { root: string; number: number }) {
                 className="border-b border-border-hairline/60 px-3 py-1.5 last:border-b-0"
               >
                 <div className="flex items-center gap-1.5">
-                  <span className="font-mono text-[10.5px] text-fg-subtle">{c.short}</span>
-                  <span className="truncate font-display text-[11.5px] text-fg-base/90">
+                  <span className="font-mono text-2xs text-fg-subtle">{c.short}</span>
+                  <span className="truncate font-display text-xs text-fg-base/90">
                     {firstLine(c.message)}
                   </span>
                 </div>
-                <div className="mt-0.5 truncate font-display text-[10px] text-fg-subtle">
+                <div className="mt-0.5 truncate font-display text-2xs text-fg-subtle">
                   {c.author}
                 </div>
               </div>
@@ -503,22 +503,22 @@ function FileRow({ file }: { file: { path: string; status: string; additions: nu
     <div className="border-b border-border-hairline/60 last:border-b-0">
       <button
         onClick={() => setOpen((o) => !o)}
-        className="flex w-full items-center gap-2 px-3 py-1.5 text-left transition-colors hover:bg-white/[0.04]"
+        className="flex w-full items-center gap-2 px-3 py-1.5 text-left transition-colors hover:bg-surface-1"
       >
         <FileDiff size={10} strokeWidth={2.1} className="shrink-0 text-fg-muted" />
-        <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-fg-base/90">
+        <span className="min-w-0 flex-1 truncate font-mono text-xs text-fg-base/90">
           {file.path}
         </span>
-        <span className="shrink-0 font-display text-[10px] text-fg-subtle">{file.status}</span>
+        <span className="shrink-0 font-display text-2xs text-fg-subtle">{file.status}</span>
         {file.additions > 0 && (
-          <span className="font-mono text-[10px] text-green-400">+{file.additions}</span>
+          <span className="font-mono text-2xs text-green-400">+{file.additions}</span>
         )}
         {file.deletions > 0 && (
-          <span className="font-mono text-[10px] text-red-400">−{file.deletions}</span>
+          <span className="font-mono text-2xs text-red-400">−{file.deletions}</span>
         )}
       </button>
       {open && file.patch && (
-        <pre className="max-h-64 overflow-auto whitespace-pre bg-black/30 px-3 py-2 font-mono text-[10.5px] leading-snug">
+        <pre className="max-h-64 overflow-auto whitespace-pre bg-scrim-2 px-3 py-2 font-mono text-2xs leading-snug">
           {file.patch.split('\n').map((line, i) => (
             <div
               key={i}
@@ -535,7 +535,7 @@ function FileRow({ file }: { file: { path: string; status: string; additions: nu
         </pre>
       )}
       {open && !file.patch && (
-        <div className="px-3 py-2 font-display text-[10.5px] italic text-fg-subtle">
+        <div className="px-3 py-2 font-display text-2xs italic text-fg-subtle">
           binary or oversized — patch omitted by GitHub
         </div>
       )}
@@ -545,7 +545,7 @@ function FileRow({ file }: { file: { path: string; status: string; additions: nu
 
 function SectionLabel({ children }: { children: React.ReactNode }) {
   return (
-    <div className="border-b border-border-hairline bg-bg-base/30 px-3 py-1.5 font-display text-[10px] uppercase tracking-wider text-fg-subtle">
+    <div className="border-b border-border-hairline bg-bg-base/30 px-3 py-1.5 font-display text-2xs uppercase tracking-wider text-fg-subtle">
       {children}
     </div>
   );
@@ -621,20 +621,20 @@ function CreateView({
       </div>
 
       <label className="flex flex-col gap-1">
-        <span className="font-display text-[10.5px] uppercase tracking-wider text-fg-subtle">
+        <span className="font-display text-2xs uppercase tracking-wider text-fg-subtle">
           title
         </span>
         <input
           value={title}
           onChange={(e) => setTitle(e.target.value)}
           placeholder="What does this PR do?"
-          className="rounded border border-border-subtle bg-bg-base/60 px-2.5 py-1.5 font-display text-[12px] text-fg-base placeholder:text-fg-subtle focus:border-accent/45 focus:outline-none"
+          className="rounded border border-border-subtle bg-bg-base/60 px-2.5 py-1.5 font-display text-sm text-fg-base placeholder:text-fg-subtle focus:border-accent/45 focus:outline-none"
           spellCheck={false}
         />
       </label>
 
       <label className="flex flex-1 flex-col gap-1">
-        <span className="font-display text-[10.5px] uppercase tracking-wider text-fg-subtle">
+        <span className="font-display text-2xs uppercase tracking-wider text-fg-subtle">
           description
         </span>
         <textarea
@@ -642,12 +642,12 @@ function CreateView({
           onChange={(e) => setBody(e.target.value)}
           placeholder="Markdown body. Bullet the highlights, link issues with #123."
           rows={10}
-          className="min-h-[160px] flex-1 rounded border border-border-subtle bg-bg-base/60 px-2.5 py-1.5 font-display text-[12px] text-fg-base placeholder:text-fg-subtle focus:border-accent/45 focus:outline-none"
+          className="min-h-[160px] flex-1 rounded border border-border-subtle bg-bg-base/60 px-2.5 py-1.5 font-display text-sm text-fg-base placeholder:text-fg-subtle focus:border-accent/45 focus:outline-none"
           spellCheck
         />
       </label>
 
-      <label className="flex items-center gap-1.5 font-display text-[11px] text-fg-muted">
+      <label className="flex items-center gap-1.5 font-display text-xs text-fg-muted">
         <input
           type="checkbox"
           checked={draft}
@@ -658,7 +658,7 @@ function CreateView({
       </label>
 
       {err && (
-        <div className="rounded bg-red-500/[0.08] px-3 py-2 font-mono text-[11px] text-red-300 ring-1 ring-red-500/20">
+        <div className="rounded bg-red-500/[0.08] px-3 py-2 font-mono text-xs text-red-300 ring-1 ring-red-500/20">
           {err}
         </div>
       )}
@@ -667,14 +667,14 @@ function CreateView({
         <button
           onClick={onCancel}
           disabled={busy}
-          className="rounded px-2.5 py-1 font-display text-[11px] text-fg-muted hover:bg-white/[0.05] hover:text-fg-base disabled:opacity-50"
+          className="rounded px-2.5 py-1 font-display text-xs text-fg-muted hover:bg-surface-1 hover:text-fg-base disabled:opacity-50"
         >
           cancel
         </button>
         <button
           onClick={() => void submit()}
           disabled={busy || !title.trim() || !head || !base || head === base}
-          className="rounded bg-accent-soft px-3 py-1 font-display text-[11px] font-medium text-fg-base ring-1 ring-accent/45 hover:bg-accent/20 disabled:opacity-50"
+          className="rounded bg-accent-soft px-3 py-1 font-display text-xs font-medium text-fg-base ring-1 ring-accent/45 hover:bg-accent/20 disabled:opacity-50"
         >
           {busy ? 'creating…' : draft ? 'create draft' : 'create PR'}
         </button>
@@ -696,13 +696,13 @@ function BranchPicker({
 }) {
   return (
     <label className="flex flex-col gap-1">
-      <span className="font-display text-[10.5px] uppercase tracking-wider text-fg-subtle">
+      <span className="font-display text-2xs uppercase tracking-wider text-fg-subtle">
         {label}
       </span>
       <select
         value={value}
         onChange={(e) => onChange(e.target.value)}
-        className="appearance-none rounded border border-border-subtle bg-bg-base/60 px-2.5 py-1.5 font-mono text-[11.5px] text-fg-base focus:border-accent/45 focus:outline-none"
+        className="appearance-none rounded border border-border-subtle bg-bg-base/60 px-2.5 py-1.5 font-mono text-xs text-fg-base focus:border-accent/45 focus:outline-none"
       >
         {!options.find((b) => b.name === value) && <option value={value}>{value}</option>}
         {options.map((b) => (

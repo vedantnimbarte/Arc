@@ -35,8 +35,8 @@ export function CommitGraph({ commits, emptyHint }: Props) {
   if (commits.length === 0) {
     return (
       <div className="flex flex-1 flex-col items-center justify-center px-6 py-10 text-center">
-        <span className="mb-3 h-10 w-10 rounded-full bg-white/[0.03] ring-1 ring-white/[0.04]" aria-hidden />
-        <p className="font-display text-[12px] text-fg-subtle">
+        <span className="mb-3 h-10 w-10 rounded-full bg-surface-1 ring-1 ring-edge-1" aria-hidden />
+        <p className="font-display text-sm text-fg-subtle">
           {emptyHint ?? 'No commits match the current filters.'}
         </p>
       </div>
@@ -135,33 +135,33 @@ export function CommitGraph({ commits, emptyHint }: Props) {
               key={row.commit.oid}
               className={cn(
                 'group flex items-center gap-2.5 rounded-lg px-3',
-                'transition-all duration-150 hover:bg-white/[0.035]',
+                'transition-all duration-150 hover:bg-surface-1',
               )}
               style={{ height: ROW_HEIGHT, marginRight: 8 }}
               title={row.commit.oid}
             >
-              <span className="shrink-0 rounded-md bg-white/[0.035] px-1.5 py-[1px] font-mono text-[10.5px] text-fg-muted ring-1 ring-inset ring-white/[0.03] transition-colors group-hover:bg-white/[0.06] group-hover:text-fg-base">
+              <span className="shrink-0 rounded-md bg-surface-1 px-1.5 py-[1px] font-mono text-2xs text-fg-muted ring-1 ring-inset ring-edge-1 transition-colors group-hover:bg-surface-2 group-hover:text-fg-base">
                 {row.commit.short}
               </span>
-              <span className="min-w-0 flex-1 truncate font-display text-[12.5px] text-fg-base">
+              <span className="min-w-0 flex-1 truncate font-display text-sm text-fg-base">
                 {row.commit.subject || (
                   <span className="italic text-fg-subtle">(no subject)</span>
                 )}
               </span>
               <DiffStat additions={row.commit.additions} deletions={row.commit.deletions} />
               {row.commit.parents.length > 1 && (
-                <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-white/[0.05] px-2 py-[1px] font-display text-[9.5px] uppercase tracking-widest2 text-fg-subtle ring-1 ring-inset ring-white/[0.04]">
+                <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-surface-1 px-2 py-[1px] font-display text-2xs uppercase tracking-widest2 text-fg-subtle ring-1 ring-inset ring-edge-1">
                   <GitMerge size={9} strokeWidth={2.2} />
                   merge
                 </span>
               )}
               <span
-                className="shrink-0 truncate font-display text-[11px] text-fg-muted"
+                className="shrink-0 truncate font-display text-xs text-fg-muted"
                 style={{ maxWidth: 140 }}
               >
                 {row.commit.author}
               </span>
-              <span className="shrink-0 font-mono text-[10.5px] tabular-nums text-fg-subtle">
+              <span className="shrink-0 font-mono text-2xs tabular-nums text-fg-subtle">
                 {formatRelative(row.commit.time)}
               </span>
             </li>
@@ -186,7 +186,7 @@ function formatRelative(unixSeconds: number): string {
 function DiffStat({ additions, deletions }: { additions: number; deletions: number }) {
   if (additions === 0 && deletions === 0) return null;
   return (
-    <span className="flex shrink-0 items-center gap-1 font-mono text-[10.5px] tabular-nums">
+    <span className="flex shrink-0 items-center gap-1 font-mono text-2xs tabular-nums">
       {additions > 0 && (
         <span className="rounded px-1 py-[1px] text-[#3ad28a] ring-1 ring-inset ring-[#3ad28a]/20 bg-[#3ad28a]/[0.07]">
           +{additions}

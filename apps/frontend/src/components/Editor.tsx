@@ -463,7 +463,7 @@ export function Editor({ filePath, tabId }: Props) {
       {/* Header: file icon · name · path · undo · redo · save status · save button */}
       <div className="flex h-8 shrink-0 items-center gap-2 border-b border-border-hairline bg-bg-chrome/40 px-3 backdrop-blur-md">
         <Icon size={12} strokeWidth={1.8} style={{ color }} />
-        <span className="font-display text-[12px] font-medium tracking-tight text-fg-base">
+        <span className="font-display text-sm font-medium tracking-tight text-fg-base">
           {basename(filePath)}
         </span>
         {dirty && (
@@ -472,12 +472,12 @@ export function Editor({ filePath, tabId }: Props) {
             title="Unsaved changes"
           />
         )}
-        <span className="hidden truncate font-mono text-[10px] text-fg-subtle md:inline" title={filePath}>
+        <span className="hidden truncate font-mono text-2xs text-fg-subtle md:inline" title={filePath}>
           · {filePath}
         </span>
         {lineBlame && (
           <span
-            className="hidden min-w-0 shrink truncate font-mono text-[10px] text-fg-subtle lg:inline"
+            className="hidden min-w-0 shrink truncate font-mono text-2xs text-fg-subtle lg:inline"
             title={lineBlame.content ? `${lineBlame.short} · ${lineBlame.content}` : lineBlame.short}
           >
             · {lineBlame.author}, {relTimeFromUnix(lineBlame.time)}
@@ -489,7 +489,7 @@ export function Editor({ filePath, tabId }: Props) {
             <div
               role="tablist"
               aria-label="Markdown view"
-              className="mr-1 flex items-center gap-0.5 rounded-md bg-white/[0.05] p-0.5"
+              className="mr-1 flex items-center gap-0.5 rounded-md bg-surface-1 p-0.5"
             >
               {(
                 [
@@ -504,9 +504,9 @@ export function Editor({ filePath, tabId }: Props) {
                   aria-selected={mode === id}
                   onClick={() => mode !== id && setMode(id)}
                   className={cn(
-                    'flex h-5 items-center gap-1 rounded px-1.5 font-display text-[10.5px] font-medium tracking-tight transition-colors duration-150',
+                    'flex h-5 items-center gap-1 rounded px-1.5 font-display text-2xs font-medium tracking-tight transition-colors duration-150',
                     mode === id
-                      ? 'bg-white/[0.10] text-fg-base'
+                      ? 'bg-surface-3 text-fg-base'
                       : 'text-fg-muted hover:text-fg-base',
                   )}
                   title={title}
@@ -519,7 +519,7 @@ export function Editor({ filePath, tabId }: Props) {
           )}
           <button
             onClick={() => viewRef.current && undo(viewRef.current)}
-            className="flex h-6 w-6 items-center justify-center rounded-md text-fg-muted transition-colors duration-150 hover:bg-white/[0.08] hover:text-fg-base disabled:opacity-40"
+            className="flex h-6 w-6 items-center justify-center rounded-md text-fg-muted transition-colors duration-150 hover:bg-surface-2 hover:text-fg-base disabled:opacity-40"
             aria-label="Undo"
             title="Undo (⌘Z)"
             disabled={mode === 'preview'}
@@ -528,7 +528,7 @@ export function Editor({ filePath, tabId }: Props) {
           </button>
           <button
             onClick={() => viewRef.current && redo(viewRef.current)}
-            className="flex h-6 w-6 items-center justify-center rounded-md text-fg-muted transition-colors duration-150 hover:bg-white/[0.08] hover:text-fg-base disabled:opacity-40"
+            className="flex h-6 w-6 items-center justify-center rounded-md text-fg-muted transition-colors duration-150 hover:bg-surface-2 hover:text-fg-base disabled:opacity-40"
             aria-label="Redo"
             title="Redo (⇧⌘Z)"
             disabled={mode === 'preview'}
@@ -542,10 +542,10 @@ export function Editor({ filePath, tabId }: Props) {
             onClick={() => void saveRef.current()}
             disabled={!dirty || status.kind === 'saving'}
             className={cn(
-              'ml-1 flex h-6 items-center gap-1 rounded-md px-2 font-display text-[11px] font-medium tracking-tight transition-colors duration-150',
+              'ml-1 flex h-6 items-center gap-1 rounded-md px-2 font-display text-xs font-medium tracking-tight transition-colors duration-150',
               dirty && status.kind !== 'saving'
                 ? 'surface-silver active:scale-[0.97]'
-                : 'bg-white/[0.05] text-fg-subtle',
+                : 'bg-surface-1 text-fg-subtle',
             )}
             aria-label="Save"
             title="Save (⌘S)"
@@ -635,7 +635,7 @@ function StatusLabel({ status, dirty }: { status: Status; dirty: boolean }) {
   }
   return (
     <span
-      className={cn('flex items-center gap-1 px-1.5 font-mono text-[10px]', color)}
+      className={cn('flex items-center gap-1 px-1.5 font-mono text-2xs', color)}
       title={status.kind === 'error' ? status.message : undefined}
     >
       {Icon && <Icon size={10} strokeWidth={2.2} />}
@@ -650,13 +650,13 @@ function ErrorBlock({ filePath, message }: { filePath: string; message: string }
   return (
     <div className="flex flex-1 flex-col items-center justify-center gap-2 px-6 text-center">
       <Icon size={28} strokeWidth={1.6} className="text-fg-subtle" />
-      <span className="font-display text-[13px] font-medium tracking-tight text-fg-base">
+      <span className="font-display text-base font-medium tracking-tight text-fg-base">
         {isBinary ? "Can't preview this file" : 'Failed to open'}
       </span>
-      <span className="max-w-md font-mono text-[11px] leading-relaxed text-fg-muted">
+      <span className="max-w-md font-mono text-xs leading-relaxed text-fg-muted">
         {message}
       </span>
-      <span className="mt-1 max-w-md truncate font-mono text-[10px] text-fg-subtle" title={filePath}>
+      <span className="mt-1 max-w-md truncate font-mono text-2xs text-fg-subtle" title={filePath}>
         {filePath}
       </span>
     </div>

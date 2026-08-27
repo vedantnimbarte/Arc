@@ -29,6 +29,19 @@ export default {
           'monospace',
         ],
       },
+      // A seven-rung type scale, replacing ~650 one-off `text-[Npx]` values
+      // that ran from 8.5px to 22px in half-pixel steps. The floor is 11px:
+      // below that, UI labels stop being readable at arm's length on a
+      // 1x display, and most of the old sub-11px text was navigation.
+      fontSize: {
+        '2xs': ['11px', { lineHeight: '15px' }],
+        xs: ['12px', { lineHeight: '16px' }],
+        sm: ['13px', { lineHeight: '18px' }],
+        base: ['14px', { lineHeight: '20px' }],
+        lg: ['16px', { lineHeight: '22px' }],
+        xl: ['19px', { lineHeight: '26px' }],
+        '2xl': ['22px', { lineHeight: '28px' }],
+      },
       colors: {
         // Tokens are driven by CSS variables set on `<html>` by the active
         // theme (see `src/themes/index.ts`). Tokens that should support
@@ -42,6 +55,25 @@ export default {
           hover: 'rgb(var(--bg-hover, 69 69 71) / <alpha-value>)',
           chrome: 'rgb(var(--bg-chrome, 34 34 36) / <alpha-value>)',
           subtle: 'var(--bg-subtle, rgba(52, 52, 54, 0.38))',
+        },
+        // Elevation ladder. Use these instead of `bg-white/[x]` — a raw white
+        // overlay assumes a dark ground and goes invisible on the light
+        // themes. Three rungs, deliberately: resting, hover, pressed.
+        surface: {
+          1: 'var(--surface-1, rgba(255, 255, 255, 0.035))',
+          2: 'var(--surface-2, rgba(255, 255, 255, 0.065))',
+          3: 'var(--surface-3, rgba(255, 255, 255, 0.11))',
+        },
+        // Borders/rings that sit *on* a surface. `border-subtle`/`strong`
+        // remain the chrome-level dividers.
+        edge: {
+          1: 'var(--edge-1, rgba(255, 255, 255, 0.05))',
+          2: 'var(--edge-2, rgba(255, 255, 255, 0.10))',
+        },
+        // Backdrops behind dialogs and popovers.
+        scrim: {
+          1: 'var(--scrim-1, rgba(0, 0, 0, 0.22))',
+          2: 'var(--scrim-2, rgba(0, 0, 0, 0.45))',
         },
         border: {
           subtle: 'var(--border-subtle, rgba(220, 224, 232, 0.07))',

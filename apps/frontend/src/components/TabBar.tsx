@@ -178,11 +178,11 @@ export function TabBar() {
           so it never shifts the side clusters or eats the window-drag region. */}
       {activeTab && (
         <div className="pointer-events-none absolute inset-y-0 left-1/2 flex max-w-[44%] -translate-x-1/2 items-center gap-1.5 px-3">
-          <span className="truncate font-display text-[12px] font-medium tracking-tight text-fg-base/85">
+          <span className="truncate font-display text-sm font-medium tracking-tight text-fg-base/85">
             {activeTab.title}
           </span>
           {activeTab.cwd && (
-            <span className="shrink truncate font-display text-[11.5px] text-fg-subtle">
+            <span className="shrink truncate font-display text-xs text-fg-subtle">
               · {basename(activeTab.cwd)}
             </span>
           )}
@@ -192,7 +192,7 @@ export function TabBar() {
       {/* Sidebar toggle — left rail, mirrors macOS toolbar control */}
       <button
         onClick={toggleSidebar}
-        className="group flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-fg-muted transition-all duration-200 ease-apple hover:bg-white/[0.08] hover:text-fg-base active:bg-white/[0.12]"
+        className="group flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-fg-muted transition-all duration-200 ease-apple hover:bg-surface-2 hover:text-fg-base active:bg-surface-3"
         aria-label={sidebarCollapsed ? 'Show sidebar' : 'Hide sidebar'}
         aria-pressed={!sidebarCollapsed}
         title={sidebarCollapsed ? 'Show sidebar (⌘B)' : 'Hide sidebar (⌘B)'}
@@ -209,7 +209,7 @@ export function TabBar() {
       <AiCliMenuButton clis={aiClis} onLaunch={(cli) => void launchAiCli(cli)} />
       <button
         onClick={() => void runCommand('shortcut.open-shortcuts')}
-        className="group flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-fg-muted transition-all duration-200 ease-apple hover:bg-white/[0.08] hover:text-fg-base active:bg-white/[0.12]"
+        className="group flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-fg-muted transition-all duration-200 ease-apple hover:bg-surface-2 hover:text-fg-base active:bg-surface-3"
         aria-label="Keyboard shortcuts"
         title={`Keyboard shortcuts (${formatBinding(getBinding('open-shortcuts'))})`}
       >
@@ -223,7 +223,7 @@ export function TabBar() {
         <button
           ref={plusRef}
           onClick={() => setMenuOpen((o) => !o)}
-          className="group ml-0.5 flex h-[28px] w-[28px] shrink-0 items-center justify-center rounded-[7px] text-fg-subtle transition-all duration-200 ease-apple hover:bg-white/[0.06] hover:text-fg-base active:bg-white/[0.10]"
+          className="group ml-0.5 flex h-[28px] w-[28px] shrink-0 items-center justify-center rounded-[7px] text-fg-subtle transition-all duration-200 ease-apple hover:bg-surface-2 hover:text-fg-base active:bg-surface-3"
           aria-label="New cell"
           aria-expanded={menuOpen}
           aria-haspopup="menu"
@@ -243,7 +243,7 @@ export function TabBar() {
         {isGitRepo && (
           <button
             onClick={() => void gitWindowOpen()}
-            className="group flex h-8 w-8 items-center justify-center rounded-md text-fg-muted transition-all duration-200 ease-apple hover:bg-white/[0.08] hover:text-fg-base active:bg-white/[0.12]"
+            className="group flex h-8 w-8 items-center justify-center rounded-md text-fg-muted transition-all duration-200 ease-apple hover:bg-surface-2 hover:text-fg-base active:bg-surface-3"
             aria-label="Open Git history"
             title="Git history"
           >
@@ -260,21 +260,21 @@ export function TabBar() {
           ref={menuRef}
           role="menu"
           style={{ position: 'fixed', top: menuPos.top, left: menuPos.left }}
-          className="material-sheet z-50 w-52 animate-popover-in overflow-hidden rounded-md bg-bg-panel shadow-sheet ring-1 ring-white/10"
+          className="material-sheet z-50 w-52 animate-popover-in overflow-hidden rounded-md bg-bg-panel shadow-sheet ring-1 ring-edge-2"
         >
           <button
             role="menuitem"
             onClick={handleNewTerminal}
-            className="flex w-full items-center gap-2 px-3 py-2 text-left font-display text-[12px] text-fg-base/90 transition-colors hover:bg-white/[0.06]"
+            className="flex w-full items-center gap-2 px-3 py-2 text-left font-display text-sm text-fg-base/90 transition-colors hover:bg-surface-2"
           >
             <TerminalIcon size={12} strokeWidth={2} className="text-fg-subtle" />
             <span className="flex-1">Terminal</span>
-            <kbd className="font-mono text-[9.5px] text-fg-subtle">⌘T</kbd>
+            <kbd className="font-mono text-2xs text-fg-subtle">⌘T</kbd>
           </button>
           <button
             role="menuitem"
             onClick={newEditor}
-            className="flex w-full items-center gap-2 px-3 py-2 text-left font-display text-[12px] text-fg-base/90 transition-colors hover:bg-white/[0.06]"
+            className="flex w-full items-center gap-2 px-3 py-2 text-left font-display text-sm text-fg-base/90 transition-colors hover:bg-surface-2"
           >
             <FileCode size={12} strokeWidth={2} className="text-fg-subtle" />
             <span className="flex-1">Editor (new file)</span>
@@ -282,7 +282,7 @@ export function TabBar() {
           <button
             role="menuitem"
             onClick={handleNewPreview}
-            className="flex w-full items-center gap-2 px-3 py-2 text-left font-display text-[12px] text-fg-base/90 transition-colors hover:bg-white/[0.06]"
+            className="flex w-full items-center gap-2 px-3 py-2 text-left font-display text-sm text-fg-base/90 transition-colors hover:bg-surface-2"
           >
             <Monitor size={12} strokeWidth={2} className="text-fg-subtle" />
             <span className="flex-1">Preview</span>
@@ -290,15 +290,15 @@ export function TabBar() {
           <button
             role="menuitem"
             onClick={handleNewApiClient}
-            className="flex w-full items-center gap-2 px-3 py-2 text-left font-display text-[12px] text-fg-base/90 transition-colors hover:bg-white/[0.06]"
+            className="flex w-full items-center gap-2 px-3 py-2 text-left font-display text-sm text-fg-base/90 transition-colors hover:bg-surface-2"
           >
             <Send size={12} strokeWidth={2} className="text-fg-subtle" />
             <span className="flex-1">API Client</span>
           </button>
           {aiClis.length > 0 && (
             <>
-              <div className="my-1 border-t border-white/[0.05]" />
-              <div className="px-3 pb-1 pt-1.5 font-display text-[9.5px] uppercase tracking-wider text-fg-subtle/80">
+              <div className="my-1 border-t border-edge-1" />
+              <div className="px-3 pb-1 pt-1.5 font-display text-2xs uppercase tracking-wider text-fg-subtle/80">
                 AI Agents
               </div>
               {aiClis.map((cli) => (
@@ -306,7 +306,7 @@ export function TabBar() {
                   key={cli.id}
                   role="menuitem"
                   onClick={() => launchCli(cli)}
-                  className="flex w-full items-center gap-2 px-3 py-2 text-left font-display text-[12px] text-fg-base/90 transition-colors hover:bg-white/[0.06]"
+                  className="flex w-full items-center gap-2 px-3 py-2 text-left font-display text-sm text-fg-base/90 transition-colors hover:bg-surface-2"
                   title={cli.path}
                 >
                   <Bot size={12} strokeWidth={2} className="text-fg-subtle" />
@@ -318,7 +318,7 @@ export function TabBar() {
                   <button
                     role="menuitem"
                     onClick={() => launchWingmanMode('pilot')}
-                    className="flex w-full items-center gap-2 px-3 py-2 text-left font-display text-[12px] text-fg-base/90 transition-colors hover:bg-white/[0.06]"
+                    className="flex w-full items-center gap-2 px-3 py-2 text-left font-display text-sm text-fg-base/90 transition-colors hover:bg-surface-2"
                     title="Prompt for a goal, then run Wingman pilot mode"
                   >
                     <Bot size={12} strokeWidth={2} className="text-fg-subtle" />
@@ -327,7 +327,7 @@ export function TabBar() {
                   <button
                     role="menuitem"
                     onClick={() => launchWingmanMode('headless')}
-                    className="flex w-full items-center gap-2 px-3 py-2 text-left font-display text-[12px] text-fg-base/90 transition-colors hover:bg-white/[0.06]"
+                    className="flex w-full items-center gap-2 px-3 py-2 text-left font-display text-sm text-fg-base/90 transition-colors hover:bg-surface-2"
                     title="Prompt for a message, then run a one-shot headless response"
                   >
                     <Bot size={12} strokeWidth={2} className="text-fg-subtle" />
@@ -425,10 +425,10 @@ function AiCliMenuButton({
         className={cn(
           'group flex h-8 w-8 shrink-0 items-center justify-center rounded-md transition-all duration-200 ease-apple',
           open
-            ? 'bg-white/[0.10] text-fg-base'
+            ? 'bg-surface-3 text-fg-base'
             : clis.length === 0
-              ? 'text-fg-subtle/60 hover:bg-white/[0.08] hover:text-fg-muted active:bg-white/[0.12]'
-              : 'text-fg-muted hover:bg-white/[0.08] hover:text-fg-base active:bg-white/[0.12]',
+              ? 'text-fg-subtle/60 hover:bg-surface-2 hover:text-fg-muted active:bg-surface-3'
+              : 'text-fg-muted hover:bg-surface-2 hover:text-fg-base active:bg-surface-3',
         )}
       >
         <Bot size={14} strokeWidth={1.9} />
@@ -440,10 +440,10 @@ function AiCliMenuButton({
             ref={menuRef}
             role="menu"
             style={{ position: 'fixed', top: pos.top, left: pos.left }}
-            className="material-sheet z-50 w-48 animate-popover-in overflow-hidden rounded-md shadow-sheet ring-1 ring-white/10"
+            className="material-sheet z-50 w-48 animate-popover-in overflow-hidden rounded-md shadow-sheet ring-1 ring-edge-2"
           >
             {clis.length === 0 ? (
-              <div className="px-3 py-3 font-display text-[11.5px] leading-snug text-fg-muted">
+              <div className="px-3 py-3 font-display text-xs leading-snug text-fg-muted">
                 <div className="mb-1 font-medium text-fg-base">No AI CLIs found</div>
                 <div className="text-fg-subtle">
                   Install <code className="font-mono">claude</code>,{' '}
@@ -461,7 +461,7 @@ function AiCliMenuButton({
                     onLaunch(cli);
                     setOpen(false);
                   }}
-                  className="flex w-full items-center gap-2 px-3 py-2 text-left font-display text-[12px] text-fg-base/90 transition-colors hover:bg-white/[0.06]"
+                  className="flex w-full items-center gap-2 px-3 py-2 text-left font-display text-sm text-fg-base/90 transition-colors hover:bg-surface-2"
                   title={cli.path}
                 >
                   <Bot size={12} strokeWidth={2} className="text-fg-subtle" />
@@ -492,7 +492,7 @@ function WindowControls() {
   const win = getCurrentWindow();
 
   return (
-    <div className="ml-1.5 flex h-full items-center gap-px border-l border-white/[0.05] px-1.5">
+    <div className="ml-1.5 flex h-full items-center gap-px border-l border-edge-1 px-1.5">
       {/* --- Minimize --- */}
       <button
         onClick={() => void win.minimize()}
@@ -520,8 +520,8 @@ function WindowControls() {
           'group relative flex h-[28px] w-10 items-center justify-center rounded-md',
           'text-fg-subtle/50',
           'transition-all duration-200 ease-out',
-          'hover:bg-white/[0.08] hover:text-fg-base/80',
-          'active:scale-95 active:bg-white/[0.13]',
+          'hover:bg-surface-2 hover:text-fg-base/80',
+          'active:scale-95 active:bg-surface-3',
         )}
         aria-label={isMaximized ? 'Restore window' : 'Maximize window'}
         title={isMaximized ? 'Restore' : 'Maximize'}
@@ -644,7 +644,7 @@ function NewFileDialog({ open, initialDirectory, onClose, onCreated }: NewFileDi
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-start justify-center bg-black/40 backdrop-blur-sm"
+      className="fixed inset-0 z-50 flex items-start justify-center bg-scrim-2 backdrop-blur-sm"
       onClick={onClose}
     >
       <div
@@ -652,18 +652,18 @@ function NewFileDialog({ open, initialDirectory, onClose, onCreated }: NewFileDi
         onKeyDown={(e) => {
           if (e.key === 'Escape') onClose();
         }}
-        className="material-sheet mt-[18vh] flex w-[520px] max-w-[92vw] animate-sheet-in flex-col overflow-hidden rounded-window shadow-sheet ring-1 ring-white/10"
+        className="material-sheet mt-[18vh] flex w-[520px] max-w-[92vw] animate-sheet-in flex-col overflow-hidden rounded-window shadow-sheet ring-1 ring-edge-2"
       >
         <div className="flex items-center gap-2 border-b border-border-hairline px-4 py-3">
           <FileCode size={13} strokeWidth={2} className="text-fg-subtle" />
-          <span className="font-display text-[12.5px] font-medium tracking-tight text-fg-base">
+          <span className="font-display text-sm font-medium tracking-tight text-fg-base">
             New file
           </span>
         </div>
 
         <div className="flex flex-col gap-3 px-4 py-4">
           <label className="flex flex-col gap-1">
-            <span className="font-display text-[10.5px] uppercase tracking-wider text-fg-subtle">
+            <span className="font-display text-2xs uppercase tracking-wider text-fg-subtle">
               Directory
             </span>
             <div className="flex gap-1.5">
@@ -672,12 +672,12 @@ function NewFileDialog({ open, initialDirectory, onClose, onCreated }: NewFileDi
                 onChange={(e) => setDirectory(e.target.value)}
                 placeholder="C:\\path\\to\\folder"
                 spellCheck={false}
-                className="min-w-0 flex-1 rounded-md border border-white/[0.06] bg-black/[0.25] px-2.5 py-1.5 font-mono text-[12px] text-fg-base placeholder:text-fg-subtle focus:border-accent/40 focus:bg-black/[0.32] focus:shadow-focus focus:outline-none"
+                className="min-w-0 flex-1 rounded-md border border-edge-1 bg-scrim-1 px-2.5 py-1.5 font-mono text-sm text-fg-base placeholder:text-fg-subtle focus:border-accent/40 focus:bg-scrim-2 focus:shadow-focus focus:outline-none"
               />
               <button
                 type="button"
                 onClick={pickDir}
-                className="flex shrink-0 items-center gap-1.5 rounded-md border border-white/[0.06] bg-white/[0.03] px-2.5 py-1.5 font-display text-[11.5px] text-fg-muted transition-colors hover:bg-white/[0.08] hover:text-fg-base"
+                className="flex shrink-0 items-center gap-1.5 rounded-md border border-edge-1 bg-surface-1 px-2.5 py-1.5 font-display text-xs text-fg-muted transition-colors hover:bg-surface-2 hover:text-fg-base"
                 title="Pick a folder"
               >
                 <FolderOpen size={11} strokeWidth={2} />
@@ -687,7 +687,7 @@ function NewFileDialog({ open, initialDirectory, onClose, onCreated }: NewFileDi
           </label>
 
           <label className="flex flex-col gap-1">
-            <span className="font-display text-[10.5px] uppercase tracking-wider text-fg-subtle">
+            <span className="font-display text-2xs uppercase tracking-wider text-fg-subtle">
               Filename
             </span>
             <input
@@ -703,22 +703,22 @@ function NewFileDialog({ open, initialDirectory, onClose, onCreated }: NewFileDi
               placeholder="notes.md"
               spellCheck={false}
               autoComplete="off"
-              className="rounded-md border border-white/[0.06] bg-black/[0.25] px-2.5 py-1.5 font-mono text-[12px] text-fg-base placeholder:text-fg-subtle focus:border-accent/40 focus:bg-black/[0.32] focus:shadow-focus focus:outline-none"
+              className="rounded-md border border-edge-1 bg-scrim-1 px-2.5 py-1.5 font-mono text-sm text-fg-base placeholder:text-fg-subtle focus:border-accent/40 focus:bg-scrim-2 focus:shadow-focus focus:outline-none"
             />
           </label>
 
           {error && (
-            <div className="rounded-md border border-red-500/30 bg-red-500/[0.08] px-2.5 py-1.5 font-display text-[11.5px] text-red-300">
+            <div className="rounded-md border border-red-500/30 bg-red-500/[0.08] px-2.5 py-1.5 font-display text-xs text-red-300">
               {error}
             </div>
           )}
         </div>
 
-        <div className="flex items-center justify-end gap-2 border-t border-border-hairline bg-black/[0.15] px-4 py-2.5">
+        <div className="flex items-center justify-end gap-2 border-t border-border-hairline bg-scrim-1 px-4 py-2.5">
           <button
             type="button"
             onClick={onClose}
-            className="rounded-md px-3 py-1.5 font-display text-[11.5px] text-fg-muted transition-colors hover:bg-white/[0.06] hover:text-fg-base"
+            className="rounded-md px-3 py-1.5 font-display text-xs text-fg-muted transition-colors hover:bg-surface-2 hover:text-fg-base"
           >
             Cancel
           </button>
@@ -726,7 +726,7 @@ function NewFileDialog({ open, initialDirectory, onClose, onCreated }: NewFileDi
             type="button"
             onClick={() => void submit()}
             disabled={busy}
-            className="rounded-md bg-accent/90 px-3 py-1.5 font-display text-[11.5px] font-medium text-bg-base transition-colors hover:bg-accent disabled:opacity-50"
+            className="rounded-md bg-accent/90 px-3 py-1.5 font-display text-xs font-medium text-bg-base transition-colors hover:bg-accent disabled:opacity-50"
           >
             {busy ? 'Creating…' : 'Create & open'}
           </button>

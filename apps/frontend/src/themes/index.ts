@@ -25,6 +25,17 @@ export interface ThemeTokens {
   borderSubtle: string;
   borderStrong: string;
   borderHairline: string;
+  // Text ramp. These are set by *target contrast*, not by whatever alpha
+  // looked right — every rung below carries real text (secondary labels,
+  // placeholders, empty-state copy), so every rung has to clear WCAG AA.
+  //   fgBase   — opaque, the theme's maximum
+  //   fgMuted  — ~7:1 against bgBase (AAA)
+  //   fgSubtle — ~4.5:1 against bgBase (AA); this is the floor, not a
+  //              decorative "barely there" tint. It was 2.3-2.5:1 across all
+  //              four themes before, i.e. failing AA everywhere it was used.
+  // Catppuccin Latte is the exception: its upstream text colour tops out at
+  // 7.1:1 on its own base, so muted has to run opaque and the ramp there is
+  // effectively two steps. Deviating further would mean leaving the palette.
   fgMuted: string;
   fgSubtle: string;
   accentSoft: string;
@@ -33,7 +44,55 @@ export interface ThemeTokens {
   wash1: string;
   wash2: string;
   wash3: string;
+
+  // ─── Elevation ──────────────────────────────────────────────────────
+  // Semantic overlay surfaces, replacing the raw `bg-white/[x]` ladder the
+  // UI used to be written against. Those hardcode "lift = add white", which
+  // is only true on a dark ground — on paper a lift has to be *ink*. Naming
+  // the three steps lets each theme decide which direction lift goes while
+  // the components keep asking for the same rung.
+  //
+  // surface1 = resting tint (zebra rows, inert chips)
+  // surface2 = hover / selected
+  // surface3 = pressed / strongly raised
+  // edge1/edge2 = hairline and visible borders on those surfaces
+  // scrim1/scrim2 = dialog and modal backdrops
+  //
+  // Optional so themes authored before these existed (including user JSON in
+  // `<data_dir>/arc/themes/`) keep loading; `applyTheme` fills them in from
+  // `mode` when absent.
+  surface1?: string;
+  surface2?: string;
+  surface3?: string;
+  edge1?: string;
+  edge2?: string;
+  scrim1?: string;
+  scrim2?: string;
 }
+
+/** Elevation defaults per mode, used when a theme doesn't declare its own.
+ *  Dark lifts with light; light lifts with ink — same rungs, opposite sign. */
+const ELEVATION: Record<'dark' | 'light', Required<Pick<ThemeTokens,
+  'surface1' | 'surface2' | 'surface3' | 'edge1' | 'edge2' | 'scrim1' | 'scrim2'>>> = {
+  dark: {
+    surface1: 'rgba(255, 255, 255, 0.035)',
+    surface2: 'rgba(255, 255, 255, 0.065)',
+    surface3: 'rgba(255, 255, 255, 0.11)',
+    edge1: 'rgba(255, 255, 255, 0.05)',
+    edge2: 'rgba(255, 255, 255, 0.10)',
+    scrim1: 'rgba(0, 0, 0, 0.22)',
+    scrim2: 'rgba(0, 0, 0, 0.45)',
+  },
+  light: {
+    surface1: 'rgba(15, 17, 26, 0.035)',
+    surface2: 'rgba(15, 17, 26, 0.065)',
+    surface3: 'rgba(15, 17, 26, 0.11)',
+    edge1: 'rgba(15, 17, 26, 0.09)',
+    edge2: 'rgba(15, 17, 26, 0.16)',
+    scrim1: 'rgba(15, 17, 26, 0.12)',
+    scrim2: 'rgba(15, 17, 26, 0.30)',
+  },
+};
 
 export interface ThemeDef {
   /** Stable id used as the persisted theme key. Built-ins are 'dark',
@@ -67,8 +126,8 @@ const dark: ThemeDef = {
     borderSubtle: 'rgba(220, 224, 232, 0.07)',
     borderStrong: 'rgba(220, 224, 232, 0.14)',
     borderHairline: 'rgba(0, 0, 0, 0.42)',
-    fgMuted: 'rgba(230, 234, 242, 0.58)',
-    fgSubtle: 'rgba(220, 226, 238, 0.30)',
+    fgMuted: 'rgba(230, 234, 242, 0.68)',
+    fgSubtle: 'rgba(220, 226, 238, 0.52)',
     accentSoft: 'rgba(200, 204, 214, 0.10)',
     accentGlow: 'rgba(220, 224, 232, 0.42)',
     wash1: '198 208 222',
@@ -106,8 +165,8 @@ const light: ThemeDef = {
     borderSubtle: 'rgba(60, 60, 70, 0.10)',
     borderStrong: 'rgba(60, 60, 70, 0.20)',
     borderHairline: 'rgba(0, 0, 0, 0.16)',
-    fgMuted: 'rgba(28, 28, 30, 0.62)',
-    fgSubtle: 'rgba(28, 28, 30, 0.38)',
+    fgMuted: 'rgba(28, 28, 30, 0.74)',
+    fgSubtle: 'rgba(28, 28, 30, 0.61)',
     accentSoft: 'rgba(56, 115, 214, 0.10)',
     accentGlow: 'rgba(56, 115, 214, 0.28)',
     wash1: '210 220 240',
@@ -148,8 +207,8 @@ const catppuccinMocha: ThemeDef = {
     borderSubtle: 'rgba(205, 214, 244, 0.07)',
     borderStrong: 'rgba(205, 214, 244, 0.16)',
     borderHairline: 'rgba(0, 0, 0, 0.48)',
-    fgMuted: 'rgba(205, 214, 244, 0.62)',
-    fgSubtle: 'rgba(205, 214, 244, 0.34)',
+    fgMuted: 'rgba(205, 214, 244, 0.75)',
+    fgSubtle: 'rgba(205, 214, 244, 0.57)',
     accentSoft: 'rgba(180, 190, 254, 0.12)',
     accentGlow: 'rgba(180, 190, 254, 0.45)',
     wash1: '203 166 247',  // mauve
@@ -201,8 +260,8 @@ const catppuccinLatte: ThemeDef = {
     borderSubtle: 'rgba(76, 79, 105, 0.10)',
     borderStrong: 'rgba(76, 79, 105, 0.22)',
     borderHairline: 'rgba(0, 0, 0, 0.16)',
-    fgMuted: 'rgba(76, 79, 105, 0.62)',
-    fgSubtle: 'rgba(76, 79, 105, 0.38)',
+    fgMuted: 'rgba(76, 79, 105, 1)',
+    fgSubtle: 'rgba(76, 79, 105, 0.82)',
     accentSoft: 'rgba(30, 102, 245, 0.12)',
     accentGlow: 'rgba(30, 102, 245, 0.30)',
     wash1: '136 57 239',  // mauve  #8839ef
@@ -363,6 +422,17 @@ export function applyTheme(theme: ThemeDef): void {
   set('--wash-1', t.wash1);
   set('--wash-2', t.wash2);
   set('--wash-3', t.wash3);
+
+  // Elevation — a theme may override any rung; anything it leaves out falls
+  // back to the defaults for its mode.
+  const e = ELEVATION[theme.mode];
+  set('--surface-1', t.surface1 ?? e.surface1);
+  set('--surface-2', t.surface2 ?? e.surface2);
+  set('--surface-3', t.surface3 ?? e.surface3);
+  set('--edge-1', t.edge1 ?? e.edge1);
+  set('--edge-2', t.edge2 ?? e.edge2);
+  set('--scrim-1', t.scrim1 ?? e.scrim1);
+  set('--scrim-2', t.scrim2 ?? e.scrim2);
 
   root.style.colorScheme = theme.mode;
   root.setAttribute('data-theme', theme.id);
