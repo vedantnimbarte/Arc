@@ -32,7 +32,7 @@ export interface WorkspaceMeta {
 export interface Tab {
   id: string;
   title: string;
-  kind: 'terminal' | 'editor' | 'preview' | 'apiclient' | 'ssh' | 'diff' | 'wingman-board';
+  kind: 'terminal' | 'editor' | 'preview' | 'apiclient' | 'ssh' | 'diff' | 'wingman-board' | 'wingman-review';
   /** Which workspace this tab belongs to. Every tab has one after hydrate;
    *  new tabs inherit the active workspace (stamped in `addTab`). */
   workspaceId?: string;
@@ -273,6 +273,9 @@ interface WorkspaceState {
   /** Open (or focus) the Wingman pilot board tab. Only one is useful — the
    *  board is global, not per-project. */
   openWingmanBoard: () => string;
+  /** Open (or focus) the Wingman review queue tab — agent-authored change
+   *  sets across every card, ordered by what needs a decision. */
+  openWingmanReview: () => string;
   /** Open a new SSH tab for `host`. The tab spawns an xterm and dials via
    *  the SSH store on mount. Sets `sshHostId` on the tab; `sshSessionId`
    *  is filled once the connect resolves. */
@@ -1189,6 +1192,18 @@ export const useWorkspace = create<WorkspaceState>()((set, get) => ({
       kind: 'apiclient',
     };
     get().addTab(tab);
+    return id;
+  },
+  openWingmanReview: () => {
+    // Like the board, the queue spans every project the daemon serves, so a
+    // second tab would duplicate it.
+    const existing = get().tabs.find((t) => t.kind === 'wingman-review');
+    if (existing) {
+      get().setActive(existing.id);
+      return existing.id;
+    }
+    const id = `wingman-review-${Date.now()}`;
+    get().addTab({ id, title: 'Review Queue', kind: 'wingman-review' });
     return id;
   },
   openWingmanBoard: () => {

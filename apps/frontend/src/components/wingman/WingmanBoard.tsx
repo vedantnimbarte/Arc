@@ -1,17 +1,19 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
   Ban,
   Check,
   ChevronDown,
   ChevronRight,
   FolderGit2,
+  Inbox,
   Play,
   RefreshCw,
   RotateCcw,
   X,
 } from 'lucide-react';
 import { cn } from '../../lib/cn';
-import { useWingman } from '../../state/wingman';
+import { reviewQueue, useWingman } from '../../state/wingman';
+import { useWorkspace } from '../../state/workspace';
 
 import { WINGMAN_COLUMNS, type WingmanCard, type WingmanSubRow } from '../../lib/tauri';
 
@@ -34,6 +36,12 @@ export function WingmanBoard() {
   const refresh = useWingman((s) => s.refreshBoard);
   const dispatchCard = useWingman((s) => s.dispatchCard);
 
+  // How many change sets are waiting on a human right now.
+  const pending = useMemo(
+    () => reviewQueue(cards).filter((i) => ['review', 'failed'].includes(i.task.status)).length,
+    [cards],
+  );
+
   useEffect(() => {
     if (status === 'connected') void refresh();
   }, [status, refresh]);
@@ -54,15 +62,34 @@ export function WingmanBoard() {
         <span className="font-display text-xs font-medium tracking-tight text-fg-base">
           Pilot board
         </span>
-        <button
-          type="button"
-          onClick={() => void refresh()}
-          title="Refresh"
-          aria-label="Refresh board"
-          className="rounded p-1 text-fg-subtle transition-colors hover:bg-surface-2 hover:text-fg-base"
-        >
-          <RefreshCw size={11} strokeWidth={2} className={cn(loading && 'animate-spin')} />
-        </button>
+        <div className="flex items-center gap-1">
+          {/* The board dispatches work; the queue reviews it. Pending count
+              here because "what is waiting on me" is the question you have
+              while looking at the board. */}
+          <button
+            type="button"
+            onClick={() => useWorkspace.getState().openWingmanReview()}
+            title="Review agent changes"
+            className="flex items-center gap-1 rounded px-1.5 py-0.5 font-mono text-2xs text-fg-muted transition-colors hover:bg-surface-2 hover:text-fg-base"
+          >
+            <Inbox size={11} strokeWidth={2} />
+            review
+            {pending > 0 && (
+              <span className="rounded bg-status-warn/15 px-1 tabular-nums text-status-warn">
+                {pending}
+              </span>
+            )}
+          </button>
+          <button
+            type="button"
+            onClick={() => void refresh()}
+            title="Refresh"
+            aria-label="Refresh board"
+            className="rounded p-1 text-fg-subtle transition-colors hover:bg-surface-2 hover:text-fg-base"
+          >
+            <RefreshCw size={11} strokeWidth={2} className={cn(loading && 'animate-spin')} />
+          </button>
+        </div>
       </div>
 
       <RunDetailOverlay />

@@ -603,7 +603,8 @@ export type TabKind =
   | 'apiclient'
   | 'ssh'
   | 'diff'
-  | 'wingman-board';
+  | 'wingman-board'
+  | 'wingman-review';
 
 export interface TabInput {
   id: string;
