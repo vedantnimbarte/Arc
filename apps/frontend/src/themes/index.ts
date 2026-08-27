@@ -467,12 +467,12 @@ export const FONT_OPTIONS: FontOption[] = [
   {
     id: 'jetbrains-mono',
     label: 'JetBrains Mono',
-    stack: "'JetBrains Mono', 'SF Mono', ui-monospace, Menlo, monospace",
+    stack: "'JetBrains Mono Variable', 'JetBrains Mono', 'SF Mono', ui-monospace, Menlo, monospace",
   },
   {
     id: 'fira-code',
     label: 'Fira Code',
-    stack: "'Fira Code', 'JetBrains Mono', 'SF Mono', ui-monospace, monospace",
+    stack: "'Fira Code', 'JetBrains Mono Variable', 'JetBrains Mono', 'SF Mono', ui-monospace, monospace",
   },
   {
     id: 'cascadia-code',

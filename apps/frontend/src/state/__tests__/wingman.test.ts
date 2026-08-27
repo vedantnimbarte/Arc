@@ -1,5 +1,10 @@
 import { describe, expect, it, beforeEach } from 'vitest';
-import { __applyEventForTests as applyEvent, __resetWingmanForTests, useWingman } from '../wingman';
+import {
+  __applyEventForTests as applyEvent,
+  __resetWingmanForTests,
+  transcriptToChat,
+  useWingman,
+} from '../wingman';
 import type { WingmanStreamEvent } from '../../lib/tauri';
 
 /** Drive the reducer the way the IPC listener does. */
@@ -106,5 +111,84 @@ describe('wingman stream folding', () => {
     // Wingman can add events; an older ARC must not break on them.
     const s = feed({ kind: 'something_new', payload: { whatever: 1 } });
     expect(s.chat).toHaveLength(0);
+  });
+});
+
+describe('transcript replay', () => {
+  it('produces the same rows a live turn would', () => {
+    // The point of the mapper: a resumed conversation must be
+    // indistinguishable from one you watched stream. Stored transcripts nest
+    // tool calls inside an assistant message and record results separately,
+    // so this reconciles two different shapes onto one row set.
+    const rows = transcriptToChat([
+      { kind: 'session_start', ts: 't', model: 'm', provider: 'p' },
+      { kind: 'user', ts: 't', text: 'what changed?' },
+      {
+        kind: 'assistant',
+        ts: 't',
+        blocks: [
+          { type: 'thinking', text: 'consider the diff' },
+          { type: 'text', text: 'Let me look. ' },
+          { type: 'text', text: 'One moment.' },
+          { type: 'tool_use', id: 'c1', name: 'git_diff', input: { staged: false } },
+        ],
+      },
+      { kind: 'tool_result', ts: 't', id: 'c1', output: '3 files', is_error: false },
+      { kind: 'assistant', ts: 't', blocks: [{ type: 'text', text: 'Three files changed.' }] },
+    ]);
+
+    expect(rows.map((r) => r.kind)).toEqual([
+      'user',
+      'thinking',
+      'assistant',
+      'tool',
+      'assistant',
+    ]);
+    // Sibling text blocks in one message read as a single answer.
+    expect(rows[2]).toEqual({ kind: 'assistant', text: 'Let me look. One moment.' });
+    const tool = rows.find((r) => r.kind === 'tool');
+    expect(tool?.output).toBe('3 files');
+    expect(tool?.isError).toBe(false);
+    expect(tool?.name).toBe('git_diff');
+  });
+
+  it('skips record kinds ARC has no row for', () => {
+    // Compaction recaps, pruned tool results and system-prompt splices are all
+    // written to the log. An older ARC must not break on a newer daemon's.
+    const rows = transcriptToChat([
+      { kind: 'recap', ts: 't', replaced: 12, text: 'earlier turns folded' },
+      { kind: 'tool_result_pruned', ts: 't', id: 'x', content: 'shrunk' },
+      { kind: 'something_new_entirely', ts: 't' },
+      { kind: 'user', ts: 't', text: 'still here' },
+    ]);
+    expect(rows).toEqual([{ kind: 'user', text: 'still here' }]);
+  });
+
+  it('drops a tool result whose call is missing', () => {
+    // Compaction can fold away the assistant message that made the call while
+    // leaving the result behind.
+    const rows = transcriptToChat([
+      { kind: 'tool_result', ts: 't', id: 'orphan', output: 'x' },
+    ]);
+    expect(rows).toHaveLength(0);
+  });
+
+  it('handles an empty or absent transcript', () => {
+    expect(transcriptToChat([])).toEqual([]);
+    expect(transcriptToChat(undefined as never)).toEqual([]);
+  });
+
+  it('ignores image blocks without losing the surrounding text', () => {
+    const rows = transcriptToChat([
+      {
+        kind: 'assistant',
+        ts: 't',
+        blocks: [
+          { type: 'text', text: 'see this' },
+          { type: 'image', data: 'base64…', media_type: 'image/png' },
+        ],
+      },
+    ]);
+    expect(rows).toEqual([{ kind: 'assistant', text: 'see this' }]);
   });
 });

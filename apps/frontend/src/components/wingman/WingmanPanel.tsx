@@ -5,9 +5,13 @@ import {
   ChevronDown,
   ChevronRight,
   CircleAlert,
+  // Aliased: lucide's `History` shadows the DOM `History` interface, and TS
+  // then resolves the global instead of the component.
+  History as HistoryIcon,
   Plus,
   ShieldCheck,
   ShieldX,
+  Trash2,
   Wrench,
 } from 'lucide-react';
 import { cn } from '../../lib/cn';
@@ -35,8 +39,22 @@ export function WingmanPanel() {
   const send = useWingman((s) => s.send);
   const newChat = useWingman((s) => s.newChat);
 
+  const cost = useWingman((s) => s.cost);
+  const loadCost = useWingman((s) => s.loadCost);
+  const loadSessions = useWingman((s) => s.loadSessions);
+
   const [text, setText] = useState('');
+  const [showHistory, setShowHistory] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
+
+  // Refresh spend when the panel opens and after each turn settles. Cheap
+  // (a read of Wingman's own ledger) and it's the number that goes stale
+  // fastest while you're using the panel.
+  useEffect(() => {
+    if (status === 'connected' && !streaming) void loadCost();
+  }, [status, streaming, activeProject, loadCost]);
+
+  const spend = totalSpend(cost);
 
   // Follow the tail while a turn streams. Only when already near the bottom, so
   // scrolling up to read an earlier tool result isn't yanked away mid-turn.
@@ -85,6 +103,22 @@ export function WingmanPanel() {
         </select>
         <button
           type="button"
+          onClick={() => {
+            setShowHistory((v) => !v);
+            if (!showHistory) void loadSessions();
+          }}
+          aria-pressed={showHistory}
+          title="Past conversations"
+          aria-label="Past conversations"
+          className={cn(
+            'rounded p-1 transition-colors hover:bg-surface-2 hover:text-fg-base',
+            showHistory ? 'bg-surface-2 text-fg-base' : 'text-fg-subtle',
+          )}
+        >
+          <HistoryIcon size={12} strokeWidth={2.2} />
+        </button>
+        <button
+          type="button"
           onClick={newChat}
           title="New conversation"
           aria-label="New conversation"
@@ -93,6 +127,8 @@ export function WingmanPanel() {
           <Plus size={12} strokeWidth={2.2} />
         </button>
       </div>
+
+      {showHistory && <SessionList onPick={() => setShowHistory(false)} />}
 
       <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto px-2 py-2">
         {chat.length === 0 ? (
@@ -148,17 +184,110 @@ export function WingmanPanel() {
             <ArrowUp size={12} strokeWidth={2.3} />
           </button>
         </div>
-        {usage && (
-          <div className="mt-1 flex justify-end gap-2 px-1 font-mono text-2xs tabular-nums text-fg-subtle">
-            <span title="Input tokens">in {usage.input.toLocaleString()}</span>
-            <span title="Output tokens">out {usage.output.toLocaleString()}</span>
-            {usage.cacheRead > 0 && (
-              <span title="Tokens served from cache">cached {usage.cacheRead.toLocaleString()}</span>
-            )}
-          </div>
-        )}
+        <div className="mt-1 flex items-center justify-between gap-2 px-1 font-mono text-2xs tabular-nums text-fg-subtle">
+          {/* Project spend to date. Wingman's own pitch is that you can see
+              what the work costs, so it belongs in view, not behind a menu. */}
+          <span title="Total spend on this project, per `wingman cost`">
+            {spend !== null ? `$${spend.toFixed(2)} total` : ''}
+          </span>
+          {usage && (
+            <span className="flex gap-2">
+              <span title="Input tokens">in {usage.input.toLocaleString()}</span>
+              <span title="Output tokens">out {usage.output.toLocaleString()}</span>
+              {usage.cacheRead > 0 && (
+                <span title="Tokens served from cache">
+                  cached {usage.cacheRead.toLocaleString()}
+                </span>
+              )}
+            </span>
+          )}
+        </div>
       </div>
     </div>
+  );
+}
+
+/**
+ * Pull a dollar total out of `wingman cost --json`.
+ *
+ * The shape is the daemon's and ARC only wants one number from it, so this
+ * probes the plausible keys rather than typing the whole payload — a schema
+ * ARC doesn't own is a schema ARC shouldn't mirror. Returns null when nothing
+ * matches, and the footer then shows nothing rather than `$0.00`, which would
+ * read as "this was free".
+ */
+function totalSpend(cost: unknown): number | null {
+  if (!cost || typeof cost !== 'object') return null;
+  const c = cost as Record<string, unknown>;
+  for (const key of ['total_usd', 'usd', 'total', 'total_cost']) {
+    const v = c[key];
+    if (typeof v === 'number' && Number.isFinite(v)) return v;
+  }
+  return null;
+}
+
+/** Past conversations for the active project. Wingman stores each transcript
+ *  as a file, so these survive daemon restarts — resuming continues the real
+ *  history, not a fresh context that merely looks similar. */
+function SessionList({ onPick }: { onPick: () => void }) {
+  const sessions = useWingman((s) => s.sessions);
+  const loading = useWingman((s) => s.sessionsLoading);
+  const activeId = useWingman((s) => s.sessionId);
+  const resume = useWingman((s) => s.resumeSession);
+  const forget = useWingman((s) => s.forgetSession);
+
+  if (loading && sessions.length === 0) {
+    return (
+      <p className="border-b border-border-hairline px-2 py-2 font-mono text-2xs text-fg-subtle">
+        loading…
+      </p>
+    );
+  }
+  if (sessions.length === 0) {
+    return (
+      <p className="border-b border-border-hairline px-2 py-2 font-mono text-2xs text-fg-subtle">
+        no past conversations
+      </p>
+    );
+  }
+
+  return (
+    <ul className="max-h-48 shrink-0 overflow-y-auto border-b border-border-hairline">
+      {sessions.map((s) => (
+        <li key={s.session_id} className="group flex items-center gap-1 px-1.5 py-0.5">
+          <button
+            type="button"
+            onClick={() => {
+              void resume(s.session_id);
+              onPick();
+            }}
+            title={s.model ? `${s.model} · ${s.turns} turn(s)` : `${s.turns} turn(s)`}
+            className={cn(
+              'min-w-0 flex-1 rounded px-1 py-1 text-left transition-colors hover:bg-surface-1',
+              s.session_id === activeId && 'bg-surface-2',
+            )}
+          >
+            <span className="block truncate font-display text-2xs text-fg-base">
+              {s.first_prompt || '(no prompt)'}
+            </span>
+            <span className="block truncate font-mono text-2xs text-fg-subtle">
+              {[s.model, `${s.turns} turn${s.turns === 1 ? '' : 's'}`]
+                .filter(Boolean)
+                .join(' · ')}
+            </span>
+          </button>
+          <button
+            type="button"
+            onClick={() => void forget(s.session_id)}
+            title="Forget this conversation"
+            aria-label="Forget this conversation"
+            className="shrink-0 rounded p-1 text-fg-subtle opacity-0 transition-opacity hover:bg-surface-2 hover:text-status-err group-hover:opacity-100 focus-visible:opacity-100"
+          >
+            <Trash2 size={10} strokeWidth={2} />
+          </button>
+        </li>
+      ))}
+    </ul>
   );
 }
 

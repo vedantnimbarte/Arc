@@ -426,12 +426,11 @@ export default function App() {
         icon: Bot,
         when: () => useWingman.getState().status === 'connected',
         run: () => {
-          // Routed through the chat panel rather than a bespoke result view:
-          // the answer streams like any other turn and stays in the transcript.
+          // Answered by the daemon's `explain` route, not an agent turn — the
+          // result lands in the panel transcript either way, but this costs no
+          // tokens and returns in one round trip.
           useFiles.getState().showSidebarView('wingman');
-          void useWingman
-            .getState()
-            .send('Explain the current working-tree changes in this repo.');
+          void useWingman.getState().explainChanges();
         },
       },
     ];

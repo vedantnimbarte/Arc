@@ -8,6 +8,7 @@ import {
   Play,
   RefreshCw,
   RotateCcw,
+  X,
 } from 'lucide-react';
 import { cn } from '../../lib/cn';
 import { useWingman } from '../../state/wingman';
@@ -48,7 +49,7 @@ export function WingmanBoard() {
   }
 
   return (
-    <div className="flex h-full min-h-0 flex-col bg-bg-base">
+    <div className="relative flex h-full min-h-0 flex-col bg-bg-base">
       <div className="flex shrink-0 items-center justify-between border-b border-border-hairline px-3 py-1.5">
         <span className="font-display text-xs font-medium tracking-tight text-fg-base">
           Pilot board
@@ -63,6 +64,8 @@ export function WingmanBoard() {
           <RefreshCw size={11} strokeWidth={2} className={cn(loading && 'animate-spin')} />
         </button>
       </div>
+
+      <RunDetailOverlay />
 
       <div className="min-h-0 flex-1 overflow-x-auto">
         <div className="flex h-full min-w-max gap-px bg-border-hairline p-px">
@@ -100,6 +103,7 @@ function CardView({
   onDispatch: (id: string, again?: boolean) => Promise<void>;
 }) {
   const [open, setOpen] = useState(false);
+  const openRunDetail = useWingman((s) => s.openRunDetail);
   const subrows = card.rollup?.subrows ?? [];
   const hasRun = Boolean(card.run_id);
 
@@ -128,8 +132,18 @@ function CardView({
           <p className="font-display text-xs leading-snug text-fg-base">
             {card.title || card.goal || card.short || card.id}
           </p>
-          <p className="mt-0.5 truncate font-mono text-2xs text-fg-subtle">
-            {card.project_name || card.project}
+          <p className="mt-0.5 flex items-center gap-1 truncate font-mono text-2xs text-fg-subtle">
+            <span className="truncate">{card.project_name || card.project}</span>
+            {card.run_id && (
+              <button
+                type="button"
+                onClick={() => void openRunDetail(card.run_id!)}
+                title="Inspect the full run state"
+                className="shrink-0 rounded px-1 text-fg-subtle underline decoration-dotted underline-offset-2 transition-colors hover:bg-surface-2 hover:text-fg-base"
+              >
+                run
+              </button>
+            )}
           </p>
 
           {card.badges.length > 0 && (
@@ -183,6 +197,67 @@ function CardView({
         </div>
       )}
     </article>
+  );
+}
+
+/**
+ * Full `RunState` for one run, over the board.
+ *
+ * The board's sub-rows are a projection; this is the whole record — planner
+ * output, per-task timings, attempts, worker outcomes. ARC renders it as
+ * formatted JSON rather than a bespoke table on purpose: the shape is
+ * Wingman's and it grows, so a hand-built view would silently omit whatever
+ * was added last. Showing everything is more useful than showing a curated
+ * subset that goes stale.
+ */
+function RunDetailOverlay() {
+  const detail = useWingman((s) => s.runDetail);
+  const loading = useWingman((s) => s.runDetailLoading);
+  const close = useWingman((s) => s.closeRunDetail);
+
+  useEffect(() => {
+    if (!detail) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') close();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [detail, close]);
+
+  if (!detail) return null;
+
+  return (
+    <div
+      className="absolute inset-0 z-40 flex items-start justify-center bg-scrim-2 p-8 backdrop-blur-sm"
+      onClick={close}
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        className="material-sheet flex max-h-full w-[640px] max-w-full animate-sheet-in flex-col overflow-hidden rounded-window shadow-sheet ring-1 ring-edge-2"
+      >
+        <div className="flex shrink-0 items-center justify-between border-b border-border-hairline px-3 py-2">
+          <span className="truncate font-mono text-2xs text-fg-muted">{detail.runId}</span>
+          <button
+            type="button"
+            onClick={close}
+            title="Close (esc)"
+            aria-label="Close run detail"
+            className="rounded p-1 text-fg-subtle transition-colors hover:bg-surface-2 hover:text-fg-base"
+          >
+            <X size={11} strokeWidth={2.2} />
+          </button>
+        </div>
+        <div className="min-h-0 flex-1 overflow-auto">
+          {loading && !detail.state ? (
+            <p className="px-3 py-4 font-mono text-2xs text-fg-subtle">loading…</p>
+          ) : (
+            <pre className="px-3 py-2 font-mono text-2xs leading-relaxed text-fg-muted">
+              {JSON.stringify(detail.state, null, 2)}
+            </pre>
+          )}
+        </div>
+      </div>
+    </div>
   );
 }
 

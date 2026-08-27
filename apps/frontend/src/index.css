@@ -1,3 +1,10 @@
+/* Bundled webfonts. Variable builds, so one file per family covers every
+   weight the UI asks for instead of the five static faces the old Google
+   Fonts link pulled. Vite fingerprints and inlines them into the build, so
+   `wght` ranges resolve offline and there is no CDN on the boot path. */
+@import '@fontsource-variable/inter';
+@import '@fontsource-variable/jetbrains-mono';
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
@@ -321,7 +328,7 @@
     font-style: italic;
   }
   .md-preview code {
-    font-family: 'SF Mono', ui-monospace, 'JetBrains Mono', Menlo, Monaco, 'Cascadia Code', Consolas, monospace;
+    font-family: 'SF Mono', ui-monospace, 'JetBrains Mono Variable', 'JetBrains Mono', Menlo, Monaco, 'Cascadia Code', Consolas, monospace;
     font-size: 0.88em;
     background: rgba(255, 255, 255, 0.06);
     color: #fab387;
@@ -618,7 +625,7 @@ html:not(.dark) ::-webkit-scrollbar-thumb:hover {
   margin: 0;
   padding-left: 0.34em;
   display: flex;
-  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-family: 'JetBrains Mono Variable', 'JetBrains Mono', ui-monospace, monospace;
   font-weight: 600;
   font-size: 40px;
   letter-spacing: 0.34em;
@@ -664,7 +671,7 @@ html:not(.dark) ::-webkit-scrollbar-thumb:hover {
   align-items: center;
   justify-content: center;
   gap: 12px;
-  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-family: 'JetBrains Mono Variable', 'JetBrains Mono', ui-monospace, monospace;
   font-size: 11px;
   font-weight: 500;
   letter-spacing: 0.28em;
