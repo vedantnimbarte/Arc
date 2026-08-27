@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { WingmanSettings } from './wingman/WingmanSettings';
 import {
   Cpu,
   Keyboard,
@@ -26,6 +27,7 @@ import {
   ArrowDown,
   Activity,
   KeyRound,
+  Bot,
 } from 'lucide-react';
 import {
   DEFAULT_SEARCH_IGNORE_DIRS,
@@ -77,6 +79,7 @@ type Pane =
   | 'editor'
   | 'sidebar'
   | 'secrets'
+  | 'wingman'
   | 'about';
 
 export function SettingsPage() {
@@ -168,6 +171,7 @@ export function SettingsPage() {
             <SidebarRow icon={FileCode2} label="Editor" active={pane === 'editor'} onClick={() => setPane('editor')} />
             <SidebarRow icon={PanelLeft} label="Sidebar" active={pane === 'sidebar'} onClick={() => setPane('sidebar')} />
             <SidebarRow icon={KeyRound} label="Secrets" active={pane === 'secrets'} onClick={() => setPane('secrets')} />
+            <SidebarRow icon={Bot} label="Wingman" active={pane === 'wingman'} onClick={() => setPane('wingman')} />
             <SidebarRow icon={Info} label="About" active={pane === 'about'} onClick={() => setPane('about')} />
           </nav>
 
@@ -220,6 +224,7 @@ export function SettingsPage() {
               )}
               {pane === 'sidebar' && <SidebarSettingsPane />}
               {pane === 'secrets' && <SecretsPane />}
+              {pane === 'wingman' && <WingmanPane />}
               {pane === 'about' && <AboutPane />}
             </div>
           )}
@@ -1611,6 +1616,22 @@ function detectPlatform(): string {
 }
 
 // ─── primitives ────────────────────────────────────────────────────────────
+
+/** Wingman is an optional coding-agent daemon ARC talks to over HTTP/SSE.
+ *  The connection form lives in its own component so the settings window and
+ *  any future onboarding flow can share it. */
+function WingmanPane() {
+  return (
+    <div className="flex flex-col gap-6">
+      <Section
+        title="Connection"
+        hint="Wingman is a terminal coding agent. Point ARC at a running `wingman serve` daemon to enable the agent panel and the pilot board. ARC works fully without it."
+      >
+        <WingmanSettings />
+      </Section>
+    </div>
+  );
+}
 
 function Section({
   title,

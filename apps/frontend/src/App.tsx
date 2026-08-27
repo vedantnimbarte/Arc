@@ -27,13 +27,15 @@ import {
 import { useCommands, type CommandAction, type CommandGroup } from './state/commands';
 import { useTaskCommands } from './state/tasks';
 import { WingmanPromptDialog } from './components/WingmanPromptDialog';
-import { FolderOpen, FolderTree, GitPullRequest, ListOrdered } from 'lucide-react';
+import { Bot, FolderOpen, FolderTree, GitPullRequest, LayoutGrid, ListOrdered } from 'lucide-react';
 // Side-effect import: subscribes to file-tree root changes and keeps the
 // project-config store fresh. Doesn't render anything itself.
 import './state/projectConfig';
 import { fsPickFolder, ptyListAiClis, settingsWindowOpen, type AiCliId } from './lib/tauri';
 import { PasteWarning } from './components/PasteWarning';
 import { TrustPrompt } from './components/TrustPrompt';
+import { useSettings } from './state/settings';
+import { autoConnectWingman, useWingman } from './state/wingman';
 
 // CodeMirror is heavy — defer its bundle until a file is actually opened.
 const Editor = lazy(() =>
@@ -59,6 +61,9 @@ const SshSessionLogPanel = lazy(() =>
 );
 const GitOverlays = lazy(() =>
   import('./components/git/GitOverlays').then((m) => ({ default: m.GitOverlays })),
+);
+const WingmanBoard = lazy(() =>
+  import('./components/wingman/WingmanBoard').then((m) => ({ default: m.WingmanBoard })),
 );
 
 export default function App() {
@@ -145,6 +150,10 @@ export default function App() {
         <Suspense fallback={<EditorFallback />}>
           <SshTab sessionKey={tab.id} hostId={tab.sshHostId} />
         </Suspense>
+      ) : tab.kind === 'wingman-board' ? (
+        <Suspense fallback={<EditorFallback />}>
+          <WingmanBoard />
+        </Suspense>
       ) : tab.kind === 'diff' && tab.filePath && tab.diffRoot ? (
         <Suspense fallback={<EditorFallback />}>
           <DiffView
@@ -203,6 +212,16 @@ export default function App() {
   useEffect(() => {
     void useSsh.getState().hydrate();
   }, []);
+
+  // Connect to the configured Wingman daemon once settings have hydrated.
+  // Deliberately fire-and-forget: ARC works fully without Wingman, so a
+  // missing or unreachable daemon must never block or error the shell.
+  const wingmanUrl = useSettings((s) => s.wingmanUrl);
+  const settingsHydrated = useSettings((s) => s.settingsHydrated);
+  useEffect(() => {
+    if (!settingsHydrated) return;
+    void autoConnectWingman(wingmanUrl);
+  }, [settingsHydrated, wingmanUrl]);
 
   const sshLogPanelOpen = useSsh((s) => s.logPanelOpen);
   const setSshLogPanelOpen = useSsh((s) => s.setLogPanelOpen);
@@ -375,6 +394,44 @@ export default function App() {
           void import('./state/gitUi').then(({ useGitUi }) => {
             useGitUi.getState().openPrList();
           });
+        },
+      },
+      // Wingman actions only appear once a daemon is actually connected —
+      // offering them otherwise would surface a feature the user can't use.
+      {
+        id: 'wingman.panel',
+        title: 'Wingman: Ask about this repo',
+        group: 'Wingman',
+        keywords: ['ai', 'agent', 'chat', 'wingman', 'ask'],
+        icon: Bot,
+        when: () => useWingman.getState().status === 'connected',
+        run: () => useFiles.getState().showSidebarView('wingman'),
+      },
+      {
+        id: 'wingman.board',
+        title: 'Wingman: Pilot Board',
+        group: 'Wingman',
+        keywords: ['board', 'kanban', 'pilot', 'agent', 'runs', 'tasks'],
+        icon: LayoutGrid,
+        when: () => useWingman.getState().status === 'connected',
+        run: () => {
+          useWorkspace.getState().openWingmanBoard();
+        },
+      },
+      {
+        id: 'wingman.explain-diff',
+        title: 'Wingman: Explain working-tree changes',
+        group: 'Wingman',
+        keywords: ['explain', 'diff', 'changes', 'summary', 'review'],
+        icon: Bot,
+        when: () => useWingman.getState().status === 'connected',
+        run: () => {
+          // Routed through the chat panel rather than a bespoke result view:
+          // the answer streams like any other turn and stays in the transcript.
+          useFiles.getState().showSidebarView('wingman');
+          void useWingman
+            .getState()
+            .send('Explain the current working-tree changes in this repo.');
         },
       },
     ];

@@ -32,7 +32,7 @@ export interface WorkspaceMeta {
 export interface Tab {
   id: string;
   title: string;
-  kind: 'terminal' | 'editor' | 'preview' | 'apiclient' | 'ssh' | 'diff';
+  kind: 'terminal' | 'editor' | 'preview' | 'apiclient' | 'ssh' | 'diff' | 'wingman-board';
   /** Which workspace this tab belongs to. Every tab has one after hydrate;
    *  new tabs inherit the active workspace (stamped in `addTab`). */
   workspaceId?: string;
@@ -270,6 +270,9 @@ interface WorkspaceState {
   setPreviewUrl: (id: string, url: string) => void;
   /** Open a new API Client tab. */
   openApiClient: () => string;
+  /** Open (or focus) the Wingman pilot board tab. Only one is useful — the
+   *  board is global, not per-project. */
+  openWingmanBoard: () => string;
   /** Open a new SSH tab for `host`. The tab spawns an xterm and dials via
    *  the SSH store on mount. Sets `sshHostId` on the tab; `sshSessionId`
    *  is filled once the connect resolves. */
@@ -1186,6 +1189,18 @@ export const useWorkspace = create<WorkspaceState>()((set, get) => ({
       kind: 'apiclient',
     };
     get().addTab(tab);
+    return id;
+  },
+  openWingmanBoard: () => {
+    // The board spans every project the daemon serves, so a second tab would
+    // show identical content — focus the existing one instead.
+    const existing = get().tabs.find((t) => t.kind === 'wingman-board');
+    if (existing) {
+      get().setActive(existing.id);
+      return existing.id;
+    }
+    const id = `wingman-board-${Date.now()}`;
+    get().addTab({ id, title: 'Pilot Board', kind: 'wingman-board' });
     return id;
   },
   setApiClientState: (id, stateJson) =>

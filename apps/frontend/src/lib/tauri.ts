@@ -596,7 +596,14 @@ export async function onLspEvent(
 // the Rust DTOs serialized via serde defaults. Outer invoke arguments use
 // camelCase — Tauri converts them to snake_case Rust params automatically.
 
-export type TabKind = 'terminal' | 'editor' | 'preview' | 'apiclient' | 'ssh' | 'diff';
+export type TabKind =
+  | 'terminal'
+  | 'editor'
+  | 'preview'
+  | 'apiclient'
+  | 'ssh'
+  | 'diff'
+  | 'wingman-board';
 
 export interface TabInput {
   id: string;
@@ -702,6 +709,9 @@ export interface PersistedSettings {
   /** Enable Language Server Protocol features (diagnostics, hover, completion)
    *  in the editor. Requires the relevant language servers on PATH. */
   editorLsp?: boolean;
+  /** Address of a `wingman serve` daemon. Empty disables the integration.
+   *  The token is not persisted here — it lives in the OS credential vault. */
+  wingmanUrl?: string;
   /** Notify on long-running commands when unfocused (Tier 1.5). */
   notifyLongCommands?: boolean;
   /** Seconds a command must exceed before notifying. */
@@ -1553,4 +1563,270 @@ export async function sshSessionLogs(
     hostId,
     limit: limit ?? null,
   });
+}
+
+// ─── Wingman ───────────────────────────────────────────────────────────────
+//
+// ARC drives a `wingman serve` daemon over HTTP/SSE (see rust/wingman). The
+// whole surface is optional: with no daemon configured or reachable,
+// `wingmanHealth` rejects and the UI hides every Wingman affordance. Nothing
+// here should be awaited on a path that blocks ARC's own startup.
+
+export interface WingmanHealth {
+  ok: boolean;
+  version: string;
+  uptime_secs: number;
+  /** When true, every route but health needs the bearer token. */
+  auth_required: boolean;
+}
+
+export interface WingmanProject {
+  id: string;
+  root: string;
+  branch: string | null;
+  indexd_running: boolean;
+  index_age_secs: number | null;
+}
+
+/** One planner task inside a pilot run. Projected live from the run's state —
+ *  the board never stores these. */
+export interface WingmanSubRow {
+  task_id: string;
+  title: string;
+  status: string;
+  role: string | null;
+  agent_name: string | null;
+  model: string | null;
+  usd: number;
+  attempts: number;
+  writes: number;
+  elapsed_secs: number | null;
+  current_tool: string | null;
+  outcome: string | null;
+  /** Present once the task has a worktree — what the review queue opens. */
+  worktree: string | null;
+  session_id: string | null;
+  deps: string[];
+  blocked_by: string[];
+}
+
+export interface WingmanRollUp {
+  status: string | null;
+  total: number;
+  done: number;
+  failed: number;
+  blocked: number;
+  in_progress: number;
+  not_started: number;
+  review: number;
+  usd: number;
+  subrows: WingmanSubRow[];
+}
+
+/** Typed `{kind,text}` so a renderer can tell a progress badge from a label the
+ *  user typed, without parsing formatted text. */
+export interface WingmanBadge {
+  kind: string;
+  text: string;
+}
+
+export type WingmanColumn = 'backlog' | 'planned' | 'in_progress' | 'review' | 'done';
+
+export interface WingmanCard {
+  id: string;
+  short: string | null;
+  project: string;
+  project_name: string | null;
+  /** The board's registry can name repos this daemon doesn't serve; dispatching
+   *  one is a 403, so the UI disables it rather than offering it. */
+  project_missing: boolean;
+  title: string | null;
+  goal: string | null;
+  notes: string | null;
+  column: WingmanColumn;
+  archived: boolean;
+  labels: string[];
+  badges: WingmanBadge[];
+  rollup: WingmanRollUp | null;
+  run_id: string | null;
+  created_at: string | null;
+}
+
+export const WINGMAN_COLUMNS: { id: WingmanColumn; label: string }[] = [
+  { id: 'backlog', label: 'Backlog' },
+  { id: 'planned', label: 'Planned' },
+  { id: 'in_progress', label: 'In Progress' },
+  { id: 'review', label: 'Review' },
+  { id: 'done', label: 'Done' },
+];
+
+export interface WingmanBoardData {
+  cards: WingmanCard[];
+}
+
+export interface WingmanRunSummary {
+  run_id: string;
+  goal: string;
+  status: string;
+  done: number;
+  total: number;
+  /** Terminal runs never change again, so the UI can stop watching. */
+  terminal: boolean;
+}
+
+export interface WingmanSessionInfo {
+  session_id: string;
+  first_prompt: string | null;
+  model: string | null;
+  provider: string | null;
+  turns: number;
+}
+
+/** One frame off a stream. `kind` is the agent event's own `type`
+ *  (`text_delta`, `thinking_delta`, `tool_start`, `tool_result`, `usage`,
+ *  `verification`, `turn_complete`, `stop`, `error`), or for the run firehose
+ *  the event name (`run.started`, `run.finished`, …). ARC adds two terminal
+ *  kinds of its own: `done` and `error`. */
+export interface WingmanStreamEvent {
+  kind: string;
+  payload: Record<string, unknown>;
+}
+
+export type WingmanPilotAction = 'approve' | 'veto' | 'abort' | 'retry';
+
+export async function wingmanConfigure(baseUrl: string, token?: string | null): Promise<void> {
+  return invoke('wingman_configure', { baseUrl, token: token ?? null });
+}
+
+export async function wingmanHealth(): Promise<WingmanHealth> {
+  return invoke('wingman_health');
+}
+
+export async function wingmanProjects(): Promise<WingmanProject[]> {
+  return invoke('wingman_projects');
+}
+
+export async function wingmanBoard(
+  project?: string | null,
+  archived = false,
+): Promise<WingmanBoardData> {
+  return invoke('wingman_board', { project: project ?? null, archived });
+}
+
+export async function wingmanBoardAddCard(
+  project: string,
+  title: string,
+  goal?: string | null,
+): Promise<unknown> {
+  return invoke('wingman_board_add_card', { project, title, goal: goal ?? null });
+}
+
+export async function wingmanBoardDispatch(card: string, again = false): Promise<unknown> {
+  return invoke('wingman_board_dispatch', { card, again });
+}
+
+export async function wingmanBoardArchive(card: string, restore = false): Promise<unknown> {
+  return invoke('wingman_board_archive', { card, restore });
+}
+
+export async function wingmanBoardDeleteCard(card: string): Promise<unknown> {
+  return invoke('wingman_board_delete_card', { card });
+}
+
+export async function wingmanPilotRuns(project: string): Promise<WingmanRunSummary[]> {
+  return invoke('wingman_pilot_runs', { project });
+}
+
+export async function wingmanPilotRun(project: string, run: string): Promise<unknown> {
+  return invoke('wingman_pilot_run', { project, run });
+}
+
+export async function wingmanPilotControl(
+  project: string,
+  run: string,
+  action: WingmanPilotAction,
+  task?: string | null,
+): Promise<unknown> {
+  return invoke('wingman_pilot_control', { project, run, action, task: task ?? null });
+}
+
+export async function wingmanSessions(project: string): Promise<WingmanSessionInfo[]> {
+  return invoke('wingman_sessions', { project });
+}
+
+export async function wingmanSessionTranscript(project: string, id: string): Promise<unknown> {
+  return invoke('wingman_session_transcript', { project, id });
+}
+
+export async function wingmanCreateSession(
+  project: string,
+  model?: string | null,
+  mode?: string | null,
+): Promise<string> {
+  return invoke('wingman_create_session', { project, model: model ?? null, mode: mode ?? null });
+}
+
+export async function wingmanDeleteSession(project: string, id: string): Promise<unknown> {
+  return invoke('wingman_delete_session', { project, id });
+}
+
+export async function wingmanDiff(project: string, file?: string | null): Promise<unknown> {
+  return invoke('wingman_diff', { project, file: file ?? null });
+}
+
+export async function wingmanExplain(
+  project: string,
+  base?: string | null,
+  staged = false,
+): Promise<unknown> {
+  return invoke('wingman_explain', { project, base: base ?? null, staged });
+}
+
+export async function wingmanCost(project: string, compare = false): Promise<unknown> {
+  return invoke('wingman_cost', { project, compare });
+}
+
+/**
+ * Start a turn. Resolves with the event topic to listen on; the turn runs in
+ * the background and emits there.
+ *
+ * The stream always terminates with exactly one `done` or `error` event, even
+ * when the daemon refuses the turn outright — a 409 (session already has a turn
+ * in flight), 429 (queue full) or 403 (over the permission ceiling) produce no
+ * stream at all. So a caller can always tear down on the first terminal event
+ * rather than guessing.
+ */
+export async function wingmanTurnStart(opts: {
+  project: string;
+  session?: string | null;
+  prompt: string;
+  model?: string | null;
+  mode?: string | null;
+}): Promise<string> {
+  return invoke('wingman_turn_start', {
+    project: opts.project,
+    session: opts.session ?? null,
+    prompt: opts.prompt,
+    model: opts.model ?? null,
+    mode: opts.mode ?? null,
+  });
+}
+
+/** Listen on a topic returned by `wingmanTurnStart`. */
+export async function onWingmanTurn(
+  topic: string,
+  handler: (ev: WingmanStreamEvent) => void,
+): Promise<UnlistenFn> {
+  return listen<WingmanStreamEvent>(topic, (e) => handler(e.payload));
+}
+
+/** Open the daemon's cross-project run firehose. Emits on `wingman://events`. */
+export async function wingmanEventsSubscribe(): Promise<void> {
+  return invoke('wingman_events_subscribe');
+}
+
+export async function onWingmanEvents(
+  handler: (ev: WingmanStreamEvent) => void,
+): Promise<UnlistenFn> {
+  return listen<WingmanStreamEvent>('wingman://events', (e) => handler(e.payload));
 }

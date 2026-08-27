@@ -102,10 +102,12 @@ dependencies = [
  "arc-pty",
  "arc-session-manager",
  "arc-ssh",
+ "arc-wingman",
  "dashmap",
  "fontdb",
  "keyring",
  "open",
+ "parking_lot",
  "rfd",
  "serde",
  "serde_json",
@@ -257,6 +259,19 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c049c0be4daef0b145cb3555416b3b8ef5b7888a38aea1a3a155801fe7b0810b"
 dependencies = [
  "rustversion",
+]
+
+[[package]]
+name = "arc-wingman"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "futures",
+ "reqwest 0.12.28",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tracing",
 ]
 
 [[package]]

@@ -3,6 +3,7 @@ import {
   GitBranch,
   ListTree,
   Search,
+  Bot,
   Server,
   type LucideIcon,
 } from 'lucide-react';
@@ -32,6 +33,7 @@ export const SIDEBAR_VIEWS: SidebarViewDef[] = [
   { id: 'search', label: 'Search', Icon: Search },
   { id: 'outline', label: 'Outline', Icon: ListTree },
   { id: 'ssh', label: 'SSH', Icon: Server, shortcut: 'toggle-ssh-panel' },
+  { id: 'wingman', label: 'Wingman', Icon: Bot },
 ];
 
 /** Lookup by id — convenient for the body switch / customization UI. */
