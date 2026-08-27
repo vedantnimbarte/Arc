@@ -27,7 +27,15 @@ import {
 import { useCommands, type CommandAction, type CommandGroup } from './state/commands';
 import { useTaskCommands } from './state/tasks';
 import { WingmanPromptDialog } from './components/WingmanPromptDialog';
-import { Bot, FolderOpen, FolderTree, GitPullRequest, LayoutGrid, ListOrdered } from 'lucide-react';
+import {
+  Bot,
+  FolderOpen,
+  FolderTree,
+  GitPullRequest,
+  Inbox,
+  LayoutGrid,
+  ListOrdered,
+} from 'lucide-react';
 // Side-effect import: subscribes to file-tree root changes and keeps the
 // project-config store fresh. Doesn't render anything itself.
 import './state/projectConfig';
@@ -64,6 +72,9 @@ const GitOverlays = lazy(() =>
 );
 const WingmanBoard = lazy(() =>
   import('./components/wingman/WingmanBoard').then((m) => ({ default: m.WingmanBoard })),
+);
+const WingmanReview = lazy(() =>
+  import('./components/wingman/WingmanReview').then((m) => ({ default: m.WingmanReview })),
 );
 
 export default function App() {
@@ -153,6 +164,10 @@ export default function App() {
       ) : tab.kind === 'wingman-board' ? (
         <Suspense fallback={<EditorFallback />}>
           <WingmanBoard />
+        </Suspense>
+      ) : tab.kind === 'wingman-review' ? (
+        <Suspense fallback={<EditorFallback />}>
+          <WingmanReview />
         </Suspense>
       ) : tab.kind === 'diff' && tab.filePath && tab.diffRoot ? (
         <Suspense fallback={<EditorFallback />}>
@@ -416,6 +431,17 @@ export default function App() {
         when: () => useWingman.getState().status === 'connected',
         run: () => {
           useWorkspace.getState().openWingmanBoard();
+        },
+      },
+      {
+        id: 'wingman.review',
+        title: 'Wingman: Review Queue',
+        group: 'Wingman',
+        keywords: ['review', 'queue', 'diff', 'approve', 'agent', 'changes', 'worktree'],
+        icon: Inbox,
+        when: () => useWingman.getState().status === 'connected',
+        run: () => {
+          useWorkspace.getState().openWingmanReview();
         },
       },
       {

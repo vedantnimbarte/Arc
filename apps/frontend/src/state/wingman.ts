@@ -12,6 +12,8 @@ import {
   wingmanCost,
   wingmanCreateSession,
   wingmanDeleteSession,
+  fsReadDir,
+  gitChanges,
   wingmanEventsSubscribe,
   wingmanExplain,
   wingmanHealth,
@@ -28,10 +30,13 @@ import {
   type WingmanProject,
   type WingmanSessionInfo,
   type WingmanSessionRecord,
+  type WingmanSubRow,
+  type GitChangeEntry,
   type WingmanStreamEvent,
 } from '../lib/tauri';
 import { useFiles } from './files';
 import { useGit } from './git';
+import { useWorkspace } from './workspace';
 
 /**
  * Wingman integration state.
@@ -97,6 +102,15 @@ interface WingmanState {
   runDetail: { runId: string; state: unknown } | null;
   runDetailLoading: boolean;
 
+  /** Changed files per agent worktree, keyed by absolute worktree path.
+   *
+   *  Three non-list states, because they mean different things to a reviewer:
+   *  `'loading'` is still counting, `'missing'` is a worktree Wingman has
+   *  already torn down (the common case once a run ends), and an empty array
+   *  is an agent that ran and genuinely changed nothing. Collapsing the last
+   *  two would report most finished tasks as "no changes", which is wrong. */
+  worktreeChanges: Record<string, GitChangeEntry[] | 'loading' | 'missing'>;
+
   connect: (baseUrl: string, token?: string | null) => Promise<void>;
   disconnect: () => Promise<void>;
   setActiveProject: (id: string) => void;
@@ -124,6 +138,12 @@ interface WingmanState {
   /** Ask Wingman to summarise the working tree. Goes through the daemon's
    *  `explain` route rather than burning an agent turn on it. */
   explainChanges: () => Promise<void>;
+  /** Read the changed files in one agent worktree. Cached — a worktree that
+   *  has finished doesn't change again, and the queue re-renders often. */
+  loadWorktreeChanges: (worktree: string) => Promise<void>;
+  /** Open one file from an agent worktree in ARC's diff viewer, rooted at that
+   *  worktree so the diff is against the agent's own base. */
+  openWorktreeFile: (worktree: string, relPath: string) => void;
   /** Point ARC's file tree and Source Control at a pilot task's worktree, so
    *  the agent's changes get reviewed in ARC's own diff viewer. This is the
    *  review queue — it reuses the whole existing git stack rather than adding
@@ -163,6 +183,7 @@ export const useWingman = create<WingmanState>((set, get) => ({
   cost: null,
   runDetail: null,
   runDetailLoading: false,
+  worktreeChanges: {},
 
   connect: async (baseUrl, token) => {
     // Browser-only dev build has no IPC; stay unconfigured rather than
@@ -280,6 +301,40 @@ export const useWingman = create<WingmanState>((set, get) => ({
     if (!project) return;
     await wingmanPilotControl(project, run, action, task ?? null);
     await get().refreshBoard();
+  },
+
+  loadWorktreeChanges: async (worktree) => {
+    if (!isTauri || !worktree) return;
+    // Already loaded or in flight — the queue re-renders on every board
+    // refresh and these are filesystem reads.
+    if (get().worktreeChanges[worktree]) return;
+    set((s) => ({ worktreeChanges: { ...s.worktreeChanges, [worktree]: 'loading' } }));
+    const put = (v: GitChangeEntry[] | 'missing') =>
+      set((s) => ({ worktreeChanges: { ...s.worktreeChanges, [worktree]: v } }));
+    try {
+      // Probe the directory first. `gitChanges` returns [] both for "nothing
+      // changed" and for "not a repo", so without this a torn-down worktree
+      // would be reported as a clean one — and Wingman removes worktrees when
+      // a run ends, so that's the majority of finished tasks.
+      await fsReadDir(worktree);
+    } catch {
+      put('missing');
+      return;
+    }
+    try {
+      put(await gitChanges(worktree));
+    } catch {
+      put('missing');
+    }
+  },
+
+  openWorktreeFile: (worktree, relPath) => {
+    // Root the diff at the worktree, not the user's workspace: the agent
+    // branched from its own base, and diffing against the user's checkout
+    // would show unrelated local edits as part of the agent's work.
+    const sep = worktree.includes('\\') ? '\\' : '/';
+    const abs = `${worktree}${sep}${relPath.split('/').join(sep)}`;
+    useWorkspace.getState().openDiff(abs, worktree, 'worktree');
   },
 
   openWorktree: (path) => {
@@ -524,6 +579,64 @@ function applyEvent(
     default:
       return;
   }
+}
+
+/** One agent-authored change set awaiting a human. Flattens the board's
+ *  card → run → task nesting into the unit a reviewer actually works in: a
+ *  worktree with a diff in it. */
+export interface ReviewItem {
+  cardId: string;
+  cardTitle: string;
+  project: string;
+  runId: string | null;
+  task: WingmanSubRow;
+  /** Non-null by construction — a task without a worktree has nothing to
+   *  review and never reaches the queue. */
+  worktree: string;
+}
+
+/** Tasks needing a decision sort first. Everything else is context. */
+const REVIEW_PRIORITY: Record<string, number> = {
+  review: 0,
+  failed: 1,
+  in_progress: 2,
+  done: 3,
+};
+
+/**
+ * Build the review queue from the board.
+ *
+ * The board is organised for *dispatching* work — by card, by column. Review
+ * is the opposite job: you want every change set an agent produced, across
+ * every card and run, ordered by what needs a decision. So this flattens the
+ * hierarchy and re-sorts it rather than reusing the board's shape.
+ *
+ * Only tasks with a worktree qualify: no worktree means no diff, and a queue
+ * entry you can't act on is noise.
+ */
+export function reviewQueue(cards: WingmanCard[]): ReviewItem[] {
+  const items: ReviewItem[] = [];
+  for (const card of cards ?? []) {
+    for (const task of card.rollup?.subrows ?? []) {
+      if (!task.worktree) continue;
+      items.push({
+        cardId: card.id,
+        cardTitle: card.title || card.goal || card.short || card.id,
+        project: card.project,
+        runId: card.run_id,
+        task,
+        worktree: task.worktree,
+      });
+    }
+  }
+  return items.sort((a, b) => {
+    const pa = REVIEW_PRIORITY[a.task.status] ?? 9;
+    const pb = REVIEW_PRIORITY[b.task.status] ?? 9;
+    if (pa !== pb) return pa - pb;
+    // Within a status, most expensive first — the costliest work is the most
+    // wasteful to leave unreviewed.
+    return b.task.usd - a.task.usd;
+  });
 }
 
 /**

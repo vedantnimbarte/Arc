@@ -2,10 +2,11 @@ import { describe, expect, it, beforeEach } from 'vitest';
 import {
   __applyEventForTests as applyEvent,
   __resetWingmanForTests,
+  reviewQueue,
   transcriptToChat,
   useWingman,
 } from '../wingman';
-import type { WingmanStreamEvent } from '../../lib/tauri';
+import type { WingmanCard, WingmanStreamEvent, WingmanSubRow } from '../../lib/tauri';
 
 /** Drive the reducer the way the IPC listener does. */
 function feed(...events: WingmanStreamEvent[]) {
@@ -111,6 +112,114 @@ describe('wingman stream folding', () => {
     // Wingman can add events; an older ARC must not break on them.
     const s = feed({ kind: 'something_new', payload: { whatever: 1 } });
     expect(s.chat).toHaveLength(0);
+  });
+});
+
+describe('review queue', () => {
+  const task = (over: Partial<WingmanSubRow> & { task_id: string }): WingmanSubRow => ({
+    title: over.task_id,
+    status: 'done',
+    role: null,
+    agent_name: null,
+    model: null,
+    usd: 0,
+    attempts: 0,
+    writes: 0,
+    elapsed_secs: null,
+    current_tool: null,
+    outcome: null,
+    worktree: `/wt/${over.task_id}`,
+    session_id: null,
+    deps: [],
+    blocked_by: [],
+    ...over,
+  });
+
+  const card = (id: string, subrows: WingmanSubRow[]): WingmanCard => ({
+    id,
+    short: null,
+    project: 'proj',
+    project_name: 'Proj',
+    project_missing: false,
+    title: `card ${id}`,
+    goal: null,
+    notes: null,
+    column: 'in_progress',
+    archived: false,
+    labels: [],
+    badges: [],
+    rollup: {
+      status: null,
+      total: subrows.length,
+      done: 0,
+      failed: 0,
+      blocked: 0,
+      in_progress: 0,
+      not_started: 0,
+      review: 0,
+      usd: 0,
+      subrows,
+    },
+    run_id: `run-${id}`,
+    created_at: null,
+  });
+
+  it('flattens every card and run into one list', () => {
+    const q = reviewQueue([
+      card('a', [task({ task_id: 't1' }), task({ task_id: 't2' })]),
+      card('b', [task({ task_id: 't3' })]),
+    ]);
+    expect(q).toHaveLength(3);
+    expect(q.map((i) => i.task.task_id).sort()).toEqual(['t1', 't2', 't3']);
+    // Each entry carries the context needed to act without re-querying.
+    expect(q[0]?.cardTitle).toMatch(/^card /);
+    expect(q[0]?.runId).toMatch(/^run-/);
+  });
+
+  it('drops tasks with no worktree', () => {
+    // No worktree means no diff. A queue entry you can't act on is noise.
+    const q = reviewQueue([
+      card('a', [task({ task_id: 'pending', worktree: null }), task({ task_id: 'real' })]),
+    ]);
+    expect(q.map((i) => i.task.task_id)).toEqual(['real']);
+  });
+
+  it('orders by what needs a decision, then by cost', () => {
+    const q = reviewQueue([
+      card('a', [
+        task({ task_id: 'done-cheap', status: 'done', usd: 0.1 }),
+        task({ task_id: 'running', status: 'in_progress' }),
+        task({ task_id: 'review-cheap', status: 'review', usd: 0.5 }),
+        task({ task_id: 'failed', status: 'failed' }),
+        task({ task_id: 'review-pricey', status: 'review', usd: 9.0 }),
+      ]),
+    ]);
+    expect(q.map((i) => i.task.task_id)).toEqual([
+      // review first, priciest first within it — the costliest work is the
+      // most wasteful to leave unreviewed
+      'review-pricey',
+      'review-cheap',
+      'failed',
+      'running',
+      'done-cheap',
+    ]);
+  });
+
+  it('puts unknown statuses last rather than dropping them', () => {
+    const q = reviewQueue([
+      card('a', [
+        task({ task_id: 'weird', status: 'some_new_status' }),
+        task({ task_id: 'normal', status: 'review' }),
+      ]),
+    ]);
+    expect(q.map((i) => i.task.task_id)).toEqual(['normal', 'weird']);
+  });
+
+  it('handles an empty board', () => {
+    expect(reviewQueue([])).toEqual([]);
+    expect(reviewQueue(undefined as never)).toEqual([]);
+    // A card whose run has not produced a rollup yet.
+    expect(reviewQueue([{ ...card('a', []), rollup: null }])).toEqual([]);
   });
 });
 
