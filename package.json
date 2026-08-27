@@ -2,7 +2,7 @@
   "name": "arc",
   "private": true,
   "version": "0.1.0",
-  "description": "ARC — terminal, editor & git workspace for developers",
+  "description": "ARC — terminal, editor & git workspace with optional Wingman agents",
   "packageManager": "pnpm@9.15.9",
   "scripts": {
     "dev": "pnpm --filter @arc/frontend dev",
