@@ -1705,11 +1705,18 @@ export type WingmanSessionRecord =
   | { kind: 'recap'; ts: string; replaced: number; text: string }
   | { kind: string; [k: string]: unknown };
 
-/** One frame off a stream. `kind` is the agent event's own `type`
- *  (`text_delta`, `thinking_delta`, `tool_start`, `tool_result`, `usage`,
- *  `verification`, `turn_complete`, `stop`, `error`), or for the run firehose
- *  the event name (`run.started`, `run.finished`, …). ARC adds two terminal
- *  kinds of its own: `done` and `error`. */
+/** One frame off a stream.
+ *
+ *  `kind` is the agent event's own `type` (`text_delta`, `thinking_delta`,
+ *  `tool_start`, `tool_result`, `usage`, `verification`, `turn_complete`,
+ *  `stop`, `error`), or for the run firehose the event name (`run.started`,
+ *  `run.finished`, …).
+ *
+ *  Two more terminators, confirmed against a live 0.2.0 daemon: the daemon
+ *  sends `end` when the turn's child process exits, carrying `exit` and (only
+ *  on failure) a `stderr` tail — a child that dies without a `stop` sends only
+ *  this. ARC then adds its own `done`, or `error` when the request was refused
+ *  outright and no stream ever opened. */
 export interface WingmanStreamEvent {
   kind: string;
   payload: Record<string, unknown>;

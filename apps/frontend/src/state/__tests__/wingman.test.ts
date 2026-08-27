@@ -82,6 +82,40 @@ describe('wingman stream folding', () => {
     }
   });
 
+  it('ends the turn quietly when the child exits cleanly', () => {
+    // A real stream ends `… stop, end` — confirmed against a live daemon. The
+    // clean `end` must not add a row on top of the answer.
+    __resetWingmanForTests();
+    useWingman.setState({ streaming: true });
+    const s = feed({ kind: 'end', payload: { exit: 0, stderr: null } });
+    expect(s.streaming).toBe(false);
+    expect(s.chat).toHaveLength(0);
+  });
+
+  it('surfaces stderr when the turn child dies without a stop', () => {
+    // The hole this closes: a worker crash or hard provider failure sends
+    // `end` with a non-zero exit and no `stop`. Without this the composer
+    // would re-enable having shown the user nothing at all.
+    __resetWingmanForTests();
+    useWingman.setState({ streaming: true });
+    const s = feed({
+      kind: 'end',
+      payload: { exit: 101, stderr: 'thread panicked at provider.rs:42' },
+    });
+    expect(s.streaming).toBe(false);
+    expect(s.chat).toHaveLength(1);
+    const row = s.chat[0];
+    expect(row?.kind).toBe('error');
+    expect(row?.kind === 'error' && row.message).toContain('exited 101');
+    expect(row?.kind === 'error' && row.message).toContain('provider.rs:42');
+  });
+
+  it('still reports a failed exit with no stderr attached', () => {
+    __resetWingmanForTests();
+    const s = feed({ kind: 'end', payload: { exit: 1 } });
+    expect(s.chat[0]?.kind === 'error' && s.chat[0].message).toBe('agent exited 1');
+  });
+
   it('keeps streaming through turn_complete', () => {
     // turn_complete is one provider round-trip inside a user turn, not the end
     // of it — the composer must stay disabled through a multi-step tool loop.
