@@ -568,6 +568,33 @@ function applyEvent(
       }));
       return;
 
+    // The daemon's own stream terminator, carrying the turn child's exit code
+    // and — only on failure — a tail of its stderr. A clean turn sends `stop`
+    // first and this is redundant; a child that dies without one (worker
+    // crash, hard provider failure) sends only this, and without surfacing it
+    // the composer would simply re-enable with nothing shown.
+    case 'end': {
+      const exit = num(p.exit);
+      if (exit !== 0) {
+        const detail = str(p.stderr).trim();
+        set((s) => ({
+          chat: [
+            ...s.chat,
+            {
+              kind: 'error',
+              message: detail
+                ? `agent exited ${exit}\n${detail}`
+                : `agent exited ${exit}`,
+            },
+          ],
+          streaming: false,
+        }));
+        return;
+      }
+      set(() => ({ streaming: false }));
+      return;
+    }
+
     case 'stop':
     case 'done':
       set(() => ({ streaming: false }));

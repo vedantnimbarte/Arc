@@ -101,6 +101,68 @@ async fn pilot_runs_and_sessions_deserialize() {
     }
 }
 
+/// The one test here that is not read-only, and the only one that costs money.
+///
+/// Everything else in the client is exercised by the read paths; the turn
+/// stream is the one surface whose framing has only ever been unit-tested
+/// against synthetic frames. This runs a real turn so the SSE parser meets a
+/// real provider stream: chunk boundaries the transport chooses, keepalive
+/// comments, and the actual `AgentEvent` tag values.
+///
+/// Kept deliberately tiny — a prompt that wants a two-token answer — and the
+/// session is deleted afterwards so a test run doesn't litter `session list`.
+/// Ignored by default, so it never runs in CI or on a stray `cargo test`.
+#[tokio::test]
+#[ignore = "needs a running `wingman serve` AND spends provider credits"]
+async fn turn_streams_typed_events() {
+    let c = client();
+    let project = c.projects().await.expect("projects")[0].id.clone();
+
+    let session = c
+        .create_session(&project, None, Some("read-only"))
+        .await
+        .expect("create session");
+    println!("session {session}");
+
+    let mut kinds: Vec<String> = Vec::new();
+    let mut text = String::new();
+
+    c.turn_stream(
+        &project,
+        Some(&session),
+        "Reply with exactly: OK",
+        None,
+        Some("read-only"),
+        |kind, payload| {
+            if kind == "text_delta" {
+                text.push_str(payload.get("text").and_then(|v| v.as_str()).unwrap_or(""));
+            }
+            kinds.push(kind);
+        },
+    )
+    .await
+    .expect("turn stream");
+
+    println!("events: {kinds:?}");
+    println!("text: {text:?}");
+
+    // The parser produced typed events, not raw bytes — this is the assertion
+    // that the SSE framing survives a real stream.
+    assert!(!kinds.is_empty(), "stream yielded no events at all");
+    assert!(
+        kinds.iter().any(|k| k == "text_delta"),
+        "no text_delta in {kinds:?} — the payload `type` tag did not resolve"
+    );
+    assert!(
+        kinds.iter().any(|k| k == "stop"),
+        "no terminal stop in {kinds:?} — ARC would spin forever"
+    );
+    assert!(!text.trim().is_empty(), "text deltas carried no text");
+
+    // Don't leave the probe behind in the user's session list.
+    let _ = c.delete_session(&project, &session).await;
+}
+
 /// A wrong project id must surface the daemon's own message, not a bare status
 /// code — that error text is what ARC shows the user.
 #[tokio::test]
