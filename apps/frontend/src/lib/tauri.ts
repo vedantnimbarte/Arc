@@ -1680,7 +1680,29 @@ export interface WingmanSessionInfo {
   model: string | null;
   provider: string | null;
   turns: number;
+  /** Last-modified, epoch seconds. The daemon sorts newest-first already. */
+  mtime?: number;
 }
+
+/** One block inside an assistant message. Tagged `type`, snake_case.
+ *  `image` is accepted but not rendered — ARC's transcript is text-only. */
+export type WingmanContentBlock =
+  | { type: 'text'; text: string }
+  | { type: 'thinking'; text: string }
+  | { type: 'tool_use'; id: string; name: string; input: unknown }
+  | { type: 'tool_result'; tool_use_id: string; content: string; is_error?: boolean }
+  | { type: string; [k: string]: unknown };
+
+/** One line of a stored transcript. Tagged `kind`, snake_case.
+ *  Wingman writes more variants than ARC renders (compaction recaps, pruned
+ *  tool results, system-prompt splices); unknown kinds are skipped. */
+export type WingmanSessionRecord =
+  | { kind: 'session_start'; ts: string; model: string; provider: string }
+  | { kind: 'user'; ts: string; text: string }
+  | { kind: 'assistant'; ts: string; blocks: WingmanContentBlock[] }
+  | { kind: 'tool_result'; ts: string; id: string; output: string; is_error?: boolean }
+  | { kind: 'recap'; ts: string; replaced: number; text: string }
+  | { kind: string; [k: string]: unknown };
 
 /** One frame off a stream. `kind` is the agent event's own `type`
  *  (`text_delta`, `thinking_delta`, `tool_start`, `tool_result`, `usage`,
@@ -1754,7 +1776,10 @@ export async function wingmanSessions(project: string): Promise<WingmanSessionIn
   return invoke('wingman_sessions', { project });
 }
 
-export async function wingmanSessionTranscript(project: string, id: string): Promise<unknown> {
+export async function wingmanSessionTranscript(
+  project: string,
+  id: string,
+): Promise<WingmanSessionRecord[]> {
   return invoke('wingman_session_transcript', { project, id });
 }
 

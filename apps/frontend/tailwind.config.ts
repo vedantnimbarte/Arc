@@ -13,6 +13,9 @@ export default {
           'BlinkMacSystemFont',
           'SF Pro Display',
           'SF Pro Text',
+          // Bundled variable build (see index.css); 'Inter' stays as a
+          // fallback for anyone who has the static family installed.
+          'Inter Variable',
           'Inter',
           'system-ui',
           'sans-serif',
@@ -21,6 +24,7 @@ export default {
         mono: [
           'SF Mono',
           'ui-monospace',
+          'JetBrains Mono Variable',
           'JetBrains Mono',
           'Menlo',
           'Monaco',

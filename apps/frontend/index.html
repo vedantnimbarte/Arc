@@ -3,13 +3,11 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <!-- Inter mimics SF Pro closely on non-Apple platforms; JetBrains Mono stands in for SF Mono. -->
-    <link
-      href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@300;400;500;600&display=swap"
-      rel="stylesheet"
-    />
+    <!-- Inter mimics SF Pro closely on non-Apple platforms; JetBrains Mono
+         stands in for SF Mono. Both are bundled (see index.css) rather than
+         fetched from a CDN: a desktop app should not need the network to
+         render its own UI, and the CDN round-trip on a cold start showed up
+         as a flash of fallback text. -->
     <title>ARC</title>
   </head>
   <body class="bg-bg-base text-fg-base font-display antialiased">

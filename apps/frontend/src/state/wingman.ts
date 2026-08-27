@@ -9,16 +9,25 @@ import {
   wingmanBoardArchive,
   wingmanBoardDispatch,
   wingmanConfigure,
+  wingmanCost,
   wingmanCreateSession,
+  wingmanDeleteSession,
   wingmanEventsSubscribe,
+  wingmanExplain,
   wingmanHealth,
   wingmanPilotControl,
+  wingmanPilotRun,
   wingmanProjects,
+  wingmanSessions,
+  wingmanSessionTranscript,
   wingmanTurnStart,
   type WingmanCard,
+  type WingmanContentBlock,
   type WingmanHealth,
   type WingmanPilotAction,
   type WingmanProject,
+  type WingmanSessionInfo,
+  type WingmanSessionRecord,
   type WingmanStreamEvent,
 } from '../lib/tauri';
 import { useFiles } from './files';
@@ -76,6 +85,18 @@ interface WingmanState {
   streaming: boolean;
   usage: TokenUsage | null;
 
+  /** Stored conversations for the active project, newest first. */
+  sessions: WingmanSessionInfo[];
+  sessionsLoading: boolean;
+
+  /** Cumulative spend for the active project, as `wingman cost --json` reports
+   *  it. Shape is the daemon's, so it stays a Value — ARC only reads a total. */
+  cost: unknown | null;
+
+  /** Full `RunState` for the run being inspected on the board. */
+  runDetail: { runId: string; state: unknown } | null;
+  runDetailLoading: boolean;
+
   connect: (baseUrl: string, token?: string | null) => Promise<void>;
   disconnect: () => Promise<void>;
   setActiveProject: (id: string) => void;
@@ -90,6 +111,19 @@ interface WingmanState {
   ) => Promise<void>;
   send: (prompt: string) => Promise<void>;
   newChat: () => void;
+  /** List stored conversations for the active project. */
+  loadSessions: () => Promise<void>;
+  /** Reopen a stored conversation: replays its transcript into the panel and
+   *  points the next turn at it, so the daemon continues the same history. */
+  resumeSession: (id: string) => Promise<void>;
+  /** Forget a conversation — deletes the transcript and de-indexes it. */
+  forgetSession: (id: string) => Promise<void>;
+  loadCost: () => Promise<void>;
+  openRunDetail: (runId: string) => Promise<void>;
+  closeRunDetail: () => void;
+  /** Ask Wingman to summarise the working tree. Goes through the daemon's
+   *  `explain` route rather than burning an agent turn on it. */
+  explainChanges: () => Promise<void>;
   /** Point ARC's file tree and Source Control at a pilot task's worktree, so
    *  the agent's changes get reviewed in ARC's own diff viewer. This is the
    *  review queue — it reuses the whole existing git stack rather than adding
@@ -124,6 +158,11 @@ export const useWingman = create<WingmanState>((set, get) => ({
   chat: [],
   streaming: false,
   usage: null,
+  sessions: [],
+  sessionsLoading: false,
+  cost: null,
+  runDetail: null,
+  runDetailLoading: false,
 
   connect: async (baseUrl, token) => {
     // Browser-only dev build has no IPC; stay unconfigured rather than
@@ -182,6 +221,9 @@ export const useWingman = create<WingmanState>((set, get) => ({
       chat: [],
       streaming: false,
       usage: null,
+      sessions: [],
+      cost: null,
+      runDetail: null,
       lastError: null,
     });
   },
@@ -189,8 +231,18 @@ export const useWingman = create<WingmanState>((set, get) => ({
   setActiveProject: (id) => {
     // Switching project invalidates the conversation: sessions are per-project
     // on the daemon, so carrying the id across would 404 on the next turn.
-    set({ activeProject: id, sessionId: null, chat: [], usage: null });
+    // The session list and cost are per-project too — leaving them would show
+    // one project's history under another's name.
+    set({
+      activeProject: id,
+      sessionId: null,
+      chat: [],
+      usage: null,
+      sessions: [],
+      cost: null,
+    });
     void get().refreshBoard();
+    void get().loadSessions();
   },
 
   refreshBoard: async () => {
@@ -243,6 +295,103 @@ export const useWingman = create<WingmanState>((set, get) => ({
     unlistenTurn?.();
     unlistenTurn = null;
     set({ sessionId: null, chat: [], usage: null, streaming: false });
+  },
+
+  loadSessions: async () => {
+    const project = get().activeProject;
+    if (get().status !== 'connected' || !project) return;
+    set({ sessionsLoading: true });
+    try {
+      set({ sessions: await wingmanSessions(project) });
+    } catch (e) {
+      set({ lastError: e instanceof Error ? e.message : String(e) });
+    } finally {
+      set({ sessionsLoading: false });
+    }
+  },
+
+  resumeSession: async (id) => {
+    const project = get().activeProject;
+    if (!project) return;
+    // Stop following the previous turn before swapping the transcript out —
+    // a late delta would otherwise append to the conversation we just loaded.
+    unlistenTurn?.();
+    unlistenTurn = null;
+    try {
+      const records = await wingmanSessionTranscript(project, id);
+      set({
+        sessionId: id,
+        chat: transcriptToChat(records),
+        // Usage is per-turn and not stored in the transcript; showing the last
+        // live turn's numbers against a resumed conversation would be a lie.
+        usage: null,
+        streaming: false,
+      });
+    } catch (e) {
+      set({ lastError: e instanceof Error ? e.message : String(e) });
+    }
+  },
+
+  forgetSession: async (id) => {
+    const project = get().activeProject;
+    if (!project) return;
+    await wingmanDeleteSession(project, id);
+    // Drop the panel's view of it too if that's what was open.
+    if (get().sessionId === id) get().newChat();
+    await get().loadSessions();
+  },
+
+  loadCost: async () => {
+    const project = get().activeProject;
+    if (get().status !== 'connected' || !project) return;
+    try {
+      set({ cost: await wingmanCost(project, false) });
+    } catch (e) {
+      set({ lastError: e instanceof Error ? e.message : String(e) });
+    }
+  },
+
+  openRunDetail: async (runId) => {
+    const project = get().activeProject;
+    if (!project) return;
+    set({ runDetail: { runId, state: null }, runDetailLoading: true });
+    try {
+      const state = await wingmanPilotRun(project, runId);
+      // Guard against a race: the user may have closed the overlay, or opened
+      // a different run, while this was in flight.
+      if (get().runDetail?.runId === runId) set({ runDetail: { runId, state } });
+    } catch (e) {
+      set({ lastError: e instanceof Error ? e.message : String(e) });
+    } finally {
+      set({ runDetailLoading: false });
+    }
+  },
+
+  closeRunDetail: () => set({ runDetail: null, runDetailLoading: false }),
+
+  explainChanges: async () => {
+    const project = get().activeProject;
+    if (get().status !== 'connected' || !project) return;
+    set((s) => ({
+      chat: [...s.chat, { kind: 'user', text: 'Explain the working-tree changes.' }],
+      streaming: true,
+    }));
+    try {
+      const result = await wingmanExplain(project, null, false);
+      // The route answers directly; no agent turn, no tokens billed. Output is
+      // JSON when the subcommand emits it and `{stdout,...}` when it doesn't.
+      const r = result as { stdout?: unknown; summary?: unknown };
+      const text = str(r.summary) || str(r.stdout) || JSON.stringify(result, null, 2);
+      set((s) => ({ chat: [...s.chat, { kind: 'assistant', text }], streaming: false }));
+    } catch (e) {
+      set((s) => ({
+        chat: [
+          ...s.chat,
+          { kind: 'error', message: e instanceof Error ? e.message : String(e) },
+        ],
+        streaming: false,
+      }));
+    }
   },
 
   send: async (prompt) => {
@@ -375,6 +524,80 @@ function applyEvent(
     default:
       return;
   }
+}
+
+/**
+ * Replay a stored transcript into panel rows.
+ *
+ * Two shapes have to reconcile. A live turn arrives as a flat event stream
+ * where `tool_start` and `tool_result` are separate events matched by id. A
+ * stored transcript nests tool *calls* inside an assistant message's `blocks`
+ * and records each tool *result* as its own top-level record, keyed by the same
+ * id. So the call rows are built first and results are folded onto them
+ * afterwards — exactly what `applyEvent` does for `tool_result`, which is why
+ * a resumed conversation looks identical to one you just watched stream.
+ *
+ * Unknown record kinds are skipped rather than rendered: Wingman writes
+ * variants ARC has no row for (compaction recaps, pruned tool results,
+ * per-turn system-prompt splices), and an older ARC must not break on a newer
+ * daemon's log.
+ */
+export function transcriptToChat(records: WingmanSessionRecord[]): ChatItem[] {
+  const chat: ChatItem[] = [];
+  const toolIndex = new Map<string, number>();
+
+  for (const rec of records ?? []) {
+    switch (rec.kind) {
+      case 'user': {
+        const text = str((rec as { text?: unknown }).text);
+        if (text) chat.push({ kind: 'user', text });
+        break;
+      }
+
+      case 'assistant': {
+        const blocks = (rec as { blocks?: WingmanContentBlock[] }).blocks ?? [];
+        for (const b of blocks) {
+          if (b.type === 'text') {
+            const text = str((b as { text?: unknown }).text);
+            // Coalesce with a preceding assistant row: one stored message can
+            // hold several text blocks, and they read as one answer.
+            const last = chat[chat.length - 1];
+            if (text && last && last.kind === 'assistant') last.text += text;
+            else if (text) chat.push({ kind: 'assistant', text });
+          } else if (b.type === 'thinking') {
+            const text = str((b as { text?: unknown }).text);
+            if (text) chat.push({ kind: 'thinking', text });
+          } else if (b.type === 'tool_use') {
+            const id = str((b as { id?: unknown }).id);
+            toolIndex.set(id, chat.length);
+            chat.push({
+              kind: 'tool',
+              id,
+              name: str((b as { name?: unknown }).name),
+              input: (b as { input?: unknown }).input,
+            });
+          }
+          // `image` and any future block type: no row.
+        }
+        break;
+      }
+
+      case 'tool_result': {
+        const id = str((rec as { id?: unknown }).id);
+        const at = toolIndex.get(id);
+        if (at === undefined) break; // result without a call — drop it
+        const row = chat[at];
+        if (row?.kind !== 'tool') break;
+        row.output = str((rec as { output?: unknown }).output);
+        row.isError = Boolean((rec as { is_error?: unknown }).is_error);
+        break;
+      }
+
+      default:
+        break;
+    }
+  }
+  return chat;
 }
 
 /** Keyring entry holding the daemon's bearer token. Settings live in plain
