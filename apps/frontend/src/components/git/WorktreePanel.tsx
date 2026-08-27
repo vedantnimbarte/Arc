@@ -71,19 +71,19 @@ export function WorktreePanel() {
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-start justify-center bg-black/40 backdrop-blur-sm"
+      className="fixed inset-0 z-50 flex items-start justify-center bg-scrim-2 backdrop-blur-sm"
       onClick={() => onClose(false)}
     >
       <div
         onClick={(e) => e.stopPropagation()}
-        className="material-sheet mt-[10vh] flex w-[640px] max-w-[92vw] animate-sheet-in flex-col overflow-hidden rounded-window shadow-sheet ring-1 ring-white/10"
+        className="material-sheet mt-[10vh] flex w-[640px] max-w-[92vw] animate-sheet-in flex-col overflow-hidden rounded-window shadow-sheet ring-1 ring-edge-2"
       >
         <div className="flex items-center justify-between border-b border-border-hairline px-4 py-2.5">
-          <div className="flex items-center gap-2 font-display text-[12.5px] font-semibold tracking-tight text-fg-base">
+          <div className="flex items-center gap-2 font-display text-sm font-semibold tracking-tight text-fg-base">
             <FolderTree size={12} strokeWidth={2.1} className="text-fg-muted" />
             Worktrees
             {entries.length > 0 && (
-              <span className="font-mono text-[10px] font-normal text-fg-subtle">
+              <span className="font-mono text-2xs font-normal text-fg-subtle">
                 · {entries.length}
               </span>
             )}
@@ -93,14 +93,14 @@ export function WorktreePanel() {
               onClick={() => void refresh()}
               disabled={loading}
               title="Refresh"
-              className="rounded p-1 text-fg-subtle transition-colors hover:bg-white/[0.06] hover:text-fg-base disabled:opacity-35"
+              className="rounded p-1 text-fg-subtle transition-colors hover:bg-surface-2 hover:text-fg-base disabled:opacity-35"
             >
               <RefreshCw size={11} strokeWidth={2.1} className={loading ? 'animate-spin' : ''} />
             </button>
             <button
               onClick={() => onClose(false)}
               title="Close (esc)"
-              className="rounded p-1 text-fg-subtle transition-colors hover:bg-white/[0.06] hover:text-fg-base"
+              className="rounded p-1 text-fg-subtle transition-colors hover:bg-surface-2 hover:text-fg-base"
             >
               <X size={11} strokeWidth={2.2} />
             </button>
@@ -108,7 +108,7 @@ export function WorktreePanel() {
         </div>
 
         {!root && (
-          <div className="px-4 py-6 text-center font-display text-[11.5px] italic text-fg-subtle">
+          <div className="px-4 py-6 text-center font-display text-xs italic text-fg-subtle">
             open a workspace folder first — worktrees attach to a repository.
           </div>
         )}
@@ -116,14 +116,14 @@ export function WorktreePanel() {
         {root && (
           <>
             {err && (
-              <div className="border-b border-border-hairline bg-red-500/[0.06] px-4 py-2 font-mono text-[11px] text-red-300">
+              <div className="border-b border-border-hairline bg-red-500/[0.06] px-4 py-2 font-mono text-xs text-red-300">
                 {err}
               </div>
             )}
 
             <div className="max-h-[55vh] overflow-y-auto">
               {entries.length === 0 && !loading && !err && (
-                <div className="px-4 py-6 text-center font-display text-[11.5px] italic text-fg-subtle">
+                <div className="px-4 py-6 text-center font-display text-xs italic text-fg-subtle">
                   no worktrees — this directory isn&rsquo;t a git repository,
                   or git isn&rsquo;t on PATH.
                 </div>
@@ -145,7 +145,7 @@ export function WorktreePanel() {
             ) : (
               <button
                 onClick={() => setCreating(true)}
-                className="flex items-center justify-center gap-1.5 border-t border-border-hairline bg-bg-base/30 py-2 font-display text-[11.5px] font-medium text-fg-muted transition-colors hover:bg-accent-soft hover:text-fg-base"
+                className="flex items-center justify-center gap-1.5 border-t border-border-hairline bg-bg-base/30 py-2 font-display text-xs font-medium text-fg-muted transition-colors hover:bg-accent-soft hover:text-fg-base"
               >
                 <Plus size={11} strokeWidth={2.2} />
                 Add worktree
@@ -210,37 +210,37 @@ function WorktreeRow({
         />
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-1.5">
-            <span className="truncate font-display text-[12px] font-medium tracking-tight text-fg-base">
+            <span className="truncate font-display text-sm font-medium tracking-tight text-fg-base">
               {worktree.branch ?? <span className="italic text-fg-muted">detached</span>}
             </span>
             {worktree.head_short && (
-              <span className="font-mono text-[10px] text-fg-subtle">{worktree.head_short}</span>
+              <span className="font-mono text-2xs text-fg-subtle">{worktree.head_short}</span>
             )}
             {worktree.is_main && (
-              <span className="rounded bg-bg-hover px-1 font-mono text-[9.5px] text-fg-muted">main</span>
+              <span className="rounded bg-bg-hover px-1 font-mono text-2xs text-fg-muted">main</span>
             )}
             {worktree.locked && (
               <Lock size={9} strokeWidth={2.4} className="text-amber-300" />
             )}
             {worktree.prunable && (
-              <span className="rounded bg-amber-500/[0.18] px-1 font-mono text-[9.5px] text-amber-300">
+              <span className="rounded bg-amber-500/[0.18] px-1 font-mono text-2xs text-amber-300">
                 prunable
               </span>
             )}
             {isCurrent && (
-              <span className="rounded bg-accent-soft px-1 font-mono text-[9.5px] text-accent">
+              <span className="rounded bg-accent-soft px-1 font-mono text-2xs text-accent">
                 active
               </span>
             )}
           </div>
-          <div className="mt-0.5 truncate font-mono text-[10.5px] text-fg-subtle">{worktree.path}</div>
-          {err && <div className="mt-1 font-mono text-[10.5px] text-red-300">{err}</div>}
+          <div className="mt-0.5 truncate font-mono text-2xs text-fg-subtle">{worktree.path}</div>
+          {err && <div className="mt-1 font-mono text-2xs text-red-300">{err}</div>}
         </div>
         <div className="flex shrink-0 items-center gap-1">
           {!isCurrent && (
             <button
               onClick={switchTo}
-              className="rounded px-1.5 py-0.5 font-display text-[10.5px] text-fg-muted transition-colors hover:bg-white/[0.06] hover:text-fg-base"
+              className="rounded px-1.5 py-0.5 font-display text-2xs text-fg-muted transition-colors hover:bg-surface-2 hover:text-fg-base"
             >
               switch
             </button>
@@ -252,14 +252,14 @@ function WorktreeRow({
                   <button
                     onClick={() => void remove(false)}
                     disabled={removing}
-                    className="font-display text-[10.5px] text-red-300 hover:text-red-200 disabled:opacity-50"
+                    className="font-display text-2xs text-red-300 hover:text-red-200 disabled:opacity-50"
                   >
                     remove
                   </button>
                   <button
                     onClick={() => void remove(true)}
                     disabled={removing}
-                    className="font-display text-[10.5px] text-red-300/80 hover:text-red-200 disabled:opacity-50"
+                    className="font-display text-2xs text-red-300/80 hover:text-red-200 disabled:opacity-50"
                     title="Remove even if dirty"
                   >
                     force
@@ -267,7 +267,7 @@ function WorktreeRow({
                   <button
                     onClick={() => setConfirming(false)}
                     disabled={removing}
-                    className="font-display text-[10.5px] text-fg-subtle hover:text-fg-base disabled:opacity-50"
+                    className="font-display text-2xs text-fg-subtle hover:text-fg-base disabled:opacity-50"
                   >
                     cancel
                   </button>
@@ -339,7 +339,7 @@ function AddWorktreeForm({
 
   return (
     <div className="space-y-2 border-t border-border-hairline bg-bg-base/30 p-3">
-      <div className="flex items-center gap-2 font-display text-[11px] font-semibold tracking-tight text-fg-base">
+      <div className="flex items-center gap-2 font-display text-xs font-semibold tracking-tight text-fg-base">
         <Plus size={11} strokeWidth={2.2} className="text-fg-muted" />
         Add worktree
       </div>
@@ -349,12 +349,12 @@ function AddWorktreeForm({
           value={newPath}
           onChange={(e) => setNewPath(e.target.value)}
           placeholder="/path/to/new/worktree"
-          className="flex-1 rounded border border-border-subtle bg-bg-base/60 px-2 py-1 font-mono text-[11px] text-fg-base placeholder:text-fg-subtle focus:border-accent/45 focus:outline-none"
+          className="flex-1 rounded border border-border-subtle bg-bg-base/60 px-2 py-1 font-mono text-xs text-fg-base placeholder:text-fg-subtle focus:border-accent/45 focus:outline-none"
           spellCheck={false}
         />
         <button
           onClick={() => void pickPath()}
-          className="rounded border border-border-subtle px-2 py-1 font-display text-[11px] text-fg-muted hover:border-border-strong hover:text-fg-base"
+          className="rounded border border-border-subtle px-2 py-1 font-display text-xs text-fg-muted hover:border-border-strong hover:text-fg-base"
         >
           browse…
         </button>
@@ -365,12 +365,12 @@ function AddWorktreeForm({
           value={branch}
           onChange={(e) => setBranch(e.target.value)}
           placeholder={createBranch ? 'new-branch-name' : 'existing-branch-or-ref'}
-          className="flex-1 rounded border border-border-subtle bg-bg-base/60 px-2 py-1 font-mono text-[11px] text-fg-base placeholder:text-fg-subtle focus:border-accent/45 focus:outline-none"
+          className="flex-1 rounded border border-border-subtle bg-bg-base/60 px-2 py-1 font-mono text-xs text-fg-base placeholder:text-fg-subtle focus:border-accent/45 focus:outline-none"
           spellCheck={false}
         />
       </FieldRow>
 
-      <label className="ml-[88px] flex items-center gap-1.5 font-display text-[11px] text-fg-muted">
+      <label className="ml-[88px] flex items-center gap-1.5 font-display text-xs text-fg-muted">
         <input
           type="checkbox"
           checked={createBranch}
@@ -386,26 +386,26 @@ function AddWorktreeForm({
             value={startPoint}
             onChange={(e) => setStartPoint(e.target.value)}
             placeholder="HEAD (default)"
-            className="flex-1 rounded border border-border-subtle bg-bg-base/60 px-2 py-1 font-mono text-[11px] text-fg-base placeholder:text-fg-subtle focus:border-accent/45 focus:outline-none"
+            className="flex-1 rounded border border-border-subtle bg-bg-base/60 px-2 py-1 font-mono text-xs text-fg-base placeholder:text-fg-subtle focus:border-accent/45 focus:outline-none"
             spellCheck={false}
           />
         </FieldRow>
       )}
 
-      {err && <div className="ml-[88px] font-mono text-[10.5px] text-red-300">{err}</div>}
+      {err && <div className="ml-[88px] font-mono text-2xs text-red-300">{err}</div>}
 
       <div className="flex justify-end gap-2 pt-1">
         <button
           onClick={onCancel}
           disabled={busy}
-          className="rounded px-2.5 py-1 font-display text-[11px] text-fg-muted hover:bg-white/[0.05] hover:text-fg-base disabled:opacity-50"
+          className="rounded px-2.5 py-1 font-display text-xs text-fg-muted hover:bg-surface-1 hover:text-fg-base disabled:opacity-50"
         >
           cancel
         </button>
         <button
           onClick={() => void submit()}
           disabled={busy}
-          className="rounded bg-accent-soft px-3 py-1 font-display text-[11px] font-medium text-fg-base ring-1 ring-accent/45 transition-colors hover:bg-accent/20 disabled:opacity-50"
+          className="rounded bg-accent-soft px-3 py-1 font-display text-xs font-medium text-fg-base ring-1 ring-accent/45 transition-colors hover:bg-accent/20 disabled:opacity-50"
         >
           {busy ? 'creating…' : 'create'}
         </button>
@@ -417,7 +417,7 @@ function AddWorktreeForm({
 function FieldRow({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div className="flex items-center gap-3">
-      <span className="w-[80px] shrink-0 text-right font-display text-[11px] text-fg-muted">
+      <span className="w-[80px] shrink-0 text-right font-display text-xs text-fg-muted">
         {label}
       </span>
       {children}

@@ -198,7 +198,7 @@ export function SshTab({ sessionKey, hostId }: SshTabProps) {
   if (!host) {
     return (
       <div className="flex h-full w-full items-center justify-center bg-bg-base">
-        <div className="font-mono text-[11px] text-fg-subtle">
+        <div className="font-mono text-xs text-fg-subtle">
           host not found — open the SSH panel to add or pick one
         </div>
       </div>
@@ -220,8 +220,8 @@ export function SshTab({ sessionKey, hostId }: SshTabProps) {
                     : 'rgb(200 202 208)',
             }}
           />
-          <span className="font-display text-[11px] text-fg-base">{hostName}</span>
-          <span className="font-mono text-[10px] text-fg-subtle">{hostLine}</span>
+          <span className="font-display text-xs text-fg-base">{hostName}</span>
+          <span className="font-mono text-2xs text-fg-subtle">{hostLine}</span>
         </div>
         <div className="flex items-center gap-1">
           <LogDrawerToggle open={drawerOpen} onToggle={() => setDrawerOpen((v) => !v)} />
@@ -229,7 +229,7 @@ export function SshTab({ sessionKey, hostId }: SshTabProps) {
             <button
               type="button"
               onClick={() => disconnect(sessionId)}
-              className="rounded px-1.5 py-1 font-mono text-[9px] uppercase tracking-widest2 text-status-err transition hover:bg-bg-hover"
+              className="rounded px-1.5 py-1 font-mono text-2xs uppercase tracking-widest2 text-status-err transition hover:bg-bg-hover"
             >
               Disconnect
             </button>

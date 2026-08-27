@@ -89,7 +89,7 @@ export function ShortcutsDialog({ open, onClose }: Props) {
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-start justify-center bg-black/40 backdrop-blur-sm"
+      className="fixed inset-0 z-50 flex items-start justify-center bg-scrim-2 backdrop-blur-sm"
       onClick={() => {
         if (capturing) setCapturing(null);
         else onClose();
@@ -97,20 +97,20 @@ export function ShortcutsDialog({ open, onClose }: Props) {
     >
       <div
         onClick={(e) => e.stopPropagation()}
-        className="material-sheet mt-[8vh] flex h-[80vh] w-[720px] max-w-[94vw] animate-sheet-in flex-col overflow-hidden rounded-window shadow-sheet ring-1 ring-white/10"
+        className="material-sheet mt-[8vh] flex h-[80vh] w-[720px] max-w-[94vw] animate-sheet-in flex-col overflow-hidden rounded-window shadow-sheet ring-1 ring-edge-2"
       >
         {/* Header */}
         <div className="flex h-11 shrink-0 items-center justify-between border-b border-border-hairline bg-bg-chrome/40 px-4 backdrop-blur-md">
           <div className="flex items-center gap-2">
             <Keyboard size={13} strokeWidth={2.1} className="text-accent-bright" />
-            <span className="font-display text-[13px] font-semibold tracking-tight text-fg-base">
+            <span className="font-display text-base font-semibold tracking-tight text-fg-base">
               Keyboard Shortcuts
             </span>
           </div>
           <div className="flex items-center gap-1">
             <button
               onClick={() => resetAll()}
-              className="flex items-center gap-1 rounded-md px-2 py-1 font-display text-[11px] text-fg-muted transition-all hover:bg-white/[0.08] hover:text-fg-base"
+              className="flex items-center gap-1 rounded-md px-2 py-1 font-display text-xs text-fg-muted transition-all hover:bg-surface-2 hover:text-fg-base"
               title="Reset every shortcut to its default"
             >
               <RotateCcw size={10} strokeWidth={2.1} />
@@ -118,7 +118,7 @@ export function ShortcutsDialog({ open, onClose }: Props) {
             </button>
             <button
               onClick={onClose}
-              className="rounded-md p-1.5 text-fg-subtle transition-all duration-150 ease-apple hover:bg-white/[0.08] hover:text-fg-base"
+              className="rounded-md p-1.5 text-fg-subtle transition-all duration-150 ease-apple hover:bg-surface-2 hover:text-fg-base"
               aria-label="Close"
               title="Close (esc)"
             >
@@ -134,14 +134,14 @@ export function ShortcutsDialog({ open, onClose }: Props) {
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             placeholder="filter by action or key…"
-            className="flex-1 bg-transparent font-display text-[13px] text-fg-base placeholder:text-fg-subtle focus:outline-none"
+            className="flex-1 bg-transparent font-display text-base text-fg-base placeholder:text-fg-subtle focus:outline-none"
             autoComplete="off"
             spellCheck={false}
           />
           {query && (
             <button
               onClick={() => setQuery('')}
-              className="rounded p-1 text-fg-subtle hover:bg-white/[0.06] hover:text-fg-base"
+              className="rounded p-1 text-fg-subtle hover:bg-surface-2 hover:text-fg-base"
               aria-label="Clear filter"
             >
               <X size={10} strokeWidth={2.2} />
@@ -156,7 +156,7 @@ export function ShortcutsDialog({ open, onClose }: Props) {
             if (rows.length === 0) return null;
             return (
               <section key={cat} className="mb-3">
-                <h3 className="px-1 pb-1 font-display text-[10.5px] font-semibold uppercase tracking-widest2 text-fg-subtle">
+                <h3 className="px-1 pb-1 font-display text-2xs font-semibold uppercase tracking-widest2 text-fg-subtle">
                   {cat}
                 </h3>
                 <div className="space-y-0.5">
@@ -187,7 +187,7 @@ export function ShortcutsDialog({ open, onClose }: Props) {
             <div className="mb-2 mt-1">
               <div className="mb-2 flex items-center gap-2 px-1">
                 <div className="h-px flex-1 bg-border-hairline" />
-                <span className="font-display text-[9.5px] font-semibold uppercase tracking-widest2 text-fg-subtle">
+                <span className="font-display text-2xs font-semibold uppercase tracking-widest2 text-fg-subtle">
                   Built-in · not rebindable
                 </span>
                 <div className="h-px flex-1 bg-border-hairline" />
@@ -197,7 +197,7 @@ export function ShortcutsDialog({ open, onClose }: Props) {
                 if (rows.length === 0) return null;
                 return (
                   <section key={cat} className="mb-3">
-                    <h3 className="px-1 pb-1 font-display text-[10.5px] font-semibold uppercase tracking-widest2 text-fg-subtle">
+                    <h3 className="px-1 pb-1 font-display text-2xs font-semibold uppercase tracking-widest2 text-fg-subtle">
                       {cat}
                     </h3>
                     <div className="space-y-0.5">
@@ -207,14 +207,14 @@ export function ShortcutsDialog({ open, onClose }: Props) {
                           className="flex items-center gap-3 rounded-md px-2 py-1.5"
                         >
                           <div className="min-w-0 flex-1">
-                            <span className="font-display text-[12.5px] font-medium tracking-tight text-fg-base">
+                            <span className="font-display text-sm font-medium tracking-tight text-fg-base">
                               {s.label}
                             </span>
-                            <p className="truncate font-display text-[11px] text-fg-subtle">
+                            <p className="truncate font-display text-xs text-fg-subtle">
                               {s.description}
                             </p>
                           </div>
-                          <span className="shrink-0 rounded-md border border-border-subtle bg-bg-base/40 px-2.5 py-1 font-mono text-[11px] text-fg-muted">
+                          <span className="shrink-0 rounded-md border border-border-subtle bg-bg-base/40 px-2.5 py-1 font-mono text-xs text-fg-muted">
                             {s.keys}
                           </span>
                         </div>
@@ -226,7 +226,7 @@ export function ShortcutsDialog({ open, onClose }: Props) {
             </div>
           )}
           {filtered.length === 0 && filteredRef.length === 0 && (
-            <div className="flex items-center justify-center gap-1.5 px-4 py-12 font-display text-[12px] italic text-fg-subtle">
+            <div className="flex items-center justify-center gap-1.5 px-4 py-12 font-display text-sm italic text-fg-subtle">
               <Search size={11} strokeWidth={2} />
               no actions match "{query}"
             </div>
@@ -234,7 +234,7 @@ export function ShortcutsDialog({ open, onClose }: Props) {
         </div>
 
         {/* Footer */}
-        <div className="flex shrink-0 items-center justify-between border-t border-border-hairline px-3.5 py-2 font-display text-[10px] text-fg-subtle">
+        <div className="flex shrink-0 items-center justify-between border-t border-border-hairline px-3.5 py-2 font-display text-2xs text-fg-subtle">
           <span>
             <kbd className="font-mono">click</kbd> a binding to rebind ·{' '}
             <kbd className="font-mono">esc</kbd> to cancel
@@ -306,24 +306,24 @@ function ShortcutRow({
     <div
       className={cn(
         'group flex items-center gap-3 rounded-md px-2 py-1.5 transition-colors',
-        capturing ? 'bg-accent-soft ring-1 ring-inset ring-accent/40' : 'hover:bg-white/[0.035]',
+        capturing ? 'bg-accent-soft ring-1 ring-inset ring-accent/40' : 'hover:bg-surface-1',
       )}
     >
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-1.5">
-          <span className="font-display text-[12.5px] font-medium tracking-tight text-fg-base">
+          <span className="font-display text-sm font-medium tracking-tight text-fg-base">
             {meta.label}
           </span>
           {isCustom && (
             <span
-              className="rounded bg-accent/20 px-1 py-0.5 font-mono text-[8.5px] tracking-tight text-accent-bright"
+              className="rounded bg-accent/20 px-1 py-0.5 font-mono text-2xs tracking-tight text-accent-bright"
               title="Customized — click reset to restore the default"
             >
               custom
             </span>
           )}
         </div>
-        <p className="truncate font-display text-[11px] text-fg-subtle">
+        <p className="truncate font-display text-xs text-fg-subtle">
           {meta.description}
         </p>
       </div>
@@ -332,7 +332,7 @@ function ShortcutRow({
         <div className="flex items-center gap-2">
           {conflict && (
             <span
-              className="flex items-center gap-1 font-display text-[10.5px] text-status-warn"
+              className="flex items-center gap-1 font-display text-2xs text-status-warn"
               title="This combo is already bound to another action"
             >
               <AlertTriangle size={10} strokeWidth={2.1} />
@@ -341,7 +341,7 @@ function ShortcutRow({
           )}
           <button
             ref={captureRef}
-            className="rounded-md border border-accent/40 bg-bg-base/70 px-2.5 py-1 font-mono text-[11px] text-fg-base shadow-focus outline-none"
+            className="rounded-md border border-accent/40 bg-bg-base/70 px-2.5 py-1 font-mono text-xs text-fg-base shadow-focus outline-none"
             tabIndex={-1}
           >
             {pending ? formatBinding(pending) : 'press a combo…'}
@@ -358,14 +358,14 @@ function ShortcutRow({
           )}
           <button
             onClick={onClearBinding}
-            className="rounded-md px-2 py-1 font-display text-[10.5px] text-fg-muted transition-colors hover:bg-white/[0.06] hover:text-fg-base"
+            className="rounded-md px-2 py-1 font-display text-2xs text-fg-muted transition-colors hover:bg-surface-2 hover:text-fg-base"
             title="Disable this action"
           >
             disable
           </button>
           <button
             onClick={onCancel}
-            className="rounded-md px-2 py-1 font-display text-[10.5px] text-fg-muted transition-colors hover:bg-white/[0.06] hover:text-fg-base"
+            className="rounded-md px-2 py-1 font-display text-2xs text-fg-muted transition-colors hover:bg-surface-2 hover:text-fg-base"
           >
             cancel
           </button>
@@ -375,7 +375,7 @@ function ShortcutRow({
           <button
             onClick={onStartCapture}
             className={cn(
-              'rounded-md border px-2.5 py-1 font-mono text-[11px] transition-colors',
+              'rounded-md border px-2.5 py-1 font-mono text-xs transition-colors',
               binding
                 ? 'border-border-subtle bg-bg-base/40 text-fg-base hover:border-border-strong hover:bg-bg-base/60'
                 : 'border-dashed border-border-subtle bg-bg-base/20 text-fg-subtle italic hover:border-border-strong',
@@ -387,7 +387,7 @@ function ShortcutRow({
           {isCustom && (
             <button
               onClick={onReset}
-              className="rounded-md p-1 text-fg-subtle opacity-0 transition-all hover:bg-white/[0.06] hover:text-fg-base group-hover:opacity-100"
+              className="rounded-md p-1 text-fg-subtle opacity-0 transition-all hover:bg-surface-2 hover:text-fg-base group-hover:opacity-100"
               title="Reset to default"
               aria-label="Reset to default"
             >

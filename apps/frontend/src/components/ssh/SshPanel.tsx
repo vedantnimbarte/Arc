@@ -115,7 +115,7 @@ export function SshPanel({ onClose }: { onClose?: () => void }) {
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
                 placeholder={tab === 'hosts' ? 'search hosts…' : 'search keys…'}
-                className="flex-1 bg-transparent font-mono text-[12px] text-fg-base placeholder:text-fg-subtle focus:outline-none"
+                className="flex-1 bg-transparent font-mono text-sm text-fg-base placeholder:text-fg-subtle focus:outline-none"
               />
               {query && (
                 <button
@@ -193,7 +193,7 @@ function SectionHeader({
       <div className="flex h-11 items-center justify-between px-4">
         <div className="flex items-center gap-2.5">
           <Server size={14} strokeWidth={1.5} className="text-accent" />
-          <span className="select-none font-mono text-[10.5px] uppercase tracking-widest2 text-fg-muted">
+          <span className="select-none font-mono text-2xs uppercase tracking-widest2 text-fg-muted">
             SSH
           </span>
         </div>
@@ -263,7 +263,7 @@ function TabPill({
       type="button"
       onClick={onClick}
       className={cn(
-        'relative mr-5 pb-2 pt-1.5 font-mono text-[10.5px] uppercase tracking-widest2 transition-colors',
+        'relative mr-5 pb-2 pt-1.5 font-mono text-2xs uppercase tracking-widest2 transition-colors',
         active ? 'text-fg-base' : 'text-fg-subtle hover:text-fg-muted',
       )}
     >
@@ -299,7 +299,7 @@ function HostList({
 }: HostListProps) {
   if (!hydrated) {
     return (
-      <div className="py-10 text-center font-mono text-[11px] text-fg-subtle">
+      <div className="py-10 text-center font-mono text-xs text-fg-subtle">
         loading…
       </div>
     );
@@ -308,12 +308,12 @@ function HostList({
     return (
       <div className="flex flex-col items-center gap-3 px-4 py-14 text-center">
         <Server size={22} strokeWidth={1.3} className="text-fg-subtle" />
-        <div className="font-display text-[13px] font-medium text-fg-base">
+        <div className="font-display text-base font-medium text-fg-base">
           No hosts yet
         </div>
-        <div className="max-w-[200px] font-mono text-[11px] leading-relaxed text-fg-subtle">
+        <div className="max-w-[200px] font-mono text-xs leading-relaxed text-fg-subtle">
           Add one with the{' '}
-          <kbd className="rounded bg-bg-hover px-1.5 py-px font-mono text-[10px]">
+          <kbd className="rounded bg-bg-hover px-1.5 py-px font-mono text-2xs">
             +
           </kbd>{' '}
           above. ARC stores connection params; auth lives in your keys list.
@@ -343,24 +343,24 @@ function HostList({
               />
               <div className="min-w-0 flex-1">
                 <div className="flex items-center justify-between gap-2">
-                  <span className="truncate font-display text-[13px] text-fg-base">
+                  <span className="truncate font-display text-base text-fg-base">
                     {h.name}
                   </span>
                   {liveStatus === 'connected' && (
-                    <span className="shrink-0 font-mono text-[9px] uppercase tracking-widest2 text-status-ok">
+                    <span className="shrink-0 font-mono text-2xs uppercase tracking-widest2 text-status-ok">
                       Live
                     </span>
                   )}
                   {liveStatus === 'connecting' && (
-                    <span className="shrink-0 font-mono text-[9px] uppercase tracking-widest2 text-accent">
+                    <span className="shrink-0 font-mono text-2xs uppercase tracking-widest2 text-accent">
                       Dialing
                     </span>
                   )}
                 </div>
-                <div className="mt-1 truncate font-mono text-[11px] text-fg-muted">
+                <div className="mt-1 truncate font-mono text-xs text-fg-muted">
                   {h.username}@{h.host}:{h.port}
                 </div>
-                <div className="mt-0.5 font-mono text-[10px] text-fg-subtle">
+                <div className="mt-0.5 font-mono text-2xs text-fg-subtle">
                   {identity ? identity.kind : 'password'}
                   {' · '}
                   {h.last_used_at ? relTime(h.last_used_at) : 'never used'}
@@ -401,7 +401,7 @@ function KeyList({ keys, hosts, hydrated, onGenerate, onImport }: KeyListProps) 
 
   if (!hydrated) {
     return (
-      <div className="py-10 text-center font-mono text-[11px] text-fg-subtle">
+      <div className="py-10 text-center font-mono text-xs text-fg-subtle">
         loading…
       </div>
     );
@@ -410,10 +410,10 @@ function KeyList({ keys, hosts, hydrated, onGenerate, onImport }: KeyListProps) 
     return (
       <div className="flex flex-col items-center gap-3 px-4 py-14 text-center">
         <Key size={22} strokeWidth={1.3} className="text-fg-subtle" />
-        <div className="font-display text-[13px] font-medium text-fg-base">
+        <div className="font-display text-base font-medium text-fg-base">
           No keys yet
         </div>
-        <div className="max-w-[200px] font-mono text-[11px] leading-relaxed text-fg-subtle">
+        <div className="max-w-[200px] font-mono text-xs leading-relaxed text-fg-subtle">
           Generate a fresh ed25519 keypair or import an existing one from{' '}
           <code className="font-mono">~/.ssh</code>.
         </div>
@@ -421,14 +421,14 @@ function KeyList({ keys, hosts, hydrated, onGenerate, onImport }: KeyListProps) 
           <button
             type="button"
             onClick={onGenerate}
-            className="rounded-squircle bg-accent/90 px-4 py-1.5 font-display text-[11px] font-medium text-bg-base transition hover:bg-accent"
+            className="rounded-squircle bg-accent/90 px-4 py-1.5 font-display text-xs font-medium text-bg-base transition hover:bg-accent"
           >
             Generate
           </button>
           <button
             type="button"
             onClick={onImport}
-            className="rounded-squircle border border-border-subtle px-4 py-1.5 font-display text-[11px] font-medium text-fg-base transition hover:bg-bg-hover"
+            className="rounded-squircle border border-border-subtle px-4 py-1.5 font-display text-xs font-medium text-fg-base transition hover:bg-bg-hover"
           >
             Import
           </button>
@@ -446,21 +446,21 @@ function KeyList({ keys, hosts, hydrated, onGenerate, onImport }: KeyListProps) 
             className="rounded-squircle border border-border-subtle bg-bg-subtle/40 px-4 py-3"
           >
             <div className="flex items-start justify-between gap-2">
-              <span className="font-mono text-[12px] leading-tight text-fg-base">
+              <span className="font-mono text-sm leading-tight text-fg-base">
                 {k.name}
               </span>
-              <span className="mt-px shrink-0 font-mono text-[9.5px] uppercase tracking-widest2 text-fg-subtle">
+              <span className="mt-px shrink-0 font-mono text-2xs uppercase tracking-widest2 text-fg-subtle">
                 {k.kind}
               </span>
             </div>
             <div
               title={k.fingerprint}
-              className="mt-2 break-all font-mono text-[10px] leading-relaxed text-fg-muted"
+              className="mt-2 break-all font-mono text-2xs leading-relaxed text-fg-muted"
             >
               {chunkFingerprint(k.fingerprint)}
             </div>
             <div className="mt-2.5 flex items-center justify-between">
-              <span className="font-mono text-[10px] text-fg-subtle">
+              <span className="font-mono text-2xs text-fg-subtle">
                 {uses === 0 ? 'unused' : `${uses} host${uses === 1 ? '' : 's'}`}
                 {k.has_passphrase ? ' · secured' : ''}
               </span>
@@ -471,7 +471,7 @@ function KeyList({ keys, hosts, hydrated, onGenerate, onImport }: KeyListProps) 
                     void deleteKey(k.id, false);
                   }
                 }}
-                className="rounded px-1.5 py-px font-mono text-[10px] text-fg-subtle transition-colors hover:bg-bg-hover hover:text-status-err"
+                className="rounded px-1.5 py-px font-mono text-2xs text-fg-subtle transition-colors hover:bg-bg-hover hover:text-status-err"
               >
                 remove
               </button>
@@ -510,7 +510,7 @@ function BroadcastBar() {
     <div className="animate-view-in border-t border-border-hairline bg-bg-chrome/30 px-3 py-2.5">
       <div className="mb-1.5 flex items-center gap-1.5">
         <Radio size={11} className="animate-pulse-soft text-accent" />
-        <span className="font-mono text-[9.5px] uppercase tracking-widest2 text-fg-muted">
+        <span className="font-mono text-2xs uppercase tracking-widest2 text-fg-muted">
           Broadcast → {liveCount} session{liveCount !== 1 ? 's' : ''}
         </span>
       </div>
@@ -525,7 +525,7 @@ function BroadcastBar() {
             }
           }}
           placeholder="command to all sessions…"
-          className="flex-1 bg-transparent font-mono text-[12px] text-fg-base placeholder:text-fg-subtle focus:outline-none"
+          className="flex-1 bg-transparent font-mono text-sm text-fg-base placeholder:text-fg-subtle focus:outline-none"
           spellCheck={false}
           autoComplete="off"
         />
@@ -534,7 +534,7 @@ function BroadcastBar() {
           onClick={send}
           disabled={!cmd.trim()}
           title="Send to all connected sessions"
-          className="flex h-6 items-center gap-1 rounded-md px-2 font-display text-[11px] font-medium text-fg-base transition-colors hover:bg-bg-hover disabled:opacity-40"
+          className="flex h-6 items-center gap-1 rounded-md px-2 font-display text-xs font-medium text-fg-base transition-colors hover:bg-bg-hover disabled:opacity-40"
         >
           <SendHorizontal size={11} />
           send
@@ -555,7 +555,7 @@ function SectionFooter({
 }) {
   return (
     <footer className="border-t border-border-hairline bg-bg-chrome/30 px-4 py-2.5">
-      <span className="font-mono text-[10px] uppercase tracking-widest2 text-fg-subtle">
+      <span className="font-mono text-2xs uppercase tracking-widest2 text-fg-subtle">
         {hostCount} host{hostCount !== 1 ? 's' : ''} · {keyCount} key
         {keyCount !== 1 ? 's' : ''}
       </span>

@@ -53,9 +53,9 @@ export function HostDetail({ host, identity, onBack, onEdit }: HostDetailProps) 
           className="flex items-center gap-1 rounded-md px-1.5 py-1 text-fg-muted transition hover:bg-bg-hover hover:text-fg-base"
         >
           <ChevronLeft className="h-3.5 w-3.5" />
-          <span className="font-mono text-[10px] uppercase tracking-widest2">Back</span>
+          <span className="font-mono text-2xs uppercase tracking-widest2">Back</span>
         </button>
-        <div className="font-display text-[12px] font-medium text-fg-base">{host.name}</div>
+        <div className="font-display text-sm font-medium text-fg-base">{host.name}</div>
         <div className="flex items-center gap-1">
           <button
             type="button"
@@ -77,23 +77,23 @@ export function HostDetail({ host, identity, onBack, onEdit }: HostDetailProps) 
               statusDotClass(live?.status as never),
             )}
           />
-          <span className="font-mono text-[10px] uppercase tracking-widest2 text-fg-base">
+          <span className="font-mono text-2xs uppercase tracking-widest2 text-fg-base">
             {statusLabel(live?.status as never)}
           </span>
           {live?.status === 'connected' && (
-            <span className="ml-auto font-mono text-[10px] text-fg-muted">
+            <span className="ml-auto font-mono text-2xs text-fg-muted">
               uptime {uptime(live.connectedAt)}
             </span>
           )}
           {live?.status === 'error' && live.error && (
-            <span className="ml-auto truncate font-mono text-[10px] text-status-err">
+            <span className="ml-auto truncate font-mono text-2xs text-status-err">
               {live.error}
             </span>
           )}
         </div>
 
         <Field label="Host">
-          <span className="font-mono text-[13px] text-fg-base">
+          <span className="font-mono text-base text-fg-base">
             {host.username}
             <span className="text-fg-subtle"> @ </span>
             {host.host}
@@ -105,20 +105,20 @@ export function HostDetail({ host, identity, onBack, onEdit }: HostDetailProps) 
         <Field label="Identity">
           {identity ? (
             <>
-              <div className="font-mono text-[12px] text-fg-base">{identity.path}</div>
-              <div className="mt-px font-mono text-[10px] text-fg-muted">
+              <div className="font-mono text-sm text-fg-base">{identity.path}</div>
+              <div className="mt-px font-mono text-2xs text-fg-muted">
                 {chunkFingerprint(identity.fingerprint)} · {identity.kind}
               </div>
             </>
           ) : (
-            <div className="font-mono text-[11px] text-status-err">
+            <div className="font-mono text-xs text-status-err">
               none — add one in the Keys tab
             </div>
           )}
         </Field>
 
         <Field label="Keepalive">
-          <span className="font-mono text-[12px] text-fg-base">
+          <span className="font-mono text-sm text-fg-base">
             {host.keepalive_secs}
             <span className="ml-1 text-fg-subtle">s</span>
           </span>
@@ -126,7 +126,7 @@ export function HostDetail({ host, identity, onBack, onEdit }: HostDetailProps) 
 
         {host.startup_cmd && (
           <Field label="Startup">
-            <pre className="rounded-squircle border border-border-subtle bg-bg-subtle/60 px-2 py-1.5 font-mono text-[11px] text-fg-base">
+            <pre className="rounded-squircle border border-border-subtle bg-bg-subtle/60 px-2 py-1.5 font-mono text-xs text-fg-base">
               {host.startup_cmd}
             </pre>
           </Field>
@@ -138,7 +138,7 @@ export function HostDetail({ host, identity, onBack, onEdit }: HostDetailProps) 
           <button
             type="button"
             onClick={() => liveId && disconnect(liveId)}
-            className="flex items-center gap-1.5 rounded-squircle border border-status-err/40 px-3 py-1.5 font-display text-[11.5px] text-status-err transition hover:bg-status-err/10"
+            className="flex items-center gap-1.5 rounded-squircle border border-status-err/40 px-3 py-1.5 font-display text-xs text-status-err transition hover:bg-status-err/10"
           >
             <Power className="h-3.5 w-3.5" />
             Disconnect
@@ -149,7 +149,7 @@ export function HostDetail({ host, identity, onBack, onEdit }: HostDetailProps) 
             onClick={handleConnect}
             disabled={!identity}
             className={cn(
-              'flex items-center gap-1.5 rounded-squircle px-3 py-1.5 font-display text-[11.5px] transition',
+              'flex items-center gap-1.5 rounded-squircle px-3 py-1.5 font-display text-xs transition',
               identity
                 ? 'bg-accent/90 text-bg-base hover:bg-accent'
                 : 'cursor-not-allowed border border-border-subtle text-fg-subtle',
@@ -167,7 +167,7 @@ export function HostDetail({ host, identity, onBack, onEdit }: HostDetailProps) 
               void deleteHost(host.id);
             }
           }}
-          className="flex items-center gap-1.5 rounded-squircle border border-border-subtle px-2.5 py-1.5 font-display text-[11.5px] text-fg-muted transition hover:bg-bg-hover hover:text-status-err"
+          className="flex items-center gap-1.5 rounded-squircle border border-border-subtle px-2.5 py-1.5 font-display text-xs text-fg-muted transition hover:bg-bg-hover hover:text-status-err"
         >
           <Trash2 className="h-3.5 w-3.5" />
           Remove
@@ -180,7 +180,7 @@ export function HostDetail({ host, identity, onBack, onEdit }: HostDetailProps) 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div className="mb-3 last:mb-0">
-      <div className="font-mono text-[9.5px] uppercase tracking-widest2 text-fg-subtle">
+      <div className="font-mono text-2xs uppercase tracking-widest2 text-fg-subtle">
         {label}
       </div>
       <div className="mt-1">{children}</div>

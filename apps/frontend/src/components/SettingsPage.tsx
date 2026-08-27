@@ -145,7 +145,7 @@ export function SettingsPage() {
         data-tauri-drag-region
         className="material-toolbar relative flex h-9 items-center justify-center px-3"
       >
-        <span className="font-display text-[12px] font-semibold tracking-tight text-fg-base">
+        <span className="font-display text-sm font-semibold tracking-tight text-fg-base">
           Settings
         </span>
         <button
@@ -171,7 +171,7 @@ export function SettingsPage() {
             <SidebarRow icon={Info} label="About" active={pane === 'about'} onClick={() => setPane('about')} />
           </nav>
 
-          <div className="mt-auto p-3 font-display text-[10px] tracking-tight text-fg-subtle">
+          <div className="mt-auto p-3 font-display text-2xs tracking-tight text-fg-subtle">
             arc settings · saved to sqlite
           </div>
         </aside>
@@ -294,18 +294,18 @@ function AppearancePane({
           <button
             onClick={() => onFontSizeChange(fontSize - 1)}
             disabled={fontSize <= MIN_FONT_SIZE}
-            className="flex h-8 w-8 items-center justify-center text-fg-muted transition-colors hover:bg-white/[0.06] hover:text-fg-base disabled:opacity-30 disabled:hover:bg-transparent"
+            className="flex h-8 w-8 items-center justify-center text-fg-muted transition-colors hover:bg-surface-2 hover:text-fg-base disabled:opacity-30 disabled:hover:bg-transparent"
             aria-label="Decrease font size"
           >
             <Minus size={12} />
           </button>
-          <div className="flex h-8 w-16 items-center justify-center border-x border-border-subtle font-mono text-[13px] text-fg-base">
+          <div className="flex h-8 w-16 items-center justify-center border-x border-border-subtle font-mono text-base text-fg-base">
             {fontSize}px
           </div>
           <button
             onClick={() => onFontSizeChange(fontSize + 1)}
             disabled={fontSize >= MAX_FONT_SIZE}
-            className="flex h-8 w-8 items-center justify-center text-fg-muted transition-colors hover:bg-white/[0.06] hover:text-fg-base disabled:opacity-30 disabled:hover:bg-transparent"
+            className="flex h-8 w-8 items-center justify-center text-fg-muted transition-colors hover:bg-surface-2 hover:text-fg-base disabled:opacity-30 disabled:hover:bg-transparent"
             aria-label="Increase font size"
           >
             <Plus size={12} />
@@ -426,12 +426,12 @@ function ThemesPane({
             placeholder="https://…/my-theme.json"
             spellCheck={false}
             autoComplete="off"
-            className="min-w-0 flex-1 rounded-lg border border-border-subtle bg-bg-base/60 px-3 py-2 font-mono text-[11.5px] text-fg-base placeholder:text-fg-subtle focus:border-accent/45 focus:outline-none"
+            className="min-w-0 flex-1 rounded-lg border border-border-subtle bg-bg-base/60 px-3 py-2 font-mono text-xs text-fg-base placeholder:text-fg-subtle focus:border-accent/45 focus:outline-none"
           />
           <button
             onClick={() => void onInstall()}
             disabled={installing || !url.trim()}
-            className="shrink-0 rounded-lg bg-accent-soft px-3 py-2 font-display text-[11.5px] font-medium text-fg-base ring-1 ring-accent/45 transition-colors hover:bg-accent/20 disabled:opacity-50"
+            className="shrink-0 rounded-lg bg-accent-soft px-3 py-2 font-display text-xs font-medium text-fg-base ring-1 ring-accent/45 transition-colors hover:bg-accent/20 disabled:opacity-50"
           >
             {installing ? 'installing…' : 'install'}
           </button>
@@ -439,7 +439,7 @@ function ThemesPane({
         {msg && (
           <p
             className={cn(
-              'mt-2 font-display text-[11px] leading-relaxed',
+              'mt-2 font-display text-xs leading-relaxed',
               msg.kind === 'ok' ? 'text-status-ok' : 'text-status-err',
             )}
           >
@@ -465,11 +465,11 @@ function ToggleRow({
   return (
     <div className="flex items-center justify-between gap-4 rounded-lg border border-border-subtle bg-bg-base/40 px-3 py-2.5">
       <div className="min-w-0">
-        <p className="font-display text-[12.5px] font-medium tracking-tight text-fg-base">
+        <p className="font-display text-sm font-medium tracking-tight text-fg-base">
           {label}
         </p>
         {hint && (
-          <p className="mt-0.5 font-display text-[11px] leading-relaxed text-fg-subtle">
+          <p className="mt-0.5 font-display text-xs leading-relaxed text-fg-subtle">
             {hint}
           </p>
         )}
@@ -548,7 +548,7 @@ function AppearanceCard({
       <div className="flex items-center justify-between border-t border-border-subtle bg-bg-base/40 px-3 py-2">
         <div className="flex items-center gap-1.5">
           <Icon size={11} strokeWidth={2.1} className={active ? 'text-accent-bright' : 'text-fg-muted'} />
-          <span className="font-display text-[12px] font-medium tracking-tight text-fg-base">
+          <span className="font-display text-sm font-medium tracking-tight text-fg-base">
             {label}
           </span>
         </div>
@@ -591,10 +591,10 @@ function ThemeCard({
         ))}
       </div>
       <div className="min-w-0 flex-1">
-        <div className="truncate font-display text-[12px] font-medium tracking-tight text-fg-base">
+        <div className="truncate font-display text-sm font-medium tracking-tight text-fg-base">
           {label}
         </div>
-        <div className="truncate font-display text-[10.5px] text-fg-muted">{description}</div>
+        <div className="truncate font-display text-2xs text-fg-muted">{description}</div>
       </div>
       {active && <Check size={11} className="shrink-0 text-accent" />}
     </button>
@@ -609,7 +609,7 @@ function LightSwatch() {
         <span className="h-1.5 w-1.5 rounded-full" style={{ background: '#febc2e' }} />
         <span className="h-1.5 w-1.5 rounded-full" style={{ background: '#28c840' }} />
       </div>
-      <div className="font-mono text-[9px] leading-tight" style={{ color: '#3873d6' }}>
+      <div className="font-mono text-2xs leading-tight" style={{ color: '#3873d6' }}>
         ~ $ <span style={{ color: '#1c1c1e' }}>arc</span>
       </div>
     </div>
@@ -624,7 +624,7 @@ function DarkSwatch() {
         <span className="h-1.5 w-1.5 rounded-full" style={{ background: '#f0a958' }} />
         <span className="h-1.5 w-1.5 rounded-full" style={{ background: '#3ad28a' }} />
       </div>
-      <div className="font-mono text-[9px] leading-tight" style={{ color: '#c8cad0' }}>
+      <div className="font-mono text-2xs leading-tight" style={{ color: '#c8cad0' }}>
         ~ $ <span style={{ color: '#eef0f3' }}>arc</span>
       </div>
     </div>
@@ -681,12 +681,12 @@ function ShortcutsPane() {
   return (
     <div className="space-y-3">
       <div className="flex items-center justify-between">
-        <h3 className="font-display text-[11px] font-semibold uppercase tracking-widest2 text-fg-muted">
+        <h3 className="font-display text-xs font-semibold uppercase tracking-widest2 text-fg-muted">
           Keyboard Shortcuts
         </h3>
         <button
           onClick={() => resetAll()}
-          className="flex items-center gap-1 rounded-md px-2 py-1 font-display text-[11px] text-fg-muted transition-all hover:bg-white/[0.08] hover:text-fg-base"
+          className="flex items-center gap-1 rounded-md px-2 py-1 font-display text-xs text-fg-muted transition-all hover:bg-surface-2 hover:text-fg-base"
           title="Reset every shortcut to its default"
         >
           <RotateCcw size={10} strokeWidth={2.1} />
@@ -700,14 +700,14 @@ function ShortcutsPane() {
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           placeholder="filter by action or key…"
-          className="flex-1 bg-transparent font-display text-[12.5px] text-fg-base placeholder:text-fg-subtle focus:outline-none"
+          className="flex-1 bg-transparent font-display text-sm text-fg-base placeholder:text-fg-subtle focus:outline-none"
           autoComplete="off"
           spellCheck={false}
         />
         {query && (
           <button
             onClick={() => setQuery('')}
-            className="rounded p-1 text-fg-subtle hover:bg-white/[0.06] hover:text-fg-base"
+            className="rounded p-1 text-fg-subtle hover:bg-surface-2 hover:text-fg-base"
             aria-label="Clear filter"
           >
             <X size={10} strokeWidth={2.2} />
@@ -721,7 +721,7 @@ function ShortcutsPane() {
           if (rows.length === 0) return null;
           return (
             <section key={cat} className="mb-3">
-              <h4 className="px-1 pb-1 font-display text-[10.5px] font-semibold uppercase tracking-widest2 text-fg-subtle">
+              <h4 className="px-1 pb-1 font-display text-2xs font-semibold uppercase tracking-widest2 text-fg-subtle">
                 {cat}
               </h4>
               <div className="space-y-0.5">
@@ -752,7 +752,7 @@ function ShortcutsPane() {
           <div className="mb-1 mt-1">
             <div className="mb-2 flex items-center gap-2 px-1">
               <div className="h-px flex-1 bg-border-hairline" />
-              <span className="font-display text-[9.5px] font-semibold uppercase tracking-widest2 text-fg-subtle">
+              <span className="font-display text-2xs font-semibold uppercase tracking-widest2 text-fg-subtle">
                 Built-in · not rebindable
               </span>
               <div className="h-px flex-1 bg-border-hairline" />
@@ -762,7 +762,7 @@ function ShortcutsPane() {
               if (rows.length === 0) return null;
               return (
                 <section key={cat} className="mb-3">
-                  <h4 className="px-1 pb-1 font-display text-[10.5px] font-semibold uppercase tracking-widest2 text-fg-subtle">
+                  <h4 className="px-1 pb-1 font-display text-2xs font-semibold uppercase tracking-widest2 text-fg-subtle">
                     {cat}
                   </h4>
                   <div className="space-y-0.5">
@@ -772,14 +772,14 @@ function ShortcutsPane() {
                         className="flex items-center gap-3 rounded-md px-2 py-1.5"
                       >
                         <div className="min-w-0 flex-1">
-                          <span className="font-display text-[12.5px] font-medium tracking-tight text-fg-base">
+                          <span className="font-display text-sm font-medium tracking-tight text-fg-base">
                             {s.label}
                           </span>
-                          <p className="truncate font-display text-[11px] text-fg-subtle">
+                          <p className="truncate font-display text-xs text-fg-subtle">
                             {s.description}
                           </p>
                         </div>
-                        <span className="shrink-0 rounded-md border border-border-subtle bg-bg-base/40 px-2.5 py-1 font-mono text-[11px] text-fg-muted">
+                        <span className="shrink-0 rounded-md border border-border-subtle bg-bg-base/40 px-2.5 py-1 font-mono text-xs text-fg-muted">
                           {s.keys}
                         </span>
                       </div>
@@ -791,14 +791,14 @@ function ShortcutsPane() {
           </div>
         )}
         {filtered.length === 0 && filteredRef.length === 0 && (
-          <div className="flex items-center justify-center gap-1.5 px-4 py-12 font-display text-[12px] italic text-fg-subtle">
+          <div className="flex items-center justify-center gap-1.5 px-4 py-12 font-display text-sm italic text-fg-subtle">
             <Search size={11} strokeWidth={2} />
             no actions match "{query}"
           </div>
         )}
       </div>
 
-      <p className="font-display text-[11px] text-fg-subtle">
+      <p className="font-display text-xs text-fg-subtle">
         Click a binding to rebind · <kbd className="font-mono">esc</kbd> to cancel ·
         built-in shortcuts are shown for reference
       </p>
@@ -862,24 +862,24 @@ function ShortcutRow({
     <div
       className={cn(
         'group flex items-center gap-3 rounded-md px-2 py-1.5 transition-colors',
-        capturing ? 'bg-accent-soft ring-1 ring-inset ring-accent/40' : 'hover:bg-white/[0.035]',
+        capturing ? 'bg-accent-soft ring-1 ring-inset ring-accent/40' : 'hover:bg-surface-1',
       )}
     >
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-1.5">
-          <span className="font-display text-[12.5px] font-medium tracking-tight text-fg-base">
+          <span className="font-display text-sm font-medium tracking-tight text-fg-base">
             {meta.label}
           </span>
           {isCustom && (
             <span
-              className="rounded bg-accent/20 px-1 py-0.5 font-mono text-[8.5px] tracking-tight text-accent-bright"
+              className="rounded bg-accent/20 px-1 py-0.5 font-mono text-2xs tracking-tight text-accent-bright"
               title="Customized — click reset to restore the default"
             >
               custom
             </span>
           )}
         </div>
-        <p className="truncate font-display text-[11px] text-fg-subtle">
+        <p className="truncate font-display text-xs text-fg-subtle">
           {meta.description}
         </p>
       </div>
@@ -888,7 +888,7 @@ function ShortcutRow({
         <div className="flex items-center gap-2">
           {conflict && (
             <span
-              className="flex items-center gap-1 font-display text-[10.5px] text-status-warn"
+              className="flex items-center gap-1 font-display text-2xs text-status-warn"
               title="This combo is already bound to another action"
             >
               <AlertTriangle size={10} strokeWidth={2.1} />
@@ -897,7 +897,7 @@ function ShortcutRow({
           )}
           <button
             ref={captureRef}
-            className="rounded-md border border-accent/40 bg-bg-base/70 px-2.5 py-1 font-mono text-[11px] text-fg-base shadow-focus outline-none"
+            className="rounded-md border border-accent/40 bg-bg-base/70 px-2.5 py-1 font-mono text-xs text-fg-base shadow-focus outline-none"
             tabIndex={-1}
           >
             {pending ? formatBinding(pending) : 'press a combo…'}
@@ -914,14 +914,14 @@ function ShortcutRow({
           )}
           <button
             onClick={onClearBinding}
-            className="rounded-md px-2 py-1 font-display text-[10.5px] text-fg-muted transition-colors hover:bg-white/[0.06] hover:text-fg-base"
+            className="rounded-md px-2 py-1 font-display text-2xs text-fg-muted transition-colors hover:bg-surface-2 hover:text-fg-base"
             title="Disable this action"
           >
             disable
           </button>
           <button
             onClick={onCancel}
-            className="rounded-md px-2 py-1 font-display text-[10.5px] text-fg-muted transition-colors hover:bg-white/[0.06] hover:text-fg-base"
+            className="rounded-md px-2 py-1 font-display text-2xs text-fg-muted transition-colors hover:bg-surface-2 hover:text-fg-base"
           >
             cancel
           </button>
@@ -931,7 +931,7 @@ function ShortcutRow({
           <button
             onClick={onStartCapture}
             className={cn(
-              'rounded-md border px-2.5 py-1 font-mono text-[11px] transition-colors',
+              'rounded-md border px-2.5 py-1 font-mono text-xs transition-colors',
               binding
                 ? 'border-border-subtle bg-bg-base/40 text-fg-base hover:border-border-strong hover:bg-bg-base/60'
                 : 'border-dashed border-border-subtle bg-bg-base/20 text-fg-subtle italic hover:border-border-strong',
@@ -943,7 +943,7 @@ function ShortcutRow({
           {isCustom && (
             <button
               onClick={onReset}
-              className="rounded-md p-1 text-fg-subtle opacity-0 transition-all hover:bg-white/[0.06] hover:text-fg-base group-hover:opacity-100"
+              className="rounded-md p-1 text-fg-subtle opacity-0 transition-all hover:bg-surface-2 hover:text-fg-base group-hover:opacity-100"
               title="Reset to default"
               aria-label="Reset to default"
             >
@@ -1036,7 +1036,7 @@ function SidebarSettingsPane() {
                 )}
               >
                 <Icon size={14} strokeWidth={1.9} className="shrink-0 text-fg-muted" />
-                <span className="flex-1 font-display text-[12.5px] font-medium tracking-tight text-fg-base">
+                <span className="flex-1 font-display text-sm font-medium tracking-tight text-fg-base">
                   {def.label}
                 </span>
                 <SidebarRowBtn
@@ -1083,7 +1083,7 @@ function SidebarSettingsPane() {
         <button
           type="button"
           onClick={reset}
-          className="inline-flex items-center gap-2 rounded-lg border border-border-subtle bg-bg-base/60 px-3 py-2 font-display text-[12px] font-medium tracking-tight text-fg-base transition-colors hover:bg-bg-hover"
+          className="inline-flex items-center gap-2 rounded-lg border border-border-subtle bg-bg-base/60 px-3 py-2 font-display text-sm font-medium tracking-tight text-fg-base transition-colors hover:bg-bg-hover"
         >
           <RotateCcw size={13} strokeWidth={2} />
           Reset to defaults
@@ -1118,14 +1118,14 @@ function SearchIgnoreEditor() {
     <div className="space-y-2.5">
       <div className="flex flex-wrap gap-1.5">
         {dirs.length === 0 && (
-          <span className="font-display text-[11.5px] italic text-fg-subtle">
+          <span className="font-display text-xs italic text-fg-subtle">
             Nothing ignored — search will include every folder.
           </span>
         )}
         {dirs.map((name) => (
           <span
             key={name}
-            className="inline-flex items-center gap-1 rounded-md border border-border-subtle bg-bg-base/50 py-1 pl-2 pr-1 font-mono text-[11px] text-fg-base"
+            className="inline-flex items-center gap-1 rounded-md border border-border-subtle bg-bg-base/50 py-1 pl-2 pr-1 font-mono text-xs text-fg-base"
           >
             {name}
             <button
@@ -1153,13 +1153,13 @@ function SearchIgnoreEditor() {
           placeholder="folder name, e.g. coverage"
           spellCheck={false}
           autoComplete="off"
-          className="w-56 rounded-lg border border-border-subtle bg-bg-base/60 px-2.5 py-1.5 font-mono text-[12px] text-fg-base placeholder:text-fg-subtle focus:border-border-strong focus:outline-none"
+          className="w-56 rounded-lg border border-border-subtle bg-bg-base/60 px-2.5 py-1.5 font-mono text-sm text-fg-base placeholder:text-fg-subtle focus:border-border-strong focus:outline-none"
         />
         <button
           type="button"
           onClick={add}
           disabled={!draft.trim()}
-          className="inline-flex items-center gap-1.5 rounded-lg border border-border-subtle bg-bg-base/60 px-2.5 py-1.5 font-display text-[12px] font-medium tracking-tight text-fg-base transition-colors hover:bg-bg-hover disabled:cursor-not-allowed disabled:opacity-45"
+          className="inline-flex items-center gap-1.5 rounded-lg border border-border-subtle bg-bg-base/60 px-2.5 py-1.5 font-display text-sm font-medium tracking-tight text-fg-base transition-colors hover:bg-bg-hover disabled:cursor-not-allowed disabled:opacity-45"
         >
           <Plus size={13} strokeWidth={2} />
           Add
@@ -1168,7 +1168,7 @@ function SearchIgnoreEditor() {
           <button
             type="button"
             onClick={() => setDirs([...DEFAULT_SEARCH_IGNORE_DIRS])}
-            className="inline-flex items-center gap-1.5 rounded-lg px-2 py-1.5 font-display text-[11.5px] text-fg-muted transition-colors hover:text-fg-base"
+            className="inline-flex items-center gap-1.5 rounded-lg px-2 py-1.5 font-display text-xs text-fg-muted transition-colors hover:text-fg-base"
           >
             <RotateCcw size={12} strokeWidth={2} />
             Reset list
@@ -1246,10 +1246,10 @@ function TerminalPane({
           )}
         >
           <div className="min-w-0">
-            <p className="font-display text-[12.5px] font-medium tracking-tight text-fg-base">
+            <p className="font-display text-sm font-medium tracking-tight text-fg-base">
               Threshold
             </p>
-            <p className="mt-0.5 font-display text-[11px] leading-relaxed text-fg-subtle">
+            <p className="mt-0.5 font-display text-xs leading-relaxed text-fg-subtle">
               Minimum duration before notifying.
             </p>
           </div>
@@ -1260,9 +1260,9 @@ function TerminalPane({
               max={3600}
               value={notifyThresholdSecs}
               onChange={(e) => onNotifyThresholdChange(Number(e.target.value))}
-              className="w-16 rounded-md border border-border-subtle bg-bg-base/60 px-2 py-1 text-right font-mono text-[12px] text-fg-base focus:border-accent/45 focus:outline-none"
+              className="w-16 rounded-md border border-border-subtle bg-bg-base/60 px-2 py-1 text-right font-mono text-sm text-fg-base focus:border-accent/45 focus:outline-none"
             />
-            <span className="font-display text-[11px] text-fg-subtle">sec</span>
+            <span className="font-display text-xs text-fg-subtle">sec</span>
           </div>
         </div>
         <div className={cn('mt-2 transition-opacity', !notifyLongCommands && 'pointer-events-none opacity-50')}>
@@ -1309,7 +1309,7 @@ function ShellPicker({
         />
 
         {shells === null && isTauri && (
-          <p className="px-1 font-display text-[11px] text-fg-subtle">
+          <p className="px-1 font-display text-xs text-fg-subtle">
             Discovering shells…
           </p>
         )}
@@ -1332,7 +1332,7 @@ function ShellPicker({
               : 'border-border-subtle bg-bg-base/40',
           )}
         >
-          <div className="mb-1 font-display text-[11px] font-medium tracking-tight text-fg-muted">
+          <div className="mb-1 font-display text-xs font-medium tracking-tight text-fg-muted">
             Custom path
           </div>
           <input
@@ -1348,7 +1348,7 @@ function ShellPicker({
                 ? 'C:\\Program Files\\…\\shell.exe'
                 : '/usr/local/bin/fish'
             }
-            className="w-full bg-transparent font-mono text-[12px] text-fg-base placeholder:text-fg-subtle focus:outline-none"
+            className="w-full bg-transparent font-mono text-sm text-fg-base placeholder:text-fg-subtle focus:outline-none"
             autoComplete="off"
             spellCheck={false}
           />
@@ -1379,8 +1379,8 @@ function ShellRow({
           : 'border-border-subtle bg-bg-base/40 text-fg-muted hover:border-border-strong hover:text-fg-base',
       )}
     >
-      <span className="font-display text-[12.5px] font-medium tracking-tight">{label}</span>
-      <span className="ml-3 truncate font-mono text-[10.5px] text-fg-subtle">{subtitle}</span>
+      <span className="font-display text-sm font-medium tracking-tight">{label}</span>
+      <span className="ml-3 truncate font-mono text-2xs text-fg-subtle">{subtitle}</span>
     </button>
   );
 }
@@ -1439,7 +1439,7 @@ function SecretsPane() {
   };
 
   const inputCls =
-    'flex-1 rounded-squircle border border-border-subtle bg-bg-subtle px-3 py-2 font-mono text-[12px] text-fg-base placeholder:text-fg-subtle transition-colors focus:border-border-strong focus:outline-none';
+    'flex-1 rounded-squircle border border-border-subtle bg-bg-subtle px-3 py-2 font-mono text-sm text-fg-base placeholder:text-fg-subtle transition-colors focus:border-border-strong focus:outline-none';
 
   return (
     <div className="space-y-7">
@@ -1448,7 +1448,7 @@ function SecretsPane() {
         hint="Stored in your OS credential vault (Keychain / Credential Manager / secret-service). Values never touch disk in plaintext, and are never shown or listed here — only names are."
       >
         {!isTauri ? (
-          <p className="font-mono text-[11px] text-fg-subtle">
+          <p className="font-mono text-xs text-fg-subtle">
             The secrets vault requires the desktop app.
           </p>
         ) : (
@@ -1481,18 +1481,18 @@ function SecretsPane() {
                 type="button"
                 onClick={() => void add()}
                 disabled={busy || !name.trim() || !value}
-                className="flex items-center justify-center gap-1 rounded-squircle bg-accent/90 px-4 py-2 font-display text-[12px] font-medium text-bg-base transition hover:bg-accent disabled:opacity-40"
+                className="flex items-center justify-center gap-1 rounded-squircle bg-accent/90 px-4 py-2 font-display text-sm font-medium text-bg-base transition hover:bg-accent disabled:opacity-40"
               >
                 <Plus size={13} /> Save
               </button>
             </div>
 
-            {error && <p className="font-mono text-[11px] text-status-err">{error}</p>}
+            {error && <p className="font-mono text-xs text-status-err">{error}</p>}
 
             {loading ? (
-              <p className="font-mono text-[11px] text-fg-subtle">loading…</p>
+              <p className="font-mono text-xs text-fg-subtle">loading…</p>
             ) : names.length === 0 ? (
-              <p className="font-mono text-[11px] text-fg-subtle">No secrets yet.</p>
+              <p className="font-mono text-xs text-fg-subtle">No secrets yet.</p>
             ) : (
               <ul className="flex flex-col gap-px">
                 {names.map((n) => (
@@ -1500,13 +1500,13 @@ function SecretsPane() {
                     key={n}
                     className="flex items-center justify-between rounded-squircle px-3 py-2 hover:bg-bg-hover"
                   >
-                    <span className="flex items-center gap-2 font-mono text-[12px] text-fg-base">
+                    <span className="flex items-center gap-2 font-mono text-sm text-fg-base">
                       <Lock size={12} className="text-fg-subtle" /> {n}
                     </span>
                     <button
                       type="button"
                       onClick={() => void remove(n)}
-                      className="rounded px-1.5 py-px font-mono text-[10px] text-fg-subtle transition-colors hover:bg-bg-hover hover:text-status-err"
+                      className="rounded px-1.5 py-px font-mono text-2xs text-fg-subtle transition-colors hover:bg-bg-hover hover:text-status-err"
                     >
                       remove
                     </button>
@@ -1538,14 +1538,14 @@ function AboutPane() {
           draggable={false}
         />
         <div>
-          <h1 className="font-display text-[22px] font-semibold tracking-tight text-fg-base">
+          <h1 className="font-display text-2xl font-semibold tracking-tight text-fg-base">
             ARC
           </h1>
-          <p className="font-display text-[12px] text-fg-muted">
+          <p className="font-display text-sm text-fg-muted">
             AI-native terminal & agent runtime
           </p>
         </div>
-        <div className="flex items-center gap-2 font-mono text-[11px] text-fg-subtle">
+        <div className="flex items-center gap-2 font-mono text-xs text-fg-subtle">
           <span className="rounded-md border border-border-subtle bg-bg-base/40 px-2 py-0.5">
             v{APP_VERSION}
           </span>
@@ -1565,7 +1565,7 @@ function AboutPane() {
           onClick={() => openExternal(REPO_URL)}
           className="flex items-center justify-between rounded-lg border border-border-subtle bg-bg-base/40 px-3 py-2 text-fg-base transition-all duration-150 ease-apple hover:border-border-strong hover:bg-bg-base/60"
         >
-          <span className="flex items-center gap-2 font-display text-[12.5px] font-medium tracking-tight">
+          <span className="flex items-center gap-2 font-display text-sm font-medium tracking-tight">
             <Github size={12} strokeWidth={2.1} className="text-fg-muted" />
             GitHub repository
           </span>
@@ -1575,7 +1575,7 @@ function AboutPane() {
           onClick={() => openExternal(`${REPO_URL}/issues`)}
           className="flex items-center justify-between rounded-lg border border-border-subtle bg-bg-base/40 px-3 py-2 text-fg-base transition-all duration-150 ease-apple hover:border-border-strong hover:bg-bg-base/60"
         >
-          <span className="flex items-center gap-2 font-display text-[12.5px] font-medium tracking-tight">
+          <span className="flex items-center gap-2 font-display text-sm font-medium tracking-tight">
             <AlertTriangle size={12} strokeWidth={2.1} className="text-fg-muted" />
             Report an issue
           </span>
@@ -1583,7 +1583,7 @@ function AboutPane() {
         </button>
       </div>
 
-      <p className="pt-2 font-display text-[10.5px] text-fg-subtle">
+      <p className="pt-2 font-display text-2xs text-fg-subtle">
         © 2026 ARC contributors. Released under the MIT license.
       </p>
     </div>
@@ -1593,10 +1593,10 @@ function AboutPane() {
 function AboutRow({ label, value }: { label: string; value: string }) {
   return (
     <div className="flex items-baseline justify-between gap-3">
-      <span className="font-display text-[11px] uppercase tracking-widest2 text-fg-subtle">
+      <span className="font-display text-xs uppercase tracking-widest2 text-fg-subtle">
         {label}
       </span>
-      <span className="text-right font-display text-[12px] text-fg-base">{value}</span>
+      <span className="text-right font-display text-sm text-fg-base">{value}</span>
     </div>
   );
 }
@@ -1623,12 +1623,12 @@ function Section({
 }) {
   return (
     <section className="space-y-2">
-      <h3 className="font-display text-[11px] font-semibold uppercase tracking-widest2 text-fg-muted">
+      <h3 className="font-display text-xs font-semibold uppercase tracking-widest2 text-fg-muted">
         {title}
       </h3>
       {children}
       {hint && (
-        <p className="font-display text-[11px] leading-relaxed text-fg-subtle">{hint}</p>
+        <p className="font-display text-xs leading-relaxed text-fg-subtle">{hint}</p>
       )}
     </section>
   );
@@ -1649,10 +1649,10 @@ function SidebarRow({
     <button
       onClick={onClick}
       className={cn(
-        'source-row flex items-center gap-2 rounded-md px-2.5 py-1.5 text-left font-display text-[12.5px] font-medium tracking-tight',
+        'source-row flex items-center gap-2 rounded-md px-2.5 py-1.5 text-left font-display text-sm font-medium tracking-tight',
         active
           ? 'bg-accent-soft text-fg-base ring-1 ring-border-strong'
-          : 'text-fg-base/85 hover:bg-white/[0.06]',
+          : 'text-fg-base/85 hover:bg-surface-2',
       )}
     >
       <Icon size={12} strokeWidth={2.1} className={active ? 'text-accent-bright' : 'text-fg-muted'} />

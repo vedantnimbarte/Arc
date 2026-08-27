@@ -157,23 +157,23 @@ export function RebasePanel() {
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-start justify-center bg-black/40 backdrop-blur-sm"
+      className="fixed inset-0 z-50 flex items-start justify-center bg-scrim-2 backdrop-blur-sm"
       onClick={() => !running && onClose(false)}
     >
       <div
         onClick={(e) => e.stopPropagation()}
-        className="material-sheet mt-[8vh] flex w-[720px] max-w-[94vw] animate-sheet-in flex-col overflow-hidden rounded-window shadow-sheet ring-1 ring-white/10"
+        className="material-sheet mt-[8vh] flex w-[720px] max-w-[94vw] animate-sheet-in flex-col overflow-hidden rounded-window shadow-sheet ring-1 ring-edge-2"
       >
         <div className="flex items-center justify-between border-b border-border-hairline px-4 py-2.5">
-          <div className="flex items-center gap-2 font-display text-[12.5px] font-semibold tracking-tight text-fg-base">
+          <div className="flex items-center gap-2 font-display text-sm font-semibold tracking-tight text-fg-base">
             <ListOrdered size={12} strokeWidth={2.1} className="text-fg-muted" />
             Interactive rebase
-            <span className="font-mono text-[10px] font-normal text-fg-subtle">
+            <span className="font-mono text-2xs font-normal text-fg-subtle">
               · last {order.length} {order.length === 1 ? 'commit' : 'commits'}
             </span>
           </div>
           <div className="flex items-center gap-2">
-            <label className="flex items-center gap-1.5 font-display text-[11px] text-fg-muted">
+            <label className="flex items-center gap-1.5 font-display text-xs text-fg-muted">
               count
               <input
                 type="number"
@@ -181,14 +181,14 @@ export function RebasePanel() {
                 max={50}
                 value={count}
                 onChange={(e) => setCount(Math.max(1, Math.min(50, Number(e.target.value) || 1)))}
-                className="w-12 rounded border border-border-subtle bg-bg-base/60 px-1 py-0.5 text-center font-mono text-[11px] text-fg-base focus:border-accent/45 focus:outline-none"
+                className="w-12 rounded border border-border-subtle bg-bg-base/60 px-1 py-0.5 text-center font-mono text-xs text-fg-base focus:border-accent/45 focus:outline-none"
               />
             </label>
             <button
               onClick={() => !running && onClose(false)}
               disabled={running}
               title="Close (esc)"
-              className="rounded p-1 text-fg-subtle transition-colors hover:bg-white/[0.06] hover:text-fg-base disabled:opacity-50"
+              className="rounded p-1 text-fg-subtle transition-colors hover:bg-surface-2 hover:text-fg-base disabled:opacity-50"
             >
               <X size={11} strokeWidth={2.2} />
             </button>
@@ -196,14 +196,14 @@ export function RebasePanel() {
         </div>
 
         {!root && (
-          <div className="px-4 py-6 text-center font-display text-[11.5px] italic text-fg-subtle">
+          <div className="px-4 py-6 text-center font-display text-xs italic text-fg-subtle">
             open a repository first
           </div>
         )}
 
         {root && (
           <>
-            <div className="border-b border-border-hairline bg-bg-base/30 px-4 py-1.5 font-display text-[10.5px] text-fg-subtle">
+            <div className="border-b border-border-hairline bg-bg-base/30 px-4 py-1.5 font-display text-2xs text-fg-subtle">
               Order is oldest-first (top), matching git&rsquo;s rebase TODO. Squash and fixup
               fold into the row above. Reword + edit aren&rsquo;t supported yet — use{' '}
               <span className="font-mono">git commit --amend</span> after.
@@ -211,7 +211,7 @@ export function RebasePanel() {
 
             <div className="max-h-[55vh] overflow-y-auto">
               {loading && (
-                <div className="px-4 py-6 text-center font-display text-[11.5px] italic text-fg-subtle">
+                <div className="px-4 py-6 text-center font-display text-xs italic text-fg-subtle">
                   loading commits…
                 </div>
               )}
@@ -236,12 +236,12 @@ export function RebasePanel() {
             </div>
 
             {err && (
-              <div className="border-t border-border-hairline bg-red-500/[0.06] px-4 py-2 font-mono text-[11px] text-red-300">
+              <div className="border-t border-border-hairline bg-red-500/[0.06] px-4 py-2 font-mono text-xs text-red-300">
                 <div className="flex items-start gap-1.5">
                   <AlertTriangle size={11} strokeWidth={2.2} className="mt-0.5 shrink-0" />
                   <div className="flex-1">
                     {err}
-                    <div className="mt-1 text-[10px] text-red-300/70">
+                    <div className="mt-1 text-2xs text-red-300/70">
                       If the rebase stopped mid-way for conflicts, resolve them in the
                       diff view, then click &ldquo;continue&rdquo; or &ldquo;abort&rdquo;.
                     </div>
@@ -250,7 +250,7 @@ export function RebasePanel() {
                 <div className="mt-2 flex gap-2">
                   <button
                     onClick={() => void abort()}
-                    className="rounded bg-red-500/[0.18] px-2.5 py-1 font-display text-[11px] text-red-200 hover:bg-red-500/[0.28]"
+                    className="rounded bg-red-500/[0.18] px-2.5 py-1 font-display text-xs text-red-200 hover:bg-red-500/[0.28]"
                   >
                     abort rebase
                   </button>
@@ -259,21 +259,21 @@ export function RebasePanel() {
             )}
 
             <div className="flex items-center justify-between border-t border-border-hairline bg-bg-base/30 px-4 py-2">
-              <div className="font-display text-[10.5px] text-fg-subtle">
+              <div className="font-display text-2xs text-fg-subtle">
                 {keepCount} commits kept · {dropCount} dropped
               </div>
               <div className="flex items-center gap-2">
                 <button
                   onClick={() => !running && onClose(false)}
                   disabled={running}
-                  className="rounded px-2.5 py-1 font-display text-[11px] text-fg-muted hover:bg-white/[0.05] hover:text-fg-base disabled:opacity-50"
+                  className="rounded px-2.5 py-1 font-display text-xs text-fg-muted hover:bg-surface-1 hover:text-fg-base disabled:opacity-50"
                 >
                   cancel
                 </button>
                 <button
                   onClick={() => void submit()}
                   disabled={running || order.length === 0 || !base}
-                  className="rounded bg-accent-soft px-3 py-1 font-display text-[11px] font-medium text-fg-base ring-1 ring-accent/45 transition-colors hover:bg-accent/20 disabled:opacity-50"
+                  className="rounded bg-accent-soft px-3 py-1 font-display text-xs font-medium text-fg-base ring-1 ring-accent/45 transition-colors hover:bg-accent/20 disabled:opacity-50"
                 >
                   {running ? 'rebasing…' : 'start rebase'}
                 </button>
@@ -316,7 +316,7 @@ function RebaseRow({
           onClick={onUp}
           disabled={isFirst}
           title="Move up (newer in history)"
-          className="rounded p-0.5 text-fg-subtle transition-colors enabled:hover:bg-white/[0.06] enabled:hover:text-fg-base disabled:opacity-30"
+          className="rounded p-0.5 text-fg-subtle transition-colors enabled:hover:bg-surface-2 enabled:hover:text-fg-base disabled:opacity-30"
         >
           <ArrowUp size={9} strokeWidth={2.4} />
         </button>
@@ -324,7 +324,7 @@ function RebaseRow({
           onClick={onDown}
           disabled={isLast}
           title="Move down (older in history)"
-          className="rounded p-0.5 text-fg-subtle transition-colors enabled:hover:bg-white/[0.06] enabled:hover:text-fg-base disabled:opacity-30"
+          className="rounded p-0.5 text-fg-subtle transition-colors enabled:hover:bg-surface-2 enabled:hover:text-fg-base disabled:opacity-30"
         >
           <ArrowDown size={9} strokeWidth={2.4} />
         </button>
@@ -332,18 +332,18 @@ function RebaseRow({
 
       <ActionPicker value={action} onChange={onAction} />
 
-      <span className="shrink-0 rounded bg-white/[0.05] px-1.5 py-0.5 font-mono text-[10px] text-fg-muted">
+      <span className="shrink-0 rounded bg-surface-1 px-1.5 py-0.5 font-mono text-2xs text-fg-muted">
         {commit.short}
       </span>
       <span
         className={cn(
-          'min-w-0 flex-1 truncate font-display text-[12px]',
+          'min-w-0 flex-1 truncate font-display text-sm',
           dropped ? 'text-fg-subtle line-through' : 'text-fg-base/90',
         )}
       >
         {commit.subject || <span className="italic text-fg-subtle">(no subject)</span>}
       </span>
-      <span className="shrink-0 truncate font-display text-[10.5px] text-fg-subtle" style={{ maxWidth: 100 }}>
+      <span className="shrink-0 truncate font-display text-2xs text-fg-subtle" style={{ maxWidth: 100 }}>
         {commit.author}
       </span>
     </div>
@@ -372,10 +372,10 @@ function ActionPicker({
           onClick={() => onChange(a.id)}
           title={a.hint}
           className={cn(
-            'rounded px-1.5 py-0.5 font-display text-[10px] font-medium tracking-tight transition-colors',
+            'rounded px-1.5 py-0.5 font-display text-2xs font-medium tracking-tight transition-colors',
             value === a.id
               ? 'bg-accent-soft text-fg-base ring-1 ring-accent/45'
-              : 'text-fg-subtle hover:bg-white/[0.05] hover:text-fg-base',
+              : 'text-fg-subtle hover:bg-surface-1 hover:text-fg-base',
           )}
         >
           {a.label}

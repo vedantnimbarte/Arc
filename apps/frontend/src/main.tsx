@@ -2,11 +2,15 @@ import React, { Component, Suspense, useEffect, type ErrorInfo, type ReactNode }
 import ReactDOM from 'react-dom/client';
 import App from './App';
 import { Splash } from './components/Splash';
-import { SettingsPage } from './components/SettingsPage';
 import { rehydrateSettingsFromBroadcast, useSettings } from './state/settings';
 import { onSettingsChanged } from './lib/tauri';
 import './index.css';
 
+// Settings and Git are separate windows — each boots this same bundle with a
+// `view` param, so neither belongs in the main window's entry chunk.
+const SettingsPage = React.lazy(() =>
+  import('./components/SettingsPage').then((m) => ({ default: m.SettingsPage })),
+);
 const GitPage = React.lazy(() =>
   import('./components/GitPage').then((m) => ({ default: m.GitPage })),
 );
@@ -41,7 +45,12 @@ function Root() {
     };
   }, []);
 
-  if (view === 'settings') return <SettingsPage />;
+  if (view === 'settings')
+    return (
+      <Suspense fallback={null}>
+        <SettingsPage />
+      </Suspense>
+    );
   if (view === 'git')
     return (
       <Suspense fallback={null}>

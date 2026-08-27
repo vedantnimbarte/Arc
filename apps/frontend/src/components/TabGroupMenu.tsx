@@ -105,10 +105,10 @@ export function TabGroupMenu({ x, y, group, onClose }: Props) {
       }}
       className={cn(
         'flex w-full items-center gap-2.5 rounded-md px-2.5 py-1.5 text-left transition-colors',
-        'font-display text-[12px] tracking-tight',
+        'font-display text-sm tracking-tight',
         danger
           ? 'text-fg-base hover:bg-status-err/15 hover:text-status-err'
-          : 'text-fg-base hover:bg-white/[0.06]',
+          : 'text-fg-base hover:bg-surface-2',
       )}
     >
       <Icon size={13} strokeWidth={2.1} className="shrink-0 text-fg-muted" />
@@ -123,7 +123,7 @@ export function TabGroupMenu({ x, y, group, onClose }: Props) {
       style={{ position: 'fixed', left: pos.left, top: pos.top, zIndex: 9999 }}
       className={cn(
         'material-sheet w-[244px] rounded-xl p-2.5 shadow-2xl',
-        'ring-1 ring-white/[0.10]',
+        'ring-1 ring-edge-2',
         'animate-popover-in',
       )}
     >
@@ -145,7 +145,7 @@ export function TabGroupMenu({ x, y, group, onClose }: Props) {
           }}
           placeholder="Name this group"
           className={cn(
-            'w-full bg-transparent font-display text-[13px] font-semibold tracking-tight',
+            'w-full bg-transparent font-display text-base font-semibold tracking-tight',
             'text-fg-base placeholder:font-medium placeholder:text-fg-subtle',
             'focus:outline-none',
           )}
@@ -186,7 +186,7 @@ export function TabGroupMenu({ x, y, group, onClose }: Props) {
         })}
       </div>
 
-      <div className="my-1.5 h-px bg-white/[0.06]" aria-hidden />
+      <div className="my-1.5 h-px bg-surface-2" aria-hidden />
 
       <Item
         icon={group.collapsed ? ChevronRight : ChevronDown}

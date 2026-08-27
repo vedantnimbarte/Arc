@@ -2,10 +2,8 @@ import { Component, lazy, Suspense, useEffect, useRef, useState, type ErrorInfo,
 import { createPortal } from 'react-dom';
 import { Terminal } from './components/Terminal';
 import { Preview } from './components/Preview';
-import { ApiClient } from './components/ApiClient';
-import { SshTab } from './components/ssh/SshTab';
-import { SshSessionLogPanel } from './components/ssh/SshSessionLogDrawer';
 import { useSsh } from './state/ssh';
+import { useGitUi } from './state/gitUi';
 import { TabBar } from './components/TabBar';
 import { WindowResizeHandles } from './components/WindowResizeHandles';
 import { CommandPalette } from './components/CommandPalette';
@@ -16,7 +14,6 @@ import { ResizeHandle } from './components/ResizeHandle';
 import { SearchPalette } from './components/SearchPalette';
 import { ShortcutsDialog } from './components/ShortcutsDialog';
 import { PaneTreeView } from './components/PaneTreeView';
-import { ArcAiBar } from './components/ArcAiBar';
 import { WorkspaceRail } from './components/WorkspaceRail';
 import { useWorkspace } from './state/workspace';
 import { useFiles, SIDEBAR_RAIL_WIDTH, defaultWidthForView } from './state/files';
@@ -29,11 +26,7 @@ import {
 } from './state/shortcuts';
 import { useCommands, type CommandAction, type CommandGroup } from './state/commands';
 import { useTaskCommands } from './state/tasks';
-import { WorktreePanel } from './components/git/WorktreePanel';
-import { CherryPickDialog } from './components/git/CherryPickDialog';
 import { WingmanPromptDialog } from './components/WingmanPromptDialog';
-import { RebasePanel } from './components/git/RebasePanel';
-import { PrPanel } from './components/git/PrPanel';
 import { FolderOpen, FolderTree, GitPullRequest, ListOrdered } from 'lucide-react';
 // Side-effect import: subscribes to file-tree root changes and keeps the
 // project-config store fresh. Doesn't render anything itself.
@@ -48,6 +41,24 @@ const Editor = lazy(() =>
 );
 const DiffView = lazy(() =>
   import('./components/DiffView').then((m) => ({ default: m.DiffView })),
+);
+// Everything below is reachable but rarely on the boot path — a REST client,
+// an SSH terminal, the SSH log drawer and the git overlays. Each is only
+// rendered behind a tab kind or an open flag, so deferring them keeps the
+// entry chunk to what a cold "open a terminal" launch actually needs.
+const ApiClient = lazy(() =>
+  import('./components/ApiClient').then((m) => ({ default: m.ApiClient })),
+);
+const SshTab = lazy(() =>
+  import('./components/ssh/SshTab').then((m) => ({ default: m.SshTab })),
+);
+const SshSessionLogPanel = lazy(() =>
+  import('./components/ssh/SshSessionLogDrawer').then((m) => ({
+    default: m.SshSessionLogPanel,
+  })),
+);
+const GitOverlays = lazy(() =>
+  import('./components/git/GitOverlays').then((m) => ({ default: m.GitOverlays })),
 );
 
 export default function App() {
@@ -127,9 +138,13 @@ export default function App() {
       ) : tab.kind === 'preview' ? (
         <Preview tabId={tab.id} />
       ) : tab.kind === 'apiclient' ? (
-        <ApiClient tabId={tab.id} />
+        <Suspense fallback={<EditorFallback />}>
+          <ApiClient tabId={tab.id} />
+        </Suspense>
       ) : tab.kind === 'ssh' && tab.sshHostId ? (
-        <SshTab sessionKey={tab.id} hostId={tab.sshHostId} />
+        <Suspense fallback={<EditorFallback />}>
+          <SshTab sessionKey={tab.id} hostId={tab.sshHostId} />
+        </Suspense>
       ) : tab.kind === 'diff' && tab.filePath && tab.diffRoot ? (
         <Suspense fallback={<EditorFallback />}>
           <DiffView
@@ -144,7 +159,7 @@ export default function App() {
         </Suspense>
       ) : (
         <div className="flex h-full items-center justify-center text-fg-muted">
-          <span className="font-display text-[13px] tracking-tight">no file</span>
+          <span className="font-display text-base tracking-tight">no file</span>
         </div>
       );
     portals.push(
@@ -160,6 +175,15 @@ export default function App() {
   const [searchOpen, setSearchOpen] = useState(false);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const sidebarCollapsed = useFiles((s) => s.collapsed);
+  // One boolean gates the lazy git-overlay chunk. Each panel still self-gates
+  // internally; this only decides whether the chunk is fetched at all.
+  const anyGitOverlayOpen = useGitUi(
+    (s) =>
+      s.worktreePanelOpen ||
+      s.rebasePanelOpen ||
+      s.cherryPickTarget !== null ||
+      s.prPanelView.kind !== 'closed',
+  );
   const sidebarWidth = useFiles((s) => s.sidebarWidth);
   const sidebarView = useFiles((s) => s.sidebarView);
   const toggleSidebar = useFiles((s) => s.toggleCollapsed);
@@ -382,11 +406,12 @@ export default function App() {
             </main>
           </div>
 
-          {sshLogPanelOpen && <SshSessionLogPanel onClose={() => setSshLogPanelOpen(false)} />}
+          {sshLogPanelOpen && (
+            <Suspense fallback={null}>
+              <SshSessionLogPanel onClose={() => setSshLogPanelOpen(false)} />
+            </Suspense>
+          )}
         </div>
-
-        {/* Bottom dock — centered Arc AI composer + version bottom-right. */}
-        <ArcAiBar />
         </div>
 
         {/* File-tree sidebar — full-height column on the right edge, mirroring
@@ -430,11 +455,12 @@ export default function App() {
       <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} />
       <CommandHistoryPalette open={historyOpen} onClose={() => setHistoryOpen(false)} />
       <CommandBlocks open={blocksOpen} onClose={() => setBlocksOpen(false)} />
-      <WorktreePanel />
-      <CherryPickDialog />
       <WingmanPromptDialog />
-      <RebasePanel />
-      <PrPanel />
+      {anyGitOverlayOpen && (
+        <Suspense fallback={null}>
+          <GitOverlays />
+        </Suspense>
+      )}
       <SearchPalette open={searchOpen} onClose={() => setSearchOpen(false)} />
       <ShortcutsDialog open={shortcutsOpen} onClose={() => setShortcutsOpen(false)} />
       <PasteWarning />
@@ -484,16 +510,16 @@ class TabErrorBoundary extends Component<
       return (
         <div className="flex h-full w-full items-center justify-center px-6 text-center">
           <div className="max-w-sm space-y-2">
-            <div className="font-display text-[13px] tracking-tight text-fg-base">
+            <div className="font-display text-base tracking-tight text-fg-base">
               this tab crashed
             </div>
-            <div className="text-[11px] text-fg-muted">
+            <div className="text-xs text-fg-muted">
               {this.state.error.message || 'unknown error'}
             </div>
             <button
               type="button"
               onClick={() => this.setState({ error: null })}
-              className="rounded-md border border-border-subtle px-2.5 py-1 text-[11px] text-fg-base hover:bg-bg-surface"
+              className="rounded-md border border-border-subtle px-2.5 py-1 text-xs text-fg-base hover:bg-bg-surface"
             >
               retry
             </button>

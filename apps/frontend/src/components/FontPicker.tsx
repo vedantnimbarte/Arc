@@ -54,13 +54,13 @@ export function FontPicker({ value, onChange }: Props) {
           className="shrink-0 text-fg-subtle transition-colors group-hover:text-fg-muted"
         />
         <span
-          className="min-w-0 flex-1 truncate font-display text-[12.5px] font-medium tracking-tight text-fg-base"
+          className="min-w-0 flex-1 truncate font-display text-sm font-medium tracking-tight text-fg-base"
           style={{ fontFamily: previewStack }}
         >
           {label}
         </span>
         <span
-          className="hidden shrink-0 truncate text-[12px] text-fg-subtle tabular-nums sm:inline"
+          className="hidden shrink-0 truncate text-sm text-fg-subtle tabular-nums sm:inline"
           style={{ fontFamily: previewStack }}
         >
           {SPECIMEN}
@@ -223,7 +223,7 @@ function FontPopover({
       role="dialog"
       aria-label="Choose a font"
       style={{ position: 'fixed', top: pos.top, left: pos.left, width: pos.width }}
-      className="material-sheet z-[60] flex max-h-[420px] flex-col overflow-hidden rounded-lg shadow-sheet ring-1 ring-white/10 animate-popover-in"
+      className="material-sheet z-[60] flex max-h-[420px] flex-col overflow-hidden rounded-lg shadow-sheet ring-1 ring-edge-2 animate-popover-in"
     >
       {/* Search */}
       <div className="flex items-center gap-2 border-b border-border-hairline bg-bg-base/60 px-3 py-2">
@@ -234,14 +234,14 @@ function FontPopover({
           onChange={(e) => setQuery(e.target.value)}
           onKeyDown={onKey}
           placeholder="Search system fonts…"
-          className="flex-1 bg-transparent font-display text-[12.5px] text-fg-base placeholder:text-fg-subtle focus:outline-none"
+          className="flex-1 bg-transparent font-display text-sm text-fg-base placeholder:text-fg-subtle focus:outline-none"
           autoComplete="off"
           spellCheck={false}
         />
         {query && (
           <button
             onClick={() => setQuery('')}
-            className="rounded p-0.5 text-fg-subtle hover:bg-white/[0.08] hover:text-fg-base"
+            className="rounded p-0.5 text-fg-subtle hover:bg-surface-2 hover:text-fg-base"
             aria-label="Clear search"
           >
             <X size={10} strokeWidth={2.2} />
@@ -252,7 +252,7 @@ function FontPopover({
       {/* List */}
       <div ref={listRef} role="listbox" className="min-h-0 flex-1 overflow-y-auto py-1">
         {loading && (
-          <div className="flex items-center justify-center gap-2 px-4 py-10 font-display text-[12px] text-fg-subtle">
+          <div className="flex items-center justify-center gap-2 px-4 py-10 font-display text-sm text-fg-subtle">
             <Loader2 size={13} strokeWidth={2.2} className="animate-spin" />
             Loading system fonts…
           </div>
@@ -260,7 +260,7 @@ function FontPopover({
 
         {!loading && filtered.length === 0 && (
           <div className="flex flex-col items-center gap-1 px-4 py-10 text-center">
-            <span className="font-display text-[12px] italic text-fg-subtle">
+            <span className="font-display text-sm italic text-fg-subtle">
               {fonts && fonts.length === 0
                 ? 'No system fonts found.'
                 : `No fonts match “${query}”`}
@@ -283,17 +283,17 @@ function FontPopover({
                 onClick={() => pick(family)}
                 className={cn(
                   'flex w-full items-baseline gap-3 px-3 py-2 text-left transition-colors',
-                  isFocus ? 'bg-white/[0.06]' : 'hover:bg-white/[0.04]',
+                  isFocus ? 'bg-surface-2' : 'hover:bg-surface-1',
                 )}
               >
                 <span
-                  className="min-w-0 flex-1 truncate text-[13.5px] leading-tight text-fg-base"
+                  className="min-w-0 flex-1 truncate text-base leading-tight text-fg-base"
                   style={{ fontFamily: stack }}
                 >
                   {family}
                 </span>
                 <span
-                  className="shrink-0 text-[12px] leading-tight text-fg-subtle"
+                  className="shrink-0 text-sm leading-tight text-fg-subtle"
                   style={{ fontFamily: stack }}
                 >
                   {SPECIMEN}
@@ -313,7 +313,7 @@ function FontPopover({
 
       {/* Footer */}
       {!loading && (fonts?.length ?? 0) > 0 && (
-        <div className="flex items-center justify-between border-t border-border-hairline bg-bg-base/40 px-3 py-1.5 font-display text-[10px] text-fg-subtle">
+        <div className="flex items-center justify-between border-t border-border-hairline bg-bg-base/40 px-3 py-1.5 font-display text-2xs text-fg-subtle">
           <span className="tabular-nums">
             {filtered.length === fonts!.length
               ? `${fonts!.length} fonts`

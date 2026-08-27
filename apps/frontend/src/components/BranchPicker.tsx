@@ -153,12 +153,12 @@ export function BranchPicker({ open, onClose, onCheckedOut }: Props) {
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-start justify-center bg-black/40 backdrop-blur-sm"
+      className="fixed inset-0 z-50 flex items-start justify-center bg-scrim-2 backdrop-blur-sm"
       onClick={onClose}
     >
       <div
         onClick={(e) => e.stopPropagation()}
-        className="material-sheet mt-[12vh] flex w-[640px] max-w-[92vw] animate-sheet-in flex-col overflow-hidden rounded-window shadow-sheet ring-1 ring-white/10"
+        className="material-sheet mt-[12vh] flex w-[640px] max-w-[92vw] animate-sheet-in flex-col overflow-hidden rounded-window shadow-sheet ring-1 ring-edge-2"
       >
         {/* Header — search input */}
         <div className="flex items-center gap-2 border-b border-border-hairline px-3.5 py-2.5">
@@ -169,7 +169,7 @@ export function BranchPicker({ open, onClose, onCheckedOut }: Props) {
             onChange={(e) => setQuery(e.target.value)}
             onKeyDown={onKeyDown}
             placeholder="switch branch…"
-            className="flex-1 bg-transparent font-display text-[13px] text-fg-base placeholder:text-fg-subtle focus:outline-none"
+            className="flex-1 bg-transparent font-display text-base text-fg-base placeholder:text-fg-subtle focus:outline-none"
             autoComplete="off"
             spellCheck={false}
             disabled={!!switching}
@@ -177,12 +177,12 @@ export function BranchPicker({ open, onClose, onCheckedOut }: Props) {
           {loading && (
             <Loader2 size={11} className="animate-spin text-fg-subtle" />
           )}
-          <kbd className="font-mono text-[10px] text-fg-subtle">esc</kbd>
+          <kbd className="font-mono text-2xs text-fg-subtle">esc</kbd>
         </div>
 
         {/* Error tray (only visible on a failed checkout) */}
         {error && (
-          <div className="flex items-start gap-2 border-b border-border-hairline bg-status-err/[0.08] px-3.5 py-2 font-display text-[11px] text-status-err/90">
+          <div className="flex items-start gap-2 border-b border-border-hairline bg-status-err/[0.08] px-3.5 py-2 font-display text-xs text-status-err/90">
             <AlertTriangle size={11} strokeWidth={2.1} className="mt-[1px] shrink-0" />
             <span className="line-clamp-2 break-words">{error}</span>
           </div>
@@ -257,7 +257,7 @@ export function BranchPicker({ open, onClose, onCheckedOut }: Props) {
         </div>
 
         {/* Footer — kbd hints + total count */}
-        <div className="flex items-center justify-between border-t border-border-hairline px-3.5 py-1.5 font-display text-[10px] text-fg-subtle">
+        <div className="flex items-center justify-between border-t border-border-hairline px-3.5 py-1.5 font-display text-2xs text-fg-subtle">
           <span>
             <kbd className="font-mono">↑↓</kbd> select ·{' '}
             <kbd className="font-mono">return</kbd> checkout ·{' '}
@@ -276,7 +276,7 @@ export function BranchPicker({ open, onClose, onCheckedOut }: Props) {
 
 function SectionLabel({ label, count }: { label: string; count?: number }) {
   return (
-    <div className="flex items-center gap-1.5 px-3.5 pb-1 pt-2 font-display text-[9.5px] uppercase tracking-widest2 text-fg-subtle/80">
+    <div className="flex items-center gap-1.5 px-3.5 pb-1 pt-2 font-display text-2xs uppercase tracking-widest2 text-fg-subtle/80">
       <span className="h-px flex-1 bg-border-hairline/60" />
       <span>{label}</span>
       {count !== undefined && (
@@ -311,7 +311,7 @@ function BranchRow({ branch, isSelected, switching, onHover, onPick }: RowProps)
         'flex w-full items-center gap-3 px-3.5 py-2 text-left transition-colors',
         isSelected
           ? 'bg-accent-soft ring-1 ring-inset ring-border-strong'
-          : 'hover:bg-white/[0.045]',
+          : 'hover:bg-surface-1',
         (switching || branch.current) && 'cursor-default',
       )}
     >
@@ -337,39 +337,39 @@ function BranchRow({ branch, isSelected, switching, onHover, onPick }: RowProps)
       <div className="min-w-0 flex-1">
         <div className="flex items-baseline gap-1.5">
           {remotePrefix && (
-            <span className="font-mono text-[11px] text-fg-subtle">
+            <span className="font-mono text-xs text-fg-subtle">
               {remotePrefix}/
             </span>
           )}
           <span
             className={cn(
-              'truncate font-mono text-[12.5px]',
+              'truncate font-mono text-sm',
               branch.current ? 'text-fg-base' : 'text-fg-base/90',
             )}
           >
             {localName}
           </span>
           {branch.current && (
-            <span className="inline-flex items-center gap-0.5 rounded-full bg-accent-soft px-1.5 py-[1px] font-display text-[9px] uppercase tracking-widest2 text-fg-muted">
+            <span className="inline-flex items-center gap-0.5 rounded-full bg-accent-soft px-1.5 py-[1px] font-display text-2xs uppercase tracking-widest2 text-fg-muted">
               <Check size={8} strokeWidth={2.5} />
               on
             </span>
           )}
           {branch.upstream && !branch.remote && !branch.current && (
-            <span className="truncate font-mono text-[10px] text-fg-subtle/80">
+            <span className="truncate font-mono text-2xs text-fg-subtle/80">
               → {branch.upstream}
             </span>
           )}
         </div>
         {branch.subject && (
-          <div className="mt-0.5 truncate font-display text-[10.5px] text-fg-subtle">
+          <div className="mt-0.5 truncate font-display text-2xs text-fg-subtle">
             {branch.subject}
           </div>
         )}
       </div>
 
       {/* Trailing meta column */}
-      <div className="flex shrink-0 items-center gap-2.5 font-mono text-[10px] text-fg-subtle tabular-nums">
+      <div className="flex shrink-0 items-center gap-2.5 font-mono text-2xs text-fg-subtle tabular-nums">
         {branch.head_short && <span>{branch.head_short}</span>}
         <span className="w-[36px] text-right">{formatAge(branch.time * 1000)}</span>
         {isSelected && !switching && !branch.current && (
@@ -385,7 +385,7 @@ function BranchRow({ branch, isSelected, switching, onHover, onPick }: RowProps)
 
 function EmptyState({ text, icon }: { text: string; icon?: React.ReactNode }) {
   return (
-    <div className="flex items-center justify-center gap-1.5 px-4 py-8 font-display text-[11.5px] italic text-fg-subtle">
+    <div className="flex items-center justify-center gap-1.5 px-4 py-8 font-display text-xs italic text-fg-subtle">
       {icon}
       {text}
     </div>

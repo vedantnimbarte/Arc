@@ -294,22 +294,22 @@ function KvTable({
   const append = () => onChange([...rows, newKV()]);
 
   return (
-    <div className="overflow-hidden rounded-md border border-white/[0.05]">
-      <div className="grid grid-cols-[20px_1fr_1fr_24px] items-center gap-2 border-b border-white/[0.04] bg-black/[0.18] px-2 py-1.5 font-display text-[10.5px] uppercase tracking-wider text-fg-subtle/70">
+    <div className="overflow-hidden rounded-md border border-edge-1">
+      <div className="grid grid-cols-[20px_1fr_1fr_24px] items-center gap-2 border-b border-edge-1 bg-scrim-1 px-2 py-1.5 font-display text-2xs uppercase tracking-wider text-fg-subtle/70">
         <span />
         <span>Key</span>
         <span>Value</span>
         <span />
       </div>
       {rows.length === 0 && (
-        <div className="px-3 py-3 font-display text-[11.5px] text-fg-subtle/80">
+        <div className="px-3 py-3 font-display text-xs text-fg-subtle/80">
           No rows yet. Click "+ Add row" below.
         </div>
       )}
       {rows.map((row) => (
         <div
           key={row.id}
-          className="grid grid-cols-[20px_1fr_1fr_24px] items-center gap-2 border-b border-white/[0.03] px-2 py-1.5 last:border-b-0 hover:bg-white/[0.02]"
+          className="grid grid-cols-[20px_1fr_1fr_24px] items-center gap-2 border-b border-edge-1 px-2 py-1.5 last:border-b-0 hover:bg-surface-1"
         >
           <input
             type="checkbox"
@@ -323,7 +323,7 @@ function KvTable({
             value={row.name}
             onChange={(e) => update(row.id, { name: e.target.value })}
             placeholder={placeholder?.name ?? 'key'}
-            className="bg-transparent font-mono text-[12px] text-fg-base outline-none placeholder:text-fg-subtle/50"
+            className="bg-transparent font-mono text-sm text-fg-base outline-none placeholder:text-fg-subtle/50"
           />
           {nameSuggestions && (
             <datalist id={`kv-suggest-${row.id}`}>
@@ -336,11 +336,11 @@ function KvTable({
             value={row.value}
             onChange={(e) => update(row.id, { value: e.target.value })}
             placeholder={placeholder?.value ?? 'value'}
-            className="bg-transparent font-mono text-[12px] text-fg-base outline-none placeholder:text-fg-subtle/50"
+            className="bg-transparent font-mono text-sm text-fg-base outline-none placeholder:text-fg-subtle/50"
           />
           <button
             onClick={() => remove(row.id)}
-            className="flex h-5 w-5 items-center justify-center rounded text-fg-subtle/70 transition-colors hover:bg-white/[0.06] hover:text-rose-300"
+            className="flex h-5 w-5 items-center justify-center rounded text-fg-subtle/70 transition-colors hover:bg-surface-2 hover:text-rose-300"
             aria-label="Remove row"
             title="Remove row"
           >
@@ -350,7 +350,7 @@ function KvTable({
       ))}
       <button
         onClick={append}
-        className="flex w-full items-center gap-1.5 px-2.5 py-1.5 text-left font-display text-[11px] text-fg-subtle transition-colors hover:bg-white/[0.04] hover:text-fg-base"
+        className="flex w-full items-center gap-1.5 px-2.5 py-1.5 text-left font-display text-xs text-fg-subtle transition-colors hover:bg-surface-1 hover:text-fg-base"
       >
         <Plus size={11} strokeWidth={2.2} />
         Add row
@@ -425,7 +425,7 @@ function statusTone(status: number): string {
   if (status >= 400) return 'bg-rose-400/10 text-rose-200 border-rose-400/25';
   if (status >= 300) return 'bg-amber-400/10 text-amber-200 border-amber-400/25';
   if (status >= 200) return 'bg-emerald-400/10 text-emerald-200 border-emerald-400/25';
-  return 'bg-white/[0.06] text-fg-base border-white/[0.08]';
+  return 'bg-surface-2 text-fg-base border-edge-2';
 }
 
 const COMMON_HEADERS = [
@@ -772,7 +772,7 @@ export function ApiClient({ tabId }: Props) {
         {state.leftRailCollapsed && (
           <button
             onClick={() => setState((s) => ({ ...s, leftRailCollapsed: false }))}
-            className="flex w-7 shrink-0 items-center justify-center border-r border-border-hairline bg-base/40 text-fg-subtle transition-colors hover:bg-white/[0.04] hover:text-fg-base"
+            className="flex w-7 shrink-0 items-center justify-center border-r border-border-hairline bg-base/40 text-fg-subtle transition-colors hover:bg-surface-1 hover:text-fg-base"
             title="Show panel"
             aria-label="Show panel"
           >
@@ -833,16 +833,16 @@ function SubTabStrip({
             key={d.localId}
             onClick={() => onSelect(d.localId)}
             className={cn(
-              'group flex h-7 max-w-[220px] shrink-0 items-center gap-1.5 rounded-md px-2 font-display text-[11.5px] transition-colors',
+              'group flex h-7 max-w-[220px] shrink-0 items-center gap-1.5 rounded-md px-2 font-display text-xs transition-colors',
               active
-                ? 'bg-white/[0.07] text-fg-base'
-                : 'text-fg-subtle hover:bg-white/[0.04] hover:text-fg-muted',
+                ? 'bg-surface-2 text-fg-base'
+                : 'text-fg-subtle hover:bg-surface-1 hover:text-fg-muted',
             )}
             title={label}
           >
             <span
               className={cn(
-                'font-mono text-[10px] font-semibold tracking-tight',
+                'font-mono text-2xs font-semibold tracking-tight',
                 methodColour(d.method),
               )}
             >
@@ -859,7 +859,7 @@ function SubTabStrip({
                 e.stopPropagation();
                 onClose(d.localId);
               }}
-              className="flex h-4 w-4 shrink-0 items-center justify-center rounded text-fg-subtle/60 opacity-0 transition-all hover:bg-white/[0.08] hover:text-fg-base group-hover:opacity-100"
+              className="flex h-4 w-4 shrink-0 items-center justify-center rounded text-fg-subtle/60 opacity-0 transition-all hover:bg-surface-2 hover:text-fg-base group-hover:opacity-100"
               aria-label="Close request"
             >
               <X size={10} strokeWidth={2.2} />
@@ -869,7 +869,7 @@ function SubTabStrip({
       })}
       <button
         onClick={onNew}
-        className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-fg-subtle transition-colors hover:bg-white/[0.06] hover:text-fg-base"
+        className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-fg-subtle transition-colors hover:bg-surface-2 hover:text-fg-base"
         title="New request"
         aria-label="New request"
       >
@@ -910,7 +910,7 @@ function RequestBuilder({
             ref={methodRef}
             onClick={() => setMethodOpen((o) => !o)}
             className={cn(
-              'flex h-8 items-center gap-1 rounded-md border border-white/[0.06] bg-black/[0.18] px-2.5 font-mono text-[11.5px] font-semibold tracking-tight transition-colors hover:bg-black/[0.24]',
+              'flex h-8 items-center gap-1 rounded-md border border-edge-1 bg-scrim-1 px-2.5 font-mono text-xs font-semibold tracking-tight transition-colors hover:bg-scrim-1',
               methodColour(draft.method),
             )}
           >
@@ -919,7 +919,7 @@ function RequestBuilder({
           </button>
           {methodOpen && (
             <div
-              className="material-sheet absolute left-0 top-9 z-20 w-32 overflow-hidden rounded-md shadow-sheet ring-1 ring-white/10"
+              className="material-sheet absolute left-0 top-9 z-20 w-32 overflow-hidden rounded-md shadow-sheet ring-1 ring-edge-2"
               onMouseLeave={() => setMethodOpen(false)}
             >
               {METHODS.map((m) => (
@@ -930,7 +930,7 @@ function RequestBuilder({
                     setMethodOpen(false);
                   }}
                   className={cn(
-                    'flex w-full items-center px-3 py-1.5 text-left font-mono text-[11px] font-semibold transition-colors hover:bg-white/[0.06]',
+                    'flex w-full items-center px-3 py-1.5 text-left font-mono text-xs font-semibold transition-colors hover:bg-surface-2',
                     methodColour(m),
                   )}
                 >
@@ -952,8 +952,8 @@ function RequestBuilder({
           onClick={onSend}
           disabled={draft.pending || !draft.url.trim()}
           className={cn(
-            'flex h-8 shrink-0 items-center gap-1.5 rounded-md px-3 font-display text-[11.5px] font-medium tracking-tight transition-all duration-150 ease-apple',
-            'bg-accent/85 text-fg-base shadow-focus hover:bg-accent disabled:cursor-not-allowed disabled:bg-white/[0.04] disabled:text-fg-subtle/50 disabled:shadow-none',
+            'flex h-8 shrink-0 items-center gap-1.5 rounded-md px-3 font-display text-xs font-medium tracking-tight transition-all duration-150 ease-apple',
+            'bg-accent/85 text-fg-base shadow-focus hover:bg-accent disabled:cursor-not-allowed disabled:bg-surface-1 disabled:text-fg-subtle/50 disabled:shadow-none',
           )}
           title="Send (⌘↵)"
         >
@@ -967,7 +967,7 @@ function RequestBuilder({
 
         <button
           onClick={onSave}
-          className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-fg-subtle transition-colors hover:bg-white/[0.06] hover:text-fg-base"
+          className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-fg-subtle transition-colors hover:bg-surface-2 hover:text-fg-base"
           title="Save request"
           aria-label="Save request"
         >
@@ -976,7 +976,7 @@ function RequestBuilder({
       </div>
 
       {/* Builder sub-tab strip */}
-      <div className="flex items-center gap-0 border-t border-white/[0.04] px-3">
+      <div className="flex items-center gap-0 border-t border-edge-1 px-3">
         {(['params', 'headers', 'body', 'auth'] as BuilderTab[]).map((t) => {
           const active = builderTab === t;
           const count =
@@ -996,13 +996,13 @@ function RequestBuilder({
               key={t}
               onClick={() => onBuilderTab(t)}
               className={cn(
-                'relative flex items-center gap-1.5 px-3 py-2 font-display text-[11.5px] capitalize tracking-tight transition-colors',
+                'relative flex items-center gap-1.5 px-3 py-2 font-display text-xs capitalize tracking-tight transition-colors',
                 active ? 'text-fg-base' : 'text-fg-subtle hover:text-fg-muted',
               )}
             >
               {t}
               {count > 0 && (
-                <span className="rounded-sm bg-white/[0.08] px-1 font-mono text-[9px] text-fg-base/80">
+                <span className="rounded-sm bg-surface-2 px-1 font-mono text-2xs text-fg-base/80">
                   {count}
                 </span>
               )}
@@ -1075,7 +1075,7 @@ function UrlInput({
   const hasVars = VAR_PATTERN.test(value);
 
   return (
-    <div className="flex min-w-0 flex-1 items-center gap-1.5 rounded-md border border-white/[0.06] bg-black/[0.22] px-2.5 transition-colors focus-within:border-accent/40 focus-within:shadow-focus">
+    <div className="flex min-w-0 flex-1 items-center gap-1.5 rounded-md border border-edge-1 bg-scrim-1 px-2.5 transition-colors focus-within:border-accent/40 focus-within:shadow-focus">
       <Globe size={11} strokeWidth={2} className="shrink-0 text-fg-subtle" />
       <input
         value={value}
@@ -1087,14 +1087,14 @@ function UrlInput({
           }
         }}
         placeholder="https://api.example.com/v1/{{resource}}"
-        className="min-w-0 flex-1 bg-transparent py-1.5 font-mono text-[12px] text-fg-base outline-none placeholder:text-fg-subtle/50"
+        className="min-w-0 flex-1 bg-transparent py-1.5 font-mono text-sm text-fg-base outline-none placeholder:text-fg-subtle/50"
         spellCheck={false}
         autoCapitalize="off"
         autoCorrect="off"
       />
       {hasVars && (
         <span
-          className="shrink-0 rounded-sm bg-white/[0.06] px-1 py-0.5 font-mono text-[9.5px] text-fg-subtle"
+          className="shrink-0 rounded-sm bg-surface-2 px-1 py-0.5 font-mono text-2xs text-fg-subtle"
           title={resolved}
         >
           {resolved.length > 28 ? `${resolved.slice(0, 26)}…` : resolved}
@@ -1148,10 +1148,10 @@ function BodyEditor({
             key={r.id}
             onClick={() => onMode(r.id)}
             className={cn(
-              'rounded-sm px-2 py-1 font-display text-[11px] tracking-tight transition-colors',
+              'rounded-sm px-2 py-1 font-display text-xs tracking-tight transition-colors',
               mode === r.id
                 ? 'bg-accent/20 text-fg-base'
-                : 'text-fg-subtle hover:bg-white/[0.04] hover:text-fg-muted',
+                : 'text-fg-subtle hover:bg-surface-1 hover:text-fg-muted',
             )}
           >
             {r.label}
@@ -1160,7 +1160,7 @@ function BodyEditor({
         {mode === 'json' && (
           <button
             onClick={prettifyJson}
-            className="ml-auto flex items-center gap-1 rounded-sm px-2 py-1 font-display text-[11px] text-fg-subtle transition-colors hover:bg-white/[0.04] hover:text-fg-base"
+            className="ml-auto flex items-center gap-1 rounded-sm px-2 py-1 font-display text-xs text-fg-subtle transition-colors hover:bg-surface-1 hover:text-fg-base"
             title="Format JSON"
           >
             <Sparkles size={10} strokeWidth={2} />
@@ -1169,7 +1169,7 @@ function BodyEditor({
         )}
       </div>
       {mode === 'none' && (
-        <div className="rounded-md border border-dashed border-white/[0.06] p-4 text-center font-display text-[11.5px] text-fg-subtle/80">
+        <div className="rounded-md border border-dashed border-edge-1 p-4 text-center font-display text-xs text-fg-subtle/80">
           No body for this request.
         </div>
       )}
@@ -1178,7 +1178,7 @@ function BodyEditor({
           value={text}
           onChange={(e) => onText(e.target.value)}
           placeholder={mode === 'json' ? '{ "key": "value" }' : 'request body'}
-          className="min-h-[180px] w-full resize-y rounded-md border border-white/[0.05] bg-black/[0.22] p-2.5 font-mono text-[12px] leading-relaxed text-fg-base outline-none transition-colors focus:border-accent/40"
+          className="min-h-[180px] w-full resize-y rounded-md border border-edge-1 bg-scrim-1 p-2.5 font-mono text-sm leading-relaxed text-fg-base outline-none transition-colors focus:border-accent/40"
           spellCheck={false}
         />
       )}
@@ -1236,10 +1236,10 @@ function AuthEditor({
             key={m.id}
             onClick={() => onChange({ ...auth, mode: m.id })}
             className={cn(
-              'rounded-sm px-2 py-1 font-display text-[11px] tracking-tight transition-colors',
+              'rounded-sm px-2 py-1 font-display text-xs tracking-tight transition-colors',
               auth.mode === m.id
                 ? 'bg-accent/20 text-fg-base'
-                : 'text-fg-subtle hover:bg-white/[0.04] hover:text-fg-muted',
+                : 'text-fg-subtle hover:bg-surface-1 hover:text-fg-muted',
             )}
           >
             {m.label}
@@ -1287,13 +1287,13 @@ function AuthEditor({
             placeholder="secret"
           />
           <div className="flex flex-col gap-1">
-            <label className="font-display text-[10px] uppercase tracking-wider text-fg-subtle/70">
+            <label className="font-display text-2xs uppercase tracking-wider text-fg-subtle/70">
               Add to
             </label>
             <select
               value={auth.apiKeyIn}
               onChange={(e) => onChange({ ...auth, apiKeyIn: e.target.value as 'header' | 'query' })}
-              className="h-8 rounded-md border border-white/[0.06] bg-black/[0.22] px-2 font-display text-[11.5px] text-fg-base outline-none focus:border-accent/40"
+              className="h-8 rounded-md border border-edge-1 bg-scrim-1 px-2 font-display text-xs text-fg-base outline-none focus:border-accent/40"
             >
               <option value="header">Header</option>
               <option value="query">Query</option>
@@ -1303,8 +1303,8 @@ function AuthEditor({
       )}
 
       {computed && (
-        <div className="rounded-md border border-white/[0.04] bg-black/[0.18] px-3 py-2 font-mono text-[11px] text-fg-subtle">
-          <span className="font-display text-[10px] uppercase tracking-wider text-fg-subtle/70">
+        <div className="rounded-md border border-edge-1 bg-scrim-1 px-3 py-2 font-mono text-xs text-fg-subtle">
+          <span className="font-display text-2xs uppercase tracking-wider text-fg-subtle/70">
             Computed&nbsp;
           </span>
           <span className="text-fg-muted">{computed}</span>
@@ -1329,7 +1329,7 @@ function FieldInput({
 }) {
   return (
     <div className="flex flex-col gap-1">
-      <label className="font-display text-[10px] uppercase tracking-wider text-fg-subtle/70">
+      <label className="font-display text-2xs uppercase tracking-wider text-fg-subtle/70">
         {label}
       </label>
       <input
@@ -1337,7 +1337,7 @@ function FieldInput({
         value={value}
         onChange={(e) => onChange(e.target.value)}
         placeholder={placeholder}
-        className="h-8 rounded-md border border-white/[0.06] bg-black/[0.22] px-2.5 font-mono text-[12px] text-fg-base outline-none transition-colors focus:border-accent/40 focus:shadow-focus"
+        className="h-8 rounded-md border border-edge-1 bg-scrim-1 px-2.5 font-mono text-sm text-fg-base outline-none transition-colors focus:border-accent/40 focus:shadow-focus"
         spellCheck={false}
         autoComplete="off"
       />
@@ -1369,10 +1369,10 @@ function ResponseViewer({
   if (draft.error) {
     return (
       <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-2 bg-base p-6 text-center">
-        <div className="rounded-md border border-rose-400/30 bg-rose-500/10 px-3 py-2 font-mono text-[12px] text-rose-200">
+        <div className="rounded-md border border-rose-400/30 bg-rose-500/10 px-3 py-2 font-mono text-sm text-rose-200">
           {draft.error}
         </div>
-        <div className="font-display text-[11px] text-fg-subtle">
+        <div className="font-display text-xs text-fg-subtle">
           Check the URL, the network, or any CORS-free origin restrictions.
         </div>
       </div>
@@ -1383,16 +1383,16 @@ function ResponseViewer({
     return (
       <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-3 bg-base p-6 text-center">
         <Send size={28} strokeWidth={1.5} className="text-fg-subtle/50" />
-        <div className="font-display text-[12px] text-fg-muted">
+        <div className="font-display text-sm text-fg-muted">
           Hit{' '}
-          <kbd className="rounded bg-white/[0.06] px-1.5 py-0.5 font-mono text-[10px] text-fg-base">
+          <kbd className="rounded bg-surface-2 px-1.5 py-0.5 font-mono text-2xs text-fg-base">
             ⌘↵
           </kbd>{' '}
           to send.
         </div>
         <button
           onClick={onSample}
-          className="flex items-center gap-1 rounded-md border border-white/[0.06] px-2.5 py-1 font-display text-[11px] text-fg-subtle transition-colors hover:bg-white/[0.04] hover:text-fg-base"
+          className="flex items-center gap-1 rounded-md border border-edge-1 px-2.5 py-1 font-display text-xs text-fg-subtle transition-colors hover:bg-surface-1 hover:text-fg-base"
         >
           <Sparkles size={11} strokeWidth={2} />
           Try a sample request
@@ -1414,16 +1414,16 @@ function ResponseViewer({
       <div className="flex shrink-0 items-center gap-2 border-b border-border-hairline bg-base/60 px-3 py-2">
         <span
           className={cn(
-            'inline-flex items-center gap-1 rounded-md border px-2 py-0.5 font-mono text-[11px] font-semibold',
+            'inline-flex items-center gap-1 rounded-md border px-2 py-0.5 font-mono text-xs font-semibold',
             statusTone(resp.status),
           )}
         >
           {resp.status} {resp.status_text}
         </span>
-        <span className="font-mono text-[11px] text-fg-subtle">{resp.time_ms} ms</span>
-        <span className="font-mono text-[11px] text-fg-subtle">{formatSize(resp.size_bytes)}</span>
+        <span className="font-mono text-xs text-fg-subtle">{resp.time_ms} ms</span>
+        <span className="font-mono text-xs text-fg-subtle">{formatSize(resp.size_bytes)}</span>
         {resp.truncated && (
-          <span className="rounded-sm bg-amber-400/10 px-1.5 py-0.5 font-display text-[10px] text-amber-200">
+          <span className="rounded-sm bg-amber-400/10 px-1.5 py-0.5 font-display text-2xs text-amber-200">
             truncated
           </span>
         )}
@@ -1433,10 +1433,10 @@ function ResponseViewer({
               key={t.id}
               onClick={() => onResponseTab(t.id)}
               className={cn(
-                'rounded-sm px-2 py-1 font-display text-[11px] tracking-tight transition-colors',
+                'rounded-sm px-2 py-1 font-display text-xs tracking-tight transition-colors',
                 responseTab === t.id
-                  ? 'bg-white/[0.08] text-fg-base'
-                  : 'text-fg-subtle hover:bg-white/[0.04] hover:text-fg-muted',
+                  ? 'bg-surface-2 text-fg-base'
+                  : 'text-fg-subtle hover:bg-surface-1 hover:text-fg-muted',
               )}
             >
               {t.label}
@@ -1447,20 +1447,20 @@ function ResponseViewer({
 
       <div className="min-h-0 flex-1 overflow-auto">
         {responseTab === 'pretty' && (
-          <pre className="m-0 p-3 font-mono text-[12px] leading-relaxed text-fg-base">
+          <pre className="m-0 p-3 font-mono text-sm leading-relaxed text-fg-base">
             {pretty}
           </pre>
         )}
         {responseTab === 'raw' && (
-          <pre className="m-0 whitespace-pre-wrap break-all p-3 font-mono text-[12px] text-fg-base">
+          <pre className="m-0 whitespace-pre-wrap break-all p-3 font-mono text-sm text-fg-base">
             {resp.body_text ?? '[binary body — view as Preview]'}
           </pre>
         )}
         {responseTab === 'headers' && (
-          <table className="w-full border-collapse text-left font-mono text-[12px]">
+          <table className="w-full border-collapse text-left font-mono text-sm">
             <tbody>
               {resp.headers.map((h, i) => (
-                <tr key={`${h.name}-${i}`} className="border-b border-white/[0.03]">
+                <tr key={`${h.name}-${i}`} className="border-b border-edge-1">
                   <td className="px-3 py-1.5 align-top text-fg-subtle">{h.name}</td>
                   <td className="break-all px-3 py-1.5 text-fg-base">{h.value}</td>
                 </tr>
@@ -1486,7 +1486,7 @@ function ResponseViewer({
                 />
               </div>
             ) : (
-              <div className="flex h-full items-center justify-center font-display text-[11.5px] text-fg-subtle">
+              <div className="flex h-full items-center justify-center font-display text-xs text-fg-subtle">
                 No preview available for {contentType || 'this content type'}.
               </div>
             )}
@@ -1590,12 +1590,12 @@ function LeftRail({
   return (
     <div className="flex w-64 shrink-0 flex-col border-r border-border-hairline bg-base/40">
       <div className="flex h-9 items-center justify-between border-b border-border-hairline px-2.5">
-        <span className="font-display text-[11px] uppercase tracking-wider text-fg-subtle/80">
+        <span className="font-display text-xs uppercase tracking-wider text-fg-subtle/80">
           Workspace
         </span>
         <button
           onClick={onCollapse}
-          className="flex h-5 w-5 items-center justify-center rounded text-fg-subtle hover:bg-white/[0.06] hover:text-fg-base"
+          className="flex h-5 w-5 items-center justify-center rounded text-fg-subtle hover:bg-surface-2 hover:text-fg-base"
           title="Collapse"
           aria-label="Collapse panel"
         >
@@ -1613,7 +1613,7 @@ function LeftRail({
           actions={
             <button
               onClick={createCollection}
-              className="flex h-5 w-5 items-center justify-center rounded text-fg-subtle hover:bg-white/[0.06] hover:text-fg-base"
+              className="flex h-5 w-5 items-center justify-center rounded text-fg-subtle hover:bg-surface-2 hover:text-fg-base"
               title="New collection"
               aria-label="New collection"
             >
@@ -1624,7 +1624,7 @@ function LeftRail({
           {collectionsOpen && (
             <div className="pb-1">
               {collections.length === 0 && (grouped.get(null) ?? []).length === 0 && (
-                <div className="px-3 py-2 font-display text-[11px] text-fg-subtle/80">
+                <div className="px-3 py-2 font-display text-xs text-fg-subtle/80">
                   No saved requests yet.
                 </div>
               )}
@@ -1663,7 +1663,7 @@ function LeftRail({
             history.length > 0 && (
               <button
                 onClick={clearHistory}
-                className="flex h-5 w-5 items-center justify-center rounded text-fg-subtle hover:bg-white/[0.06] hover:text-rose-300"
+                className="flex h-5 w-5 items-center justify-center rounded text-fg-subtle hover:bg-surface-2 hover:text-rose-300"
                 title="Clear history"
                 aria-label="Clear history"
               >
@@ -1675,7 +1675,7 @@ function LeftRail({
           {historyOpen && (
             <div className="pb-1">
               {history.length === 0 && (
-                <div className="px-3 py-2 font-display text-[11px] text-fg-subtle/80">
+                <div className="px-3 py-2 font-display text-xs text-fg-subtle/80">
                   No requests yet.
                 </div>
               )}
@@ -1695,7 +1695,7 @@ function LeftRail({
           actions={
             <button
               onClick={createEnv}
-              className="flex h-5 w-5 items-center justify-center rounded text-fg-subtle hover:bg-white/[0.06] hover:text-fg-base"
+              className="flex h-5 w-5 items-center justify-center rounded text-fg-subtle hover:bg-surface-2 hover:text-fg-base"
               title="New environment"
               aria-label="New environment"
             >
@@ -1706,7 +1706,7 @@ function LeftRail({
           {envsOpen && (
             <div className="pb-1">
               {envs.length === 0 && (
-                <div className="px-3 py-2 font-display text-[11px] text-fg-subtle/80">
+                <div className="px-3 py-2 font-display text-xs text-fg-subtle/80">
                   No environments. Create one for {`{{var}}`} substitution.
                 </div>
               )}
@@ -1750,7 +1750,7 @@ function Section({
   children?: React.ReactNode;
 }) {
   return (
-    <div className="border-b border-white/[0.04]">
+    <div className="border-b border-edge-1">
       <div className="flex h-7 items-center gap-1 px-2">
         <button
           onClick={onToggle}
@@ -1764,7 +1764,7 @@ function Section({
           />
         </button>
         <span className="text-fg-subtle">{icon}</span>
-        <span className="ml-0.5 flex-1 font-display text-[10.5px] uppercase tracking-wider text-fg-subtle/80">
+        <span className="ml-0.5 flex-1 font-display text-2xs uppercase tracking-wider text-fg-subtle/80">
           {title}
         </span>
         {actions}
@@ -1790,7 +1790,7 @@ function CollectionRow({
   const [open, setOpen] = useState(true);
   return (
     <div>
-      <div className="group flex items-center gap-1 px-2 py-1 hover:bg-white/[0.02]">
+      <div className="group flex items-center gap-1 px-2 py-1 hover:bg-surface-1">
         <button
           onClick={() => setOpen((o) => !o)}
           className="flex h-4 w-4 items-center justify-center rounded text-fg-subtle hover:text-fg-base"
@@ -1802,7 +1802,7 @@ function CollectionRow({
           />
         </button>
         <Folder size={10} strokeWidth={2} className="text-fg-subtle" />
-        <span className="flex-1 truncate font-display text-[11.5px] text-fg-base/90">{name}</span>
+        <span className="flex-1 truncate font-display text-xs text-fg-base/90">{name}</span>
         <button
           onClick={onDelete}
           className="flex h-4 w-4 items-center justify-center rounded text-fg-subtle opacity-0 hover:text-rose-300 group-hover:opacity-100"
@@ -1840,13 +1840,13 @@ function SavedRequestRow({
   return (
     <div
       className={cn(
-        'group flex items-center gap-2 py-1 pr-2 hover:bg-white/[0.02]',
+        'group flex items-center gap-2 py-1 pr-2 hover:bg-surface-1',
         indent ? 'pl-7' : 'pl-3',
       )}
     >
       <span
         className={cn(
-          'shrink-0 font-mono text-[9.5px] font-semibold',
+          'shrink-0 font-mono text-2xs font-semibold',
           methodColour(request.method),
         )}
       >
@@ -1854,7 +1854,7 @@ function SavedRequestRow({
       </span>
       <button
         onClick={onOpen}
-        className="flex-1 truncate text-left font-display text-[11.5px] text-fg-base/85 hover:text-fg-base"
+        className="flex-1 truncate text-left font-display text-xs text-fg-base/85 hover:text-fg-base"
         title={request.url}
       >
         {request.name || request.url}
@@ -1885,23 +1885,23 @@ function HistoryRow({
   return (
     <button
       onClick={onClick}
-      className="group flex w-full items-center gap-2 px-3 py-1 text-left hover:bg-white/[0.02]"
+      className="group flex w-full items-center gap-2 px-3 py-1 text-left hover:bg-surface-1"
       title={entry.url}
     >
-      <span className="shrink-0 font-mono text-[10px] text-fg-subtle/70">{time}</span>
+      <span className="shrink-0 font-mono text-2xs text-fg-subtle/70">{time}</span>
       <span
         className={cn(
-          'shrink-0 font-mono text-[9.5px] font-semibold',
+          'shrink-0 font-mono text-2xs font-semibold',
           methodColour(entry.method),
         )}
       >
         {entry.method}
       </span>
-      <span className="flex-1 truncate font-display text-[11px] text-fg-base/80">{entry.url}</span>
+      <span className="flex-1 truncate font-display text-xs text-fg-base/80">{entry.url}</span>
       {entry.status != null && (
         <span
           className={cn(
-            'shrink-0 rounded-sm px-1 font-mono text-[9.5px]',
+            'shrink-0 rounded-sm px-1 font-mono text-2xs',
             entry.status >= 400
               ? 'text-rose-300'
               : entry.status >= 300
@@ -1913,7 +1913,7 @@ function HistoryRow({
         </span>
       )}
       {entry.error && (
-        <span className="shrink-0 rounded-sm px-1 font-mono text-[9.5px] text-rose-300">err</span>
+        <span className="shrink-0 rounded-sm px-1 font-mono text-2xs text-rose-300">err</span>
       )}
     </button>
   );
@@ -1948,7 +1948,7 @@ function EnvRow({
 
   if (!editing) {
     return (
-      <div className="group flex items-center gap-2 px-3 py-1 hover:bg-white/[0.02]">
+      <div className="group flex items-center gap-2 px-3 py-1 hover:bg-surface-1">
         <button
           onClick={onActivate}
           className={cn(
@@ -1962,7 +1962,7 @@ function EnvRow({
         />
         <button
           onClick={onEdit}
-          className="flex-1 truncate text-left font-display text-[11.5px] text-fg-base/85 hover:text-fg-base"
+          className="flex-1 truncate text-left font-display text-xs text-fg-base/85 hover:text-fg-base"
         >
           {env.name}
         </button>
@@ -1996,7 +1996,7 @@ function EnvRow({
       <input
         value={name}
         onChange={(e) => setName(e.target.value)}
-        className="h-7 rounded-md border border-white/[0.06] bg-black/[0.22] px-2 font-display text-[11.5px] text-fg-base outline-none focus:border-accent/40"
+        className="h-7 rounded-md border border-edge-1 bg-scrim-1 px-2 font-display text-xs text-fg-base outline-none focus:border-accent/40"
         placeholder="Environment name"
       />
       <textarea
@@ -2004,13 +2004,13 @@ function EnvRow({
         onChange={(e) => setVarsRaw(e.target.value)}
         rows={4}
         placeholder={'base_url=https://api.example.com\ntoken=abc'}
-        className="resize-y rounded-md border border-white/[0.06] bg-black/[0.22] p-2 font-mono text-[11.5px] text-fg-base outline-none focus:border-accent/40"
+        className="resize-y rounded-md border border-edge-1 bg-scrim-1 p-2 font-mono text-xs text-fg-base outline-none focus:border-accent/40"
         spellCheck={false}
       />
       <div className="flex justify-end gap-1">
         <button
           onClick={save}
-          className="rounded-md bg-accent/85 px-2.5 py-1 font-display text-[11px] text-fg-base hover:bg-accent"
+          className="rounded-md bg-accent/85 px-2.5 py-1 font-display text-xs text-fg-base hover:bg-accent"
         >
           Save
         </button>

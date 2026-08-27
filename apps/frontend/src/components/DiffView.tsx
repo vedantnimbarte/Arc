@@ -223,19 +223,19 @@ export function DiffView({ filePath, diffRoot, diffScope }: Props) {
         : ['Parent', 'HEAD'];
 
   return (
-    <div className="flex h-full flex-col overflow-hidden bg-bg-base text-[12px]">
+    <div className="flex h-full flex-col overflow-hidden bg-bg-base text-sm">
       {/* ── File header ── */}
       <div className="flex shrink-0 items-center gap-2 border-b border-border-hairline px-3 py-1.5">
-        <span className="truncate font-mono text-[12px] text-fg-base">{fileName}</span>
+        <span className="truncate font-mono text-sm text-fg-base">{fileName}</span>
         {fileName !== relativePath && (
-          <span className="truncate text-[11px] text-fg-subtle/70">{relativePath.slice(0, relativePath.lastIndexOf('/'))}</span>
+          <span className="truncate text-xs text-fg-subtle/70">{relativePath.slice(0, relativePath.lastIndexOf('/'))}</span>
         )}
-        <span className="ml-1 shrink-0 rounded bg-white/[0.06] px-1.5 py-0.5 text-[10px] font-sans text-fg-subtle">
+        <span className="ml-1 shrink-0 rounded bg-surface-2 px-1.5 py-0.5 text-2xs font-sans text-fg-subtle">
           {scopeLabel}
         </span>
         <div className="ml-auto flex items-center gap-1.5">
           {flash && (
-            <span className="flex items-center gap-1 font-sans text-[11px] text-accent">
+            <span className="flex items-center gap-1 font-sans text-xs text-accent">
               <Check size={11} strokeWidth={2.5} />
               {flash}
             </span>
@@ -244,7 +244,7 @@ export function DiffView({ filePath, diffRoot, diffScope }: Props) {
             onClick={() => void load()}
             disabled={loading || busy}
             title="Refresh diff"
-            className="flex h-6 w-6 items-center justify-center rounded text-fg-muted transition-all hover:bg-white/[0.08] hover:text-fg-base disabled:opacity-40"
+            className="flex h-6 w-6 items-center justify-center rounded text-fg-muted transition-all hover:bg-surface-2 hover:text-fg-base disabled:opacity-40"
           >
             <RefreshCw size={12} className={loading ? 'animate-spin-slow' : ''} />
           </button>
@@ -253,7 +253,7 @@ export function DiffView({ filePath, diffRoot, diffScope }: Props) {
 
       {/* ── Error banner ── */}
       {error && (
-        <div className="flex shrink-0 items-center gap-2 border-b border-border-hairline bg-red-900/20 px-3 py-1.5 font-sans text-[11px] text-red-400">
+        <div className="flex shrink-0 items-center gap-2 border-b border-border-hairline bg-red-900/20 px-3 py-1.5 font-sans text-xs text-red-400">
           <span className="flex-1 truncate">{error}</span>
           <button onClick={() => setError(null)} className="shrink-0 hover:text-red-300">
             <X size={12} />
@@ -270,7 +270,7 @@ export function DiffView({ filePath, diffRoot, diffScope }: Props) {
         )}
 
         {!loading && parsed.length === 0 && !error && (
-          <div className="flex h-32 items-center justify-center font-sans text-[11px] text-fg-subtle">
+          <div className="flex h-32 items-center justify-center font-sans text-xs text-fg-subtle">
             No changes
           </div>
         )}
@@ -278,11 +278,11 @@ export function DiffView({ filePath, diffRoot, diffScope }: Props) {
         {!loading && parsed.length > 0 && (
           <>
             {/* Column headers */}
-            <div className="flex border-b border-border-hairline bg-white/[0.02]">
-              <div className="w-1/2 border-r border-border-hairline px-3 py-1 font-sans text-[10px] uppercase tracking-widest text-fg-subtle/60">
+            <div className="flex border-b border-border-hairline bg-surface-1">
+              <div className="w-1/2 border-r border-border-hairline px-3 py-1 font-sans text-2xs uppercase tracking-widest text-fg-subtle/60">
                 {colHeaders[0]}
               </div>
-              <div className="w-1/2 px-3 py-1 font-sans text-[10px] uppercase tracking-widest text-fg-subtle/60">
+              <div className="w-1/2 px-3 py-1 font-sans text-2xs uppercase tracking-widest text-fg-subtle/60">
                 {colHeaders[1]}
               </div>
             </div>
@@ -328,7 +328,7 @@ function HunkBlock({ hunk, scope, busy, onApply }: HunkBlockProps) {
         >
           {collapsed ? <ChevronRight size={11} strokeWidth={2} /> : <ChevronDown size={11} strokeWidth={2} />}
         </button>
-        <span className="flex-1 truncate font-mono text-[11px] text-fg-subtle/70">
+        <span className="flex-1 truncate font-mono text-xs text-fg-subtle/70">
           {hunk.header || '…'}
         </span>
 
@@ -340,7 +340,7 @@ function HunkBlock({ hunk, scope, busy, onApply }: HunkBlockProps) {
               onClick={() => onApply(hunk.rawPatch, true, false)}
               disabled={busy}
               title="Stage this hunk"
-              className="rounded px-2 py-0.5 font-sans text-[10px] text-accent transition hover:bg-accent/10 disabled:cursor-not-allowed disabled:opacity-40"
+              className="rounded px-2 py-0.5 font-sans text-2xs text-accent transition hover:bg-accent/10 disabled:cursor-not-allowed disabled:opacity-40"
             >
               Stage
             </button>
@@ -349,7 +349,7 @@ function HunkBlock({ hunk, scope, busy, onApply }: HunkBlockProps) {
               onClick={() => onApply(hunk.rawPatch, false, true)}
               disabled={busy}
               title="Discard this hunk"
-              className="rounded px-2 py-0.5 font-sans text-[10px] text-fg-muted transition hover:bg-white/[0.07] hover:text-fg-base disabled:cursor-not-allowed disabled:opacity-40"
+              className="rounded px-2 py-0.5 font-sans text-2xs text-fg-muted transition hover:bg-surface-2 hover:text-fg-base disabled:cursor-not-allowed disabled:opacity-40"
             >
               Discard
             </button>
@@ -361,7 +361,7 @@ function HunkBlock({ hunk, scope, busy, onApply }: HunkBlockProps) {
             onClick={() => onApply(hunk.rawPatch, true, true)}
             disabled={busy}
             title="Unstage this hunk"
-            className="rounded px-2 py-0.5 font-sans text-[10px] text-fg-muted transition hover:bg-white/[0.07] hover:text-fg-base disabled:cursor-not-allowed disabled:opacity-40"
+            className="rounded px-2 py-0.5 font-sans text-2xs text-fg-muted transition hover:bg-surface-2 hover:text-fg-base disabled:cursor-not-allowed disabled:opacity-40"
           >
             Unstage
           </button>
@@ -396,7 +396,7 @@ function LineCell({ cell }: { cell: SideCell }) {
       : cell.type === 'added'
         ? 'bg-green-500/[0.12]'
         : cell.type === 'empty'
-          ? 'bg-white/[0.015]'
+          ? 'bg-surface-1'
           : '';
 
   const numColor =
@@ -421,7 +421,7 @@ function LineCell({ cell }: { cell: SideCell }) {
       {/* Line number */}
       <span
         className={cn(
-          'w-9 shrink-0 select-none pr-2 text-right font-mono text-[11px] leading-[19px]',
+          'w-9 shrink-0 select-none pr-2 text-right font-mono text-xs leading-[19px]',
           numColor,
         )}
       >
@@ -430,7 +430,7 @@ function LineCell({ cell }: { cell: SideCell }) {
       {/* +/- marker */}
       <span
         className={cn(
-          'w-3 shrink-0 select-none text-center font-mono text-[11px] leading-[19px]',
+          'w-3 shrink-0 select-none text-center font-mono text-xs leading-[19px]',
           cell.type === 'removed'
             ? 'text-red-400/80'
             : cell.type === 'added'
@@ -443,7 +443,7 @@ function LineCell({ cell }: { cell: SideCell }) {
       {/* Content */}
       <span
         className={cn(
-          'flex-1 whitespace-pre-wrap break-all font-mono text-[12px] leading-[19px]',
+          'flex-1 whitespace-pre-wrap break-all font-mono text-sm leading-[19px]',
           textColor,
           cell.type === 'empty' && 'invisible',
         )}

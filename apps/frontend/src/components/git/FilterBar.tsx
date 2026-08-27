@@ -74,7 +74,7 @@ export function FilterBar({
       {/* Row 1 — author chips + view toggle */}
       <div className="flex flex-wrap items-center gap-1.5">
         {selectedAuthors.length === 0 ? (
-          <span className="inline-flex items-center gap-1.5 font-display text-[10.5px] uppercase tracking-widest2 text-fg-subtle/80">
+          <span className="inline-flex items-center gap-1.5 font-display text-2xs uppercase tracking-widest2 text-fg-subtle/80">
             <span className="h-1 w-1 rounded-full bg-fg-subtle/50" />
             All authors
           </span>
@@ -82,14 +82,14 @@ export function FilterBar({
           selectedAuthors.map((a) => (
             <span
               key={authorKey(a)}
-              className="group inline-flex items-center gap-1.5 rounded-full bg-gradient-to-b from-white/[0.07] to-white/[0.03] py-[3px] pl-2.5 pr-1 font-display text-[11px] text-fg-base ring-1 ring-inset ring-white/[0.06] shadow-control animate-fade-in"
+              className="group inline-flex items-center gap-1.5 rounded-full bg-gradient-to-b from-white/[0.07] to-white/[0.03] py-[3px] pl-2.5 pr-1 font-display text-xs text-fg-base ring-1 ring-inset ring-edge-1 shadow-control animate-fade-in"
               title={`${a.name} <${a.email}>`}
             >
               <span className="max-w-[160px] truncate">{a.name || a.email}</span>
-              <span className="font-mono text-[9.5px] text-fg-subtle">{a.commits}</span>
+              <span className="font-mono text-2xs text-fg-subtle">{a.commits}</span>
               <button
                 onClick={() => onRemoveAuthor(a)}
-                className="flex h-4 w-4 items-center justify-center rounded-full text-fg-subtle transition-all duration-150 hover:bg-white/10 hover:text-fg-base active:scale-90"
+                className="flex h-4 w-4 items-center justify-center rounded-full text-fg-subtle transition-all duration-150 hover:bg-surface-3 hover:text-fg-base active:scale-90"
                 aria-label={`Remove filter ${a.name}`}
               >
                 <X size={9} strokeWidth={2.4} />
@@ -98,7 +98,7 @@ export function FilterBar({
           ))
         )}
 
-        <span className="ml-auto inline-flex shrink-0 items-center gap-px rounded-full bg-black/[0.22] p-[3px] ring-1 ring-inset ring-white/[0.04] shadow-control">
+        <span className="ml-auto inline-flex shrink-0 items-center gap-px rounded-full bg-scrim-1 p-[3px] ring-1 ring-inset ring-edge-1 shadow-control">
           <ToggleSegment
             active={view === 'flat'}
             onClick={() => onViewChange('flat')}
@@ -116,13 +116,13 @@ export function FilterBar({
 
       {/* Row 2 — date presets + custom range + count */}
       <div className="flex flex-wrap items-center gap-1.5">
-        <div className="inline-flex items-center gap-px rounded-full bg-black/[0.18] p-[3px] ring-1 ring-inset ring-white/[0.04]">
+        <div className="inline-flex items-center gap-px rounded-full bg-scrim-1 p-[3px] ring-1 ring-inset ring-edge-1">
           {PRESETS.map((p) => (
             <button
               key={p.id}
               onClick={() => setPreset(p.id)}
               className={cn(
-                'rounded-full px-2.5 py-[2px] font-display text-[10.5px] transition-all duration-200',
+                'rounded-full px-2.5 py-[2px] font-display text-2xs transition-all duration-200',
                 range.preset === p.id
                   ? 'bg-gradient-to-b from-white/[0.14] to-white/[0.06] text-fg-base shadow-control'
                   : 'text-fg-muted hover:text-fg-base',
@@ -136,12 +136,12 @@ export function FilterBar({
         <span className="mx-1 h-3 w-px bg-border-subtle" />
 
         <DateInput value={range.from ?? ''} onChange={setCustomFrom} label="from" />
-        <span className="font-display text-[10.5px] text-fg-subtle">→</span>
+        <span className="font-display text-2xs text-fg-subtle">→</span>
         <DateInput value={range.to ?? ''} onChange={setCustomTo} label="to" />
 
         <span
           className={cn(
-            'ml-auto inline-flex items-center gap-1.5 rounded-full bg-white/[0.03] px-2.5 py-[2px] font-display text-[10.5px] tabular-nums text-fg-muted ring-1 ring-inset ring-white/[0.04]',
+            'ml-auto inline-flex items-center gap-1.5 rounded-full bg-surface-1 px-2.5 py-[2px] font-display text-2xs tabular-nums text-fg-muted ring-1 ring-inset ring-edge-1',
             loading && 'animate-pulse-soft',
           )}
         >
@@ -177,7 +177,7 @@ function ToggleSegment({
     <button
       onClick={onClick}
       className={cn(
-        'flex items-center gap-1.5 rounded-full px-2.5 py-[3px] font-display text-[11px] transition-all duration-200',
+        'flex items-center gap-1.5 rounded-full px-2.5 py-[3px] font-display text-xs transition-all duration-200',
         active
           ? 'bg-gradient-to-b from-white/[0.14] to-white/[0.06] text-fg-base shadow-control'
           : 'text-fg-muted hover:text-fg-base',
@@ -205,8 +205,8 @@ function DateInput({
       onChange={(e) => onChange(e.target.value)}
       aria-label={label}
       className={cn(
-        'h-[24px] rounded-full bg-black/[0.18] px-2.5 font-display text-[10.5px] text-fg-base ring-1 ring-inset ring-white/[0.05] transition-all duration-200',
-        'placeholder:text-fg-subtle/70 hover:bg-black/[0.24] focus:ring-accent/40 focus:outline-none',
+        'h-[24px] rounded-full bg-scrim-1 px-2.5 font-display text-2xs text-fg-base ring-1 ring-inset ring-edge-1 transition-all duration-200',
+        'placeholder:text-fg-subtle/70 hover:bg-scrim-1 focus:ring-accent/40 focus:outline-none',
       )}
     />
   );

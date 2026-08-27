@@ -247,7 +247,7 @@ export function GitPage() {
             )}
 
             {actionMsg && (
-              <div className="mx-3 mb-1 rounded-md bg-accent/10 px-3 py-1.5 font-sans text-[11px] text-accent ring-1 ring-inset ring-accent/20">
+              <div className="mx-3 mb-1 rounded-md bg-accent/10 px-3 py-1.5 font-sans text-xs text-accent ring-1 ring-inset ring-accent/20">
                 {actionMsg}
               </div>
             )}
@@ -304,7 +304,7 @@ function TitleBar({
       data-tauri-drag-region
       className="material-toolbar relative z-10 flex h-10 items-center justify-center px-3"
     >
-      <div className="flex items-center gap-2 font-display text-[12.5px] font-semibold tracking-tight text-fg-base">
+      <div className="flex items-center gap-2 font-display text-sm font-semibold tracking-tight text-fg-base">
         <span
           className="flex h-5 w-5 items-center justify-center rounded-full bg-accent-soft text-accent-bright"
           aria-hidden
@@ -315,7 +315,7 @@ function TitleBar({
         {commitCount > 0 && (
           <span
             className={cn(
-              'rounded-full bg-white/[0.05] px-1.5 py-[1px] font-mono text-[10px] tabular-nums text-fg-muted',
+              'rounded-full bg-surface-1 px-1.5 py-[1px] font-mono text-2xs tabular-nums text-fg-muted',
               loading && 'animate-pulse-soft',
             )}
           >
@@ -326,25 +326,25 @@ function TitleBar({
       <div className="absolute right-2.5 top-1/2 flex -translate-y-1/2 items-center gap-1">
         <button
           onClick={() => useGitUi.getState().openPrList()}
-          className="group flex h-6 items-center gap-1 rounded-full px-2 text-fg-subtle transition-all duration-200 ease-out hover:bg-white/[0.08] hover:text-fg-base active:scale-95"
+          className="group flex h-6 items-center gap-1 rounded-full px-2 text-fg-subtle transition-all duration-200 ease-out hover:bg-surface-2 hover:text-fg-base active:scale-95"
           aria-label="Pull requests"
           title="Pull requests"
         >
           <GitPullRequest size={11} strokeWidth={2.1} />
-          <span className="font-display text-[10.5px]">PRs</span>
+          <span className="font-display text-2xs">PRs</span>
         </button>
         <button
           onClick={() => useGitUi.getState().setRebasePanelOpen(true)}
-          className="group flex h-6 items-center gap-1 rounded-full px-2 text-fg-subtle transition-all duration-200 ease-out hover:bg-white/[0.08] hover:text-fg-base active:scale-95"
+          className="group flex h-6 items-center gap-1 rounded-full px-2 text-fg-subtle transition-all duration-200 ease-out hover:bg-surface-2 hover:text-fg-base active:scale-95"
           aria-label="Interactive rebase"
           title="Interactive rebase"
         >
           <ListOrdered size={11} strokeWidth={2.1} />
-          <span className="font-display text-[10.5px]">rebase</span>
+          <span className="font-display text-2xs">rebase</span>
         </button>
         <button
           onClick={onRefresh}
-          className="group flex h-6 w-6 items-center justify-center rounded-full text-fg-subtle transition-all duration-200 ease-out hover:bg-white/[0.08] hover:text-fg-base active:scale-90"
+          className="group flex h-6 w-6 items-center justify-center rounded-full text-fg-subtle transition-all duration-200 ease-out hover:bg-surface-2 hover:text-fg-base active:scale-90"
           aria-label="Refresh"
           title="Refresh"
         >
@@ -375,12 +375,12 @@ function EmptyState({ text }: { text: string }) {
     <div className="relative z-10 flex flex-1 items-center justify-center px-8 py-12">
       <div className="flex max-w-sm flex-col items-center gap-4 text-center">
         <span
-          className="flex h-14 w-14 items-center justify-center rounded-full bg-accent-soft text-accent-bright shadow-glow-sm ring-1 ring-white/[0.06]"
+          className="flex h-14 w-14 items-center justify-center rounded-full bg-accent-soft text-accent-bright shadow-glow-sm ring-1 ring-edge-1"
           aria-hidden
         >
           <GitBranch size={22} strokeWidth={1.8} />
         </span>
-        <p className="font-display text-[13px] leading-relaxed text-fg-muted">{text}</p>
+        <p className="font-display text-base leading-relaxed text-fg-muted">{text}</p>
       </div>
     </div>
   );
@@ -392,7 +392,7 @@ function ErrorTray({ message }: { message: string }) {
       <div
         className={cn(
           'flex items-center gap-2 rounded-xl px-3 py-2',
-          'bg-status-err/[0.08] font-display text-[11.5px] text-status-err/90',
+          'bg-status-err/[0.08] font-display text-xs text-status-err/90',
           'ring-1 ring-inset ring-status-err/20',
         )}
       >

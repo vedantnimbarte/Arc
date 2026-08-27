@@ -75,13 +75,13 @@ function MenuItem({
       }}
       className={cn(
         'flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left transition-colors',
-        'font-display text-[12px] tracking-tight',
+        'font-display text-sm tracking-tight',
         disabled
           ? 'cursor-not-allowed text-fg-subtle/60'
           : danger
             ? 'text-fg-base hover:bg-status-err/15 hover:text-status-err'
-            : 'text-fg-base hover:bg-white/[0.06]',
-        'focus-visible:bg-white/[0.06] focus:outline-none',
+            : 'text-fg-base hover:bg-surface-2',
+        'focus-visible:bg-surface-2 focus:outline-none',
       )}
     >
       <Icon
@@ -158,14 +158,14 @@ export function TabContextMenu({
       style={{ position: 'fixed', left: pos.left, top: pos.top, zIndex: 9999 }}
       className={cn(
         'material-sheet w-[200px] rounded-lg p-1 shadow-2xl',
-        'ring-1 ring-white/[0.10]',
+        'ring-1 ring-edge-2',
         'animate-popover-in',
       )}
     >
       <MenuItem icon={Pencil} label="Rename tab" onSelect={run(onRename)} />
       <MenuItem icon={Copy} label="Duplicate tab" onSelect={run(onDuplicate)} />
 
-      <div className="my-1 h-px bg-white/[0.06]" aria-hidden />
+      <div className="my-1 h-px bg-surface-2" aria-hidden />
 
       <MenuItem icon={FolderPlus} label="Add to new group" onSelect={run(onNewGroup)} />
       {groupOptions.map((g) => (
@@ -182,8 +182,8 @@ export function TabContextMenu({
           }}
           className={cn(
             'flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left transition-colors',
-            'font-display text-[12px] tracking-tight text-fg-base hover:bg-white/[0.06]',
-            'focus-visible:bg-white/[0.06] focus:outline-none',
+            'font-display text-sm tracking-tight text-fg-base hover:bg-surface-2',
+            'focus-visible:bg-surface-2 focus:outline-none',
           )}
         >
           <span
@@ -198,7 +198,7 @@ export function TabContextMenu({
         <MenuItem icon={FolderMinus} label="Remove from group" onSelect={run(onRemoveFromGroup)} />
       )}
 
-      <div className="my-1 h-px bg-white/[0.06]" aria-hidden />
+      <div className="my-1 h-px bg-surface-2" aria-hidden />
       <MenuItem icon={X} label="Close tab" danger disabled={!closable} onSelect={run(onCloseTab)} />
     </div>,
     document.body,
