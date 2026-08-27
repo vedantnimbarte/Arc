@@ -11,6 +11,11 @@
 unifies a real PTY-backed terminal, an embedded code editor, a git-aware file tree, source
 control, SSH, and a REST API client into a single, cohesive interface.
 
+It also speaks to [Wingman](https://github.com/vedantnimbarte/Wingman), a terminal coding
+agent, over its HTTP/SSE API — giving ARC an agent panel, a pilot board, and a review queue
+for agent-authored changes. That integration is entirely optional; ARC ships and runs without
+it.
+
 ## Features
 
 - **Real PTY Terminal** — xterm.js frontend backed by portable-pty, supporting bash, zsh,
@@ -26,8 +31,12 @@ control, SSH, and a REST API client into a single, cohesive interface.
   per-session logs.
 - **API Client** — A built-in Postman-style REST client (collections, environments, history).
 - **Tabs & Workspaces** — Split panes, tab groups, and session state persisted to SQLite.
-- **AI CLI Launcher** — Optionally launch external coding CLIs (Claude Code, Codex, OpenCode)
-  in a terminal tab when installed on your PATH.
+- **Wingman Agents** *(optional)* — Connect a `wingman serve` daemon to get an agent panel
+  with streamed turns (text, reasoning, tool calls, verification results, token cost), the
+  pilot board of agent runs, and a review queue that opens each finished task's git worktree
+  in ARC's own diff viewer.
+- **AI CLI Launcher** — Optionally launch external coding CLIs (Claude Code, Codex, OpenCode,
+  Wingman) in a terminal tab when installed on your PATH.
 
 ## Quick Start
 
@@ -49,6 +58,16 @@ pnpm dev                     # Open http://127.0.0.1:5173
 
 PTY and filesystem features are stubbed in the browser-only build.
 
+### Connecting Wingman (optional)
+
+```bash
+wingman serve                # defaults to 127.0.0.1:8787, no token on loopback
+```
+
+Then set that address in **Settings → Wingman**. The agent panel appears in the sidebar and
+the pilot board opens from the command palette. A token is only needed when the daemon binds
+a non-loopback address; ARC stores it in your OS credential vault, not in its database.
+
 ## Tech Stack
 
 **Frontend:** React 18 + Vite + TypeScript · Zustand state · CodeMirror 6 · xterm.js ·
@@ -64,6 +83,7 @@ Tailwind CSS · Vitest.
 - `arc-ssh` — pure-Rust SSH client (russh)
 - `arc-lsp` — language-server client (stdio JSON-RPC)
 - `arc-http-client` / `arc-project-config` — REST client engine + `.arc/config.toml` loader
+- `arc-wingman` — client for a `wingman serve` daemon (board, pilot runs, streaming turns)
 
 **Storage:** SQLite (bundled) at `<data_dir>/arc/arc.db`; tantivy index at `<data_dir>/arc/index/`.
 
