@@ -113,14 +113,26 @@ impl LspManager {
             let _ = self.stop(id).await;
         }
 
-        let mut child = Command::new(command)
-            .args(args)
+        let mut cmd = Command::new(command);
+        cmd.args(args)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::null())
-            .kill_on_drop(true)
+            .kill_on_drop(true);
+        // Language servers are console-subsystem programs and arc.exe is a
+        // GUI process with no console in release builds — without this flag
+        // each server gets a freshly allocated console (its own conhost.exe).
+        #[cfg(windows)]
+        cmd.creation_flags(CREATE_NO_WINDOW);
+        let mut child = cmd
             .spawn()
             .map_err(|e| format!("spawn `{command}`: {e}"))?;
+        // `kill_on_drop` never fires when Tauri exits via `process::exit`, and
+        // a crash skips `stop_all` too. Enrolling the server in the same
+        // kill-on-close job as the PTY shells is the backstop for both.
+        if let Some(pid) = child.id() {
+            arc_pty::assign_to_job(pid);
+        }
         let stdin = child
             .stdin
             .take()
@@ -268,7 +280,33 @@ impl LspManager {
         let _ = child.kill().await;
         Ok(())
     }
+
+    /// Kill every running server. Called on app shutdown, where Tauri's
+    /// `process::exit` skips destructors — so `kill_on_drop` never fires and
+    /// the servers would otherwise outlive the window (each holding its own
+    /// conhost.exe on Windows). No `shutdown`/`exit` handshake here: a wedged
+    /// server would hang the quit, and the process is going away regardless.
+    /// `start_kill` signals without waiting for the child to be reaped.
+    pub async fn stop_all(&self) {
+        let ids: Vec<String> = self.sessions.iter().map(|e| e.key().clone()).collect();
+        let n = ids.len();
+        for id in &ids {
+            if let Some((_, session)) = self.sessions.remove(id) {
+                if let Some(handle) = session.reader.lock().await.take() {
+                    handle.abort();
+                }
+                let _ = session.child.lock().await.start_kill();
+            }
+        }
+        if n > 0 {
+            tracing::info!(count = n, "killed all lsp servers on shutdown");
+        }
+    }
 }
+
+/// See the spawn site in [`LspManager::start`].
+#[cfg(windows)]
+const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
 /// Demux loop: responses resolve pending requests, server→client requests get
 /// a null reply (so servers that expect one don't stall), and notifications
