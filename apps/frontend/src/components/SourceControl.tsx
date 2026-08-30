@@ -29,7 +29,6 @@ import {
   Pencil,
   Plus,
   RefreshCw,
-  Sparkles,
   Trash2,
   Upload,
   X,
@@ -70,6 +69,7 @@ import { fileIcon } from '../lib/fileIcons';
 import { cn } from '../lib/cn';
 import { askConfirm } from '../state/confirm';
 import { copyText } from '../lib/clipboard';
+import { toast } from '../state/toast';
 
 /** Path separator that matches the workspace root style. */
 function joinPath(root: string, rel: string): string {
@@ -229,8 +229,6 @@ export function SourceControl() {
   const [opError, setOpError] = useState<string | null>(null);
   const [message, setMessage] = useState('');
   const [busy, setBusy] = useState(false);
-  const [flash, setFlash] = useState<string | null>(null);
-  const flashTimer = useRef<number | null>(null);
 
   // Remote ops
   const [remoteOp, setRemoteOp] = useState<'fetch' | 'pull' | 'push' | null>(null);
@@ -272,19 +270,6 @@ export function SourceControl() {
     if (!isTauri || !root) return;
     await refreshStore(root);
   }, [refreshStore, root]);
-
-  useEffect(
-    () => () => {
-      if (flashTimer.current != null) window.clearTimeout(flashTimer.current);
-    },
-    [],
-  );
-
-  const showFlash = useCallback((text: string) => {
-    setFlash(text);
-    if (flashTimer.current != null) window.clearTimeout(flashTimer.current);
-    flashTimer.current = window.setTimeout(() => setFlash(null), 2400);
-  }, []);
 
   // ── Remote ops ──────────────────────────────────────────────────────────────
 
@@ -361,13 +346,13 @@ export function SourceControl() {
       await gitStashPush(root);
       await refreshStore(root);
       await loadStashes();
-      showFlash('Stashed');
+      toast('Changes stashed');
     } catch (e) {
       setOpError(String(e));
     } finally {
       setStashBusy(false);
     }
-  }, [root, stashBusy, refreshStore, loadStashes, showFlash]);
+  }, [root, stashBusy, refreshStore, loadStashes]);
 
   const handleStashPop = useCallback(async (index?: number) => {
     if (!root || stashBusy) return;
@@ -377,13 +362,13 @@ export function SourceControl() {
       await gitStashPop(root, index);
       await refreshStore(root);
       await loadStashes();
-      showFlash('Applied stash');
+      toast('Stash applied');
     } catch (e) {
       setOpError(String(e));
     } finally {
       setStashBusy(false);
     }
-  }, [root, stashBusy, refreshStore, loadStashes, showFlash]);
+  }, [root, stashBusy, refreshStore, loadStashes]);
 
   const handleStashDrop = useCallback(async (index: number) => {
     if (!root || stashBusy) return;
@@ -392,13 +377,13 @@ export function SourceControl() {
     try {
       await gitStashDrop(root, index);
       await loadStashes();
-      showFlash('Dropped stash');
+      toast('Stash dropped');
     } catch (e) {
       setOpError(String(e));
     } finally {
       setStashBusy(false);
     }
-  }, [root, stashBusy, loadStashes, showFlash]);
+  }, [root, stashBusy, loadStashes]);
 
   // ── Amend ────────────────────────────────────────────────────────────────────
 
@@ -426,14 +411,14 @@ export function SourceControl() {
       const res = await gitCommitAmend(root, msg);
       setMessage('');
       setAmendMode(false);
-      showFlash(`✓ ${res.short || 'amended'}`);
+      toast(res.short ? `Amended as ${res.short}` : 'Commit amended');
       await refresh();
     } catch (e) {
       setOpError(String(e));
     } finally {
       setBusy(false);
     }
-  }, [busy, message, refresh, root, showFlash]);
+  }, [busy, message, refresh, root]);
 
   // ── Branch management ────────────────────────────────────────────────────────
 
@@ -464,13 +449,13 @@ export function SourceControl() {
       setNewBranchName('');
       await loadBranches();
       if (checkout) await refreshStore(root);
-      showFlash(`Branch "${newBranchName.trim()}" created`);
+      toast(`Branch "${newBranchName.trim()}" created`);
     } catch (e) {
       setOpError(String(e));
     } finally {
       setBusy(false);
     }
-  }, [root, newBranchName, loadBranches, refreshStore, showFlash]);
+  }, [root, newBranchName, loadBranches, refreshStore]);
 
   const handleBranchDelete = useCallback(async (name: string, force = false) => {
     if (!root) return;
@@ -479,7 +464,7 @@ export function SourceControl() {
     try {
       await gitBranchDelete(root, name, force);
       await loadBranches();
-      showFlash(`Deleted "${name}"`);
+      toast(`Branch "${name}" deleted`);
     } catch (e) {
       if (!force && String(e).includes('not fully merged')) {
         const forced = await askConfirm({
@@ -495,7 +480,7 @@ export function SourceControl() {
     } finally {
       setBusy(false);
     }
-  }, [root, loadBranches, showFlash]);
+  }, [root, loadBranches]);
 
   const handleBranchRename = useCallback(async (oldName: string) => {
     if (!root || !renameValue.trim()) return;
@@ -507,13 +492,13 @@ export function SourceControl() {
       setRenameValue('');
       await loadBranches();
       await refreshStore(root);
-      showFlash('Branch renamed');
+      toast('Branch renamed');
     } catch (e) {
       setOpError(String(e));
     } finally {
       setBusy(false);
     }
-  }, [root, renameValue, loadBranches, refreshStore, showFlash]);
+  }, [root, renameValue, loadBranches, refreshStore]);
 
   const handleMerge = useCallback(async (branchName: string) => {
     if (!root) return;
@@ -524,7 +509,7 @@ export function SourceControl() {
       if (res.conflicts) {
         setOpError(`Merge conflicts — resolve and commit.\n${res.message}`);
       } else {
-        showFlash(`Merged "${branchName}"`);
+        toast(`Merged "${branchName}"`);
       }
       await refreshStore(root);
     } catch (e) {
@@ -532,7 +517,7 @@ export function SourceControl() {
     } finally {
       setBusy(false);
     }
-  }, [root, refreshStore, showFlash]);
+  }, [root, refreshStore]);
 
   const grouped = useMemo(() => {
     const buckets: Record<Section, GitChangeEntry[]> = {
@@ -638,15 +623,14 @@ export function SourceControl() {
     try {
       const res = await gitCommit(root, msg);
       setMessage('');
-      const label = res.short ? res.short : 'committed';
-      showFlash(`✓ ${label}`);
+      toast(res.short ? `Committed ${res.short}` : 'Committed');
       await refresh();
     } catch (e) {
       setOpError(String(e));
     } finally {
       setBusy(false);
     }
-  }, [busy, message, refresh, root, showFlash, stagedCount]);
+  }, [busy, message, refresh, root, stagedCount]);
 
   const handleDiscard = useCallback(
     async (entry: GitChangeEntry, section: Section) => {
@@ -1029,18 +1013,6 @@ export function SourceControl() {
             >
               <Pencil size={9} strokeWidth={2.2} /> Amend
             </button>
-            {flash && (
-              <span
-                className={cn(
-                  'flex items-center gap-1 rounded-md bg-status-ok/10 px-1.5 py-[3px]',
-                  'font-mono text-2xs tabular-nums text-status-ok ring-1 ring-inset ring-status-ok/25',
-                  'animate-fade-in',
-                )}
-              >
-                <Sparkles size={9} strokeWidth={2.2} />
-                {flash}
-              </span>
-            )}
           </div>
         </div>
       )}
