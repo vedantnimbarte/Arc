@@ -21,6 +21,28 @@ pub enum Error {
 
 pub type Result<T> = std::result::Result<T, Error>;
 
+/// Every git invocation goes through here. Two flags matter, both because
+/// arc.exe is a GUI process with no console attached in release builds:
+///
+///   * `CREATE_NO_WINDOW` — without it, spawning console-subsystem git
+///     allocates a fresh console, i.e. a conhost.exe plus a black window
+///     flash, on every status poll.
+///   * `GIT_TERMINAL_PROMPT=0` — with no console there is nowhere to type a
+///     credential prompt, so a prompting `fetch`/`push` would block forever
+///     and outlive the app (orphaned git.exe + conhost in Task Manager).
+///     Fail fast instead. GUI helpers like Git Credential Manager still work.
+fn git_cmd() -> Command {
+    let mut cmd = Command::new("git");
+    cmd.env("GIT_TERMINAL_PROMPT", "0");
+    #[cfg(windows)]
+    cmd.creation_flags(CREATE_NO_WINDOW);
+    cmd
+}
+
+/// `CREATE_NO_WINDOW` — see [`git_cmd`].
+#[cfg(windows)]
+const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GitInfo {
     /// Current branch name, or `None` for a detached HEAD.
@@ -48,7 +70,7 @@ pub struct GitInfo {
 ///     an unreadable repo — silently degrade instead).
 pub async fn status<P: AsRef<Path>>(path: P) -> Result<Option<GitInfo>> {
     let path = path.as_ref();
-    let output = Command::new("git")
+    let output = git_cmd()
         .arg("-C")
         .arg(path)
         .args([
@@ -185,7 +207,7 @@ pub struct ChangeEntry {
 /// Returns `Ok(vec![])` when `path` is not inside a repo.
 pub async fn changes<P: AsRef<Path>>(path: P) -> Result<Vec<ChangeEntry>> {
     let path = path.as_ref();
-    let output = Command::new("git")
+    let output = git_cmd()
         .arg("-C")
         .arg(path)
         .args([
@@ -272,7 +294,7 @@ pub async fn changes<P: AsRef<Path>>(path: P) -> Result<Vec<ChangeEntry>> {
 /// inside a repo or git isn't available. The file tree uses this to map the
 /// repo-relative paths from [`changes`] back to absolute paths.
 pub async fn root<P: AsRef<Path>>(path: P) -> Result<Option<String>> {
-    let output = Command::new("git")
+    let output = git_cmd()
         .arg("-C")
         .arg(path.as_ref())
         .args(["rev-parse", "--show-toplevel"])
@@ -346,7 +368,7 @@ pub async fn stage<P: AsRef<Path>>(path: P, paths: &[String]) -> Result<()> {
         return Ok(());
     }
     let path = path.as_ref();
-    let mut cmd = Command::new("git");
+    let mut cmd = git_cmd();
     cmd.arg("-C").arg(path).args(["add", "--"]);
     for p in paths {
         cmd.arg(p);
@@ -380,7 +402,7 @@ pub async fn unstage<P: AsRef<Path>>(path: P, paths: &[String]) -> Result<()> {
 
     // Detect whether the repo has any commits yet — `git reset HEAD` fails
     // on a fresh repo before the first commit.
-    let head = Command::new("git")
+    let head = git_cmd()
         .arg("-C")
         .arg(path)
         .args(["rev-parse", "--verify", "--quiet", "HEAD"])
@@ -389,7 +411,7 @@ pub async fn unstage<P: AsRef<Path>>(path: P, paths: &[String]) -> Result<()> {
         .map_err(|e| Error::Spawn(e.to_string()))?;
     let has_head = head.status.success();
 
-    let mut cmd = Command::new("git");
+    let mut cmd = git_cmd();
     cmd.arg("-C").arg(path);
     if has_head {
         cmd.args(["reset", "HEAD", "--"]);
@@ -436,7 +458,7 @@ pub async fn commit<P: AsRef<Path>>(path: P, message: &str) -> Result<CommitResu
         return Err(Error::Failed("empty commit message".into()));
     }
     let path = path.as_ref();
-    let output = Command::new("git")
+    let output = git_cmd()
         .arg("-C")
         .arg(path)
         .args(["commit", "-m", msg])
@@ -458,7 +480,7 @@ pub async fn commit<P: AsRef<Path>>(path: P, message: &str) -> Result<CommitResu
 
     // Resolve the new HEAD so the UI can confirm. Don't fail the call if this
     // probe trips — the commit already landed.
-    let probe = Command::new("git")
+    let probe = git_cmd()
         .arg("-C")
         .arg(path)
         .args(["log", "-1", "--format=%h%n%s"])
@@ -496,7 +518,7 @@ pub async fn discard<P: AsRef<Path>>(
     let path = path.as_ref();
 
     if !tracked_paths.is_empty() {
-        let mut cmd = Command::new("git");
+        let mut cmd = git_cmd();
         cmd.arg("-C").arg(path).args(["checkout", "HEAD", "--"]);
         for p in tracked_paths {
             cmd.arg(p);
@@ -575,7 +597,7 @@ pub async fn branches<P: AsRef<Path>>(path: P) -> Result<Vec<BranchInfo>> {
         "%(refname:short){US}%(HEAD){US}%(refname){US}%(objectname){US}%(committerdate:unix){US}%(contents:subject){US}%(upstream:short)"
     );
 
-    let output = Command::new("git")
+    let output = git_cmd()
         .arg("-C")
         .arg(path)
         .args([
@@ -673,7 +695,7 @@ pub async fn checkout<P: AsRef<Path>>(path: P, name: &str) -> Result<CheckoutRes
         trimmed.split_once('/')
     {
         // Probe for a local branch with this exact short name.
-        let probe = Command::new("git")
+        let probe = git_cmd()
             .arg("-C")
             .arg(path)
             .args(["show-ref", "--verify", "--quiet"])
@@ -693,7 +715,7 @@ pub async fn checkout<P: AsRef<Path>>(path: P, name: &str) -> Result<CheckoutRes
         (vec!["switch", trimmed], false)
     };
 
-    let output = Command::new("git")
+    let output = git_cmd()
         .arg("-C")
         .arg(path)
         .args(&args)
@@ -711,7 +733,7 @@ pub async fn checkout<P: AsRef<Path>>(path: P, name: &str) -> Result<CheckoutRes
     }
 
     // Resolve the branch HEAD ended up on.
-    let head = Command::new("git")
+    let head = git_cmd()
         .arg("-C")
         .arg(path)
         .args(["symbolic-ref", "--short", "HEAD"])
@@ -781,7 +803,7 @@ pub async fn log<P: AsRef<Path>>(
     const SOH: char = '\u{01}';
     let format = format!("{SOH}%H{US}%h{US}%an{US}%ae{US}%at{US}%P{US}%s");
 
-    let mut cmd = Command::new("git");
+    let mut cmd = git_cmd();
     cmd.arg("-C").arg(path).args([
         "log",
         &format!("-n{limit}"),
@@ -892,7 +914,7 @@ pub struct AuthorInfo {
 /// Falls back to an empty list (rather than erroring) on a bare repo.
 pub async fn authors<P: AsRef<Path>>(path: P) -> Result<Vec<AuthorInfo>> {
     let path = path.as_ref();
-    let output = Command::new("git")
+    let output = git_cmd()
         .arg("-C")
         .arg(path)
         .args(["shortlog", "-sne", "--all", "--no-merges"])
@@ -956,7 +978,7 @@ pub async fn diff<P: AsRef<Path>>(
     path_filter: Option<&str>,
 ) -> Result<String> {
     let path = path.as_ref();
-    let mut cmd = Command::new("git");
+    let mut cmd = git_cmd();
     cmd.arg("-C")
         .arg(path)
         .arg("--no-pager")
@@ -1002,7 +1024,7 @@ pub async fn apply<P: AsRef<Path>>(
     use tokio::io::AsyncWriteExt;
 
     let path = path.as_ref();
-    let mut cmd = Command::new("git");
+    let mut cmd = git_cmd();
     cmd.arg("-C").arg(path).arg("apply");
     if cached {
         cmd.arg("--cached");
@@ -1061,7 +1083,7 @@ pub async fn diff_stat<P: AsRef<Path>>(path: P) -> Result<Option<DiffStat>> {
 
     // Cheap repo-membership check — same probe `status` does. Lets us
     // distinguish "not a repo" (return None) from "repo with no changes".
-    let probe = Command::new("git")
+    let probe = git_cmd()
         .arg("-C")
         .arg(path)
         .args(["rev-parse", "--is-inside-work-tree"])
@@ -1076,7 +1098,7 @@ pub async fn diff_stat<P: AsRef<Path>>(path: P) -> Result<Option<DiffStat>> {
 
     // Tracked changes vs HEAD. If there's no HEAD (fresh repo) this fails;
     // we treat that as "no tracked changes" and fall through to untracked.
-    let numstat = Command::new("git")
+    let numstat = git_cmd()
         .arg("-C")
         .arg(path)
         .arg("--no-pager")
@@ -1100,7 +1122,7 @@ pub async fn diff_stat<P: AsRef<Path>>(path: P) -> Result<Option<DiffStat>> {
     }
 
     // Untracked files — counted as additions of their full line count.
-    let untracked = Command::new("git")
+    let untracked = git_cmd()
         .arg("-C")
         .arg(path)
         .args(["ls-files", "--others", "--exclude-standard", "-z"])
@@ -1170,7 +1192,7 @@ pub async fn blame<P: AsRef<Path>>(
     range: Option<(usize, usize)>,
 ) -> Result<Vec<BlameLine>> {
     let path = path.as_ref();
-    let mut cmd = Command::new("git");
+    let mut cmd = git_cmd();
     cmd.arg("-C")
         .arg(path)
         .arg("--no-pager")
@@ -1260,7 +1282,7 @@ pub struct RemoteInfo {
 /// List all configured remotes with their fetch + push URLs.
 pub async fn remotes<P: AsRef<Path>>(path: P) -> Result<Vec<RemoteInfo>> {
     let path = path.as_ref();
-    let output = Command::new("git")
+    let output = git_cmd()
         .arg("-C")
         .arg(path)
         .args(["remote", "-v"])
@@ -1304,7 +1326,7 @@ pub struct RemoteOpResult {
 
 pub async fn fetch<P: AsRef<Path>>(path: P, remote: Option<&str>) -> Result<RemoteOpResult> {
     let path = path.as_ref();
-    let mut cmd = Command::new("git");
+    let mut cmd = git_cmd();
     cmd.arg("-C").arg(path).arg("fetch");
     if let Some(r) = remote {
         cmd.arg(r);
@@ -1327,7 +1349,7 @@ pub async fn fetch<P: AsRef<Path>>(path: P, remote: Option<&str>) -> Result<Remo
 
 pub async fn pull<P: AsRef<Path>>(path: P, rebase: bool) -> Result<RemoteOpResult> {
     let path = path.as_ref();
-    let mut cmd = Command::new("git");
+    let mut cmd = git_cmd();
     cmd.arg("-C").arg(path).arg("pull").arg("--no-edit");
     if rebase {
         cmd.arg("--rebase");
@@ -1356,7 +1378,7 @@ pub async fn push<P: AsRef<Path>>(
     set_upstream: bool,
 ) -> Result<RemoteOpResult> {
     let path = path.as_ref();
-    let mut cmd = Command::new("git");
+    let mut cmd = git_cmd();
     cmd.arg("-C").arg(path).arg("push");
     if force {
         cmd.arg("--force-with-lease");
@@ -1397,7 +1419,7 @@ pub struct StashEntry {
 
 pub async fn stash_list<P: AsRef<Path>>(path: P) -> Result<Vec<StashEntry>> {
     let path = path.as_ref();
-    let output = Command::new("git")
+    let output = git_cmd()
         .arg("-C")
         .arg(path)
         .args(["stash", "list", "--format=%gd\t%H\t%gs"])
@@ -1425,7 +1447,7 @@ pub async fn stash_list<P: AsRef<Path>>(path: P) -> Result<Vec<StashEntry>> {
 
 pub async fn stash_push<P: AsRef<Path>>(path: P, message: Option<&str>) -> Result<()> {
     let path = path.as_ref();
-    let mut cmd = Command::new("git");
+    let mut cmd = git_cmd();
     cmd.arg("-C").arg(path).arg("stash").arg("push");
     if let Some(m) = message {
         cmd.args(["-m", m]);
@@ -1440,7 +1462,7 @@ pub async fn stash_push<P: AsRef<Path>>(path: P, message: Option<&str>) -> Resul
 
 pub async fn stash_pop<P: AsRef<Path>>(path: P, index: Option<usize>) -> Result<()> {
     let path = path.as_ref();
-    let mut cmd = Command::new("git");
+    let mut cmd = git_cmd();
     cmd.arg("-C").arg(path).arg("stash").arg("pop");
     if let Some(i) = index {
         cmd.arg(format!("stash@{{{i}}}"));
@@ -1455,7 +1477,7 @@ pub async fn stash_pop<P: AsRef<Path>>(path: P, index: Option<usize>) -> Result<
 
 pub async fn stash_drop<P: AsRef<Path>>(path: P, index: usize) -> Result<()> {
     let path = path.as_ref();
-    let output = Command::new("git")
+    let output = git_cmd()
         .arg("-C")
         .arg(path)
         .arg("stash")
@@ -1485,7 +1507,7 @@ pub async fn branch_create<P: AsRef<Path>>(
     } else {
         &["branch", name]
     };
-    let output = Command::new("git")
+    let output = git_cmd()
         .arg("-C")
         .arg(path)
         .args(args)
@@ -1507,7 +1529,7 @@ pub async fn branch_rename<P: AsRef<Path>>(
     reject_option_like(old_name, "branch name")?;
     reject_option_like(new_name, "branch name")?;
     let path = path.as_ref();
-    let output = Command::new("git")
+    let output = git_cmd()
         .arg("-C")
         .arg(path)
         .args(["branch", "-m", old_name, new_name])
@@ -1529,7 +1551,7 @@ pub async fn branch_delete<P: AsRef<Path>>(
     reject_option_like(name, "branch name")?;
     let path = path.as_ref();
     let flag = if force { "-D" } else { "-d" };
-    let output = Command::new("git")
+    let output = git_cmd()
         .arg("-C")
         .arg(path)
         .args(["branch", flag, name])
@@ -1552,7 +1574,7 @@ pub struct MergeResult {
 pub async fn merge<P: AsRef<Path>>(path: P, branch: &str) -> Result<MergeResult> {
     reject_option_like(branch, "branch")?;
     let path = path.as_ref();
-    let output = Command::new("git")
+    let output = git_cmd()
         .arg("-C")
         .arg(path)
         .args(["merge", "--no-edit", branch])
@@ -1581,7 +1603,7 @@ pub async fn commit_amend<P: AsRef<Path>>(path: P, message: &str) -> Result<Comm
         return Err(Error::Failed("empty commit message".into()));
     }
     let path = path.as_ref();
-    let output = Command::new("git")
+    let output = git_cmd()
         .arg("-C")
         .arg(path)
         .args(["commit", "--amend", "-m", msg])
@@ -1593,7 +1615,7 @@ pub async fn commit_amend<P: AsRef<Path>>(path: P, message: &str) -> Result<Comm
         let out = String::from_utf8_lossy(&output.stdout).trim().to_string();
         return Err(Error::Failed(if !err.is_empty() { err } else { out }));
     }
-    let probe = Command::new("git")
+    let probe = git_cmd()
         .arg("-C")
         .arg(path)
         .args(["log", "-1", "--format=%h%n%s"])
@@ -1616,7 +1638,7 @@ pub async fn commit_amend<P: AsRef<Path>>(path: P, message: &str) -> Result<Comm
 pub async fn revert<P: AsRef<Path>>(path: P, oid: &str) -> Result<CommitResult> {
     reject_option_like(oid, "commit")?;
     let path = path.as_ref();
-    let output = Command::new("git")
+    let output = git_cmd()
         .arg("-C")
         .arg(path)
         .args(["revert", "--no-edit", oid])
@@ -1628,7 +1650,7 @@ pub async fn revert<P: AsRef<Path>>(path: P, oid: &str) -> Result<CommitResult> 
         let out = String::from_utf8_lossy(&output.stdout).trim().to_string();
         return Err(Error::Failed(if !err.is_empty() { err } else { out }));
     }
-    let probe = Command::new("git")
+    let probe = git_cmd()
         .arg("-C")
         .arg(path)
         .args(["log", "-1", "--format=%h%n%s"])
@@ -1651,7 +1673,7 @@ pub async fn revert<P: AsRef<Path>>(path: P, oid: &str) -> Result<CommitResult> 
 pub async fn cherry_pick<P: AsRef<Path>>(path: P, oid: &str) -> Result<()> {
     reject_option_like(oid, "commit")?;
     let path = path.as_ref();
-    let output = Command::new("git")
+    let output = git_cmd()
         .arg("-C")
         .arg(path)
         .args(["cherry-pick", oid])
@@ -1752,7 +1774,7 @@ pub async fn rebase_interactive<P: AsRef<Path>>(
     // env var (which git tokenises by whitespace).
     let (seq_editor_path, no_op_editor) = write_helpers(&dir, &todo_path)?;
 
-    let output = Command::new("git")
+    let output = git_cmd()
         .arg("-C")
         .arg(repo_path)
         .args(["rebase", "-i", base])
@@ -1784,7 +1806,7 @@ pub async fn rebase_interactive<P: AsRef<Path>>(
 /// `git rebase --abort`. Restores the pre-rebase HEAD and working tree.
 pub async fn rebase_abort<P: AsRef<Path>>(repo_path: P) -> Result<()> {
     let repo_path = repo_path.as_ref();
-    let output = Command::new("git")
+    let output = git_cmd()
         .arg("-C")
         .arg(repo_path)
         .args(["rebase", "--abort"])
@@ -1802,7 +1824,7 @@ pub async fn rebase_abort<P: AsRef<Path>>(repo_path: P) -> Result<()> {
 /// conflict in the worktree.
 pub async fn rebase_continue<P: AsRef<Path>>(repo_path: P) -> Result<()> {
     let repo_path = repo_path.as_ref();
-    let output = Command::new("git")
+    let output = git_cmd()
         .arg("-C")
         .arg(repo_path)
         .args(["rebase", "--continue"])
@@ -1880,7 +1902,7 @@ pub struct WorktreeEntry {
 /// empty vec when `path` isn't inside a repo (consistent with `status`).
 pub async fn worktree_list<P: AsRef<Path>>(path: P) -> Result<Vec<WorktreeEntry>> {
     let path = path.as_ref();
-    let output = Command::new("git")
+    let output = git_cmd()
         .arg("-C")
         .arg(path)
         .args(["worktree", "list", "--porcelain"])
@@ -1964,7 +1986,7 @@ pub async fn worktree_add<P: AsRef<Path>>(
         reject_option_like(sp, "start point")?;
     }
     let repo_path = repo_path.as_ref();
-    let mut cmd = Command::new("git");
+    let mut cmd = git_cmd();
     cmd.arg("-C").arg(repo_path).args(["worktree", "add"]);
     if create_branch {
         let name = branch
@@ -1997,7 +2019,7 @@ pub async fn worktree_remove<P: AsRef<Path>>(
     force: bool,
 ) -> Result<()> {
     let repo_path = repo_path.as_ref();
-    let mut cmd = Command::new("git");
+    let mut cmd = git_cmd();
     cmd.arg("-C").arg(repo_path).args(["worktree", "remove"]);
     if force {
         cmd.arg("--force");
@@ -2028,7 +2050,7 @@ pub async fn reset<P: AsRef<Path>>(path: P, oid: &str, mode: ResetMode) -> Resul
         ResetMode::Mixed => "--mixed",
         ResetMode::Hard => "--hard",
     };
-    let output = Command::new("git")
+    let output = git_cmd()
         .arg("-C")
         .arg(path)
         .args(["reset", flag, oid])
@@ -2045,7 +2067,7 @@ pub async fn reset<P: AsRef<Path>>(path: P, oid: &str, mode: ResetMode) -> Resul
 /// Return the full message of the most recent commit (for amend pre-fill).
 pub async fn last_commit_message<P: AsRef<Path>>(path: P) -> Result<String> {
     let path = path.as_ref();
-    let output = Command::new("git")
+    let output = git_cmd()
         .arg("-C")
         .arg(path)
         .args(["log", "-1", "--pretty=%B"])
@@ -2070,7 +2092,7 @@ pub async fn checkout_ours<P: AsRef<Path>>(path: P, paths: &[String]) -> Result<
     for p in paths {
         args.push(p.as_str());
     }
-    let output = Command::new("git")
+    let output = git_cmd()
         .arg("-C")
         .arg(path)
         .args(&args)
@@ -2086,7 +2108,7 @@ pub async fn checkout_ours<P: AsRef<Path>>(path: P, paths: &[String]) -> Result<
     for p in paths {
         add_args.push(p.as_str());
     }
-    Command::new("git")
+    git_cmd()
         .arg("-C")
         .arg(path)
         .args(&add_args)
@@ -2106,7 +2128,7 @@ pub async fn checkout_theirs<P: AsRef<Path>>(path: P, paths: &[String]) -> Resul
     for p in paths {
         args.push(p.as_str());
     }
-    let output = Command::new("git")
+    let output = git_cmd()
         .arg("-C")
         .arg(path)
         .args(&args)
@@ -2121,7 +2143,7 @@ pub async fn checkout_theirs<P: AsRef<Path>>(path: P, paths: &[String]) -> Resul
     for p in paths {
         add_args.push(p.as_str());
     }
-    Command::new("git")
+    git_cmd()
         .arg("-C")
         .arg(path)
         .args(&add_args)

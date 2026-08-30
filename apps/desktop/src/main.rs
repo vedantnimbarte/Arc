@@ -291,6 +291,13 @@ fn main() {
     app.run(|app_handle, event| match event {
         tauri::RunEvent::ExitRequested { .. } | tauri::RunEvent::Exit => {
             app_handle.state::<PtyState>().manager.kill_all();
+            // Same reasoning for language servers: `kill_on_drop` never runs
+            // under `process::exit`, so rust-analyzer & friends (each with its
+            // own conhost.exe on Windows) would keep running after the window
+            // is gone. Clone the Arc out of the state guard first — the guard
+            // can't be held across the await inside `block_on`.
+            let lsp = app_handle.state::<LspState>().manager.clone();
+            tauri::async_runtime::block_on(lsp.stop_all());
         }
         _ => {}
     });

@@ -136,7 +136,12 @@ pub trait GitHost: Send + Sync {
 ///   * `origin` isn't set
 ///   * `origin` isn't a recognized GitHub URL
 pub async fn detect_github_slug(path: &str) -> Result<Option<RepoSlug>> {
-    let output = TokioCommand::new("git")
+    let mut cmd = TokioCommand::new("git");
+    // GUI process, no console: without CREATE_NO_WINDOW this spawns a
+    // conhost.exe (and flashes a black window). See arc_git::git_cmd.
+    #[cfg(windows)]
+    cmd.creation_flags(0x0800_0000);
+    let output = cmd
         .arg("-C")
         .arg(path)
         .args(["remote", "get-url", "origin"])

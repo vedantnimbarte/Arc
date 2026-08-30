@@ -192,6 +192,7 @@ dependencies = [
 name = "arc-lsp"
 version = "0.1.0"
 dependencies = [
+ "arc-pty",
  "dashmap",
  "serde",
  "serde_json",

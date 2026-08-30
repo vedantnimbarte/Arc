@@ -308,6 +308,17 @@ impl PtyManager {
     }
 }
 
+/// Enroll `pid` in the process-wide kill-on-close job (see [`win_job`]).
+/// No-op off Windows. Exposed so *any* long-lived child arc.exe spawns —
+/// language servers included — is force-reaped if the app dies without
+/// running its graceful shutdown path.
+pub fn assign_to_job(pid: u32) {
+    #[cfg(windows)]
+    win_job::assign(pid);
+    #[cfg(not(windows))]
+    let _ = pid;
+}
+
 /// Process-wide Windows job object that all PTY shells are enrolled into. The
 /// job is configured with `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`, so when the
 /// last handle to it closes — which the OS does automatically when arc.exe
