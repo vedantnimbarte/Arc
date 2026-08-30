@@ -44,6 +44,7 @@ import { PasteWarning } from './components/PasteWarning';
 import { TrustPrompt } from './components/TrustPrompt';
 import { UpdateToast } from './components/UpdateToast';
 import { useSettings } from './state/settings';
+import { useAi } from './state/ai';
 import { autoConnectWingman, useWingman } from './state/wingman';
 
 // CodeMirror is heavy — defer its bundle until a file is actually opened.
@@ -286,6 +287,12 @@ export default function App() {
       case 'open-command-blocks':
         setBlocksOpen(true);
         return;
+      case 'ai-command': {
+        // Terminal-only: the bar types into a shell, so there has to be one.
+        const tab = useWorkspace.getState().tabs.find((t) => t.id === activeTabId);
+        if (tab?.kind === 'terminal') useAi.getState().open(tab.id);
+        return;
+      }
       case 'open-search':
         setSearchOpen(true);
         return;

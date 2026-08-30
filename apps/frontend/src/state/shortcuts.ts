@@ -11,6 +11,7 @@ export type ActionId =
   | 'open-command-palette'
   | 'open-command-history'
   | 'open-command-blocks'
+  | 'ai-command'
   | 'open-search'
   | 'open-shortcuts'
   | 'show-explorer'
@@ -78,6 +79,12 @@ export const ACTION_META: Record<ActionId, ActionMeta> = {
     id: 'open-command-blocks',
     label: 'Command Blocks',
     description: 'Browse recent commands as blocks with their output.',
+    category: 'Terminal',
+  },
+  'ai-command': {
+    id: 'ai-command',
+    label: 'Ask for a Command',
+    description: 'Describe a command in plain English and put the result on the shell prompt.',
     category: 'Terminal',
   },
   'open-search': {
@@ -161,6 +168,7 @@ export const ACTION_ORDER: ActionId[] = [
   'open-command-palette',
   'open-command-history',
   'open-command-blocks',
+  'ai-command',
   'open-search',
   'open-shortcuts',
   'show-explorer',
@@ -188,6 +196,7 @@ export const DEFAULT_BINDINGS: Record<ActionId, KeyBinding | null> = {
   'open-command-palette': { code: 'KeyP', shift: true, alt: false, ...mod() },
   'open-command-history': { code: 'KeyR', shift: false, alt: false, ...mod() },
   'open-command-blocks': { code: 'KeyR', shift: true, alt: false, ...mod() },
+  'ai-command': { code: 'KeyK', shift: false, alt: false, ...mod() },
   'open-search': { code: 'KeyP', shift: false, alt: false, ...mod() },
   'open-shortcuts': { code: 'Slash', shift: true, alt: false, ...mod() },
   'show-explorer': { code: 'KeyE', shift: true, alt: false, ...mod() },
