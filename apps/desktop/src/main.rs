@@ -66,6 +66,13 @@ fn main() {
         // System notifications for long-running commands (Tier 1.5). The
         // frontend gates delivery on a setting + window focus.
         .plugin(tauri_plugin_notification::init())
+        // In-app updates. Registering only exposes the check/download IPC —
+        // nothing is fetched until the frontend asks, and every downloaded
+        // bundle must carry a minisign signature matching the `pubkey` in
+        // tauri.conf.json or the install is rejected.
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        // `relaunch()` — used to restart into a freshly installed update.
+        .plugin(tauri_plugin_process::init())
         // Save the main window's geometry on close. Restore is gated by the
         // user's `restoreWindowState` preference, checked in `setup` below.
         // The settings & git popups are excluded — they have their own

@@ -719,6 +719,8 @@ export interface PersistedSettings {
   notifyThresholdSecs?: number;
   /** Play the OS notification sound. */
   notifySound?: boolean;
+  /** Check for a new release on launch (Settings → About). */
+  autoUpdateCheck?: boolean;
   /** Folder names excluded from file search. Fully user-editable; seeded with
    *  sensible defaults (node_modules, .venv, target, …). */
   searchIgnoreDirs?: string[];
@@ -734,6 +736,19 @@ export async function sessionSettingsLoad(): Promise<PersistedSettings | null> {
 /** Serialise and persist `settings` to SQLite. */
 export async function sessionSettingsSave(settings: PersistedSettings): Promise<void> {
   await invoke('session_settings_save', { value: JSON.stringify(settings) });
+}
+
+/** The running app's version, straight from tauri.conf.json. `null` in the
+ *  browser-only build, where there is no bundle to ask. */
+export async function getAppVersion(): Promise<string | null> {
+  if (!isTauri) return null;
+  try {
+    const { getVersion } = await import('@tauri-apps/api/app');
+    return await getVersion();
+  } catch (err) {
+    console.warn('[tauri] version lookup failed:', err);
+    return null;
+  }
 }
 
 /** Open (or focus, if already open) the standalone Settings window. */

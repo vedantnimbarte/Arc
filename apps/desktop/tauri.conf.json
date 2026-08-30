@@ -33,6 +33,7 @@
   "bundle": {
     "active": true,
     "targets": "all",
+    "createUpdaterArtifacts": true,
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
@@ -43,5 +44,13 @@
     "category": "DeveloperTool",
     "shortDescription": "AI-native terminal & agent runtime",
     "longDescription": "ARC is an AI-native terminal that combines high-performance shell I/O with agent orchestration and an embedded code editor."
+  },
+  "plugins": {
+    "updater": {
+      "endpoints": [
+        "https://github.com/vedantnimbarte/Arc/releases/latest/download/latest.json"
+      ],
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEI2MkZDMjNGMUZGMTg5RDUKUldUVmlmRWZQOEl2dGxKeXpkQUllME5aeEgrd3NmZWNEZzNVNUNZT1JJTk04TVd3eWN3ajdTOC8K"
+    }
   }
 }

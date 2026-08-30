@@ -4,7 +4,16 @@ name: release
 # Silicon), and Windows, and uploads them to a draft GitHub Release. Trigger by
 # pushing a version tag (e.g. `git tag v0.1.0 && git push origin v0.1.0`).
 #
-# Signing is not wired up yet — the produced installers are UNSIGNED, so macOS
+# In-app updates: `bundle.createUpdaterArtifacts` is on, so this job also
+# emits signed `.sig` files and the `latest.json` manifest clients poll at
+# https://github.com/vedantnimbarte/Arc/releases/latest/download/latest.json.
+# Two repo secrets must exist for that to work — TAURI_SIGNING_PRIVATE_KEY
+# (contents of the private key from `pnpm tauri signer generate`) and
+# TAURI_SIGNING_PRIVATE_KEY_PASSWORD. Note the release is created as a DRAFT:
+# `/releases/latest/` skips drafts, so no client sees the update until you
+# publish it.
+#
+# Code signing (a separate thing) is not wired up yet — the produced installers are UNSIGNED, so macOS
 # Gatekeeper and Windows SmartScreen will warn on first run (see INSTALLATION.md
 # for the bypass). To sign later, add the secrets tauri-action documents
 # (APPLE_CERTIFICATE / APPLE_SIGNING_IDENTITY / notarization creds; Windows
@@ -70,6 +79,10 @@ jobs:
       - uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Updater signing. Without these the build still succeeds but ships
+          # no `.sig` files, and every client rejects the update as unsigned.
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
           projectPath: apps/desktop
           tagName: ${{ github.ref_name }}

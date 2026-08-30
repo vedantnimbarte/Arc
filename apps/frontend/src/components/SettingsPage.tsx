@@ -28,12 +28,16 @@ import {
   Activity,
   KeyRound,
   Bot,
+  ArrowUpCircle,
+  Loader2,
 } from 'lucide-react';
 import {
   DEFAULT_SEARCH_IGNORE_DIRS,
   flushSettingsSave,
   useSettings,
 } from '../state/settings';
+import { checkForUpdate, installUpdate, type UpdateInfo } from '../lib/updater';
+import { getAppVersion } from '../lib/tauri';
 import { FontPicker } from './FontPicker';
 import { useFiles, type SidebarView } from '../state/files';
 import { useSidebarLayout } from '../state/sidebarLayout';
@@ -1392,8 +1396,10 @@ function ShellRow({
 
 // ─── About ─────────────────────────────────────────────────────────────────
 
-const APP_VERSION = '0.0.1';
-const REPO_URL = 'https://github.com/vedant-nimbarte/arc-terminal';
+/** Fallback for the browser-only build, where `getAppVersion()` has no
+ *  Tauri bridge to ask. The real number comes from tauri.conf.json. */
+const APP_VERSION_FALLBACK = '0.1.0';
+const REPO_URL = 'https://github.com/vedantnimbarte/Arc';
 
 function SecretsPane() {
   const [names, setNames] = useState<string[]>([]);
@@ -1527,6 +1533,14 @@ function SecretsPane() {
 }
 
 function AboutPane() {
+  const [version, setVersion] = useState(APP_VERSION_FALLBACK);
+
+  useEffect(() => {
+    void getAppVersion().then((v) => {
+      if (v) setVersion(v);
+    });
+  }, []);
+
   const openExternal = (url: string) => {
     if (typeof window !== 'undefined') {
       window.open(url, '_blank', 'noopener,noreferrer');
@@ -1552,7 +1566,7 @@ function AboutPane() {
         </div>
         <div className="flex items-center gap-2 font-mono text-xs text-fg-subtle">
           <span className="rounded-md border border-border-subtle bg-bg-base/40 px-2 py-0.5">
-            v{APP_VERSION}
+            v{version}
           </span>
           <span>·</span>
           <span>{detectPlatform()}</span>
@@ -1564,6 +1578,8 @@ function AboutPane() {
         <AboutRow label="License" value="MIT" />
         <AboutRow label="Authors" value="ARC contributors" />
       </div>
+
+      <UpdatesCard />
 
       <div className="flex w-full max-w-md flex-col gap-1.5">
         <button
@@ -1591,6 +1607,89 @@ function AboutPane() {
       <p className="pt-2 font-display text-2xs text-fg-subtle">
         © 2026 ARC contributors. Released under the MIT license.
       </p>
+    </div>
+  );
+}
+
+/** Manual update check + the auto-check preference. The launch-time check
+ *  and its corner card live in `UpdateToast`; this is the "I'll decide when"
+ *  path and the only entry point when auto-check is off. */
+function UpdatesCard() {
+  const autoUpdateCheck = useSettings((s) => s.autoUpdateCheck);
+  const setAutoUpdateCheck = useSettings((s) => s.setAutoUpdateCheck);
+  const [status, setStatus] = useState<'idle' | 'checking' | 'current' | 'found'>('idle');
+  const [update, setUpdate] = useState<UpdateInfo | null>(null);
+  const [progress, setProgress] = useState<number | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const onCheck = async () => {
+    setStatus('checking');
+    setError(null);
+    const found = await checkForUpdate();
+    setUpdate(found);
+    setStatus(found ? 'found' : 'current');
+  };
+
+  const onInstall = async () => {
+    setError(null);
+    setProgress(0);
+    try {
+      // Resolves into a relaunch, so there is normally no "after" here.
+      await installUpdate(setProgress);
+    } catch (err) {
+      setProgress(null);
+      setError(err instanceof Error ? err.message : String(err));
+    }
+  };
+
+  const installing = progress !== null;
+
+  return (
+    <div className="w-full max-w-md space-y-2.5 rounded-lg border border-border-subtle bg-bg-base/40 p-4">
+      <div className="flex items-center justify-between gap-3">
+        <div className="min-w-0">
+          <p className="font-display text-sm font-medium tracking-tight text-fg-base">
+            {status === 'found' && update
+              ? `Version ${update.version} is available`
+              : 'Updates'}
+          </p>
+          <p className="mt-0.5 font-display text-xs leading-relaxed text-fg-subtle">
+            {error
+              ? `Update failed: ${error}`
+              : status === 'checking'
+                ? 'Checking…'
+                : status === 'current'
+                  ? "You're on the latest version."
+                  : status === 'found'
+                    ? 'ARC will restart to finish installing.'
+                    : 'Downloads are signature-checked before they install.'}
+          </p>
+        </div>
+        <button
+          onClick={() => void (status === 'found' ? onInstall() : onCheck())}
+          disabled={status === 'checking' || installing}
+          className="flex shrink-0 items-center gap-1.5 rounded-md border border-border-subtle bg-bg-base/40 px-3 py-1.5 font-display text-xs font-medium text-fg-base transition-all duration-150 ease-apple hover:border-border-strong hover:bg-bg-base/60 disabled:opacity-60"
+        >
+          {(status === 'checking' || installing) && (
+            <Loader2 size={11} strokeWidth={2.2} className="animate-spin text-fg-muted" />
+          )}
+          {status === 'found' && !installing && (
+            <ArrowUpCircle size={11} strokeWidth={2.2} className="text-accent" />
+          )}
+          {installing
+            ? `${progress}%`
+            : status === 'found'
+              ? 'Install & restart'
+              : 'Check for updates'}
+        </button>
+      </div>
+
+      <ToggleRow
+        label="Check for updates on launch"
+        hint="Offers a new version in the corner when one ships. Off means ARC never contacts the update endpoint on its own."
+        checked={autoUpdateCheck}
+        onChange={() => setAutoUpdateCheck(!autoUpdateCheck)}
+      />
     </div>
   );
 }

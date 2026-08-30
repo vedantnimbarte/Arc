@@ -85,6 +85,10 @@ export interface Settings {
   notifySound: boolean;
   /** Folder names excluded from file search (Ctrl+P). Fully editable. */
   searchIgnoreDirs: string[];
+  /** Check for a new ARC release on launch and offer it in-app. Off means
+   *  ARC never contacts the update endpoint on its own — Settings → About
+   *  still has a manual "Check for updates" button. */
+  autoUpdateCheck: boolean;
   /** True once hydrateSettings() has applied stored values. */
   settingsHydrated: boolean;
   setDefaultShell: (shell: string | null) => void;
@@ -106,6 +110,7 @@ export interface Settings {
   setNotifyThresholdSecs: (secs: number) => void;
   setNotifySound: (on: boolean) => void;
   setSearchIgnoreDirs: (dirs: string[]) => void;
+  setAutoUpdateCheck: (on: boolean) => void;
   hydrateSettings: () => Promise<void>;
 }
 
@@ -124,6 +129,7 @@ const DEFAULTS = {
   notifyThresholdSecs: 30,
   notifySound: false,
   searchIgnoreDirs: DEFAULT_SEARCH_IGNORE_DIRS,
+  autoUpdateCheck: true,
 };
 
 const MIN_NOTIFY_SECS = 5;
@@ -183,6 +189,7 @@ export const useSettings = create<Settings>()((set, get) => ({
   setNotifyThresholdSecs: (secs) => set({ notifyThresholdSecs: clampNotifySecs(secs) }),
   setNotifySound: (on) => set({ notifySound: on }),
   setSearchIgnoreDirs: (dirs) => set({ searchIgnoreDirs: dirs }),
+  setAutoUpdateCheck: (on) => set({ autoUpdateCheck: on }),
 
   hydrateSettings: async () => {
     if (get().settingsHydrated) return;
@@ -310,6 +317,10 @@ function applyStored(
       stored.searchIgnoreDirs.every((d) => typeof d === 'string')
         ? stored.searchIgnoreDirs
         : current.searchIgnoreDirs,
+    autoUpdateCheck:
+      typeof stored.autoUpdateCheck === 'boolean'
+        ? stored.autoUpdateCheck
+        : current.autoUpdateCheck,
   };
 }
 
@@ -329,6 +340,7 @@ function toPersistedSettings(s: Settings): PersistedSettings {
     notifyThresholdSecs: s.notifyThresholdSecs,
     notifySound: s.notifySound,
     searchIgnoreDirs: s.searchIgnoreDirs,
+    autoUpdateCheck: s.autoUpdateCheck,
   };
 }
 
