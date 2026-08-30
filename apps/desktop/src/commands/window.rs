@@ -29,7 +29,6 @@ pub async fn settings_window_open(app: AppHandle) -> Result<(), String> {
         .min_inner_size(640.0, 480.0)
         .resizable(true)
         .decorations(false)
-        .transparent(false)
         .center()
         .build()
         .map_err(|e| e.to_string())?;
@@ -65,7 +64,6 @@ pub async fn git_window_open(app: AppHandle) -> Result<(), String> {
         .min_inner_size(720.0, 480.0)
         .resizable(true)
         .decorations(false)
-        .transparent(false)
         .center()
         .build()
         .map_err(|e| e.to_string())?;
