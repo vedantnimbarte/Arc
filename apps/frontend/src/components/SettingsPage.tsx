@@ -1523,7 +1523,7 @@ function ShellRow({
 
 /** Fallback for the browser-only build, where `getAppVersion()` has no
  *  Tauri bridge to ask. The real number comes from tauri.conf.json. */
-const APP_VERSION_FALLBACK = '0.1.0';
+const APP_VERSION_FALLBACK = '0.2.0';
 const REPO_URL = 'https://github.com/vedantnimbarte/Arc';
 
 function SecretsPane() {
