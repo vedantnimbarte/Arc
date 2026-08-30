@@ -5,6 +5,7 @@ import { useWorkspace } from '../state/workspace';
 import { groupColorDef, rgba } from '../lib/tabGroups';
 import { cn } from '../lib/cn';
 import { WorkspaceEditPanel, DEFAULT_WORKSPACE_COLOR as DEFAULT_COLOR } from './WorkspaceEditPanel';
+import { askConfirm } from '../state/confirm';
 
 /**
  * Discord/Slack-style vertical workspace rail — the app's leftmost column.
@@ -67,11 +68,15 @@ export function WorkspaceRail({ onOpenSettings }: { onOpenSettings: () => void }
 
   const requestDelete = (id: string, name: string) => {
     const count = countFor(id);
-    const msg =
-      count > 0
-        ? `Delete "${name}" and close its ${count} tab${count === 1 ? '' : 's'}?`
-        : `Delete "${name}"?`;
-    if (window.confirm(msg)) deleteWorkspace(id);
+    void askConfirm({
+      title: `Delete "${name}"?`,
+      body:
+        count > 0
+          ? `Its ${count} open tab${count === 1 ? '' : 's'} close with it.`
+          : undefined,
+      confirmLabel: 'delete',
+      destructive: true,
+    }).then((ok) => ok && deleteWorkspace(id));
   };
 
   const menuWorkspace = menu && workspaces.find((w) => w.id === menu.id);

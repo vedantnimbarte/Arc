@@ -25,6 +25,7 @@ import {
 } from './git/FilterBar';
 import { CommitList } from './git/CommitList';
 import { CommitGraph } from './git/CommitGraph';
+import { askConfirm } from '../state/confirm';
 
 const COMMIT_LIMIT = 500;
 
@@ -179,7 +180,16 @@ export function GitPage() {
 
   const handleReset = useCallback(async (oid: string, mode: GitResetMode) => {
     if (!root) return;
-    if (mode === 'hard' && !window.confirm(`Hard reset to ${oid.slice(0, 7)}? All uncommitted changes will be lost.`)) return;
+    if (
+      mode === 'hard' &&
+      !(await askConfirm({
+        title: `Hard reset to ${oid.slice(0, 7)}?`,
+        body: 'Every uncommitted change in the working tree is discarded.',
+        confirmLabel: 'reset',
+        destructive: true,
+      }))
+    )
+      return;
     setCommitsError(null);
     try {
       await gitReset(root, oid, mode);

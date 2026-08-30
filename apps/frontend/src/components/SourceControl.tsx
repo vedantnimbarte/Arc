@@ -68,6 +68,8 @@ import { useGitUi } from '../state/gitUi';
 import { useWorkspace } from '../state/workspace';
 import { fileIcon } from '../lib/fileIcons';
 import { cn } from '../lib/cn';
+import { askConfirm } from '../state/confirm';
+import { copyText } from '../lib/clipboard';
 
 /** Path separator that matches the workspace root style. */
 function joinPath(root: string, rel: string): string {
@@ -480,9 +482,13 @@ export function SourceControl() {
       showFlash(`Deleted "${name}"`);
     } catch (e) {
       if (!force && String(e).includes('not fully merged')) {
-        if (window.confirm(`"${name}" is not fully merged. Force delete?`)) {
-          await handleBranchDelete(name, true);
-        }
+        const forced = await askConfirm({
+          title: `"${name}" is not fully merged.`,
+          body: 'Deleting it now drops the commits that are only on this branch.',
+          confirmLabel: 'force delete',
+          destructive: true,
+        });
+        if (forced) await handleBranchDelete(name, true);
       } else {
         setOpError(String(e));
       }
@@ -654,8 +660,8 @@ export function SourceControl() {
     [root, runWithRefresh],
   );
 
-  const copyToClipboard = useCallback((text: string) => {
-    void navigator.clipboard.writeText(text);
+  const copyToClipboard = useCallback((text: string, label: string) => {
+    copyText(text, label);
   }, []);
 
   const absolutePath = useCallback(
@@ -1134,8 +1140,8 @@ export function SourceControl() {
               section: contextMenu.section,
             })
           }
-          onCopyPath={() => copyToClipboard(absolutePath(contextMenu.entry.path))}
-          onCopyRelativePath={() => copyToClipboard(contextMenu.entry.path)}
+          onCopyPath={() => copyToClipboard(absolutePath(contextMenu.entry.path), 'Path')}
+          onCopyRelativePath={() => copyToClipboard(contextMenu.entry.path, 'Relative path')}
         />
       )}
 

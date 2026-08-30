@@ -71,9 +71,29 @@
     -webkit-user-select: text;
   }
 
-  /* Disable native focus rings — we paint our own system-blue version. */
+  /* Drop the native ring on pointer interaction, but keep a real one for
+     keyboard users. `shadow-focus` (the accent bloom in tailwind.config)
+     was only reachable on six inputs; everything else — every button, tab,
+     tree row and menu item — went dark under Tab. The ring is drawn with
+     box-shadow rather than outline so it follows border-radius on the
+     squircle controls, and `:focus-visible` keeps it off during clicks. */
   *:focus {
     outline: none;
+  }
+  *:focus-visible {
+    outline: none;
+    box-shadow:
+      0 0 0 1px rgb(var(--accent, 200 202 208) / 0.85),
+      0 0 0 4px rgb(var(--accent, 200 202 208) / 0.22);
+    border-radius: inherit;
+  }
+  /* Text fields already style their own focus state; a second ring on top
+     of the inset one reads as a double border. */
+  input:focus-visible,
+  textarea:focus-visible,
+  select:focus-visible,
+  [contenteditable]:focus-visible {
+    box-shadow: none;
   }
 }
 
@@ -705,6 +725,20 @@ html:not(.dark) ::-webkit-scrollbar-thumb:hover {
 /* Honour the OS reduced-motion setting: keep the fades, drop every
    transform/blur and all the infinite ambient loops. */
 @media (prefers-reduced-motion: reduce) {
+  /* The app-wide rule. Previously only the splash honoured this setting —
+     the one screen you see for 800ms — while the ~60 animate-* classes you
+     look at all day ignored it. Everything now collapses to an instant
+     state change; the splash overrides below still matter because the
+     leave *transition* would otherwise snap to its blurred end state. */
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+
   .splash-overlay.is-leaving { transform: none; filter: none; }
   .splash-orb-1, .splash-orb-2, .splash-orb-3,
   .splash-card, .splash-sheen { animation: none; }

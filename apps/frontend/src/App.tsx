@@ -42,6 +42,8 @@ import './state/projectConfig';
 import { fsPickFolder, ptyListAiClis, settingsWindowOpen, type AiCliId } from './lib/tauri';
 import { PasteWarning } from './components/PasteWarning';
 import { TrustPrompt } from './components/TrustPrompt';
+import { ConfirmDialog } from './components/ConfirmDialog';
+import { Toasts } from './components/Toasts';
 import { UpdateToast } from './components/UpdateToast';
 import { useSettings } from './state/settings';
 import { useAi } from './state/ai';
@@ -98,6 +100,11 @@ export default function App() {
   // and pane splits.
   const hostsRef = useRef<Map<string, HTMLDivElement>>(new Map());
   const stageRef = useRef<HTMLDivElement>(null);
+  // The sidebar's two halves — the collapsed icon rail and the full panel.
+  // Both stay mounted so the width transition can play, which means the
+  // off-screen one needs deactivating rather than just hiding.
+  const railAsideRef = useRef<HTMLElement>(null);
+  const panelAsideRef = useRef<HTMLElement>(null);
 
   // Lazily create host divs *during render* so they exist before child
   // layout effects run. PaneLeafView's `useLayoutEffect` reparents the
@@ -347,6 +354,28 @@ export default function App() {
     return () => window.removeEventListener('keydown', onKey, true);
   }, []);
 
+  // Deactivate whichever sidebar half is currently off-screen. `aria-hidden`
+  // alone (what this used to rely on) hides the subtree from the a11y tree
+  // but leaves its controls in the tab order, so Tab landed on an invisible
+  // sidebar tab — a lot more obvious now that focus rings are visible.
+  //
+  // `inert` covers both, but it does not blur a descendant that is already
+  // focused, so collapsing while focus sat in the panel left the user parked
+  // on a control the a11y tree says does not exist. Hand focus to the same
+  // view's tab on the half that replaced it.
+  useEffect(() => {
+    const rail = railAsideRef.current;
+    const panel = panelAsideRef.current;
+    if (!rail || !panel) return;
+    const outgoing = sidebarCollapsed ? panel : rail;
+    const incoming = sidebarCollapsed ? rail : panel;
+    rail.inert = !sidebarCollapsed;
+    panel.inert = sidebarCollapsed;
+    if (outgoing.contains(document.activeElement)) {
+      incoming.querySelector<HTMLElement>('[role="tab"][aria-selected="true"]')?.focus();
+    }
+  }, [sidebarCollapsed]);
+
   // Seed the command-palette registry with every ActionId. Other features
   // can register their own ad-hoc actions on top of these.
   useEffect(() => {
@@ -517,6 +546,7 @@ export default function App() {
           />
         )}
         <aside
+          ref={railAsideRef}
           className="shrink-0 overflow-hidden transition-[width] duration-300 ease-apple"
           style={{ width: sidebarCollapsed ? SIDEBAR_RAIL_WIDTH : 0 }}
           aria-hidden={!sidebarCollapsed}
@@ -529,6 +559,7 @@ export default function App() {
           </div>
         </aside>
         <aside
+          ref={panelAsideRef}
           className="shrink-0 overflow-hidden transition-[width] duration-300 ease-apple"
           style={{ width: sidebarCollapsed ? 0 : sidebarWidth }}
           aria-hidden={sidebarCollapsed}
@@ -555,6 +586,8 @@ export default function App() {
       <ShortcutsDialog open={shortcutsOpen} onClose={() => setShortcutsOpen(false)} />
       <PasteWarning />
       <TrustPrompt />
+      <ConfirmDialog />
+      <Toasts />
       <UpdateToast />
 
       {/* Offscreen host stack. Tab content lives here until a leaf claims it
