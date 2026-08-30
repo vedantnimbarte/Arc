@@ -42,6 +42,7 @@ import './state/projectConfig';
 import { fsPickFolder, ptyListAiClis, settingsWindowOpen, type AiCliId } from './lib/tauri';
 import { PasteWarning } from './components/PasteWarning';
 import { TrustPrompt } from './components/TrustPrompt';
+import { UpdateToast } from './components/UpdateToast';
 import { useSettings } from './state/settings';
 import { autoConnectWingman, useWingman } from './state/wingman';
 
@@ -547,6 +548,7 @@ export default function App() {
       <ShortcutsDialog open={shortcutsOpen} onClose={() => setShortcutsOpen(false)} />
       <PasteWarning />
       <TrustPrompt />
+      <UpdateToast />
 
       {/* Offscreen host stack. Tab content lives here until a leaf claims it
           via DOM reparenting. `display:none` keeps the size measurer happy

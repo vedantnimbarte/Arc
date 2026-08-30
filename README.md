@@ -35,6 +35,9 @@ it.
   with streamed turns (text, reasoning, tool calls, verification results, token cost), the
   pilot board of agent runs, and a review queue that opens each finished task's git worktree
   in ARC's own diff viewer.
+- **In-App Updates** — ARC checks for a new release on launch, offers it in a corner
+  card, and installs it in place. Every download is minisign-verified against the key
+  baked into the build before it runs. Turn the check off in **Settings → About**.
 - **AI CLI Launcher** — Optionally launch external coding CLIs (Claude Code, Codex, OpenCode,
   Wingman) in a terminal tab when installed on your PATH.
 
@@ -98,6 +101,27 @@ apps/desktop/         Tauri shell (Rust, IPC commands)
 packages/             Shared TS packages (types, editor/terminal/ui tokens)
 rust/                 Cargo workspace (pty, filesystem, git, ssh, lsp, ...)
 ```
+
+### Cutting a release
+
+```bash
+git tag v0.2.0 && git push origin v0.2.0
+```
+
+That builds installers for all three platforms into a **draft** GitHub Release. The
+updater manifest lives at `releases/latest/download/latest.json`, and `/latest/` skips
+drafts — nobody is offered the update until you publish the release.
+
+Signing the update artifacts needs two repo secrets, generated once with
+`pnpm --filter @arc/desktop exec tauri signer generate`:
+
+| Secret | Value |
+|--------|-------|
+| `TAURI_SIGNING_PRIVATE_KEY` | Contents of the generated private key file |
+| `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` | Its password (empty string if you set none) |
+
+The matching public key is committed in `apps/desktop/tauri.conf.json`. Lose the private
+key and existing installs can never be updated again — back it up.
 
 ## Platform Support
 
