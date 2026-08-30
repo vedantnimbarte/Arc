@@ -40,6 +40,7 @@ import {
   type HttpRequestDto,
   type HttpResponseDto,
 } from '../lib/tauri';
+import { askConfirm, askText } from '../state/confirm';
 
 interface Props {
   tabId: string;
@@ -667,7 +668,10 @@ export function ApiClient({ tabId }: Props) {
     if (!sessionId || !active) return;
     let name = (active.name || 'Untitled request').trim();
     if (!name || name === 'Untitled request') {
-      const proposed = window.prompt('Save request as:', active.url || 'My request');
+      const proposed = await askText('Save request', {
+        label: 'Name',
+        value: active.url || 'My request',
+      });
       if (!proposed) return;
       name = proposed.trim() || 'Untitled request';
     }
@@ -1540,27 +1544,38 @@ function LeftRail({
 
   const createCollection = async () => {
     if (!sessionId) return;
-    const name = window.prompt('New collection name?');
+    const name = await askText('New collection', { label: 'Name', placeholder: 'e.g. Billing API' }, 'create');
     if (!name) return;
     await apiclientUpsertCollection(sessionId, { name, position: collections.length });
     onRefresh();
   };
 
   const removeCollection = async (id: string) => {
-    if (!window.confirm('Delete this collection? Saved requests inside become drafts.')) return;
+    const ok = await askConfirm({
+      title: 'Delete this collection?',
+      body: 'The requests saved inside it become drafts.',
+      confirmLabel: 'delete',
+      destructive: true,
+    });
+    if (!ok) return;
     await apiclientDeleteCollection(id);
     onRefresh();
   };
 
   const removeRequest = async (id: string) => {
-    if (!window.confirm('Delete this saved request?')) return;
+    const ok = await askConfirm({
+      title: 'Delete this saved request?',
+      confirmLabel: 'delete',
+      destructive: true,
+    });
+    if (!ok) return;
     await apiclientDeleteRequest(id);
     onRefresh();
   };
 
   const createEnv = async () => {
     if (!sessionId) return;
-    const name = window.prompt('New environment name?');
+    const name = await askText('New environment', { label: 'Name', placeholder: 'e.g. Staging' }, 'create');
     if (!name) return;
     const env = await apiclientEnvsUpsert(sessionId, { name, varsJson: '{}' });
     setEditingEnvId(env.id);
@@ -1574,7 +1589,13 @@ function LeftRail({
   };
 
   const deleteEnv = async (id: string) => {
-    if (!window.confirm('Delete this environment?')) return;
+    const ok = await askConfirm({
+      title: 'Delete this environment?',
+      body: 'Requests using its variables fall back to unset values.',
+      confirmLabel: 'delete',
+      destructive: true,
+    });
+    if (!ok) return;
     await apiclientEnvsDelete(id);
     setEditingEnvId(null);
     onRefresh();
@@ -1582,7 +1603,13 @@ function LeftRail({
 
   const clearHistory = async () => {
     if (!sessionId) return;
-    if (!window.confirm('Clear all history for this workspace?')) return;
+    const ok = await askConfirm({
+      title: 'Clear all history for this workspace?',
+      body: 'Past responses are removed. Saved requests are untouched.',
+      confirmLabel: 'clear',
+      destructive: true,
+    });
+    if (!ok) return;
     await apiclientClearHistory(sessionId);
     onRefresh();
   };

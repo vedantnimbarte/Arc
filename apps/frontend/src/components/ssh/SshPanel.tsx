@@ -19,6 +19,7 @@ import { GenerateKeyDialog } from './GenerateKeyDialog';
 import { ImportKeyDialog } from './ImportKeyDialog';
 import { HostEditDialog } from './HostEditDialog';
 import type { SshHost, SshKey } from '../../lib/tauri';
+import { askConfirm } from '../../state/confirm';
 
 /** SSH view — rendered inside the left sidebar's SSH tab (the activity rail
  *  owns view switching). `onClose` lets the host collapse the panel back to
@@ -467,9 +468,14 @@ function KeyList({ keys, hosts, hydrated, onGenerate, onImport }: KeyListProps) 
               <button
                 type="button"
                 onClick={() => {
-                  if (confirm(`Remove "${k.name}" from ARC? The file on disk stays.`)) {
-                    void deleteKey(k.id, false);
-                  }
+                  void askConfirm({
+                    title: `Remove "${k.name}" from ARC?`,
+                    body: 'The key file on disk stays where it is.',
+                    confirmLabel: 'remove',
+                    destructive: true,
+                  }).then((ok) => {
+                    if (ok) void deleteKey(k.id, false);
+                  });
                 }}
                 className="rounded px-1.5 py-px font-mono text-2xs text-fg-subtle transition-colors hover:bg-bg-hover hover:text-status-err"
               >

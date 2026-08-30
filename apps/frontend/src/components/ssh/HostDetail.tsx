@@ -4,6 +4,7 @@ import { useSsh, type SshSessionState } from '../../state/ssh';
 import { cn } from '../../lib/cn';
 import { chunkFingerprint, statusDotClass, statusLabel, uptime } from './common';
 import type { SshHost, SshKey } from '../../lib/tauri';
+import { askConfirm } from '../../state/confirm';
 import { useWorkspace } from '../../state/workspace';
 
 interface HostDetailProps {
@@ -163,9 +164,14 @@ export function HostDetail({ host, identity, onBack, onEdit }: HostDetailProps) 
         <button
           type="button"
           onClick={() => {
-            if (confirm(`Remove host "${host.name}"? This only deletes the saved entry.`)) {
-              void deleteHost(host.id);
-            }
+            void askConfirm({
+              title: `Remove host "${host.name}"?`,
+              body: 'This deletes the saved entry only. Nothing on the remote changes.',
+              confirmLabel: 'remove',
+              destructive: true,
+            }).then((ok) => {
+              if (ok) void deleteHost(host.id);
+            });
           }}
           className="flex items-center gap-1.5 rounded-squircle border border-border-subtle px-2.5 py-1.5 font-display text-xs text-fg-muted transition hover:bg-bg-hover hover:text-status-err"
         >

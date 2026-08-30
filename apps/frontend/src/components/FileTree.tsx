@@ -30,6 +30,7 @@ import { useFiles } from '../state/files';
 import { useGit, normPathKey, type GitDecoration } from '../state/git';
 import { useWorkspace } from '../state/workspace';
 import { cn } from '../lib/cn';
+import { copyText } from '../lib/clipboard';
 
 interface NodeState {
   loading: boolean;
@@ -301,7 +302,7 @@ export function FileTree() {
   }, []);
 
   const ctxCopyPath = useCallback((path: string) => {
-    void navigator.clipboard.writeText(path);
+    copyText(path, 'Path');
   }, []);
 
   const ctxCopyRelativePath = useCallback((path: string) => {
@@ -309,7 +310,7 @@ export function FileTree() {
     const sep = pathSep(root);
     const rootWithSep = root.endsWith(sep) ? root : root + sep;
     const rel = path.startsWith(rootWithSep) ? path.slice(rootWithSep.length) : path;
-    void navigator.clipboard.writeText(rel);
+    copyText(rel, 'Relative path');
   }, [root]);
 
   const ctxNewFile = useCallback((entry: FsEntry) => {
@@ -479,19 +480,37 @@ export function FileTree() {
         onContextMenu={handleRootContextMenu}
       >
         {rootError && <ErrorRow message={rootError} />}
-        {!isTauri && (
-          <div className="px-2 py-1.5 font-display text-2xs leading-relaxed text-fg-subtle">
-            <span className="text-status-warn">web preview</span> · file
-            tree is empty. Launch via <span className="font-mono">pnpm tauri:dev</span>.
-          </div>
-        )}
-        {root && (
+        {/* Order matters: the browser build has no filesystem at all, so it
+            wins over both "no folder" and whatever a stale persisted root
+            would otherwise make the tree claim about itself. */}
+        {!isTauri ? (
+          <EmptyState
+            icon={FolderOpen}
+            title="File tree unavailable"
+            body="The browser preview has no filesystem access. Run ARC as a desktop app to browse files."
+            hint="pnpm tauri:dev"
+          />
+        ) : !root ? (
+          <EmptyState
+            icon={FolderOpen}
+            title="No folder open"
+            body="Open a folder to browse, search, and track its files."
+            action={{
+              label: 'Open folder',
+              run: () => {
+                void fsPickFolder(null).then((dir) => dir && setRoot(dir));
+              },
+            }}
+          />
+        ) : null}
+        {isTauri && root && (
           <TreeChildren
             parentPath={root}
             depth={0}
             nodes={nodes}
             showHidden={showHidden}
             query={query}
+            onClearQuery={() => setSearchQuery('')}
             onToggle={toggle}
             onPaste={pasteIntoActiveTerminal}
             onOpenFile={openFile}
@@ -817,6 +836,52 @@ function DeleteDialog({
   );
 }
 
+// ── Empty states ─────────────────────────────────────────────────────────────
+
+/**
+ * The Explorer's three nothing-to-show states. Each one names what is going
+ * on and offers the way out, rather than the bare "empty folder" label that
+ * used to sit here — an empty panel is the one screen with room to say what
+ * to do next.
+ */
+function EmptyState({
+  icon: Icon,
+  title,
+  body,
+  action,
+  hint,
+}: {
+  icon: typeof FolderOpen;
+  title: string;
+  body: string;
+  action?: { label: string; run: () => void };
+  /** A command to run, set in mono. Shown under the body. */
+  hint?: string;
+}) {
+  return (
+    <div className="flex flex-col items-center gap-2 px-5 py-10 text-center">
+      <Icon size={20} strokeWidth={1.6} className="text-fg-subtle" aria-hidden />
+      <div className="font-display text-xs font-medium text-fg-muted">{title}</div>
+      <p className="m-0 max-w-[220px] font-display text-2xs leading-relaxed text-fg-subtle">
+        {body}
+      </p>
+      {hint && (
+        <code className="rounded bg-surface-1 px-1.5 py-0.5 font-mono text-2xs text-fg-subtle">
+          {hint}
+        </code>
+      )}
+      {action && (
+        <button
+          onClick={action.run}
+          className="mt-1 rounded-md bg-surface-2 px-2.5 py-1 font-display text-2xs font-medium text-fg-base ring-1 ring-edge-2 transition-colors hover:bg-surface-3"
+        >
+          {action.label}
+        </button>
+      )}
+    </div>
+  );
+}
+
 // ── TreeChildren ─────────────────────────────────────────────────────────────
 
 function TreeChildren({
@@ -825,6 +890,7 @@ function TreeChildren({
   nodes,
   showHidden,
   query,
+  onClearQuery,
   onToggle,
   onPaste,
   onOpenFile,
@@ -835,6 +901,8 @@ function TreeChildren({
   nodes: Record<string, NodeState>;
   showHidden: boolean;
   query: string;
+  /** Only the depth-0 tree renders an empty state, so only it needs this. */
+  onClearQuery?: () => void;
   onToggle: (path: string) => void;
   onPaste: (snippet: string) => void | Promise<void>;
   onOpenFile: (path: string) => string;
@@ -864,11 +932,21 @@ function TreeChildren({
   });
 
   if (visible.length === 0) {
-    return depth === 0 ? (
-      <div className="px-2 py-1.5 font-display text-2xs italic leading-relaxed text-fg-subtle">
-        {query ? 'no matches' : 'empty folder'}
-      </div>
-    ) : null;
+    if (depth !== 0) return null;
+    return query ? (
+      <EmptyState
+        icon={Search}
+        title="No files match"
+        body={`Nothing in this folder matches "${query}".`}
+        action={onClearQuery ? { label: 'Clear filter', run: onClearQuery } : undefined}
+      />
+    ) : (
+      <EmptyState
+        icon={FolderPlus}
+        title="This folder is empty"
+        body="Create a file to get started, or open a different folder."
+      />
+    );
   }
 
   return (
