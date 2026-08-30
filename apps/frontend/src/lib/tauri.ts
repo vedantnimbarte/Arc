@@ -721,6 +721,9 @@ export interface PersistedSettings {
   notifySound?: boolean;
   /** Check for a new release on launch (Settings → About). */
   autoUpdateCheck?: boolean;
+  /** Model id for the terminal's ⌘K command bar. The API key lives in the
+   *  OS credential vault, not here. */
+  aiModel?: string;
   /** Folder names excluded from file search. Fully user-editable; seeded with
    *  sensible defaults (node_modules, .venv, target, …). */
   searchIgnoreDirs?: string[];

@@ -25,6 +25,8 @@ import { useTrust } from '../state/trust';
 import { detectRiskyPaste, usePaste } from '../state/paste';
 import { useSettings } from '../state/settings';
 import { useWorkspace } from '../state/workspace';
+import { useAi } from '../state/ai';
+import { AiCommandBar } from './AiCommandBar';
 import { getFont, resolveActiveTheme } from '../themes';
 
 interface Props {
@@ -56,6 +58,9 @@ export function Terminal({ sessionKey }: Props) {
     setShowSplash(false);
     termRef.current?.focus();
   };
+  // ⌘K command bar (App owns the shortcut and names the tab).
+  const aiOpen = useAi((s) => s.openFor === sessionKey);
+
   const openRecentFile = (path: string) => {
     useWorkspace.getState().openFile(path);
     setShowSplash(false);
@@ -711,6 +716,17 @@ export function Terminal({ sessionKey }: Props) {
       />
       {showSplash && (
         <NewTabSplash onPasteCommand={pasteRecentCommand} onOpenFile={openRecentFile} />
+      )}
+      {aiOpen && (
+        <AiCommandBar
+          sessionKey={sessionKey}
+          shell={
+            useWorkspace.getState().tabs.find((t) => t.id === sessionKey)?.shellOverride ??
+            useSettings.getState().defaultShell
+          }
+          cwd={useWorkspace.getState().tabs.find((t) => t.id === sessionKey)?.cwd ?? null}
+          onInsert={pasteRecentCommand}
+        />
       )}
     </div>
   );

@@ -38,6 +38,9 @@ it.
 - **In-App Updates** — ARC checks for a new release on launch, offers it in a corner
   card, and installs it in place. Every download is minisign-verified against the key
   baked into the build before it runs. Turn the check off in **Settings → About**.
+- **⌘K Command Bar** — Describe a command in plain English and get it typed onto the
+  shell prompt for review; nothing runs until you press Enter. Needs an Anthropic API key
+  (**Settings → Terminal**), stored in your OS credential vault.
 - **AI CLI Launcher** — Optionally launch external coding CLIs (Claude Code, Codex, OpenCode,
   Wingman) in a terminal tab when installed on your PATH.
 

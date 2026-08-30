@@ -22,6 +22,10 @@ import { loadInstalledThemes } from '../lib/themeMarketplace';
 /** Folder names excluded from file search by default. Mirrors the Rust
  *  crate's built-in skip list; the setting is fully editable, so the frontend
  *  owns the source of truth and passes the active list to `fs_search`. */
+/** Default model for the ⌘K command bar. Overridable in Settings → Terminal
+ *  for anyone who wants a cheaper or faster one. */
+export const DEFAULT_AI_MODEL = 'claude-opus-5';
+
 export const DEFAULT_SEARCH_IGNORE_DIRS = [
   'node_modules',
   'target',
@@ -89,6 +93,10 @@ export interface Settings {
    *  ARC never contacts the update endpoint on its own — Settings → About
    *  still has a manual "Check for updates" button. */
   autoUpdateCheck: boolean;
+  /** Model used by the terminal's natural-language command bar. The API key
+   *  is deliberately NOT here — settings are plain rows in SQLite, so it
+   *  lives in the OS credential vault (see `ANTHROPIC_KEY_SECRET`). */
+  aiModel: string;
   /** True once hydrateSettings() has applied stored values. */
   settingsHydrated: boolean;
   setDefaultShell: (shell: string | null) => void;
@@ -111,6 +119,7 @@ export interface Settings {
   setNotifySound: (on: boolean) => void;
   setSearchIgnoreDirs: (dirs: string[]) => void;
   setAutoUpdateCheck: (on: boolean) => void;
+  setAiModel: (model: string) => void;
   hydrateSettings: () => Promise<void>;
 }
 
@@ -130,6 +139,7 @@ const DEFAULTS = {
   notifySound: false,
   searchIgnoreDirs: DEFAULT_SEARCH_IGNORE_DIRS,
   autoUpdateCheck: true,
+  aiModel: DEFAULT_AI_MODEL,
 };
 
 const MIN_NOTIFY_SECS = 5;
@@ -190,6 +200,7 @@ export const useSettings = create<Settings>()((set, get) => ({
   setNotifySound: (on) => set({ notifySound: on }),
   setSearchIgnoreDirs: (dirs) => set({ searchIgnoreDirs: dirs }),
   setAutoUpdateCheck: (on) => set({ autoUpdateCheck: on }),
+  setAiModel: (model) => set({ aiModel: model.trim() || DEFAULT_AI_MODEL }),
 
   hydrateSettings: async () => {
     if (get().settingsHydrated) return;
@@ -321,6 +332,10 @@ function applyStored(
       typeof stored.autoUpdateCheck === 'boolean'
         ? stored.autoUpdateCheck
         : current.autoUpdateCheck,
+    aiModel:
+      typeof stored.aiModel === 'string' && stored.aiModel.trim()
+        ? stored.aiModel
+        : current.aiModel,
   };
 }
 
@@ -341,6 +356,7 @@ function toPersistedSettings(s: Settings): PersistedSettings {
     notifySound: s.notifySound,
     searchIgnoreDirs: s.searchIgnoreDirs,
     autoUpdateCheck: s.autoUpdateCheck,
+    aiModel: s.aiModel,
   };
 }
 

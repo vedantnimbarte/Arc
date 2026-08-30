@@ -32,12 +32,14 @@ import {
   Loader2,
 } from 'lucide-react';
 import {
+  DEFAULT_AI_MODEL,
   DEFAULT_SEARCH_IGNORE_DIRS,
   flushSettingsSave,
   useSettings,
 } from '../state/settings';
 import { checkForUpdate, installUpdate, type UpdateInfo } from '../lib/updater';
 import { getAppVersion } from '../lib/tauri';
+import { ANTHROPIC_KEY_SECRET } from '../lib/ai';
 import { FontPicker } from './FontPicker';
 import { useFiles, type SidebarView } from '../state/files';
 import { useSidebarLayout } from '../state/sidebarLayout';
@@ -46,6 +48,7 @@ import {
   isTauri,
   ptyListShells,
   secretDelete,
+  secretGet,
   secretList,
   secretSet,
   type ShellInfo,
@@ -1239,6 +1242,13 @@ function TerminalPane({
       <ShellPicker shells={shells} defaultShell={defaultShell} onPick={onPickShell} />
 
       <Section
+        title="Command Suggestions"
+        hint="Press ⌘K / Ctrl+K in a terminal, describe what you want, and the suggested command lands on the shell prompt for you to review. Nothing runs until you press Enter yourself."
+      >
+        <AiCommandSettings />
+      </Section>
+
+      <Section
         title="Notifications"
         hint="Get a system notification when a long command finishes while ARC isn't focused. Requires shell integration (OSC 133) — most modern shell setups emit it."
       >
@@ -1283,6 +1293,121 @@ function TerminalPane({
           />
         </div>
       </Section>
+    </div>
+  );
+}
+
+/** API key + model for the ⌘K command bar. The key goes to the OS credential
+ *  vault, never to SQLite, so it is write-only here: we can tell whether one
+ *  exists, and replace or clear it, but never show it back. */
+function AiCommandSettings() {
+  const aiModel = useSettings((s) => s.aiModel);
+  const setAiModel = useSettings((s) => s.setAiModel);
+  const [model, setModel] = useState(aiModel);
+  const [key, setKey] = useState('');
+  const [hasKey, setHasKey] = useState<boolean | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => setModel(aiModel), [aiModel]);
+
+  useEffect(() => {
+    if (!isTauri) return;
+    void secretGet(ANTHROPIC_KEY_SECRET)
+      .then((v) => setHasKey(Boolean(v)))
+      .catch(() => setHasKey(false));
+  }, []);
+
+  const saveKey = async () => {
+    const trimmed = key.trim();
+    if (!trimmed || busy) return;
+    setBusy(true);
+    try {
+      await secretSet(ANTHROPIC_KEY_SECRET, trimmed);
+      setHasKey(true);
+      // Never hold the secret in component state longer than the call needs.
+      setKey('');
+    } catch (err) {
+      console.error('[ai] storing API key failed:', err);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const clearKey = async () => {
+    setBusy(true);
+    try {
+      await secretDelete(ANTHROPIC_KEY_SECRET);
+      setHasKey(false);
+    } catch (err) {
+      console.error('[ai] clearing API key failed:', err);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="rounded-lg border border-border-subtle bg-bg-base/40 px-3 py-2.5">
+      <label className="flex flex-col gap-1">
+        <span className="font-display text-sm font-medium tracking-tight text-fg-base">
+          Anthropic API key
+        </span>
+        <span className="font-display text-xs text-fg-muted">
+          {hasKey
+            ? 'A key is stored in your OS credential vault. Paste a new one to replace it.'
+            : 'Stored in your OS credential vault (Keychain / Credential Manager / secret-service), not in ARC’s database.'}
+        </span>
+        <div className="mt-1 flex items-center gap-1.5">
+          <input
+            type="password"
+            value={key}
+            onChange={(e) => setKey(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') void saveKey();
+            }}
+            placeholder={hasKey ? '••••••••••••••••' : 'sk-ant-…'}
+            spellCheck={false}
+            autoComplete="off"
+            className="min-w-0 flex-1 rounded-md border border-edge-1 bg-surface-1 px-2 py-1 font-mono text-xs text-fg-base placeholder:text-fg-subtle focus:border-accent/40 focus:outline-none"
+          />
+          <button
+            onClick={() => void saveKey()}
+            disabled={!key.trim() || busy}
+            className="shrink-0 rounded-md border border-border-subtle bg-bg-base/40 px-2.5 py-1 font-display text-xs font-medium text-fg-base transition-colors hover:border-border-strong hover:bg-bg-base/60 disabled:opacity-50"
+          >
+            Save
+          </button>
+          {hasKey && (
+            <button
+              onClick={() => void clearKey()}
+              disabled={busy}
+              className="shrink-0 rounded-md px-2 py-1 font-display text-xs text-fg-muted transition-colors hover:bg-surface-1 hover:text-fg-base disabled:opacity-50"
+            >
+              Clear
+            </button>
+          )}
+        </div>
+      </label>
+
+      <label className="mt-2.5 flex flex-col gap-1">
+        <span className="font-display text-sm font-medium tracking-tight text-fg-base">
+          Model
+        </span>
+        <span className="font-display text-xs text-fg-muted">
+          Any Claude model id. <code className="font-mono">claude-haiku-4-5</code> is the
+          cheapest and quickest; the default trades a little latency for better commands.
+        </span>
+        <input
+          value={model}
+          onChange={(e) => setModel(e.target.value)}
+          onBlur={() => setAiModel(model)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') setAiModel(model);
+          }}
+          placeholder={DEFAULT_AI_MODEL}
+          spellCheck={false}
+          className="mt-1 rounded-md border border-edge-1 bg-surface-1 px-2 py-1 font-mono text-xs text-fg-base placeholder:text-fg-subtle focus:border-accent/40 focus:outline-none"
+        />
+      </label>
     </div>
   );
 }
