@@ -12,6 +12,7 @@ members = [
     "rust/git-host",
     "rust/lsp",
     "rust/wingman",
+    "rust/claude-code",
 ]
 
 [workspace.package]
@@ -107,6 +108,7 @@ arc-project-config = { path = "rust/project-config" }
 arc-git-host = { path = "rust/git-host" }
 arc-lsp = { path = "rust/lsp" }
 arc-wingman = { path = "rust/wingman" }
+arc-claude-code = { path = "rust/claude-code" }
 
 [profile.dev]
 opt-level = 0

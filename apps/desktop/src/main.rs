@@ -88,6 +88,7 @@ fn main() {
         .manage(SshState::default())
         .manage(WatchState::default())
         .manage(commands::wingman::WingmanState::default())
+        .manage(commands::claude_code::ClaudeState::default())
         .invoke_handler(tauri::generate_handler![
             commands::pty::pty_spawn,
             commands::pty::pty_write,
@@ -236,6 +237,10 @@ fn main() {
             commands::wingman::wingman_cost,
             commands::wingman::wingman_turn_start,
             commands::wingman::wingman_events_subscribe,
+            commands::claude_code::claude_available,
+            commands::claude_code::claude_turn_start,
+            commands::claude_code::claude_turn_cancel,
+            commands::claude_code::claude_permission_respond,
         ])
         .setup(|app| {
             // Open the SQLite store before the window appears so the first

@@ -35,6 +35,7 @@ import {
   Inbox,
   LayoutGrid,
   ListOrdered,
+  Sparkles,
 } from 'lucide-react';
 // Side-effect import: subscribes to file-tree root changes and keeps the
 // project-config store fresh. Doesn't render anything itself.
@@ -48,6 +49,7 @@ import { UpdateToast } from './components/UpdateToast';
 import { useSettings } from './state/settings';
 import { useAi } from './state/ai';
 import { autoConnectWingman, useWingman } from './state/wingman';
+import { useClaudeCode } from './state/claudeCode';
 
 // CodeMirror is heavy — defer its bundle until a file is actually opened.
 const Editor = lazy(() =>
@@ -246,6 +248,12 @@ export default function App() {
     if (!settingsHydrated) return;
     void autoConnectWingman(wingmanUrl);
   }, [settingsHydrated, wingmanUrl]);
+
+  // Probe for the Claude Code CLI once on boot. Nothing to connect to — this
+  // only decides whether the panel and its palette entries exist at all.
+  useEffect(() => {
+    void useClaudeCode.getState().detect();
+  }, []);
 
   const sshLogPanelOpen = useSsh((s) => s.logPanelOpen);
   const setSshLogPanelOpen = useSsh((s) => s.setLogPanelOpen);
@@ -494,6 +502,29 @@ export default function App() {
           // tokens and returns in one round trip.
           useFiles.getState().showSidebarView('wingman');
           void useWingman.getState().explainChanges();
+        },
+      },
+      // Same rule as Wingman's: only offered once the CLI is actually
+      // installed, so the palette never lists a panel that can't answer.
+      {
+        id: 'claude.panel',
+        title: 'Claude Code: Ask about this repo',
+        group: 'Claude Code',
+        keywords: ['ai', 'agent', 'chat', 'claude', 'ask', 'code'],
+        icon: Sparkles,
+        when: () => useClaudeCode.getState().status === 'ready',
+        run: () => useFiles.getState().showSidebarView('claude'),
+      },
+      {
+        id: 'claude.new-chat',
+        title: 'Claude Code: New conversation',
+        group: 'Claude Code',
+        keywords: ['claude', 'new', 'reset', 'clear', 'chat', 'session'],
+        icon: Sparkles,
+        when: () => useClaudeCode.getState().status === 'ready',
+        run: () => {
+          useClaudeCode.getState().newChat();
+          useFiles.getState().showSidebarView('claude');
         },
       },
     ];

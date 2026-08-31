@@ -5,6 +5,7 @@ import {
   Search,
   Bot,
   Server,
+  Sparkles,
   type LucideIcon,
 } from 'lucide-react';
 import type { SidebarView } from '../state/files';
@@ -34,6 +35,7 @@ export const SIDEBAR_VIEWS: SidebarViewDef[] = [
   { id: 'outline', label: 'Outline', Icon: ListTree },
   { id: 'ssh', label: 'SSH', Icon: Server, shortcut: 'toggle-ssh-panel' },
   { id: 'wingman', label: 'Wingman', Icon: Bot },
+  { id: 'claude', label: 'Claude Code', Icon: Sparkles },
 ];
 
 /** Lookup by id — convenient for the body switch / customization UI. */

@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { WingmanSettings } from './wingman/WingmanSettings';
+import { ClaudeSettings } from './claude/ClaudeSettings';
 import {
   Cpu,
   Keyboard,
@@ -28,6 +29,7 @@ import {
   Activity,
   KeyRound,
   Bot,
+  Sparkles,
   ArrowUpCircle,
   Loader2,
 } from 'lucide-react';
@@ -87,6 +89,7 @@ type Pane =
   | 'sidebar'
   | 'secrets'
   | 'wingman'
+  | 'claude'
   | 'about';
 
 export function SettingsPage() {
@@ -179,6 +182,7 @@ export function SettingsPage() {
             <SidebarRow icon={PanelLeft} label="Sidebar" active={pane === 'sidebar'} onClick={() => setPane('sidebar')} />
             <SidebarRow icon={KeyRound} label="Secrets" active={pane === 'secrets'} onClick={() => setPane('secrets')} />
             <SidebarRow icon={Bot} label="Wingman" active={pane === 'wingman'} onClick={() => setPane('wingman')} />
+            <SidebarRow icon={Sparkles} label="Claude Code" active={pane === 'claude'} onClick={() => setPane('claude')} />
             <SidebarRow icon={Info} label="About" active={pane === 'about'} onClick={() => setPane('about')} />
           </nav>
 
@@ -232,6 +236,7 @@ export function SettingsPage() {
               {pane === 'sidebar' && <SidebarSettingsPane />}
               {pane === 'secrets' && <SecretsPane />}
               {pane === 'wingman' && <WingmanPane />}
+              {pane === 'claude' && <ClaudePane />}
               {pane === 'about' && <AboutPane />}
             </div>
           )}
@@ -1852,6 +1857,22 @@ function WingmanPane() {
         hint="Wingman is a terminal coding agent. Point ARC at a running `wingman serve` daemon to enable the agent panel and the pilot board. ARC works fully without it."
       >
         <WingmanSettings />
+      </Section>
+    </div>
+  );
+}
+
+/** Claude Code needs no connection — ARC spawns the user's own CLI, which
+ *  already holds their login. What Settings owns is the blast radius: how much
+ *  Claude may do unattended, and how much it may spend doing it. */
+function ClaudePane() {
+  return (
+    <div className="flex flex-col gap-6">
+      <Section
+        title="Claude Code"
+        hint="ARC drives your installed `claude` CLI in headless mode to give it a chat panel with reviewable edits. Nothing to connect and no key to store — it uses your existing login. ARC works fully without it."
+      >
+        <ClaudeSettings />
       </Section>
     </div>
   );

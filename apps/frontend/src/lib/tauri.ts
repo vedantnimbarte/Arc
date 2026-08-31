@@ -713,6 +713,11 @@ export interface PersistedSettings {
   /** Address of a `wingman serve` daemon. Empty disables the integration.
    *  The token is not persisted here — it lives in the OS credential vault. */
   wingmanUrl?: string;
+  /** Claude Code panel preferences. The CLI holds the credentials, so nothing
+   *  secret is stored here. */
+  claudePermissionMode?: string;
+  claudeModel?: string;
+  claudeMaxBudgetUsd?: number;
   /** Notify on long-running commands when unfocused (Tier 1.5). */
   notifyLongCommands?: boolean;
   /** Seconds a command must exceed before notifying. */
@@ -1880,4 +1885,90 @@ export async function onWingmanEvents(
   handler: (ev: WingmanStreamEvent) => void,
 ): Promise<UnlistenFn> {
   return listen<WingmanStreamEvent>('wingman://events', (e) => handler(e.payload));
+}
+
+// ─── Claude Code ───────────────────────────────────────────────────────────
+//
+// Claude Code has no daemon: ARC spawns the user's own `claude` binary in
+// headless `stream-json` mode, one child per turn (see rust/claude-code). So
+// there is nothing to configure — `claudeAvailable` returning null just means
+// the CLI isn't installed, and the UI hides every Claude surface.
+
+/** The CLI's `--permission-mode` values.
+ *
+ *  ARC answers the CLI's permission requests over the control channel, so the
+ *  modes that ask now actually prompt in the panel: `manual` asks before every
+ *  tool, `acceptEdits` applies file edits silently but still asks for anything
+ *  else (shell commands included), and `plan` never writes at all.
+ *  `dontAsk` and `bypassPermissions` never ask. */
+export type ClaudePermissionMode =
+  | 'plan'
+  | 'acceptEdits'
+  | 'auto'
+  | 'manual'
+  | 'dontAsk'
+  | 'bypassPermissions';
+
+/** One event from a turn: `init`, `text_delta`, `thinking_delta`, `tool_start`,
+ *  `tool_result`, `usage`, `result`, plus ARC's own terminal `done` / `error`.
+ *  Payload shapes are the crate's — the store narrows what it renders. */
+export interface ClaudeStreamEvent {
+  kind: string;
+  payload: Record<string, unknown>;
+}
+
+/** Absolute path to the Claude Code binary, or null when it isn't installed.
+ *  This is the gate for the whole feature. */
+export async function claudeAvailable(): Promise<string | null> {
+  return invoke<string | null>('claude_available');
+}
+
+/** Start a turn. Returns the topic to listen on; `resume` continues a prior
+ *  conversation by its session id. */
+export async function claudeTurnStart(opts: {
+  cwd: string;
+  prompt: string;
+  resume?: string | null;
+  model?: string | null;
+  permissionMode?: string | null;
+  maxBudgetUsd?: number | null;
+}): Promise<string> {
+  return invoke<string>('claude_turn_start', {
+    cwd: opts.cwd,
+    prompt: opts.prompt,
+    resume: opts.resume ?? null,
+    model: opts.model ?? null,
+    permissionMode: opts.permissionMode ?? null,
+    maxBudgetUsd: opts.maxBudgetUsd ?? null,
+  });
+}
+
+/** Answer a `permission_request`. The turn is paused until this lands.
+ *  `message` is shown to Claude on a denial so it can adapt rather than retry. */
+export async function claudePermissionRespond(opts: {
+  topic: string;
+  requestId: string;
+  allow: boolean;
+  message?: string | null;
+}): Promise<void> {
+  return invoke('claude_permission_respond', {
+    topic: opts.topic,
+    requestId: opts.requestId,
+    allow: opts.allow,
+    message: opts.message ?? null,
+  });
+}
+
+/** Kill a running turn. Unknown topics are a no-op. Also the escape hatch from
+ *  a permission prompt the user would rather not answer either way. */
+export async function claudeTurnCancel(topic: string): Promise<void> {
+  return invoke('claude_turn_cancel', { topic });
+}
+
+/** Listen on a topic returned by `claudeTurnStart`. */
+export async function onClaudeTurn(
+  topic: string,
+  handler: (ev: ClaudeStreamEvent) => void,
+): Promise<UnlistenFn> {
+  return listen<ClaudeStreamEvent>(topic, (e) => handler(e.payload));
 }

@@ -14,6 +14,7 @@ import { SourceControl } from './SourceControl';
 import { SearchView } from './SearchView';
 import { OutlineView } from './OutlineView';
 import { WingmanPanel } from './wingman/WingmanPanel';
+import { ClaudePanel } from './claude/ClaudePanel';
 import { SshPanel } from './ssh/SshPanel';
 import { fsReveal, fsWatchStart, fsWatchStop, isTauri, settingsWindowOpen } from '../lib/tauri';
 import { useFiles, type SidebarView } from '../state/files';
@@ -142,6 +143,8 @@ export function Sidebar() {
             <OutlineView />
           ) : view === 'wingman' ? (
             <WingmanPanel />
+          ) : view === 'claude' ? (
+            <ClaudePanel />
           ) : (
             <SshPanel onClose={() => setSidebarView('files')} />
           )}
