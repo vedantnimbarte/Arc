@@ -162,10 +162,9 @@ pub async fn pty_list_shells() -> Result<Vec<ShellInfo>, String> {
     Ok(discover_shells())
 }
 
-/// Enumerate installed AI coding-agent CLIs (Claude Code, OpenAI Codex,
-/// OpenCode). Used by the launcher UI to populate menus and by the chat
-/// panel to surface `local-cli` providers only when their binary is
-/// actually present.
+/// Enumerate installed AI coding-agent CLIs — see `discover_ai_clis` for the
+/// list. Used by the launcher UI to populate menus and by the chat panel to
+/// surface `local-cli` providers only when their binary is actually present.
 #[tauri::command]
 pub async fn pty_list_ai_clis() -> Result<Vec<AiCliInfo>, String> {
     Ok(discover_ai_clis())

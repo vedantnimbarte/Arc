@@ -68,8 +68,11 @@ it.
 - **⌘K Command Bar** — Describe a command in plain English and get it typed onto the
   shell prompt for review; nothing runs until you press Enter. Needs an Anthropic API key
   (**Settings → Terminal**), stored in your OS credential vault.
-- **AI CLI Launcher** — Optionally launch external coding CLIs (Claude Code, Codex, OpenCode,
-  Wingman) in a terminal tab when installed on your PATH. For Claude Code specifically, the panel above
+- **AI CLI Launcher** — Optionally launch external coding CLIs in a terminal tab when they're
+  installed on your PATH: Claude Code, OpenAI Codex, OpenCode, Kimi Code, Gemini CLI, Qwen Code,
+  Cursor Agent, GitHub Copilot, Amp, Aider, Crush, Factory Droid, and Wingman. Whatever's present
+  shows up in the tab-bar agent menu, the new-tab popover, the empty-workspace screen and the
+  command palette; anything missing simply doesn't appear. For Claude Code specifically, the panel above
   is usually the better surface — the launcher is there when you want the real TUI.
 
 ## Quick Start

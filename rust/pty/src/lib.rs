@@ -577,81 +577,126 @@ fn which_in(exe: &str, dirs: &[std::path::PathBuf]) -> Option<std::path::PathBuf
 /// Code provider regardless of where the binary lives.
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct AiCliInfo {
-    /// Stable id used in settings + provider routing
-    /// (`"claude-cli"`, `"codex-cli"`, `"opencode-cli"`, `"kimi-code-cli"`).
+    /// Stable id used in settings + provider routing. Always `<tool>-cli`;
+    /// the frontend's `AiCliId` union in `lib/tauri.ts` must list the same set.
     pub id: String,
     pub label: String,
     pub path: String,
 }
 
-/// Probe `PATH` for known AI coding-agent CLIs (Claude Code, OpenAI Codex,
-/// OpenCode, Kimi Code). Pure read — nothing is spawned, no env is mutated.
-/// Each tool may ship multiple binary names across platforms (e.g. `claude.cmd`
-/// vs `claude.exe` on Windows); the first match wins.
+/// Probe `PATH` for known AI coding-agent CLIs. Pure read — nothing is
+/// spawned, no env is mutated, and a tool that isn't installed simply doesn't
+/// appear (the launcher menus render whatever comes back).
+///
+/// Adding a tool is one row here plus one entry in the frontend's `AI_CLIS`
+/// table — the tab-bar menu, the new-tab popover, the empty-workspace list
+/// and the shortcut/palette actions all derive from those two.
 pub fn discover_ai_clis() -> Vec<AiCliInfo> {
-    // (stable id, label, [candidate binaries in preference order])
-    let candidates: &[(&str, &str, &[&str])] = if cfg!(windows) {
-        &[
-            (
-                "claude-cli",
-                "Claude Code",
-                &["claude.cmd", "claude.exe", "claude.bat", "claude"],
-            ),
-            (
-                "codex-cli",
-                "OpenAI Codex",
-                &["codex.cmd", "codex.exe", "codex.bat", "codex"],
-            ),
-            (
-                "opencode-cli",
-                "OpenCode",
-                &["opencode.cmd", "opencode.exe", "opencode.bat", "opencode"],
-            ),
-            (
-                "kimi-code-cli",
-                "Kimi Code",
-                &[
-                    "kimi.cmd",
-                    "kimi.exe",
-                    "kimi.bat",
-                    "kimi",
-                    "kimicode.cmd",
-                    "kimicode.exe",
-                    "kimicode.bat",
-                    "kimicode",
-                ],
-            ),
-            (
-                "wingman-cli",
-                "Wingman",
-                &["wingman.cmd", "wingman.exe", "wingman.bat", "wingman"],
-            ),
-        ]
-    } else {
-        &[
-            ("claude-cli", "Claude Code", &["claude"]),
-            ("codex-cli", "OpenAI Codex", &["codex"]),
-            ("opencode-cli", "OpenCode", &["opencode"]),
-            ("kimi-code-cli", "Kimi Code", &["kimi", "kimicode"]),
-            ("wingman-cli", "Wingman", &["wingman"]),
-        ]
-    };
+    // (stable id, label, [binary stems in preference order]). Stems only:
+    // the Windows `.cmd`/`.exe`/`.bat` shims are appended below rather than
+    // spelled out per tool, since every one of these ships as a node or bun
+    // shim there.
+    //
+    // Names are chosen to be unambiguous on PATH. `goose` is deliberately
+    // absent: it collides with the widely-installed Go migration tool of the
+    // same name, and launching that as an "AI agent" is worse than not
+    // offering it.
+    let candidates: &[(&str, &str, &[&str])] = &[
+        ("claude-cli", "Claude Code", &["claude"]),
+        ("codex-cli", "OpenAI Codex", &["codex"]),
+        ("opencode-cli", "OpenCode", &["opencode"]),
+        ("kimi-code-cli", "Kimi Code", &["kimi", "kimicode"]),
+        ("gemini-cli", "Gemini CLI", &["gemini"]),
+        ("qwen-code-cli", "Qwen Code", &["qwen"]),
+        ("cursor-agent-cli", "Cursor Agent", &["cursor-agent"]),
+        ("copilot-cli", "GitHub Copilot", &["copilot"]),
+        ("amp-cli", "Amp", &["amp"]),
+        ("aider-cli", "Aider", &["aider"]),
+        ("crush-cli", "Crush", &["crush"]),
+        ("droid-cli", "Factory Droid", &["droid"]),
+        ("wingman-cli", "Wingman", &["wingman"]),
+    ];
 
     let path_var = std::env::var_os("PATH").unwrap_or_default();
     let dirs: Vec<std::path::PathBuf> = std::env::split_paths(&path_var).collect();
+    scan_ai_clis(candidates, &dirs)
+}
+
+/// The search itself, split out from `PATH` lookup so it is testable without
+/// mutating the process environment. At most one entry per tool: the first
+/// stem×extension that resolves wins.
+fn scan_ai_clis(
+    candidates: &[(&str, &str, &[&str])],
+    dirs: &[std::path::PathBuf],
+) -> Vec<AiCliInfo> {
+    // The bare stem is tried last on Windows so an extensionless file that is
+    // genuinely there still resolves.
+    let exts: &[&str] = if cfg!(windows) {
+        &[".cmd", ".exe", ".bat", ""]
+    } else {
+        &[""]
+    };
 
     let mut out = Vec::new();
-    for (id, label, exes) in candidates {
-        for exe in *exes {
-            if let Some(resolved) = which_in(exe, &dirs) {
-                out.push(AiCliInfo {
-                    id: (*id).to_string(),
-                    label: (*label).to_string(),
-                    path: resolved.to_string_lossy().into_owned(),
-                });
-                break;
+    'tool: for (id, label, stems) in candidates {
+        for stem in *stems {
+            for ext in exts {
+                if let Some(resolved) = which_in(&format!("{stem}{ext}"), dirs) {
+                    out.push(AiCliInfo {
+                        id: (*id).to_string(),
+                        label: (*label).to_string(),
+                        path: resolved.to_string_lossy().into_owned(),
+                    });
+                    continue 'tool;
+                }
             }
         }
     }
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// One entry per tool, first match wins, and a tool with nothing on disk
+    /// is simply absent. Guards the stem×extension expansion in
+    /// `scan_ai_clis` — the part that is easy to break into duplicate or
+    /// missing menu rows.
+    #[test]
+    fn scan_picks_one_binary_per_tool() {
+        let dir = std::env::temp_dir().join("arc-ai-cli-scan-test");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        for name in ["claude", "claude.cmd", "claude.exe", "codex"] {
+            std::fs::write(dir.join(name), b"").unwrap();
+        }
+        let dirs = vec![dir.clone()];
+
+        let found = scan_ai_clis(
+            &[
+                ("claude-cli", "Claude Code", &["claude"]),
+                ("codex-cli", "OpenAI Codex", &["codex"]),
+                ("absent-cli", "Absent", &["definitely-not-installed"]),
+            ],
+            &dirs,
+        );
+
+        let ids: Vec<&str> = found.iter().map(|c| c.id.as_str()).collect();
+        assert_eq!(ids, ["claude-cli", "codex-cli"]);
+        assert!(found[0].path.starts_with(dir.to_str().unwrap()));
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Ids are what the frontend's `AiCliId` union keys off; a duplicate would
+    /// silently shadow a tool in the launcher menus.
+    #[test]
+    fn discovered_ids_are_unique() {
+        let ids: Vec<String> = discover_ai_clis().into_iter().map(|c| c.id).collect();
+        let mut sorted = ids.clone();
+        sorted.sort();
+        sorted.dedup();
+        assert_eq!(sorted.len(), ids.len());
+    }
 }

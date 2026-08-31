@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
+import { AI_CLIS, type AiCliId } from '../lib/tauri';
 
 /** Every user-rebindable command in the app. New commands must appear in
  *  DEFAULT_BINDINGS and ACTION_META below — this keeps the dialog, the
@@ -17,13 +18,15 @@ export type ActionId =
   | 'show-explorer'
   | 'show-source-control'
   | 'toggle-ssh-panel'
-  | 'launch-claude-cli'
-  | 'launch-codex-cli'
-  | 'launch-opencode-cli'
-  | 'launch-kimi-code-cli'
-  | 'launch-wingman-cli'
+  /** One launcher per detected CLI, derived from AI_CLIS — see LAUNCH_IDS. */
+  | LaunchActionId
   | 'launch-wingman-pilot'
   | 'launch-wingman-headless';
+
+/** `launch-claude-cli`, `launch-codex-cli`, … — one per AI_CLIS entry. */
+export type LaunchActionId = `launch-${AiCliId}`;
+
+const LAUNCH_IDS = Object.keys(AI_CLIS) as AiCliId[];
 
 export type ActionCategory = 'Workspace' | 'Terminal' | 'SSH' | 'AI CLIs' | 'Help';
 
@@ -117,36 +120,17 @@ export const ACTION_META: Record<ActionId, ActionMeta> = {
     description: 'Open or close the SSH host & key manager.',
     category: 'SSH',
   },
-  'launch-claude-cli': {
-    id: 'launch-claude-cli',
-    label: 'Launch Claude Code',
-    description: 'Open a new terminal tab running the Claude Code CLI.',
-    category: 'AI CLIs',
-  },
-  'launch-codex-cli': {
-    id: 'launch-codex-cli',
-    label: 'Launch OpenAI Codex',
-    description: 'Open a new terminal tab running the OpenAI Codex CLI.',
-    category: 'AI CLIs',
-  },
-  'launch-opencode-cli': {
-    id: 'launch-opencode-cli',
-    label: 'Launch OpenCode',
-    description: 'Open a new terminal tab running the OpenCode CLI.',
-    category: 'AI CLIs',
-  },
-  'launch-kimi-code-cli': {
-    id: 'launch-kimi-code-cli',
-    label: 'Launch Kimi Code',
-    description: 'Open a new terminal tab running the Kimi Code CLI.',
-    category: 'AI CLIs',
-  },
-  'launch-wingman-cli': {
-    id: 'launch-wingman-cli',
-    label: 'Launch Wingman',
-    description: 'Open a new terminal tab running the Wingman TUI.',
-    category: 'AI CLIs',
-  },
+  ...(Object.fromEntries(
+    LAUNCH_IDS.map((cli) => [
+      `launch-${cli}`,
+      {
+        id: `launch-${cli}`,
+        label: `Launch ${AI_CLIS[cli]}`,
+        description: `Open a new terminal tab running ${AI_CLIS[cli]}.`,
+        category: 'AI CLIs',
+      },
+    ]),
+  ) as Record<LaunchActionId, ActionMeta>),
   'launch-wingman-pilot': {
     id: 'launch-wingman-pilot',
     label: 'Launch Wingman Pilot',
@@ -174,11 +158,7 @@ export const ACTION_ORDER: ActionId[] = [
   'show-explorer',
   'show-source-control',
   'toggle-ssh-panel',
-  'launch-claude-cli',
-  'launch-codex-cli',
-  'launch-opencode-cli',
-  'launch-kimi-code-cli',
-  'launch-wingman-cli',
+  ...LAUNCH_IDS.map((cli) => `launch-${cli}` as LaunchActionId),
   'launch-wingman-pilot',
   'launch-wingman-headless',
 ];
@@ -205,11 +185,10 @@ export const DEFAULT_BINDINGS: Record<ActionId, KeyBinding | null> = {
   // AI CLI launchers ship unbound by default — users can assign keys via the
   // shortcuts dialog, and they're discoverable through the TabBar dropdown
   // and the new-tab popover regardless.
-  'launch-claude-cli': null,
-  'launch-codex-cli': null,
-  'launch-opencode-cli': null,
-  'launch-kimi-code-cli': null,
-  'launch-wingman-cli': null,
+  ...(Object.fromEntries(LAUNCH_IDS.map((cli) => [`launch-${cli}`, null])) as Record<
+    LaunchActionId,
+    null
+  >),
   'launch-wingman-pilot': null,
   'launch-wingman-headless': null,
 };

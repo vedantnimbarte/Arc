@@ -81,13 +81,34 @@ export async function ptyListShells(): Promise<ShellInfo[]> {
   return invoke<ShellInfo[]>('pty_list_shells');
 }
 
+/**
+ * Every AI coding-agent CLI the Rust detector probes for, id → display label,
+ * in menu order. Must stay in step with `discover_ai_clis` in rust/pty.
+ *
+ * Single source of truth on this side: the launcher actions in
+ * `state/shortcuts.ts` (and therefore the shortcuts dialog and the command
+ * palette) are derived from it, so adding a CLI is one row here and one row
+ * in Rust. The tab-bar menu, new-tab popover and empty-workspace list already
+ * render whatever `ptyListAiClis` returns and need no change at all.
+ */
+export const AI_CLIS = {
+  'claude-cli': 'Claude Code',
+  'codex-cli': 'OpenAI Codex',
+  'opencode-cli': 'OpenCode',
+  'kimi-code-cli': 'Kimi Code',
+  'gemini-cli': 'Gemini CLI',
+  'qwen-code-cli': 'Qwen Code',
+  'cursor-agent-cli': 'Cursor Agent',
+  'copilot-cli': 'GitHub Copilot',
+  'amp-cli': 'Amp',
+  'aider-cli': 'Aider',
+  'crush-cli': 'Crush',
+  'droid-cli': 'Factory Droid',
+  'wingman-cli': 'Wingman',
+} as const;
+
 /** Stable id assigned to each AI CLI by the Rust detector. */
-export type AiCliId =
-  | 'claude-cli'
-  | 'codex-cli'
-  | 'opencode-cli'
-  | 'kimi-code-cli'
-  | 'wingman-cli';
+export type AiCliId = keyof typeof AI_CLIS;
 
 /** One installed AI coding-agent CLI discovered on PATH. */
 export interface AiCliInfo {
@@ -97,9 +118,9 @@ export interface AiCliInfo {
 }
 
 /**
- * Enumerate AI coding-agent CLIs installed on the user's PATH (Claude Code,
- * OpenAI Codex, OpenCode). Used by the launcher UI in TabBar / new-tab popover
- * to spawn the CLI in a terminal tab.
+ * Enumerate AI coding-agent CLIs installed on the user's PATH — whichever of
+ * {@link AI_CLIS} the Rust detector actually found. Used by the launcher UI in
+ * TabBar / new-tab popover to spawn the CLI in a terminal tab.
  */
 export async function ptyListAiClis(): Promise<AiCliInfo[]> {
   return invoke<AiCliInfo[]>('pty_list_ai_clis');
