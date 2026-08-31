@@ -32,6 +32,7 @@ import {
   Trash2,
   Upload,
   X,
+  Bot,
 } from 'lucide-react';
 import {
   fsReadFile,
@@ -61,6 +62,7 @@ import {
   type GitDiffScope,
   type GitStashEntry,
 } from '../lib/tauri';
+import { agentTouched, useAgentRun } from '../state/agentRun';
 import { useFiles } from '../state/files';
 import { useGit } from '../state/git';
 import { useGitUi } from '../state/gitUi';
@@ -226,6 +228,12 @@ export function SourceControl() {
   const loading = useGit((s) => s.loading);
   const storeError = useGit((s) => s.error);
   const refreshStore = useGit((s) => s.refresh);
+
+  // Agent review: when a CLI was launched against this root, `baseline` holds
+  // what was already dirty then, so the panel can narrow to what the agent did.
+  const baseline = useAgentRun((s) => (root ? s.baselines[root] : undefined));
+  const filtering = useAgentRun((s) => s.filtering);
+  const reviewing = !!baseline && filtering;
 
   const [opError, setOpError] = useState<string | null>(null);
   const [message, setMessage] = useState('');
@@ -520,6 +528,22 @@ export function SourceControl() {
     }
   }, [root, refreshStore]);
 
+  // Everything below — sections, counts, stage-all, the commit box — runs off
+  // `visible`, so the review filter narrows the whole panel rather than just
+  // hiding rows. "Stage all" while reviewing stages the agent's work only,
+  // which is the point.
+  const visible = useMemo(
+    () => (reviewing ? entries.filter((e) => agentTouched(baseline.before, e)) : entries),
+    [entries, reviewing, baseline],
+  );
+
+  /** Agent-touched count, independent of whether the filter is on — the
+   *  review bar shows it either way. */
+  const agentCount = useMemo(
+    () => (baseline ? entries.filter((e) => agentTouched(baseline.before, e)).length : 0),
+    [entries, baseline],
+  );
+
   const grouped = useMemo(() => {
     const buckets: Record<Section, GitChangeEntry[]> = {
       staged: [],
@@ -527,17 +551,17 @@ export function SourceControl() {
       untracked: [],
       conflict: [],
     };
-    for (const e of entries) {
+    for (const e of visible) {
       buckets[sectionFor(e)].push(e);
     }
     for (const k of Object.keys(buckets) as Section[]) {
       buckets[k].sort((a, b) => a.path.localeCompare(b.path));
     }
     return buckets;
-  }, [entries]);
+  }, [visible]);
 
   const stagedCount = grouped.staged.length;
-  const total = entries.length;
+  const total = visible.length;
 
   const handleOpen = useCallback(
     (entry: GitChangeEntry) => {
@@ -814,6 +838,45 @@ export function SourceControl() {
             label="Rebase"
             onClick={() => useGitUi.getState().setRebasePanelOpen(true)}
           />
+        </div>
+      )}
+
+      {/* Agent review bar — only while a baseline exists for this root. Names
+          the agent and stays visible with the filter off, so a stale baseline
+          is never quietly narrowing the panel. */}
+      {baseline && (
+        <div className="flex shrink-0 items-center gap-2 border-b border-border-hairline bg-surface-1 px-2.5 py-1.5">
+          <Bot size={11.5} strokeWidth={2} className="shrink-0 text-fg-subtle" />
+          <span className="min-w-0 flex-1 truncate font-display text-2xs text-fg-muted">
+            <span className="text-fg-base">{baseline.agent}</span>
+            {' · '}
+            {agentCount === 0 ? 'no changes yet' : `${agentCount} file${agentCount === 1 ? '' : 's'}`}
+          </span>
+          <button
+            onClick={() => useAgentRun.getState().setFiltering(!filtering)}
+            className={cn(
+              'shrink-0 rounded-md px-1.5 py-0.5 font-display text-2xs transition-colors',
+              filtering
+                ? 'bg-surface-3 text-fg-base'
+                : 'text-fg-subtle hover:bg-surface-2 hover:text-fg-base',
+            )}
+            title={
+              filtering
+                ? 'Showing only what the agent changed — click to show every change'
+                : 'Showing every change — click to show only what the agent changed'
+            }
+            aria-pressed={filtering}
+          >
+            Agent only
+          </button>
+          <button
+            onClick={() => root && useAgentRun.getState().clear(root)}
+            className="shrink-0 text-fg-subtle transition-colors hover:text-fg-base"
+            aria-label="End agent review"
+            title="End agent review"
+          >
+            <X size={11} />
+          </button>
         </div>
       )}
 

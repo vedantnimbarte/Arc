@@ -12,6 +12,7 @@ import {
   type SshHost,
   type TabInput,
 } from '../lib/tauri';
+import { useAgentRun } from './agentRun';
 import { useFiles } from './files';
 import { useReveal } from './reveal';
 import { nextGroupColor, type TabGroupColorId } from '../lib/tabGroups';
@@ -1157,7 +1158,12 @@ export const useWorkspace = create<WorkspaceState>()((set, get) => ({
     return id;
   },
   launchAiCli: async (cli, opts) => {
-    await resetRootToHome();
+    // Unlike `newTerminal`, an agent tab deliberately does *not* reset the
+    // root to home: you launch a coding agent to work on the project you have
+    // open, so it inherits that cwd. That is also what makes the Source
+    // Control review baseline below mean anything.
+    const root = useFiles.getState().root;
+    void useAgentRun.getState().mark(root, cli.label);
     const id = `${cli.id}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
     const tab: Tab = {
       id,
