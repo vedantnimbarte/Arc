@@ -242,8 +242,8 @@ export default function App() {
   // internally; this only decides whether the chunk is fetched at all.
   const anyGitOverlayOpen = useGitUi(
     (s) =>
-      s.worktreePanelOpen ||
-      s.rebasePanelOpen ||
+      s.worktreeExpanded ||
+      s.rebaseExpanded ||
       s.cherryPickTarget !== null ||
       s.prPanelView.kind !== 'closed',
   );
@@ -459,6 +459,7 @@ export default function App() {
         run: () => {
           // Lazy import to avoid a circular dependency on App-local state.
           void import('./state/gitUi').then(({ useGitUi }) => {
+            useFiles.getState().showSidebarView('git');
             useGitUi.getState().setWorktreePanelOpen(true);
           });
         },
@@ -471,6 +472,7 @@ export default function App() {
         icon: ListOrdered,
         run: () => {
           void import('./state/gitUi').then(({ useGitUi }) => {
+            useFiles.getState().showSidebarView('git');
             useGitUi.getState().setRebasePanelOpen(true);
           });
         },

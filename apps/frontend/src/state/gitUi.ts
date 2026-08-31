@@ -15,6 +15,14 @@ interface GitUiState {
   setWorktreePanelOpen: (open: boolean) => void;
   toggleWorktreePanel: () => void;
 
+  /** Worktrees / rebase render inline in the source control panel; expanded
+   *  pops the same panel out as the roomier modal. Closing resets to inline
+   *  so the next open starts in the panel. */
+  worktreeExpanded: boolean;
+  setWorktreeExpanded: (v: boolean) => void;
+  rebaseExpanded: boolean;
+  setRebaseExpanded: (v: boolean) => void;
+
   /** Commit currently being cherry-picked. `null` = dialog closed. */
   cherryPickTarget: CherryPickContext | null;
   openCherryPick: (ctx: CherryPickContext) => void;
@@ -33,18 +41,30 @@ interface GitUiState {
   closePrPanel: () => void;
 }
 
-export const useGitUi = create<GitUiState>((set) => ({
+// Worktrees and rebase share one slot in the source control panel — opening
+// one replaces the other rather than stacking a second section below it.
+const CLOSED = {
   worktreePanelOpen: false,
-  setWorktreePanelOpen: (open) => set({ worktreePanelOpen: open }),
+  worktreeExpanded: false,
+  rebasePanelOpen: false,
+  rebaseExpanded: false,
+} as const;
+
+export const useGitUi = create<GitUiState>((set) => ({
+  ...CLOSED,
+  setWorktreePanelOpen: (open) =>
+    set(open ? { ...CLOSED, worktreePanelOpen: true } : CLOSED),
   toggleWorktreePanel: () =>
-    set((s) => ({ worktreePanelOpen: !s.worktreePanelOpen })),
+    set((s) => (s.worktreePanelOpen ? CLOSED : { ...CLOSED, worktreePanelOpen: true })),
+
+  setWorktreeExpanded: (v) => set({ worktreeExpanded: v }),
+  setRebaseExpanded: (v) => set({ rebaseExpanded: v }),
 
   cherryPickTarget: null,
   openCherryPick: (ctx) => set({ cherryPickTarget: ctx }),
   closeCherryPick: () => set({ cherryPickTarget: null }),
 
-  rebasePanelOpen: false,
-  setRebasePanelOpen: (open) => set({ rebasePanelOpen: open }),
+  setRebasePanelOpen: (open) => set(open ? { ...CLOSED, rebasePanelOpen: true } : CLOSED),
 
   prPanelView: { kind: 'closed' },
   openPrList: () => set({ prPanelView: { kind: 'list' } }),

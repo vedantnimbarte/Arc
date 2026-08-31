@@ -5,6 +5,8 @@ import {
   ArrowUp,
   GitCommitHorizontal,
   ListOrdered,
+  Maximize2,
+  Minimize2,
   Minus,
   RotateCcw,
   X,
@@ -20,6 +22,7 @@ import {
 } from '../../lib/tauri';
 import { useFiles } from '../../state/files';
 import { useGitUi } from '../../state/gitUi';
+import { PanelShell } from './PanelShell';
 import { cn } from '../../lib/cn';
 
 /**
@@ -33,9 +36,10 @@ import { cn } from '../../lib/cn';
  * the recommended workflow is to `git commit --amend` after the rebase if
  * a message needs changing.
  */
-export function RebasePanel() {
+export function RebasePanel({ inline = false }: { inline?: boolean }) {
   const open = useGitUi((s) => s.rebasePanelOpen);
   const onClose = useGitUi((s) => s.setRebasePanelOpen);
+  const setExpanded = useGitUi((s) => s.setRebaseExpanded);
   const root = useFiles((s) => s.root);
 
   const [count, setCount] = useState(10);
@@ -61,9 +65,7 @@ export function RebasePanel() {
         const ordered = [...list].reverse();
         setCommits(ordered);
         setOrder(ordered.map((c) => c.oid));
-        setActions(
-          Object.fromEntries(ordered.map((c) => [c.oid, 'pick' as GitRebaseAction])),
-        );
+        setActions(Object.fromEntries(ordered.map((c) => [c.oid, 'pick' as GitRebaseAction])));
       })
       .catch((e) => {
         if (!cancelled) setErr(e instanceof Error ? e.message : String(e));
@@ -96,8 +98,7 @@ export function RebasePanel() {
 
   const commitMap = useMemo(() => new Map(commits.map((c) => [c.oid, c])), [commits]);
 
-  const setAction = (oid: string, a: GitRebaseAction) =>
-    setActions((s) => ({ ...s, [oid]: a }));
+  const setAction = (oid: string, a: GitRebaseAction) => setActions((s) => ({ ...s, [oid]: a }));
 
   const move = (oid: string, delta: -1 | 1) => {
     setOrder((s) => {
@@ -156,133 +157,137 @@ export function RebasePanel() {
   const keepCount = order.length - dropCount;
 
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-start justify-center bg-scrim-2 backdrop-blur-sm"
-      onClick={() => !running && onClose(false)}
-    >
-      <div
-        onClick={(e) => e.stopPropagation()}
-        className="material-sheet mt-[8vh] flex w-[720px] max-w-[94vw] animate-sheet-in flex-col overflow-hidden rounded-window shadow-sheet ring-1 ring-edge-2"
-      >
-        <div className="flex items-center justify-between border-b border-border-hairline px-4 py-2.5">
-          <div className="flex items-center gap-2 font-display text-sm font-semibold tracking-tight text-fg-base">
-            <ListOrdered size={12} strokeWidth={2.1} className="text-fg-muted" />
-            Interactive rebase
-            <span className="font-mono text-2xs font-normal text-fg-subtle">
-              · last {order.length} {order.length === 1 ? 'commit' : 'commits'}
-            </span>
-          </div>
-          <div className="flex items-center gap-2">
-            <label className="flex items-center gap-1.5 font-display text-xs text-fg-muted">
-              count
-              <input
-                type="number"
-                min={1}
-                max={50}
-                value={count}
-                onChange={(e) => setCount(Math.max(1, Math.min(50, Number(e.target.value) || 1)))}
-                className="w-12 rounded border border-border-subtle bg-bg-base/60 px-1 py-0.5 text-center font-mono text-xs text-fg-base focus:border-accent/45 focus:outline-none"
-              />
-            </label>
-            <button
-              onClick={() => !running && onClose(false)}
-              disabled={running}
-              title="Close (esc)"
-              className="rounded p-1 text-fg-subtle transition-colors hover:bg-surface-2 hover:text-fg-base disabled:opacity-50"
-            >
-              <X size={11} strokeWidth={2.2} />
-            </button>
-          </div>
+    <PanelShell inline={inline} width="720px" onClose={() => !running && onClose(false)}>
+      <div className="flex items-center justify-between border-b border-border-hairline px-4 py-2.5">
+        <div className="flex items-center gap-2 font-display text-sm font-semibold tracking-tight text-fg-base">
+          <ListOrdered size={12} strokeWidth={2.1} className="text-fg-muted" />
+          Interactive rebase
+          <span className="font-mono text-2xs font-normal text-fg-subtle">
+            · last {order.length} {order.length === 1 ? 'commit' : 'commits'}
+          </span>
         </div>
+        <div className="flex items-center gap-2">
+          <label className="flex items-center gap-1.5 font-display text-xs text-fg-muted">
+            count
+            <input
+              type="number"
+              min={1}
+              max={50}
+              value={count}
+              onChange={(e) => setCount(Math.max(1, Math.min(50, Number(e.target.value) || 1)))}
+              className="w-12 rounded border border-border-subtle bg-bg-base/60 px-1 py-0.5 text-center font-mono text-xs text-fg-base focus:border-accent/45 focus:outline-none"
+            />
+          </label>
+          <button
+            onClick={() => setExpanded(inline)}
+            title={inline ? 'Expand to a window' : 'Show in the source control panel'}
+            aria-label={inline ? 'Expand to a window' : 'Show in the source control panel'}
+            className="rounded p-1 text-fg-subtle transition-colors hover:bg-surface-2 hover:text-fg-base"
+          >
+            {inline ? (
+              <Maximize2 size={11} strokeWidth={2.1} />
+            ) : (
+              <Minimize2 size={11} strokeWidth={2.1} />
+            )}
+          </button>
+          <button
+            onClick={() => !running && onClose(false)}
+            disabled={running}
+            title="Close (esc)"
+            className="rounded p-1 text-fg-subtle transition-colors hover:bg-surface-2 hover:text-fg-base disabled:opacity-50"
+          >
+            <X size={11} strokeWidth={2.2} />
+          </button>
+        </div>
+      </div>
 
-        {!root && (
-          <div className="px-4 py-6 text-center font-display text-xs italic text-fg-subtle">
-            open a repository first
+      {!root && (
+        <div className="px-4 py-6 text-center font-display text-xs italic text-fg-subtle">
+          open a repository first
+        </div>
+      )}
+
+      {root && (
+        <>
+          <div className="border-b border-border-hairline bg-bg-base/30 px-4 py-1.5 font-display text-2xs text-fg-subtle">
+            Order is oldest-first (top), matching git&rsquo;s rebase TODO. Squash and fixup fold
+            into the row above. Reword + edit aren&rsquo;t supported yet — use{' '}
+            <span className="font-mono">git commit --amend</span> after.
           </div>
-        )}
 
-        {root && (
-          <>
-            <div className="border-b border-border-hairline bg-bg-base/30 px-4 py-1.5 font-display text-2xs text-fg-subtle">
-              Order is oldest-first (top), matching git&rsquo;s rebase TODO. Squash and fixup
-              fold into the row above. Reword + edit aren&rsquo;t supported yet — use{' '}
-              <span className="font-mono">git commit --amend</span> after.
-            </div>
-
-            <div className="max-h-[55vh] overflow-y-auto">
-              {loading && (
-                <div className="px-4 py-6 text-center font-display text-xs italic text-fg-subtle">
-                  loading commits…
-                </div>
-              )}
-              {!loading &&
-                order.map((oid, idx) => {
-                  const commit = commitMap.get(oid);
-                  if (!commit) return null;
-                  const action = actions[oid] ?? 'pick';
-                  return (
-                    <RebaseRow
-                      key={oid}
-                      commit={commit}
-                      action={action}
-                      onAction={(a) => setAction(oid, a)}
-                      onUp={() => move(oid, -1)}
-                      onDown={() => move(oid, 1)}
-                      isFirst={idx === 0}
-                      isLast={idx === order.length - 1}
-                    />
-                  );
-                })}
-            </div>
-
-            {err && (
-              <div className="border-t border-border-hairline bg-red-500/[0.06] px-4 py-2 font-mono text-xs text-red-300">
-                <div className="flex items-start gap-1.5">
-                  <AlertTriangle size={11} strokeWidth={2.2} className="mt-0.5 shrink-0" />
-                  <div className="flex-1">
-                    {err}
-                    <div className="mt-1 text-2xs text-red-300/70">
-                      If the rebase stopped mid-way for conflicts, resolve them in the
-                      diff view, then click &ldquo;continue&rdquo; or &ldquo;abort&rdquo;.
-                    </div>
-                  </div>
-                </div>
-                <div className="mt-2 flex gap-2">
-                  <button
-                    onClick={() => void abort()}
-                    className="rounded bg-red-500/[0.18] px-2.5 py-1 font-display text-xs text-red-200 hover:bg-red-500/[0.28]"
-                  >
-                    abort rebase
-                  </button>
-                </div>
+          <div className={cn('overflow-y-auto', inline ? 'min-h-0 flex-1' : 'max-h-[55vh]')}>
+            {loading && (
+              <div className="px-4 py-6 text-center font-display text-xs italic text-fg-subtle">
+                loading commits…
               </div>
             )}
+            {!loading &&
+              order.map((oid, idx) => {
+                const commit = commitMap.get(oid);
+                if (!commit) return null;
+                const action = actions[oid] ?? 'pick';
+                return (
+                  <RebaseRow
+                    key={oid}
+                    commit={commit}
+                    action={action}
+                    onAction={(a) => setAction(oid, a)}
+                    onUp={() => move(oid, -1)}
+                    onDown={() => move(oid, 1)}
+                    isFirst={idx === 0}
+                    isLast={idx === order.length - 1}
+                  />
+                );
+              })}
+          </div>
 
-            <div className="flex items-center justify-between border-t border-border-hairline bg-bg-base/30 px-4 py-2">
-              <div className="font-display text-2xs text-fg-subtle">
-                {keepCount} commits kept · {dropCount} dropped
+          {err && (
+            <div className="border-t border-border-hairline bg-red-500/[0.06] px-4 py-2 font-mono text-xs text-red-300">
+              <div className="flex items-start gap-1.5">
+                <AlertTriangle size={11} strokeWidth={2.2} className="mt-0.5 shrink-0" />
+                <div className="flex-1">
+                  {err}
+                  <div className="mt-1 text-2xs text-red-300/70">
+                    If the rebase stopped mid-way for conflicts, resolve them in the diff view, then
+                    click &ldquo;continue&rdquo; or &ldquo;abort&rdquo;.
+                  </div>
+                </div>
               </div>
-              <div className="flex items-center gap-2">
+              <div className="mt-2 flex gap-2">
                 <button
-                  onClick={() => !running && onClose(false)}
-                  disabled={running}
-                  className="rounded px-2.5 py-1 font-display text-xs text-fg-muted hover:bg-surface-1 hover:text-fg-base disabled:opacity-50"
+                  onClick={() => void abort()}
+                  className="rounded bg-red-500/[0.18] px-2.5 py-1 font-display text-xs text-red-200 hover:bg-red-500/[0.28]"
                 >
-                  cancel
-                </button>
-                <button
-                  onClick={() => void submit()}
-                  disabled={running || order.length === 0 || !base}
-                  className="rounded bg-accent-soft px-3 py-1 font-display text-xs font-medium text-fg-base ring-1 ring-accent/45 transition-colors hover:bg-accent/20 disabled:opacity-50"
-                >
-                  {running ? 'rebasing…' : 'start rebase'}
+                  abort rebase
                 </button>
               </div>
             </div>
-          </>
-        )}
-      </div>
-    </div>
+          )}
+
+          <div className="flex items-center justify-between border-t border-border-hairline bg-bg-base/30 px-4 py-2">
+            <div className="font-display text-2xs text-fg-subtle">
+              {keepCount} commits kept · {dropCount} dropped
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => !running && onClose(false)}
+                disabled={running}
+                className="rounded px-2.5 py-1 font-display text-xs text-fg-muted hover:bg-surface-1 hover:text-fg-base disabled:opacity-50"
+              >
+                cancel
+              </button>
+              <button
+                onClick={() => void submit()}
+                disabled={running || order.length === 0 || !base}
+                className="rounded bg-accent-soft px-3 py-1 font-display text-xs font-medium text-fg-base ring-1 ring-accent/45 transition-colors hover:bg-accent/20 disabled:opacity-50"
+              >
+                {running ? 'rebasing…' : 'start rebase'}
+              </button>
+            </div>
+          </div>
+        </>
+      )}
+    </PanelShell>
   );
 }
 
@@ -343,7 +348,10 @@ function RebaseRow({
       >
         {commit.subject || <span className="italic text-fg-subtle">(no subject)</span>}
       </span>
-      <span className="shrink-0 truncate font-display text-2xs text-fg-subtle" style={{ maxWidth: 100 }}>
+      <span
+        className="shrink-0 truncate font-display text-2xs text-fg-subtle"
+        style={{ maxWidth: 100 }}
+      >
         {commit.author}
       </span>
     </div>
@@ -352,8 +360,18 @@ function RebaseRow({
 
 const ACTIONS: { id: GitRebaseAction; label: string; icon: typeof Minus; hint: string }[] = [
   { id: 'pick', label: 'pick', icon: GitCommitHorizontal, hint: 'keep this commit as-is' },
-  { id: 'squash', label: 'squash', icon: RotateCcw, hint: 'fold into the row above, keep both messages' },
-  { id: 'fixup', label: 'fixup', icon: RotateCcw, hint: 'fold into the row above, drop this message' },
+  {
+    id: 'squash',
+    label: 'squash',
+    icon: RotateCcw,
+    hint: 'fold into the row above, keep both messages',
+  },
+  {
+    id: 'fixup',
+    label: 'fixup',
+    icon: RotateCcw,
+    hint: 'fold into the row above, drop this message',
+  },
   { id: 'drop', label: 'drop', icon: Minus, hint: 'remove this commit from history' },
 ];
 

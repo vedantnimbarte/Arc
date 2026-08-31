@@ -3,6 +3,8 @@ import {
   FolderTree,
   GitBranch,
   Lock,
+  Maximize2,
+  Minimize2,
   Plus,
   RefreshCw,
   Trash2,
@@ -18,16 +20,18 @@ import {
 } from '../../lib/tauri';
 import { useFiles } from '../../state/files';
 import { useGitUi } from '../../state/gitUi';
+import { PanelShell } from './PanelShell';
 import { cn } from '../../lib/cn';
 
 /**
  * Worktree manager — lists `git worktree list` output for the active
- * repository and supports add / remove. The dialog opens from the status
- * bar's worktree button and from the ⌘K palette.
+ * repository and supports add / remove. Rendered inline inside the source
+ * control panel; `inline={false}` gives the standalone modal form.
  */
-export function WorktreePanel() {
+export function WorktreePanel({ inline = false }: { inline?: boolean }) {
   const open = useGitUi((s) => s.worktreePanelOpen);
   const onClose = useGitUi((s) => s.setWorktreePanelOpen);
+  const setExpanded = useGitUi((s) => s.setWorktreeExpanded);
   const root = useFiles((s) => s.root);
 
   const [entries, setEntries] = useState<GitWorktreeEntry[]>([]);
@@ -70,91 +74,100 @@ export function WorktreePanel() {
   if (!open) return null;
 
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-start justify-center bg-scrim-2 backdrop-blur-sm"
-      onClick={() => onClose(false)}
-    >
-      <div
-        onClick={(e) => e.stopPropagation()}
-        className="material-sheet mt-[10vh] flex w-[640px] max-w-[92vw] animate-sheet-in flex-col overflow-hidden rounded-window shadow-sheet ring-1 ring-edge-2"
-      >
-        <div className="flex items-center justify-between border-b border-border-hairline px-4 py-2.5">
-          <div className="flex items-center gap-2 font-display text-sm font-semibold tracking-tight text-fg-base">
-            <FolderTree size={12} strokeWidth={2.1} className="text-fg-muted" />
-            Worktrees
-            {entries.length > 0 && (
-              <span className="font-mono text-2xs font-normal text-fg-subtle">
-                · {entries.length}
-              </span>
-            )}
-          </div>
-          <div className="flex items-center gap-1">
-            <button
-              onClick={() => void refresh()}
-              disabled={loading}
-              title="Refresh"
-              className="rounded p-1 text-fg-subtle transition-colors hover:bg-surface-2 hover:text-fg-base disabled:opacity-35"
-            >
-              <RefreshCw size={11} strokeWidth={2.1} className={loading ? 'animate-spin' : ''} />
-            </button>
-            <button
-              onClick={() => onClose(false)}
-              title="Close (esc)"
-              className="rounded p-1 text-fg-subtle transition-colors hover:bg-surface-2 hover:text-fg-base"
-            >
-              <X size={11} strokeWidth={2.2} />
-            </button>
-          </div>
+    <PanelShell inline={inline} width="640px" onClose={() => onClose(false)}>
+      <div className="flex items-center justify-between border-b border-border-hairline px-4 py-2.5">
+        <div className="flex items-center gap-2 font-display text-sm font-semibold tracking-tight text-fg-base">
+          <FolderTree size={12} strokeWidth={2.1} className="text-fg-muted" />
+          Worktrees
+          {entries.length > 0 && (
+            <span className="font-mono text-2xs font-normal text-fg-subtle">
+              · {entries.length}
+            </span>
+          )}
         </div>
+        <div className="flex items-center gap-1">
+          <button
+            onClick={() => setExpanded(inline)}
+            title={inline ? 'Expand to a window' : 'Show in the source control panel'}
+            aria-label={inline ? 'Expand to a window' : 'Show in the source control panel'}
+            className="rounded p-1 text-fg-subtle transition-colors hover:bg-surface-2 hover:text-fg-base"
+          >
+            {inline ? (
+              <Maximize2 size={11} strokeWidth={2.1} />
+            ) : (
+              <Minimize2 size={11} strokeWidth={2.1} />
+            )}
+          </button>
+          <button
+            onClick={() => void refresh()}
+            disabled={loading}
+            title="Refresh"
+            className="rounded p-1 text-fg-subtle transition-colors hover:bg-surface-2 hover:text-fg-base disabled:opacity-35"
+          >
+            <RefreshCw size={11} strokeWidth={2.1} className={loading ? 'animate-spin' : ''} />
+          </button>
+          <button
+            onClick={() => onClose(false)}
+            title="Close (esc)"
+            className="rounded p-1 text-fg-subtle transition-colors hover:bg-surface-2 hover:text-fg-base"
+          >
+            <X size={11} strokeWidth={2.2} />
+          </button>
+        </div>
+      </div>
 
-        {!root && (
-          <div className="px-4 py-6 text-center font-display text-xs italic text-fg-subtle">
-            open a workspace folder first — worktrees attach to a repository.
-          </div>
-        )}
+      {!root && (
+        <div className="px-4 py-6 text-center font-display text-xs italic text-fg-subtle">
+          open a workspace folder first — worktrees attach to a repository.
+        </div>
+      )}
 
-        {root && (
-          <>
-            {err && (
-              <div className="border-b border-border-hairline bg-red-500/[0.06] px-4 py-2 font-mono text-xs text-red-300">
-                {err}
+      {root && (
+        <>
+          {err && (
+            <div className="border-b border-border-hairline bg-red-500/[0.06] px-4 py-2 font-mono text-xs text-red-300">
+              {err}
+            </div>
+          )}
+
+          <div className={cn('overflow-y-auto', inline ? 'min-h-0 flex-1' : 'max-h-[55vh]')}>
+            {entries.length === 0 && !loading && !err && (
+              <div className="px-4 py-6 text-center font-display text-xs italic text-fg-subtle">
+                no worktrees — this directory isn&rsquo;t a git repository, or git isn&rsquo;t on
+                PATH.
               </div>
             )}
-
-            <div className="max-h-[55vh] overflow-y-auto">
-              {entries.length === 0 && !loading && !err && (
-                <div className="px-4 py-6 text-center font-display text-xs italic text-fg-subtle">
-                  no worktrees — this directory isn&rsquo;t a git repository,
-                  or git isn&rsquo;t on PATH.
-                </div>
-              )}
-              {entries.map((w) => (
-                <WorktreeRow key={w.path} worktree={w} repoRoot={root} onAfter={() => void refresh()} />
-              ))}
-            </div>
-
-            {creating ? (
-              <AddWorktreeForm
+            {entries.map((w) => (
+              <WorktreeRow
+                key={w.path}
+                worktree={w}
                 repoRoot={root}
-                onCancel={() => setCreating(false)}
-                onDone={() => {
-                  setCreating(false);
-                  void refresh();
-                }}
+                onAfter={() => void refresh()}
               />
-            ) : (
-              <button
-                onClick={() => setCreating(true)}
-                className="flex items-center justify-center gap-1.5 border-t border-border-hairline bg-bg-base/30 py-2 font-display text-xs font-medium text-fg-muted transition-colors hover:bg-accent-soft hover:text-fg-base"
-              >
-                <Plus size={11} strokeWidth={2.2} />
-                Add worktree
-              </button>
-            )}
-          </>
-        )}
-      </div>
-    </div>
+            ))}
+          </div>
+
+          {creating ? (
+            <AddWorktreeForm
+              repoRoot={root}
+              onCancel={() => setCreating(false)}
+              onDone={() => {
+                setCreating(false);
+                void refresh();
+              }}
+            />
+          ) : (
+            <button
+              onClick={() => setCreating(true)}
+              className="flex items-center justify-center gap-1.5 border-t border-border-hairline bg-bg-base/30 py-2 font-display text-xs font-medium text-fg-muted transition-colors hover:bg-accent-soft hover:text-fg-base"
+            >
+              <Plus size={11} strokeWidth={2.2} />
+              Add worktree
+            </button>
+          )}
+        </>
+      )}
+    </PanelShell>
   );
 }
 
@@ -217,11 +230,11 @@ function WorktreeRow({
               <span className="font-mono text-2xs text-fg-subtle">{worktree.head_short}</span>
             )}
             {worktree.is_main && (
-              <span className="rounded bg-bg-hover px-1 font-mono text-2xs text-fg-muted">main</span>
+              <span className="rounded bg-bg-hover px-1 font-mono text-2xs text-fg-muted">
+                main
+              </span>
             )}
-            {worktree.locked && (
-              <Lock size={9} strokeWidth={2.4} className="text-amber-300" />
-            )}
+            {worktree.locked && <Lock size={9} strokeWidth={2.4} className="text-amber-300" />}
             {worktree.prunable && (
               <span className="rounded bg-amber-500/[0.18] px-1 font-mono text-2xs text-amber-300">
                 prunable
