@@ -21,8 +21,17 @@ pub enum Error {
 
 pub type Result<T> = std::result::Result<T, Error>;
 
-/// Every git invocation goes through here. Two flags matter, both because
-/// arc.exe is a GUI process with no console attached in release builds:
+/// Every git invocation goes through here. Three flags matter:
+///
+///   * `GIT_OPTIONAL_LOCKS=0` — a plain `git status` refreshes the index
+///     stat cache and writes `.git/index` back out. The workspace fs watcher
+///     sees that write, asks for a refresh, which runs `git status` again:
+///     the source-control panel then re-renders forever. Optional locks off
+///     means status/diff read without rewriting the index; commands that
+///     genuinely need the index lock (add, commit) still take it.
+///
+/// The other two exist because arc.exe is a GUI process with no console
+/// attached in release builds:
 ///
 ///   * `CREATE_NO_WINDOW` — without it, spawning console-subsystem git
 ///     allocates a fresh console, i.e. a conhost.exe plus a black window
@@ -34,6 +43,7 @@ pub type Result<T> = std::result::Result<T, Error>;
 fn git_cmd() -> Command {
     let mut cmd = Command::new("git");
     cmd.env("GIT_TERMINAL_PROMPT", "0");
+    cmd.env("GIT_OPTIONAL_LOCKS", "0");
     #[cfg(windows)]
     cmd.creation_flags(CREATE_NO_WINDOW);
     cmd

@@ -65,7 +65,7 @@ export function Sidebar() {
     // into a single refresh shortly after they settle.
     const onChange = () => {
       if (debounce) clearTimeout(debounce);
-      debounce = setTimeout(() => void refresh(root), 400);
+      debounce = setTimeout(() => void refresh(root, { background: true }), 400);
     };
     void fsWatchStart(root, onChange)
       .then((res) => {
@@ -81,7 +81,10 @@ export function Sidebar() {
         /* Watcher unavailable; the backstop poll still keeps status fresh. */
       });
 
-    const pollId = window.setInterval(() => void refresh(root), 20_000);
+    const pollId = window.setInterval(
+      () => void refresh(root, { background: true }),
+      20_000,
+    );
 
     return () => {
       active = false;

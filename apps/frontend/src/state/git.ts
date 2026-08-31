@@ -47,7 +47,10 @@ interface GitStoreState {
   dirtyDirs: Set<string>;
   loading: boolean;
   error: string | null;
-  refresh: (root: string) => Promise<void>;
+  /** `background: true` for watcher/poll-driven refreshes — they must not
+   *  flip `loading`, or the header spinner and the disabled state of every
+   *  button strobe on each poll. */
+  refresh: (root: string, opts?: { background?: boolean }) => Promise<void>;
   reset: () => void;
 }
 
@@ -80,6 +83,12 @@ function buildDecorations(
 // in-flight refresh is allowed to commit its results.
 let refreshSeq = 0;
 
+// Serialized form of the last committed result. A refresh that produces the
+// same thing skips `set()` entirely: publishing fresh `entries`/`statusByPath`
+// identities on every poll re-renders SourceControl and every FileTree node
+// for no reason, which is what the panel's flicker was.
+let lastSnapshot: string | null = null;
+
 export const useGit = create<GitStoreState>((set) => ({
   info: null,
   entries: [],
@@ -88,11 +97,12 @@ export const useGit = create<GitStoreState>((set) => ({
   dirtyDirs: new Set(),
   loading: false,
   error: null,
-  refresh: async (root: string) => {
+  refresh: async (root: string, opts?: { background?: boolean }) => {
     // Git runs against a local checkout. A remote workspace has none, and
     // handing an `ssh://` path to the git commands would surface a parse
     // error on every refresh — present it as "no repo" instead.
     if (isRemotePath(root)) {
+      lastSnapshot = null;
       set({
         info: null,
         entries: [],
@@ -105,7 +115,7 @@ export const useGit = create<GitStoreState>((set) => ({
       return;
     }
     const seq = ++refreshSeq;
-    set({ loading: true, error: null });
+    if (!opts?.background) set({ loading: true, error: null });
     try {
       const [info, entries, diffStat, repoRoot] = await Promise.all([
         gitStatus(root),
@@ -114,10 +124,17 @@ export const useGit = create<GitStoreState>((set) => ({
         gitRoot(root).catch(() => null),
       ]);
       if (seq !== refreshSeq) return; // superseded by a newer refresh
+      const snapshot = JSON.stringify([info, entries, diffStat, repoRoot]);
+      if (snapshot === lastSnapshot) {
+        set({ loading: false, error: null });
+        return;
+      }
+      lastSnapshot = snapshot;
       const { statusByPath, dirtyDirs } = buildDecorations(repoRoot, entries);
-      set({ info, entries, diffStat, statusByPath, dirtyDirs, loading: false });
+      set({ info, entries, diffStat, statusByPath, dirtyDirs, loading: false, error: null });
     } catch (e) {
       if (seq !== refreshSeq) return;
+      lastSnapshot = null;
       set({
         entries: [],
         diffStat: null,
@@ -128,7 +145,8 @@ export const useGit = create<GitStoreState>((set) => ({
       });
     }
   },
-  reset: () =>
+  reset: () => {
+    lastSnapshot = null;
     set({
       info: null,
       entries: [],
@@ -137,5 +155,11 @@ export const useGit = create<GitStoreState>((set) => ({
       dirtyDirs: new Set(),
       loading: false,
       error: null,
-    }),
+    });
+  },
 }));
+
+/** Test hook: drop the memoized snapshot so each case starts clean. */
+export function __resetGitSnapshotForTests(): void {
+  lastSnapshot = null;
+}
