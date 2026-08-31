@@ -4,8 +4,11 @@ import { persist } from 'zustand/middleware';
 export const SIDEBAR_MIN = 180;
 export const SIDEBAR_MAX = 480;
 export const SIDEBAR_DEFAULT = 260;
-/** Width of the vertical mini-rail shown when the sidebar is collapsed. */
+/** Width of the icon-only activity rail. */
 export const SIDEBAR_RAIL_WIDTH = 44;
+/** Width of the same rail with view names shown beside the icons. Wide enough
+ *  for the longest label ("Source Control") at `text-2xs`. */
+export const SIDEBAR_RAIL_WIDTH_LABELED = 128;
 
 /** Which panel is showing in the left sidebar. Driven by the sidebar's
  *  activity rail (Explorer / Source Control / SSH / Search / Outline). */
@@ -42,6 +45,10 @@ interface FilesState {
   /** Absolute paths of recently-opened editor files, most-recent first.
    *  Surfaced on the new-tab splash. Capped + persisted. */
   recentFiles: string[];
+  /** Show view names next to the activity-rail icons. On by default: eight
+   *  unlabelled glyphs is the single biggest thing new users can't decode.
+   *  Turned off from the rail's context menu once you know them. Persisted. */
+  railLabels: boolean;
   setRoot: (root: string) => void;
   /** Record a file as recently opened (deduped, moved to front, capped). */
   pushRecentFile: (path: string) => void;
@@ -54,6 +61,7 @@ interface FilesState {
   /** Toggle a view: if it's already the visible view, fall back to the
    *  Explorer; otherwise reveal it. Powers the SSH / git launcher buttons. */
   toggleSidebarView: (view: SidebarView) => void;
+  toggleRailLabels: () => void;
 }
 
 const clamp = (n: number, min: number, max: number) =>
@@ -102,6 +110,7 @@ export const useFiles = create<FilesState>()(
       sidebarView: 'files',
       viewByRoot: {},
       recentFiles: [],
+      railLabels: true,
       // Switching workspace root restores that root's last view (falling back
       // to the current view for roots we haven't seen before) and that view's
       // remembered width.
@@ -118,6 +127,7 @@ export const useFiles = create<FilesState>()(
           ),
         })),
       toggleHidden: () => set((s) => ({ showHidden: !s.showHidden })),
+      toggleRailLabels: () => set((s) => ({ railLabels: !s.railLabels })),
       toggleCollapsed: () => set((s) => ({ collapsed: !s.collapsed })),
       // Width is recorded against the *current* view so each view keeps its own.
       setSidebarWidth: (w) =>

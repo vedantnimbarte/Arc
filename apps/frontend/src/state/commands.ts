@@ -26,6 +26,10 @@ export interface CommandAction {
   id: string;
   /** Human label shown as the primary row text. */
   title: string;
+  /** One sentence on what running this does, shown dimmed after the title.
+   *  The palette is the only complete index of ARC's features, so this is what
+   *  turns it from a list of nouns into something you can learn the app from. */
+  description?: string;
   group: CommandGroup;
   /** Extra search terms. Lowercased; matched as substrings. */
   keywords?: string[];

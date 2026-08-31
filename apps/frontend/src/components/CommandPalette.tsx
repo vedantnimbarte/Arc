@@ -177,8 +177,15 @@ export function CommandPalette({ open, onClose }: Props) {
                 ) : (
                   <span className="w-3 shrink-0" />
                 )}
-                <span className="min-w-0 flex-1 truncate font-display text-sm text-fg-base/90">
-                  {action.title}
+                <span className="flex min-w-0 flex-1 items-baseline gap-2 truncate">
+                  <span className="shrink-0 font-display text-sm text-fg-base/90">
+                    {action.title}
+                  </span>
+                  {action.description && (
+                    <span className="truncate font-display text-2xs text-fg-subtle">
+                      {action.description}
+                    </span>
+                  )}
                 </span>
                 {action.shortcut && (
                   <kbd className="shrink-0 font-mono text-2xs text-fg-subtle">

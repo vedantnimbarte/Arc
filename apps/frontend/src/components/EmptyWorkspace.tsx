@@ -19,6 +19,7 @@ import { useFiles } from '../state/files';
 import { fileIcon } from '../lib/fileIcons';
 import { fsPickFiles, fsPickFolder, isTauri, ptyListAiClis, type AiCliInfo } from '../lib/tauri';
 import { groupColorDef, rgba, type TabGroupColorId } from '../lib/tabGroups';
+import { formatBinding, getBinding } from '../state/shortcuts';
 import { cn } from '../lib/cn';
 import { WorkspaceEditPanel, DEFAULT_WORKSPACE_COLOR } from './WorkspaceEditPanel';
 
@@ -103,7 +104,7 @@ export function EmptyWorkspace({ onOpenCommandPalette }: Props) {
       hint: 'Open a shell',
       icon: TerminalSquare,
       color: 'slate',
-      kbd: '⌘T',
+      kbd: formatBinding(getBinding('new-terminal')),
       run: () => void newTerminal(),
     },
     { title: 'Editor', hint: 'Open a file', icon: FileCode2, color: 'blue', run: pickAndOpen },
@@ -130,6 +131,7 @@ export function EmptyWorkspace({ onOpenCommandPalette }: Props) {
                 setEditPos({ x: r.left + r.width / 2 - 124, y: r.bottom + 6 });
               }}
               title="Edit workspace"
+              data-launcher-stay
               className="group mb-2.5 flex items-center gap-2 rounded-lg border border-border-hairline bg-surface-1 py-1.5 pl-1.5 pr-2.5 transition-colors hover:border-border-subtle hover:bg-surface-1"
             >
               <span
@@ -217,7 +219,7 @@ export function EmptyWorkspace({ onOpenCommandPalette }: Props) {
                 <UtilityRow
                   icon={CommandIcon}
                   label="Command palette"
-                  kbd="⌘K"
+                  kbd={formatBinding(getBinding('open-command-palette'))}
                   onClick={onOpenCommandPalette}
                 />
               )}

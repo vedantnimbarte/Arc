@@ -28,6 +28,7 @@ import {
   resolveRailViews,
   SIDEBAR_VIEW_BY_ID,
 } from '../lib/sidebarViews';
+import { Tooltip } from './Tooltip';
 import { formatBinding, getBinding } from '../state/shortcuts';
 import { cn } from '../lib/cn';
 
@@ -172,6 +173,7 @@ export function SidebarRail() {
     s.entries.reduce((n, e) => (e.kind === 'conflict' ? n + 1 : n), 0),
   );
   const sshLive = useSsh((s) => Object.keys(s.liveByHost).length);
+  const labels = useFiles((s) => s.railLabels);
   const order = useSidebarLayout((s) => s.order);
   const hidden = useSidebarLayout((s) => s.hidden);
   const views = useMemo(() => resolveRailViews(order, hidden), [order, hidden]);
@@ -224,13 +226,17 @@ export function SidebarRail() {
       aria-orientation="vertical"
       aria-label="Sidebar views"
       onKeyDown={onKeyDown}
-      className="flex h-full w-full flex-col items-center gap-1 py-2"
+      className={cn(
+        'flex h-full w-full flex-col gap-1 py-2',
+        labels ? 'items-stretch px-1.5' : 'items-center',
+      )}
     >
       {views.map(({ id, label, Icon, shortcut }) => {
         const active = view === id;
         const badge = railBadge(id, gitCount, gitConflicts, sshLive);
         const binding = shortcut ? getBinding(shortcut) : null;
-        return (
+        const kbd = binding ? formatBinding(binding) : undefined;
+        const button = (
           <button
             key={id}
             ref={(el) => btnRefs.current.set(id, el)}
@@ -241,13 +247,12 @@ export function SidebarRail() {
             aria-controls={SIDEBAR_PANEL_ID}
             aria-label={label}
             tabIndex={active ? 0 : -1}
-            title={[label, binding ? formatBinding(binding) : null, badge?.title]
-              .filter(Boolean)
-              .join(' · ')}
+            title={[label, kbd, badge?.title].filter(Boolean).join(' · ')}
             onClick={() => show(id)}
             onContextMenu={(e) => menu.open(id, e)}
             className={cn(
-              'group relative flex h-7 w-7 items-center justify-center rounded-md outline-none',
+              'group relative flex h-7 items-center rounded-md outline-none',
+              labels ? 'w-full justify-start gap-2 px-2' : 'w-7 justify-center',
               'transition-all duration-200 ease-out-soft active:scale-95 motion-reduce:transition-none',
               'focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-accent/40',
               active
@@ -260,22 +265,44 @@ export function SidebarRail() {
             {active && (
               <span
                 aria-hidden
-                className="pointer-events-none absolute -right-2 top-1/2 h-3.5 w-[2px] -translate-y-1/2 rounded-l-full bg-accent-bright/70"
-              />
-            )}
-            <Icon size={13} strokeWidth={2} />
-            {badge && (
-              <span
-                aria-hidden
-                title={badge.title}
                 className={cn(
-                  'pointer-events-none absolute right-1 top-1 h-[5px] w-[5px] rounded-full ring-1 ring-bg-chrome',
-                  badge.color,
-                  badge.pulse && 'animate-pulse-soft motion-reduce:animate-none',
+                  'pointer-events-none absolute top-1/2 h-3.5 w-[2px] -translate-y-1/2 rounded-l-full bg-accent-bright/70',
+                  labels ? '-right-1' : '-right-2',
                 )}
               />
             )}
+            {/* The badge hangs off the icon, not the button, so it stays put
+                when the label widens the row. */}
+            <span className="relative flex shrink-0 items-center justify-center">
+              <Icon size={13} strokeWidth={2} />
+              {badge && (
+                <span
+                  aria-hidden
+                  title={badge.title}
+                  className={cn(
+                    'pointer-events-none absolute -right-1 -top-1 h-[5px] w-[5px] rounded-full ring-1 ring-bg-chrome',
+                    badge.color,
+                    badge.pulse && 'animate-pulse-soft motion-reduce:animate-none',
+                  )}
+                />
+              )}
+            </span>
+            {labels && (
+              <span className="min-w-0 flex-1 truncate text-left font-display text-2xs tracking-tight">
+                {label}
+              </span>
+            )}
           </button>
+        );
+        // With labels off the icon is the only cue, so it gets a real tooltip
+        // rather than the ~1s native one. Opens left — the rail hugs the
+        // window's right edge.
+        return labels ? (
+          button
+        ) : (
+          <Tooltip key={id} label={label} kbd={kbd} side="left">
+            {button}
+          </Tooltip>
         );
       })}
       {menu.node}
@@ -361,6 +388,10 @@ function railMenuItems(view: SidebarView): RailMenuItem[] {
       onClick: () => useSidebarLayout.getState().setHidden(view, true),
     });
   }
+  items.push({
+    label: useFiles.getState().railLabels ? 'Hide View Names' : 'Show View Names',
+    onClick: () => useFiles.getState().toggleRailLabels(),
+  });
   items.push({
     label: 'Customize Sidebar…',
     onClick: () => {
