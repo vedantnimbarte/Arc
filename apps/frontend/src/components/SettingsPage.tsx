@@ -32,6 +32,8 @@ import {
   Sparkles,
   ArrowUpCircle,
   Loader2,
+  ClipboardCopy,
+  Trash2,
 } from 'lucide-react';
 import {
   DEFAULT_AI_MODEL,
@@ -40,7 +42,14 @@ import {
   useSettings,
 } from '../state/settings';
 import { checkForUpdate, installUpdate, type UpdateInfo } from '../lib/updater';
-import { getAppVersion } from '../lib/tauri';
+import {
+  diagnosticsClear,
+  diagnosticsCollect,
+  diagnosticsSummary,
+  getAppVersion,
+  type DiagnosticsSummary,
+} from '../lib/tauri';
+import { copyText } from '../lib/clipboard';
 import { ANTHROPIC_KEY_SECRET } from '../lib/ai';
 import { FontPicker } from './FontPicker';
 import { useFiles, type SidebarView } from '../state/files';
@@ -1711,6 +1720,8 @@ function AboutPane() {
 
       <UpdatesCard />
 
+      <DiagnosticsCard />
+
       <div className="flex w-full max-w-md flex-col gap-1.5">
         <button
           onClick={() => openExternal(REPO_URL)}
@@ -1820,6 +1831,79 @@ function UpdatesCard() {
         checked={autoUpdateCheck}
         onChange={() => setAutoUpdateCheck(!autoUpdateCheck)}
       />
+    </div>
+  );
+}
+
+/**
+ * Crash log surface. ARC's Rust side writes every panic to
+ * `<data_dir>/arc/crash.log`; without this the file exists but nobody ever
+ * finds it, and a bug report arrives as "it crashed".
+ *
+ * Quiet by design: with an empty log this is a single Copy button. It only
+ * grows a warning row once there is actually something to report.
+ */
+function DiagnosticsCard() {
+  const [summary, setSummary] = useState<DiagnosticsSummary | null>(null);
+
+  const refresh = () => {
+    void diagnosticsSummary().then(setSummary);
+  };
+  useEffect(refresh, []);
+
+  const copy = () => {
+    void diagnosticsCollect().then(
+      (text) => copyText(text, 'Diagnostics'),
+      () => copyText('(diagnostics unavailable)', 'Diagnostics'),
+    );
+  };
+
+  const clear = () => {
+    void diagnosticsClear().then(refresh);
+  };
+
+  const crashes = summary?.crash_count ?? 0;
+
+  return (
+    <div className="w-full max-w-md space-y-2.5 rounded-lg border border-border-subtle bg-bg-base/40 p-4">
+      <div className="flex items-baseline justify-between gap-3">
+        <span className="font-display text-xs uppercase tracking-widest2 text-fg-subtle">
+          Diagnostics
+        </span>
+        {crashes > 0 && summary?.last_crash_at != null && (
+          <span className="font-display text-2xs text-status-warn">
+            {crashes} crash{crashes === 1 ? '' : 'es'} logged · last{' '}
+            {new Date(summary.last_crash_at).toLocaleString()}
+          </span>
+        )}
+      </div>
+      <p className="font-display text-2xs leading-relaxed text-fg-subtle">
+        {crashes > 0
+          ? 'Paste this into a GitHub issue — it carries the version, platform, and the tail of the crash log.'
+          : 'No crashes recorded. Copy this anyway when reporting a bug: it carries the version and platform.'}
+      </p>
+      <div className="flex gap-1.5">
+        <button
+          onClick={copy}
+          className="flex flex-1 items-center justify-center gap-2 rounded-lg border border-border-subtle bg-bg-base/40 px-3 py-2 font-display text-sm font-medium tracking-tight text-fg-base transition-all duration-150 ease-apple hover:border-border-strong hover:bg-bg-base/60"
+        >
+          <ClipboardCopy size={12} strokeWidth={2.1} className="text-fg-muted" />
+          Copy diagnostics
+        </button>
+        {crashes > 0 && (
+          <button
+            onClick={clear}
+            title="Delete the crash log"
+            aria-label="Clear crash log"
+            className="rounded-lg border border-border-subtle bg-bg-base/40 px-3 py-2 text-fg-subtle transition-all duration-150 ease-apple hover:border-border-strong hover:text-fg-base"
+          >
+            <Trash2 size={12} strokeWidth={2.1} />
+          </button>
+        )}
+      </div>
+      {summary?.log_path && (
+        <p className="break-all font-mono text-2xs text-fg-subtle">{summary.log_path}</p>
+      )}
     </div>
   );
 }

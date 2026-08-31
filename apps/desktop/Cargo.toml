@@ -23,6 +23,7 @@ serde_json = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
 anyhow = { workspace = true }
+dirs = { workspace = true }
 
 arc-pty = { workspace = true }
 arc-session-manager = { workspace = true }

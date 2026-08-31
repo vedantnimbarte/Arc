@@ -43,6 +43,10 @@ fn read_restore_window_pref(store: &SessionStore) -> bool {
 }
 
 fn main() {
+    // Before anything else: a panic in a command otherwise dies with the
+    // process, leaving the user a failed invoke and no way to say what broke.
+    commands::diagnostics::install_panic_hook();
+
     tracing_subscriber::fmt()
         .with_env_filter(
             EnvFilter::try_from_default_env().unwrap_or_else(|_| {
@@ -245,6 +249,9 @@ fn main() {
             commands::claude_code::claude_turn_start,
             commands::claude_code::claude_turn_cancel,
             commands::claude_code::claude_permission_respond,
+            commands::diagnostics::diagnostics_collect,
+            commands::diagnostics::diagnostics_summary,
+            commands::diagnostics::diagnostics_clear,
         ])
         .setup(|app| {
             // Open the SQLite store before the window appears so the first

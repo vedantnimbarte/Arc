@@ -780,6 +780,38 @@ export async function getAppVersion(): Promise<string | null> {
   }
 }
 
+// ─── diagnostics ─────────────────────────────────────────────────────────
+// Crash log + build facts, for the "Copy diagnostics" button in Settings →
+// About. A panic inside a Tauri command never reaches the UI, so the Rust
+// side logs it to <data_dir>/arc/crash.log and these read it back.
+
+export interface DiagnosticsSummary {
+  /** Epoch-ms of the most recent panic, or null when the log is empty. */
+  last_crash_at: number | null;
+  crash_count: number;
+  log_path: string | null;
+}
+
+export async function diagnosticsSummary(): Promise<DiagnosticsSummary | null> {
+  if (!isTauri) return null;
+  try {
+    return await invoke<DiagnosticsSummary>('diagnostics_summary');
+  } catch {
+    return null;
+  }
+}
+
+/** The paste-ready report: version, platform, data dir, crash-log tail. */
+export async function diagnosticsCollect(): Promise<string> {
+  if (!isTauri) return 'ARC (browser build — no diagnostics available)';
+  return invoke<string>('diagnostics_collect');
+}
+
+export async function diagnosticsClear(): Promise<void> {
+  if (!isTauri) return;
+  await invoke('diagnostics_clear');
+}
+
 /** Open (or focus, if already open) the standalone Settings window. */
 export async function settingsWindowOpen(): Promise<void> {
   await invoke('settings_window_open');

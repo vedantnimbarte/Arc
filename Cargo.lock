@@ -126,6 +126,7 @@ dependencies = [
  "arc-ssh",
  "arc-wingman",
  "dashmap",
+ "dirs 5.0.1",
  "fontdb",
  "keyring",
  "open",
