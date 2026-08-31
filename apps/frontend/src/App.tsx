@@ -10,13 +10,20 @@ import { CommandPalette } from './components/CommandPalette';
 import { CommandHistoryPalette } from './components/CommandHistoryPalette';
 import { CommandBlocks } from './components/CommandBlocks';
 import { Sidebar, SidebarRail } from './components/Sidebar';
+import { StatusBar } from './components/StatusBar';
+import { EmptyWorkspace } from './components/EmptyWorkspace';
 import { ResizeHandle } from './components/ResizeHandle';
 import { SearchPalette } from './components/SearchPalette';
 import { ShortcutsDialog } from './components/ShortcutsDialog';
 import { PaneTreeView } from './components/PaneTreeView';
 import { WorkspaceRail } from './components/WorkspaceRail';
 import { useWorkspace } from './state/workspace';
-import { useFiles, SIDEBAR_RAIL_WIDTH, defaultWidthForView } from './state/files';
+import {
+  useFiles,
+  SIDEBAR_RAIL_WIDTH,
+  SIDEBAR_RAIL_WIDTH_LABELED,
+  defaultWidthForView,
+} from './state/files';
 import {
   actionFor,
   ACTION_META,
@@ -225,7 +232,12 @@ export default function App() {
   const [blocksOpen, setBlocksOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
+  // The launcher (EmptyWorkspace) otherwise only appears when a workspace has
+  // zero tabs — i.e. once, before you ever open anything. It's the app's best
+  // map of what ARC can do, so it stays reachable as an overlay.
+  const [launcherOpen, setLauncherOpen] = useState(false);
   const sidebarCollapsed = useFiles((s) => s.collapsed);
+  const railLabels = useFiles((s) => s.railLabels);
   // One boolean gates the lazy git-overlay chunk. Each panel still self-gates
   // internally; this only decides whether the chunk is fetched at all.
   const anyGitOverlayOpen = useGitUi(
@@ -406,6 +418,7 @@ export default function App() {
       return {
         id: `shortcut.${id}`,
         title: meta.label,
+        description: meta.description,
         group: CATEGORY_TO_GROUP[meta.category],
         keywords: [meta.description, meta.category],
         shortcut: binding ? formatBinding(binding) : undefined,
@@ -431,6 +444,14 @@ export default function App() {
             if (dir) useFiles.getState().setRoot(dir);
           });
         },
+      },
+      {
+        id: 'workspace.launcher',
+        title: 'Show Launcher',
+        group: 'Workspace',
+        keywords: ['launcher', 'new', 'start', 'tools', 'home', 'welcome', 'recent'],
+        icon: LayoutGrid,
+        run: () => setLauncherOpen(true),
       },
       {
         id: 'git.manage-worktrees',
@@ -608,12 +629,14 @@ export default function App() {
             </aside>
             <aside
               ref={railAsideRef}
-              className="material-sidebar shrink-0 border-l border-border-hairline"
-              style={{ width: SIDEBAR_RAIL_WIDTH }}
+              className="material-sidebar shrink-0 border-l border-border-hairline transition-[width] duration-200 ease-apple"
+              style={{ width: railLabels ? SIDEBAR_RAIL_WIDTH_LABELED : SIDEBAR_RAIL_WIDTH }}
             >
               <SidebarRail />
             </aside>
           </div>
+
+          <StatusBar />
         </div>
       </div>
 
@@ -628,6 +651,15 @@ export default function App() {
       )}
       <SearchPalette open={searchOpen} onClose={() => setSearchOpen(false)} />
       <ShortcutsDialog open={shortcutsOpen} onClose={() => setShortcutsOpen(false)} />
+      {launcherOpen && (
+        <LauncherOverlay
+          onClose={() => setLauncherOpen(false)}
+          onOpenCommandPalette={() => {
+            setLauncherOpen(false);
+            setPaletteOpen(true);
+          }}
+        />
+      )}
       <PasteWarning />
       <TrustPrompt />
       <ConfirmDialog />
@@ -648,6 +680,52 @@ export default function App() {
       {/* Frameless-window resize grips — the window has decorations:false, so
           native edge/corner resize is gone (notably on Linux). */}
       <WindowResizeHandles />
+    </div>
+  );
+}
+
+/**
+ * The launcher, shown on demand over the workspace. `EmptyWorkspace` already
+ * lays itself out centred and full-size, so this only adds the scrim and the
+ * dismiss paths — anything the user picks opens a tab, which is a dismissal
+ * too, hence the capture-phase click close.
+ */
+function LauncherOverlay({
+  onClose,
+  onOpenCommandPalette,
+}: {
+  onClose: () => void;
+  onOpenCommandPalette: () => void;
+}) {
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.stopPropagation();
+        onClose();
+      }
+    };
+    window.addEventListener('keydown', onKey, true);
+    return () => window.removeEventListener('keydown', onKey, true);
+  }, [onClose]);
+
+  return (
+    <div
+      className="fixed inset-0 z-50 animate-view-in bg-scrim-2 backdrop-blur-sm motion-reduce:animate-none"
+      onClick={onClose}
+    >
+      {/* Every launcher action either opens a tab or reveals a sidebar view, so
+          a click is a dismissal — let it through, then close on the next tick.
+          `data-launcher-stay` opts a control out (the workspace-edit chip, whose
+          popover would otherwise flash and vanish). */}
+      <div
+        className="h-full w-full"
+        onClickCapture={(e) => {
+          if ((e.target as HTMLElement | null)?.closest('[data-launcher-stay]')) return;
+          setTimeout(onClose, 0);
+        }}
+      >
+        <EmptyWorkspace onOpenCommandPalette={onOpenCommandPalette} />
+      </div>
     </div>
   );
 }

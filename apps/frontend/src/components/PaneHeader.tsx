@@ -18,6 +18,7 @@ import {
 } from 'lucide-react';
 import { findLeaf, useWorkspace, type Tab } from '../state/workspace';
 import { gitStatus, isTauri } from '../lib/tauri';
+import { Tooltip } from './Tooltip';
 import { cn } from '../lib/cn';
 
 // Below this header width, the split/maximize buttons collapse into a "⋯"
@@ -187,7 +188,7 @@ export function PaneHeader({ paneId }: Props) {
           <button
             type="button"
             aria-label="More actions"
-            title="More actions"
+            title="Split, maximize and close this pane"
             onMouseDown={(e) => e.stopPropagation()}
             onClick={(e) => {
               e.stopPropagation();
@@ -302,18 +303,19 @@ function HeaderButton({
   children: React.ReactNode;
 }) {
   return (
-    <button
-      type="button"
-      aria-label={label}
-      title={label}
-      onClick={(e) => {
-        e.stopPropagation();
-        onClick();
-      }}
-      className="flex h-[22px] w-[22px] items-center justify-center rounded text-fg-subtle transition-colors hover:bg-surface-3 hover:text-fg-base"
-    >
-      {children}
-    </button>
+    <Tooltip label={label} side="bottom">
+      <button
+        type="button"
+        aria-label={label}
+        onClick={(e) => {
+          e.stopPropagation();
+          onClick();
+        }}
+        className="flex h-[22px] w-[22px] items-center justify-center rounded text-fg-subtle transition-colors hover:bg-surface-3 hover:text-fg-base"
+      >
+        {children}
+      </button>
+    </Tooltip>
   );
 }
 

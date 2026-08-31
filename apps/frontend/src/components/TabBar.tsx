@@ -9,6 +9,7 @@ import {
   PanelRightOpen,
   Bot,
   GitBranch,
+  LayoutGrid,
   Monitor,
   Send,
   Database,
@@ -18,6 +19,7 @@ import { getCurrentWindow } from '@tauri-apps/api/window';
 import { useWorkspace } from '../state/workspace';
 import { useFiles } from '../state/files';
 import { runCommand } from '../state/commands';
+import { Tooltip } from './Tooltip';
 import { formatBinding, getBinding } from '../state/shortcuts';
 import { cn } from '../lib/cn';
 import {
@@ -197,65 +199,70 @@ export function TabBar() {
       )}
 
       {/* Sidebar toggle — left rail, mirrors macOS toolbar control */}
-      <button
-        onClick={toggleSidebar}
-        className="group flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-fg-muted transition-all duration-200 ease-apple hover:bg-surface-2 hover:text-fg-base active:bg-surface-3"
-        aria-label={sidebarCollapsed ? 'Show sidebar' : 'Hide sidebar'}
-        aria-pressed={!sidebarCollapsed}
-        title={sidebarCollapsed ? 'Show sidebar (⌘B)' : 'Hide sidebar (⌘B)'}
-      >
-        {sidebarCollapsed ? (
-          <PanelRightOpen size={14} strokeWidth={1.9} />
-        ) : (
-          <PanelRightClose size={14} strokeWidth={1.9} />
-        )}
-      </button>
+      <Tooltip label={sidebarCollapsed ? 'Show sidebar' : 'Hide sidebar'} kbd="⌘B">
+        <button
+          onClick={toggleSidebar}
+          className="group flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-fg-muted transition-all duration-200 ease-apple hover:bg-surface-2 hover:text-fg-base active:bg-surface-3"
+          aria-label={sidebarCollapsed ? 'Show sidebar' : 'Hide sidebar'}
+          aria-pressed={!sidebarCollapsed}
+        >
+          {sidebarCollapsed ? (
+            <PanelRightOpen size={14} strokeWidth={1.9} />
+          ) : (
+            <PanelRightClose size={14} strokeWidth={1.9} />
+          )}
+        </button>
+      </Tooltip>
 
       {/* AI CLI launcher + keyboard shortcuts — relocated here from the old
           bottom status bar, sitting between the sidebar toggle and the +. */}
       <AiCliMenuButton clis={aiClis} onLaunch={(cli) => void launchAiCli(cli)} />
-      <button
-        onClick={() => void runCommand('shortcut.open-shortcuts')}
-        className="group flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-fg-muted transition-all duration-200 ease-apple hover:bg-surface-2 hover:text-fg-base active:bg-surface-3"
-        aria-label="Keyboard shortcuts"
-        title={`Keyboard shortcuts (${formatBinding(getBinding('open-shortcuts'))})`}
-      >
-        <Keyboard size={14} strokeWidth={1.9} />
-      </button>
+      <Tooltip label="Keyboard shortcuts" kbd={formatBinding(getBinding('open-shortcuts'))}>
+        <button
+          onClick={() => void runCommand('shortcut.open-shortcuts')}
+          className="group flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-fg-muted transition-all duration-200 ease-apple hover:bg-surface-2 hover:text-fg-base active:bg-surface-3"
+          aria-label="Keyboard shortcuts"
+        >
+          <Keyboard size={14} strokeWidth={1.9} />
+        </button>
+      </Tooltip>
 
       {/* The workspace renders every tab as a grid cell (no tab strip); the +
-          adds a new cell. The flex-1 keeps it left-aligned and preserves the
-          window-drag region. Workspace switching lives in the left rail. */}
+          adds one. Labelled "tab" everywhere the user can see it — "cell" is
+          internal vocabulary. The flex-1 keeps it left-aligned and preserves
+          the window-drag region. Workspace switching lives in the left rail. */}
       <div className="flex min-w-0 flex-1 items-center gap-1.5 pl-1">
-        <button
-          ref={plusRef}
-          onClick={() => setMenuOpen((o) => !o)}
-          className="group ml-0.5 flex h-[28px] w-[28px] shrink-0 items-center justify-center rounded-[7px] text-fg-subtle transition-all duration-200 ease-apple hover:bg-surface-2 hover:text-fg-base active:bg-surface-3"
-          aria-label="New cell"
-          aria-expanded={menuOpen}
-          aria-haspopup="menu"
-          title="New cell"
-        >
-          <Plus
-            size={13}
-            strokeWidth={2}
-            className="transition-transform duration-200 ease-apple group-active:scale-90"
-          />
-        </button>
+        <Tooltip label="New tab">
+          <button
+            ref={plusRef}
+            onClick={() => setMenuOpen((o) => !o)}
+            className="group ml-0.5 flex h-[28px] w-[28px] shrink-0 items-center justify-center rounded-[7px] text-fg-subtle transition-all duration-200 ease-apple hover:bg-surface-2 hover:text-fg-base active:bg-surface-3"
+            aria-label="New tab"
+            aria-expanded={menuOpen}
+            aria-haspopup="menu"
+          >
+            <Plus
+              size={13}
+              strokeWidth={2}
+              className="transition-transform duration-200 ease-apple group-active:scale-90"
+            />
+          </button>
+        </Tooltip>
       </div>
 
       {/* Right cluster — git history. SSH lives in the ⌘K palette / ⌘⇧S;
           settings lives in the workspace rail. */}
       <div className="ml-0.5 flex items-center gap-0.5 pr-2">
         {isGitRepo && (
-          <button
-            onClick={() => void gitWindowOpen()}
-            className="group flex h-8 w-8 items-center justify-center rounded-md text-fg-muted transition-all duration-200 ease-apple hover:bg-surface-2 hover:text-fg-base active:bg-surface-3"
-            aria-label="Open Git history"
-            title="Git history"
-          >
-            <GitBranch size={13} strokeWidth={1.9} />
-          </button>
+          <Tooltip label="Git history" side="left">
+            <button
+              onClick={() => void gitWindowOpen()}
+              className="group flex h-8 w-8 items-center justify-center rounded-md text-fg-muted transition-all duration-200 ease-apple hover:bg-surface-2 hover:text-fg-base active:bg-surface-3"
+              aria-label="Open Git history"
+            >
+              <GitBranch size={13} strokeWidth={1.9} />
+            </button>
+          </Tooltip>
         )}
       </div>
 
@@ -271,12 +278,26 @@ export function TabBar() {
         >
           <button
             role="menuitem"
+            onClick={() => {
+              setMenuOpen(false);
+              void runCommand('workspace.launcher');
+            }}
+            className="flex w-full items-center gap-2 px-3 py-2 text-left font-display text-sm text-fg-base/90 transition-colors hover:bg-surface-2"
+          >
+            <LayoutGrid size={12} strokeWidth={2} className="text-fg-subtle" />
+            <span className="flex-1">Launcher…</span>
+          </button>
+          <div className="my-1 border-t border-edge-1" />
+          <button
+            role="menuitem"
             onClick={handleNewTerminal}
             className="flex w-full items-center gap-2 px-3 py-2 text-left font-display text-sm text-fg-base/90 transition-colors hover:bg-surface-2"
           >
             <TerminalIcon size={12} strokeWidth={2} className="text-fg-subtle" />
             <span className="flex-1">Terminal</span>
-            <kbd className="font-mono text-2xs text-fg-subtle">⌘T</kbd>
+            <kbd className="font-mono text-2xs text-fg-subtle">
+              {formatBinding(getBinding('new-terminal'))}
+            </kbd>
           </button>
           <button
             role="menuitem"
