@@ -94,6 +94,7 @@ fn main() {
         .manage(WatchState::default())
         .manage(commands::wingman::WingmanState::default())
         .manage(commands::claude_code::ClaudeState::default())
+        .manage(commands::db::DbState::default())
         .invoke_handler(tauri::generate_handler![
             commands::pty::pty_spawn,
             commands::pty::pty_write,
@@ -219,6 +220,17 @@ fn main() {
             commands::lsp::lsp_formatting,
             commands::lsp::lsp_stop,
             commands::lsp::lsp_is_running,
+            commands::proc::proc_run,
+            commands::db::db_conn_list,
+            commands::db::db_conn_upsert,
+            commands::db::db_conn_delete,
+            commands::db::db_password_set,
+            commands::db::db_connect,
+            commands::db::db_disconnect,
+            commands::db::db_is_connected,
+            commands::db::db_query,
+            commands::db::db_tables,
+            commands::db::db_preview,
             commands::network::network_probe_port,
             commands::network::shell_open_external,
             commands::fonts::fonts_list_system,
@@ -329,6 +341,11 @@ fn main() {
             // can't be held across the await inside `block_on`.
             let lsp = app_handle.state::<LspState>().manager.clone();
             tauri::async_runtime::block_on(lsp.stop_all());
+            // Database pools too, so servers see a clean disconnect rather
+            // than N abandoned sockets timing out.
+            tauri::async_runtime::block_on(
+                app_handle.state::<commands::db::DbState>().manager.close_all(),
+            );
         }
         _ => {}
     });

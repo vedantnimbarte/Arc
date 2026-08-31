@@ -16,12 +16,14 @@ use thiserror::Error;
 
 pub mod apiclient;
 pub mod commands;
+pub mod db;
 pub mod settings;
 pub mod ssh;
 pub mod tabs;
 pub mod workspaces;
 
 pub use commands::CommandRecord;
+pub use db::{DbConnection, DbConnectionInput};
 pub use ssh::{SshHost, SshHostInput, SshKey, SshSessionLogEntry};
 // Re-export so downstream crates (e.g. apps/desktop) that hold a
 // `&SessionStore` can name the pool type without taking a direct sqlx dep.

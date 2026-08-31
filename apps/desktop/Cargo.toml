@@ -36,6 +36,7 @@ arc-git-host = { workspace = true }
 arc-lsp = { workspace = true }
 arc-wingman = { workspace = true }
 arc-claude-code = { workspace = true }
+arc-db = { workspace = true }
 dashmap = { workspace = true }
 parking_lot = { workspace = true }
 fontdb = "0.18"

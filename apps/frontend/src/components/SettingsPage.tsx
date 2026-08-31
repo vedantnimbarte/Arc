@@ -73,7 +73,11 @@ import {
   type Appearance,
   type ThemeDef,
 } from '../themes';
-import { installThemeFromUrl, loadInstalledThemes } from '../lib/themeMarketplace';
+import {
+  installThemeFromFile,
+  installThemeFromUrl,
+  loadInstalledThemes,
+} from '../lib/themeMarketplace';
 import {
   ACTION_META,
   ACTION_ORDER,
@@ -395,13 +399,12 @@ function ThemesPane({
     void loadInstalledThemes().then(reload).catch(() => {});
   }, []);
 
-  const onInstall = async () => {
-    const trimmed = url.trim();
-    if (!trimmed || installing) return;
-    setInstalling(true);
-    setMsg(null);
-    const res = await installThemeFromUrl(trimmed);
+  // Both install paths land here so success and failure read the same way
+  // whichever button you pressed. A null result means the file picker was
+  // cancelled — nothing happened, so nothing is reported.
+  const applyResult = (res: Awaited<ReturnType<typeof installThemeFromUrl>> | null) => {
     setInstalling(false);
+    if (!res) return;
     if (res.ok) {
       reload();
       onThemeChange(res.theme.id);
@@ -410,6 +413,21 @@ function ThemesPane({
     } else {
       setMsg({ kind: 'err', text: res.error });
     }
+  };
+
+  const onInstall = async () => {
+    const trimmed = url.trim();
+    if (!trimmed || installing) return;
+    setInstalling(true);
+    setMsg(null);
+    applyResult(await installThemeFromUrl(trimmed));
+  };
+
+  const onImportFile = async () => {
+    if (installing) return;
+    setInstalling(true);
+    setMsg(null);
+    applyResult(await installThemeFromFile());
   };
 
   return (
@@ -444,6 +462,19 @@ function ThemesPane({
       </Section>
 
       <Section
+        title="Import from a file"
+        hint="Load a theme JSON from disk. VS Code colour themes work too — the workbench palette is converted to ARC's, with the text ramp re-solved for contrast. Saved to ~/.arc/themes so it loads next launch."
+      >
+        <button
+          onClick={() => void onImportFile()}
+          disabled={installing}
+          className="rounded-lg bg-accent-soft px-3 py-2 font-display text-xs font-medium text-fg-base ring-1 ring-accent/45 transition-colors hover:bg-accent/20 disabled:opacity-50"
+        >
+          {installing ? 'importing…' : 'choose file…'}
+        </button>
+      </Section>
+
+      <Section
         title="Install from URL"
         hint="Paste a link to a theme JSON file (e.g. a GitHub raw URL or gist). It's validated, applied, and saved to ~/.arc/themes so it loads next launch."
       >
@@ -467,17 +498,19 @@ function ThemesPane({
             {installing ? 'installing…' : 'install'}
           </button>
         </div>
-        {msg && (
-          <p
-            className={cn(
-              'mt-2 font-display text-xs leading-relaxed',
-              msg.kind === 'ok' ? 'text-status-ok' : 'text-status-err',
-            )}
-          >
-            {msg.text}
-          </p>
-        )}
       </Section>
+
+      {/* One result line for both install paths — whichever you used last. */}
+      {msg && (
+        <p
+          className={cn(
+            'font-display text-xs leading-relaxed',
+            msg.kind === 'ok' ? 'text-status-ok' : 'text-status-err',
+          )}
+        >
+          {msg.text}
+        </p>
+      )}
     </div>
   );
 }

@@ -11,6 +11,7 @@ import {
   GitBranch,
   Monitor,
   Send,
+  Database,
   Keyboard,
 } from 'lucide-react';
 import { getCurrentWindow } from '@tauri-apps/api/window';
@@ -44,6 +45,7 @@ export function TabBar() {
     newTerminal,
     openPreview,
     openApiClient,
+    openDbClient,
   } = useWorkspace();
   const activeTab = useWorkspace((s) => s.tabs.find((t) => t.id === s.activeTabId) ?? null);
   const sidebarCollapsed = useFiles((s) => s.collapsed);
@@ -154,6 +156,11 @@ export function TabBar() {
 
   const handleNewApiClient = () => {
     openApiClient();
+    setMenuOpen(false);
+  };
+
+  const handleNewDbClient = () => {
+    openDbClient();
     setMenuOpen(false);
   };
 
@@ -294,6 +301,14 @@ export function TabBar() {
           >
             <Send size={12} strokeWidth={2} className="text-fg-subtle" />
             <span className="flex-1">API Client</span>
+          </button>
+          <button
+            role="menuitem"
+            onClick={handleNewDbClient}
+            className="flex w-full items-center gap-2 px-3 py-2 text-left font-display text-sm text-fg-base/90 transition-colors hover:bg-surface-2"
+          >
+            <Database size={12} strokeWidth={2} className="text-fg-subtle" />
+            <span className="flex-1">Database</span>
           </button>
           {aiClis.length > 0 && (
             <>

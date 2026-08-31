@@ -30,7 +30,9 @@ it.
   BM25 full-text search backed by a tantivy index and a literal find-and-replace across
   the workspace (previewed per file before anything is written).
 - **Git Integration** — Branch status, diffs, logs, blame, staging/commit, worktrees,
-  interactive rebase, cherry-pick, and GitHub pull requests, all from the UI.
+  interactive rebase, cherry-pick, and GitHub pull requests, all from the UI. Merge
+  conflicts open in a three-way view that resolves one hunk at a time — take ours,
+  theirs, both, or hand-edit the result — then writes and stages the file.
 - **SSH Client** — Pure-Rust SSH (russh) with saved hosts, key generation/import, and
   per-session logs.
 - **Remote Workspaces** — Mount a saved SSH host's filesystem as the workspace root over
@@ -39,7 +41,16 @@ it.
   the tree down. Local-only features (git, content search, LSP, the task runner) sit out
   rather than misreport — the terminal for that host is an SSH tab.
 - **API Client** — A built-in Postman-style REST client (collections, environments, history).
+- **Database Client** — Query PostgreSQL, MySQL, and SQLite from a tab: saved connections,
+  a table list, a SQL editor, and a results grid. Passwords go to your OS credential
+  vault; only `user@host` is stored alongside the connection.
+- **Test Explorer** — Discovers vitest, jest, pytest, `cargo test`, and `go test` suites
+  and runs any framework, file, or single test from the sidebar. A failed row opens the
+  runner's actual output.
 - **Tabs & Workspaces** — Split panes, tab groups, and session state persisted to SQLite.
+- **Themes** — Bundled dark/light plus Catppuccin, or import your own from a file or URL.
+  VS Code colour themes import directly: the workbench palette is mapped across and the
+  text ramp is re-solved so it still clears WCAG AA on the new background.
 - **Wingman Agents** *(optional)* — Connect a `wingman serve` daemon to get an agent panel
   with streamed turns (text, reasoning, tool calls, verification results, token cost), the
   pilot board of agent runs, and a review queue that opens each finished task's git worktree
@@ -107,6 +118,7 @@ Tailwind CSS · Vitest.
 - `arc-lsp` — language-server client (stdio JSON-RPC)
 - `arc-http-client` / `arc-project-config` — REST client engine + `.arc/config.toml` loader
 - `arc-wingman` — client for a `wingman serve` daemon (board, pilot runs, streaming turns)
+- `arc-db` — Postgres / MySQL / SQLite query executor for the database client
 
 **Storage:** SQLite (bundled) at `<data_dir>/arc/arc.db`; tantivy index at `<data_dir>/arc/index/`.
 

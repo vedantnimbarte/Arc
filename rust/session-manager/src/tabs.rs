@@ -18,6 +18,8 @@ pub enum TabKind {
     Apiclient,
     Ssh,
     Diff,
+    Db,
+    Merge,
 }
 
 impl TabKind {
@@ -29,6 +31,8 @@ impl TabKind {
             TabKind::Apiclient => "apiclient",
             TabKind::Ssh => "ssh",
             TabKind::Diff => "diff",
+            TabKind::Db => "db",
+            TabKind::Merge => "merge",
         }
     }
 
@@ -39,6 +43,8 @@ impl TabKind {
             "apiclient" => TabKind::Apiclient,
             "ssh" => TabKind::Ssh,
             "diff" => TabKind::Diff,
+            "db" => TabKind::Db,
+            "merge" => TabKind::Merge,
             // Anything else (including stray data) defaults to terminal —
             // the schema CHECK prevents storage of other values, so this
             // branch only runs if the DB has been hand-edited.
