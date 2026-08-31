@@ -265,6 +265,69 @@ impl LspManager {
             .await
     }
 
+    /// All references to the symbol under the cursor, including its
+    /// declaration — `includeDeclaration` is what makes the result useful as
+    /// a "where is this used" list rather than a subset of it.
+    pub async fn references(
+        &self,
+        id: &str,
+        uri: &str,
+        line: u32,
+        character: u32,
+    ) -> LspResult<Value> {
+        let mut params = position_params(uri, line, character);
+        params["context"] = json!({ "includeDeclaration": true });
+        self.session(id)?
+            .request("textDocument/references", params)
+            .await
+    }
+
+    /// Rename the symbol under the cursor. Returns a `WorkspaceEdit`; applying
+    /// it is the caller's job (ARC's editor only applies edits to the open
+    /// buffer — see `applyWorkspaceEdit` in lspClient.ts).
+    pub async fn rename(
+        &self,
+        id: &str,
+        uri: &str,
+        line: u32,
+        character: u32,
+        new_name: &str,
+    ) -> LspResult<Value> {
+        let mut params = position_params(uri, line, character);
+        params["newName"] = json!(new_name);
+        self.session(id)?
+            .request("textDocument/rename", params)
+            .await
+    }
+
+    /// Format a whole document. Returns `TextEdit[]`.
+    ///
+    /// `options` are LSP `FormattingOptions`; the two required fields are
+    /// filled from the caller's editor settings so the server matches the
+    /// buffer's actual indentation rather than its own default.
+    pub async fn formatting(
+        &self,
+        id: &str,
+        uri: &str,
+        tab_size: u32,
+        insert_spaces: bool,
+    ) -> LspResult<Value> {
+        self.session(id)?
+            .request(
+                "textDocument/formatting",
+                json!({
+                    "textDocument": { "uri": uri },
+                    "options": {
+                        "tabSize": tab_size,
+                        "insertSpaces": insert_spaces,
+                        "trimTrailingWhitespace": true,
+                        "insertFinalNewline": true,
+                    },
+                }),
+            )
+            .await
+    }
+
     /// Shut a server down: best-effort `shutdown` request + `exit` notification,
     /// abort the reader, then kill the process.
     pub async fn stop(&self, id: &str) -> LspResult<()> {
@@ -387,6 +450,11 @@ fn initialize_params(root_uri: Option<&str>) -> Value {
                     "contextSupport": true
                 },
                 "definition": { "dynamicRegistration": false },
+                "references": { "dynamicRegistration": false },
+                // `prepareSupport: false` — ARC asks for the new name up front
+                // rather than round-tripping through prepareRename first.
+                "rename": { "dynamicRegistration": false, "prepareSupport": false },
+                "formatting": { "dynamicRegistration": false },
                 "publishDiagnostics": { "relatedInformation": false }
             },
             "workspace": { "configuration": false, "workspaceFolders": false }

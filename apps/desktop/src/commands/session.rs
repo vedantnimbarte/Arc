@@ -154,3 +154,67 @@ pub async fn session_command_finish(
         .await
         .map_err(str_err)
 }
+
+// ─── terminal scrollback ─────────────────────────────────────────────────
+//
+//   invoke("session_scrollback_save",  { tabId, data })   -> ()
+//   invoke("session_scrollback_load",  { tabId })         -> String | null
+//   invoke("session_scrollback_delete",{ tabId })         -> ()
+//   invoke("session_scrollback_prune", { keepTabIds })    -> ()
+
+/// Hard ceiling on a single stored buffer. The frontend already caps the
+/// serialized line count; this is the backstop that keeps a pathological
+/// blob (one very long line, a binary dump) out of the database.
+const SCROLLBACK_MAX_BYTES: usize = 256 * 1024;
+
+#[tauri::command]
+pub async fn session_scrollback_save(
+    store: State<'_, SessionStore>,
+    tab_id: String,
+    data: String,
+) -> Result<(), String> {
+    // Trim from the front: the tail is the recent output, which is the part
+    // worth keeping. Slice on a char boundary so the stored text stays valid.
+    let data = if data.len() > SCROLLBACK_MAX_BYTES {
+        let mut cut = data.len() - SCROLLBACK_MAX_BYTES;
+        while cut < data.len() && !data.is_char_boundary(cut) {
+            cut += 1;
+        }
+        &data[cut..]
+    } else {
+        &data[..]
+    };
+    settings::scrollback_save(store.pool(), &tab_id, data)
+        .await
+        .map_err(str_err)
+}
+
+#[tauri::command]
+pub async fn session_scrollback_load(
+    store: State<'_, SessionStore>,
+    tab_id: String,
+) -> Result<Option<String>, String> {
+    settings::scrollback_load(store.pool(), &tab_id)
+        .await
+        .map_err(str_err)
+}
+
+#[tauri::command]
+pub async fn session_scrollback_delete(
+    store: State<'_, SessionStore>,
+    tab_id: String,
+) -> Result<(), String> {
+    settings::scrollback_delete(store.pool(), &tab_id)
+        .await
+        .map_err(str_err)
+}
+
+#[tauri::command]
+pub async fn session_scrollback_prune(
+    store: State<'_, SessionStore>,
+    keep_tab_ids: Vec<String>,
+) -> Result<(), String> {
+    settings::scrollback_prune(store.pool(), &keep_tab_ids)
+        .await
+        .map_err(str_err)
+}

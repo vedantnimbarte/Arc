@@ -1,5 +1,13 @@
 import { Channel, invoke } from '@tauri-apps/api/core';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
+import {
+  isRemotePath,
+  makeRemotePath,
+  parseRemotePath,
+  posixJoin,
+  posixParent,
+  remoteParent,
+} from './remote';
 
 export const isTauri = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
 
@@ -141,11 +149,34 @@ export async function fsDefaultRoot(): Promise<string> {
   return invoke<string>('fs_default_root');
 }
 
+// ─── local / remote routing ──────────────────────────────────────────────
+//
+// A remote workspace addresses its files as `ssh://<hostId>/path` (see
+// lib/remote.ts). Rather than teach the file tree, the editor, and every
+// other caller about a second path type, the branch lives here — in the
+// functions they already call. A remote path goes to SFTP, anything else to
+// the local filesystem, and callers stay exactly as they were.
+//
+// Remote listings are re-stamped with `ssh://` URIs on the way out, so what
+// the tree hands back to these functions round-trips.
+
 export async function fsParent(path: string): Promise<string | null> {
+  if (isRemotePath(path)) return remoteParent(path);
   return invoke<string | null>('fs_parent', { path });
 }
 
 export async function fsReadDir(path: string): Promise<FsEntry[]> {
+  const remote = parseRemotePath(path);
+  if (remote) {
+    const entries = await sshFsReadDir(remote.hostId, remote.path);
+    return entries.map((e) => ({
+      name: e.name,
+      path: makeRemotePath(remote.hostId, e.path),
+      kind: e.is_dir ? 'dir' : ('file' as FsKind),
+      // Dotfile convention — SFTP reports no hidden attribute of its own.
+      hidden: e.name.startsWith('.'),
+    }));
+  }
   return invoke<FsEntry[]>('fs_read_dir', { path });
 }
 
@@ -177,10 +208,14 @@ export async function fsListFiles(
 }
 
 export async function fsReadFile(path: string): Promise<string> {
+  const remote = parseRemotePath(path);
+  if (remote) return sshFsReadFile(remote.hostId, remote.path);
   return invoke<string>('fs_read_file', { path });
 }
 
 export async function fsWriteFile(path: string, content: string): Promise<void> {
+  const remote = parseRemotePath(path);
+  if (remote) return sshFsWriteFile(remote.hostId, remote.path, content);
   return invoke<void>('fs_write_file', { path, content });
 }
 
@@ -221,6 +256,62 @@ export async function fsSearch(
   return invoke<SearchHit[]>('fs_search', { root, query, limit, ignoreDirs });
 }
 
+// ─── find & replace ──────────────────────────────────────────────────────
+//
+// Separate from `fsSearch`, which is BM25-ranked and token-based: right for
+// "show me relevant files", wrong for a replace, where missing one occurrence
+// silently corrupts the refactor. These do an exact literal scan.
+
+export interface ReplaceMatch {
+  path: string;
+  name: string;
+  /** One-based. */
+  line: number;
+  snippet: string;
+  /** Occurrences on this line. */
+  count: number;
+}
+
+export interface ReplaceSummary {
+  files_changed: number;
+  replacements: number;
+}
+
+/** Preview: every literal match under `root`. */
+export async function fsReplaceFind(
+  root: string,
+  needle: string,
+  caseSensitive: boolean,
+  limit: number,
+  ignoreDirs: string[],
+): Promise<ReplaceMatch[]> {
+  return invoke<ReplaceMatch[]>('fs_replace_find', {
+    root,
+    needle,
+    caseSensitive,
+    limit,
+    ignoreDirs,
+  });
+}
+
+/** Apply: rewrite exactly the `files` the user kept from the preview. Paths
+ *  outside `root` are rejected by the Rust side. */
+export async function fsReplaceApply(
+  root: string,
+  files: string[],
+  needle: string,
+  replacement: string,
+  caseSensitive: boolean,
+): Promise<ReplaceSummary> {
+  return invoke<ReplaceSummary>('fs_replace_apply', {
+    root,
+    files,
+    needle,
+    replacement,
+    caseSensitive,
+  });
+}
+
 /**
  * Build (or rebuild) the persistent tantivy index for `root`. Returns the
  * number of documents indexed. Subsequent `fsSearch` calls will use the
@@ -237,11 +328,25 @@ export async function fsIndexStatus(root: string): Promise<boolean> {
 
 /** Rename `path` to `newName` (basename only, within the same directory). Returns the new absolute path. */
 export async function fsRename(path: string, newName: string): Promise<string> {
+  const remote = parseRemotePath(path);
+  if (remote) {
+    const target = posixJoin(posixParent(remote.path), newName);
+    await sshFsRename(remote.hostId, remote.path, target);
+    return makeRemotePath(remote.hostId, target);
+  }
   return invoke<string>('fs_rename', { path, newName });
 }
 
-/** Delete a file or directory (recursive for directories). */
-export async function fsDelete(path: string): Promise<void> {
+/** Delete a file or directory (recursive for directories, locally).
+ *
+ *  Remote deletes are NOT recursive: SFTP has no recursive remove, and
+ *  walking a remote tree to delete it file-by-file — over a link that can
+ *  drop mid-way, with no trash to recover from — is not something to do
+ *  behind a single menu click. A non-empty remote directory reports that
+ *  it is non-empty. */
+export async function fsDelete(path: string, isDir = false): Promise<void> {
+  const remote = parseRemotePath(path);
+  if (remote) return sshFsRemove(remote.hostId, remote.path, isDir);
   await invoke('fs_delete', { path });
 }
 
@@ -252,6 +357,8 @@ export async function fsReveal(path: string): Promise<void> {
 
 /** Create a directory (and any missing ancestors) at `path`. */
 export async function fsCreateDir(path: string): Promise<void> {
+  const remote = parseRemotePath(path);
+  if (remote) return sshFsCreateDir(remote.hostId, remote.path);
   await invoke('fs_create_dir', { path });
 }
 
@@ -573,6 +680,34 @@ export async function lspDefinition(
   return invoke('lsp_definition', { id, uri, line, character });
 }
 
+export async function lspReferences(
+  id: string,
+  uri: string,
+  line: number,
+  character: number,
+): Promise<unknown> {
+  return invoke('lsp_references', { id, uri, line, character });
+}
+
+export async function lspRename(
+  id: string,
+  uri: string,
+  line: number,
+  character: number,
+  newName: string,
+): Promise<unknown> {
+  return invoke('lsp_rename', { id, uri, line, character, newName });
+}
+
+export async function lspFormatting(
+  id: string,
+  uri: string,
+  tabSize: number,
+  insertSpaces: boolean,
+): Promise<unknown> {
+  return invoke('lsp_formatting', { id, uri, tabSize, insertSpaces });
+}
+
 export async function lspStop(id: string): Promise<void> {
   await invoke('lsp_stop', { id });
 }
@@ -690,6 +825,11 @@ export async function sessionWorkspaceDelete(id: string): Promise<void> {
 /** Shape stored in the `app_settings` table under key `"user_settings"`. */
 export interface PersistedSettings {
   defaultShell: string | null;
+  /** Named terminal configurations. Validated on load by
+   *  `coerceTerminalProfiles` — this row is user-editable on disk. */
+  terminalProfiles?: unknown;
+  /** Id of the profile new terminals use. `null`/missing → `defaultShell`. */
+  defaultProfileId?: string | null;
   /** Appearance preference: 'dark' | 'light' | 'system'. */
   appearance?: 'dark' | 'light' | 'system';
   /** Active theme id (e.g. 'catppuccin-mocha'). When set + registered,
@@ -707,9 +847,13 @@ export interface PersistedSettings {
   restoreWindowState?: boolean;
   /** Enable Vim keybindings in the CodeMirror editor. */
   editorVimMode?: boolean;
-  /** Enable Language Server Protocol features (diagnostics, hover, completion)
-   *  in the editor. Requires the relevant language servers on PATH. */
+  /** Enable Language Server Protocol features (diagnostics, hover, completion,
+   *  go-to-definition, references, rename, formatting) in the editor. Requires
+   *  the relevant language servers on PATH. */
   editorLsp?: boolean;
+  /** Run the language server's formatter before every save. Requires
+   *  `editorLsp`. */
+  editorFormatOnSave?: boolean;
   /** Address of a `wingman serve` daemon. Empty disables the integration.
    *  The token is not persisted here — it lives in the OS credential vault. */
   wingmanUrl?: string;
@@ -746,6 +890,27 @@ export async function sessionSettingsSave(settings: PersistedSettings): Promise<
   await invoke('session_settings_save', { value: JSON.stringify(settings) });
 }
 
+// ─── terminal scrollback ─────────────────────────────────────────────────
+// Serialized xterm buffers keyed by tab id, so a terminal restored after a
+// relaunch comes back showing its previous output instead of an empty pane.
+
+export async function sessionScrollbackSave(tabId: string, data: string): Promise<void> {
+  await invoke('session_scrollback_save', { tabId, data });
+}
+
+export async function sessionScrollbackLoad(tabId: string): Promise<string | null> {
+  return invoke<string | null>('session_scrollback_load', { tabId });
+}
+
+export async function sessionScrollbackDelete(tabId: string): Promise<void> {
+  await invoke('session_scrollback_delete', { tabId });
+}
+
+/** Drop stored scrollback for every tab not in `keepTabIds`. */
+export async function sessionScrollbackPrune(keepTabIds: string[]): Promise<void> {
+  await invoke('session_scrollback_prune', { keepTabIds });
+}
+
 /** The running app's version, straight from tauri.conf.json. `null` in the
  *  browser-only build, where there is no bundle to ask. */
 export async function getAppVersion(): Promise<string | null> {
@@ -757,6 +922,38 @@ export async function getAppVersion(): Promise<string | null> {
     console.warn('[tauri] version lookup failed:', err);
     return null;
   }
+}
+
+// ─── diagnostics ─────────────────────────────────────────────────────────
+// Crash log + build facts, for the "Copy diagnostics" button in Settings →
+// About. A panic inside a Tauri command never reaches the UI, so the Rust
+// side logs it to <data_dir>/arc/crash.log and these read it back.
+
+export interface DiagnosticsSummary {
+  /** Epoch-ms of the most recent panic, or null when the log is empty. */
+  last_crash_at: number | null;
+  crash_count: number;
+  log_path: string | null;
+}
+
+export async function diagnosticsSummary(): Promise<DiagnosticsSummary | null> {
+  if (!isTauri) return null;
+  try {
+    return await invoke<DiagnosticsSummary>('diagnostics_summary');
+  } catch {
+    return null;
+  }
+}
+
+/** The paste-ready report: version, platform, data dir, crash-log tail. */
+export async function diagnosticsCollect(): Promise<string> {
+  if (!isTauri) return 'ARC (browser build — no diagnostics available)';
+  return invoke<string>('diagnostics_collect');
+}
+
+export async function diagnosticsClear(): Promise<void> {
+  if (!isTauri) return;
+  await invoke('diagnostics_clear');
 }
 
 /** Open (or focus, if already open) the standalone Settings window. */
@@ -1971,4 +2168,60 @@ export async function onClaudeTurn(
   handler: (ev: ClaudeStreamEvent) => void,
 ): Promise<UnlistenFn> {
   return listen<ClaudeStreamEvent>(topic, (e) => handler(e.payload));
+}
+
+// ─── remote filesystem (SFTP) ────────────────────────────────────────────
+//
+// The raw transport for remote workspaces. Callers should generally use the
+// `fs*` functions above, which route to these on an `ssh://` path — these are
+// exported for the connection lifecycle, which has no local equivalent.
+
+export interface RemoteDirEntry {
+  name: string;
+  /** Absolute POSIX path on the remote host (no `ssh://` prefix). */
+  path: string;
+  is_dir: boolean;
+  size: number;
+}
+
+/** Open (or reopen) the remote filesystem for a saved SSH host. Returns the
+ *  absolute remote root — the login directory when `path` is omitted. */
+export async function sshFsConnect(hostId: string, path?: string): Promise<string> {
+  return invoke<string>('ssh_fs_connect', { hostId, path: path ?? null });
+}
+
+export async function sshFsDisconnect(hostId: string): Promise<void> {
+  await invoke('ssh_fs_disconnect', { hostId });
+}
+
+export async function sshFsConnected(hostId: string): Promise<boolean> {
+  return invoke<boolean>('ssh_fs_connected', { hostId });
+}
+
+export async function sshFsReadDir(hostId: string, path: string): Promise<RemoteDirEntry[]> {
+  return invoke<RemoteDirEntry[]>('ssh_fs_read_dir', { hostId, path });
+}
+
+export async function sshFsReadFile(hostId: string, path: string): Promise<string> {
+  return invoke<string>('ssh_fs_read_file', { hostId, path });
+}
+
+export async function sshFsWriteFile(
+  hostId: string,
+  path: string,
+  contents: string,
+): Promise<void> {
+  await invoke('ssh_fs_write_file', { hostId, path, contents });
+}
+
+export async function sshFsCreateDir(hostId: string, path: string): Promise<void> {
+  await invoke('ssh_fs_create_dir', { hostId, path });
+}
+
+export async function sshFsRename(hostId: string, from: string, to: string): Promise<void> {
+  await invoke('ssh_fs_rename', { hostId, from, to });
+}
+
+export async function sshFsRemove(hostId: string, path: string, isDir: boolean): Promise<void> {
+  await invoke('ssh_fs_remove', { hostId, path, isDir });
 }

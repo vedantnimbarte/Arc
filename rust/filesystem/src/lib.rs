@@ -10,6 +10,7 @@ pub mod file;
 pub mod index;
 pub mod listing;
 pub mod paths;
+pub mod replace;
 pub mod search;
 pub mod watch;
 
@@ -20,6 +21,7 @@ pub use index::{is_built as index_is_built, rebuild as index_rebuild, search as 
     update_paths as index_update_paths, IndexHit};
 pub use listing::{list_files, FileItem};
 pub use paths::{default_root, parent};
+pub use replace::{find as find_literal, replace_in_files, ReplaceMatch, ReplaceSummary};
 pub use search::{search as search_files, SearchHit};
 pub use watch::Watcher;
 
@@ -45,6 +47,8 @@ pub enum Error {
     Dialog(String),
     #[error("index error: {0}")]
     Index(String),
+    #[error("invalid path: {0}")]
+    InvalidPath(String),
 }
 
 pub type Result<T> = std::result::Result<T, Error>;

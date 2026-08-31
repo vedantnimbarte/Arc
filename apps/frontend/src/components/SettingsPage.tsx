@@ -32,15 +32,25 @@ import {
   Sparkles,
   ArrowUpCircle,
   Loader2,
+  ClipboardCopy,
+  Trash2,
 } from 'lucide-react';
 import {
   DEFAULT_AI_MODEL,
   DEFAULT_SEARCH_IGNORE_DIRS,
   flushSettingsSave,
   useSettings,
+  type TerminalProfile,
 } from '../state/settings';
 import { checkForUpdate, installUpdate, type UpdateInfo } from '../lib/updater';
-import { getAppVersion } from '../lib/tauri';
+import {
+  diagnosticsClear,
+  diagnosticsCollect,
+  diagnosticsSummary,
+  getAppVersion,
+  type DiagnosticsSummary,
+} from '../lib/tauri';
+import { copyText } from '../lib/clipboard';
 import { ANTHROPIC_KEY_SECRET } from '../lib/ai';
 import { FontPicker } from './FontPicker';
 import { useFiles, type SidebarView } from '../state/files';
@@ -103,6 +113,7 @@ export function SettingsPage() {
     restoreWindowState,
     editorVimMode,
     editorLsp,
+    editorFormatOnSave,
     notifyLongCommands,
     notifyThresholdSecs,
     notifySound,
@@ -114,6 +125,7 @@ export function SettingsPage() {
     setLaunchAtLogin,
     setRestoreWindowState,
     setEditorVimMode,
+    setEditorFormatOnSave,
     setEditorLsp,
     setNotifyLongCommands,
     setNotifyThresholdSecs,
@@ -231,6 +243,8 @@ export function SettingsPage() {
                   onVimModeChange={setEditorVimMode}
                   lsp={editorLsp}
                   onLspChange={setEditorLsp}
+                  formatOnSave={editorFormatOnSave}
+                  onFormatOnSaveChange={setEditorFormatOnSave}
                 />
               )}
               {pane === 'sidebar' && <SidebarSettingsPane />}
@@ -473,14 +487,23 @@ function ToggleRow({
   hint,
   checked,
   onChange,
+  disabled = false,
 }: {
   label: string;
   hint?: string;
   checked: boolean;
   onChange: () => void;
+  /** Dims the row and blocks the switch — for a setting that only means
+   *  something while another one is on. */
+  disabled?: boolean;
 }) {
   return (
-    <div className="flex items-center justify-between gap-4 rounded-lg border border-border-subtle bg-bg-base/40 px-3 py-2.5">
+    <div
+      className={cn(
+        'flex items-center justify-between gap-4 rounded-lg border border-border-subtle bg-bg-base/40 px-3 py-2.5',
+        disabled && 'opacity-50',
+      )}
+    >
       <div className="min-w-0">
         <p className="font-display text-sm font-medium tracking-tight text-fg-base">
           {label}
@@ -491,7 +514,20 @@ function ToggleRow({
           </p>
         )}
       </div>
-      <Switch checked={checked} onChange={onChange} ariaLabel={label} />
+      <Switch checked={checked} onChange={onChange} ariaLabel={label} disabled={disabled} />
+    </div>
+  );
+}
+
+/** A read-only keys → action row. Used where the feature has no toggle of its
+ *  own and the useful thing to show is how to invoke it. */
+function ShortcutHint({ keys, label }: { keys: string; label: string }) {
+  return (
+    <div className="flex items-center justify-between gap-4 rounded-lg border border-border-subtle bg-bg-base/40 px-3 py-2">
+      <span className="font-display text-sm tracking-tight text-fg-base">{label}</span>
+      <kbd className="rounded border border-border-subtle bg-bg-base/60 px-1.5 py-0.5 font-mono text-2xs text-fg-muted">
+        {keys}
+      </kbd>
     </div>
   );
 }
@@ -500,10 +536,12 @@ function Switch({
   checked,
   onChange,
   ariaLabel,
+  disabled = false,
 }: {
   checked: boolean;
   onChange: () => void;
   ariaLabel: string;
+  disabled?: boolean;
 }) {
   return (
     <button
@@ -511,9 +549,11 @@ function Switch({
       role="switch"
       aria-checked={checked}
       aria-label={ariaLabel}
+      disabled={disabled}
       onClick={onChange}
       className={cn(
-        'relative inline-flex h-[20px] w-[34px] shrink-0 cursor-pointer items-center rounded-full border transition-colors duration-150 ease-apple',
+        'relative inline-flex h-[20px] w-[34px] shrink-0 items-center rounded-full border transition-colors duration-150 ease-apple',
+        disabled ? 'cursor-not-allowed' : 'cursor-pointer',
         checked
           ? 'border-accent/50 bg-accent/80'
           : 'border-border-subtle bg-bg-base/60 hover:bg-bg-base/80',
@@ -988,11 +1028,15 @@ function EditorPane({
   onVimModeChange,
   lsp,
   onLspChange,
+  formatOnSave,
+  onFormatOnSaveChange,
 }: {
   vimMode: boolean;
   onVimModeChange: (on: boolean) => void;
   lsp: boolean;
   onLspChange: (on: boolean) => void;
+  formatOnSave: boolean;
+  onFormatOnSaveChange: (on: boolean) => void;
 }) {
   return (
     <div className="space-y-7">
@@ -1009,7 +1053,7 @@ function EditorPane({
       </Section>
       <Section
         title="Language servers (LSP)"
-        hint="Diagnostics, hover docs, and completion from real language servers. Requires the server binaries on your PATH — e.g. typescript-language-server, rust-analyzer, pyright-langserver, gopls, clangd."
+        hint="Diagnostics, hover docs, completion, go-to-definition, references, rename, and formatting from real language servers. Requires the server binaries on your PATH — e.g. typescript-language-server, rust-analyzer, pyright-langserver, gopls, clangd."
       >
         <ToggleRow
           label="Enable LSP"
@@ -1017,6 +1061,22 @@ function EditorPane({
           checked={lsp}
           onChange={() => onLspChange(!lsp)}
         />
+        <ToggleRow
+          label="Format on save"
+          hint="Run the language server's formatter before writing the file. Languages whose server has no formatter save unchanged."
+          checked={formatOnSave}
+          disabled={!lsp}
+          onChange={() => onFormatOnSaveChange(!formatOnSave)}
+        />
+      </Section>
+      <Section
+        title="Navigation"
+        hint="Available whenever LSP is on and the file's server is running."
+      >
+        <ShortcutHint keys="F12 / ⌘-click" label="Go to definition" />
+        <ShortcutHint keys="⇧F12" label="Find all references" />
+        <ShortcutHint keys="F2" label="Rename symbol" />
+        <ShortcutHint keys="⇧⌥F" label="Format document" />
       </Section>
     </div>
   );
@@ -1245,6 +1305,8 @@ function TerminalPane({
   return (
     <div className="space-y-7">
       <ShellPicker shells={shells} defaultShell={defaultShell} onPick={onPickShell} />
+
+      <TerminalProfilesSection />
 
       <Section
         title="Command Suggestions"
@@ -1711,6 +1773,8 @@ function AboutPane() {
 
       <UpdatesCard />
 
+      <DiagnosticsCard />
+
       <div className="flex w-full max-w-md flex-col gap-1.5">
         <button
           onClick={() => openExternal(REPO_URL)}
@@ -1824,6 +1888,79 @@ function UpdatesCard() {
   );
 }
 
+/**
+ * Crash log surface. ARC's Rust side writes every panic to
+ * `<data_dir>/arc/crash.log`; without this the file exists but nobody ever
+ * finds it, and a bug report arrives as "it crashed".
+ *
+ * Quiet by design: with an empty log this is a single Copy button. It only
+ * grows a warning row once there is actually something to report.
+ */
+function DiagnosticsCard() {
+  const [summary, setSummary] = useState<DiagnosticsSummary | null>(null);
+
+  const refresh = () => {
+    void diagnosticsSummary().then(setSummary);
+  };
+  useEffect(refresh, []);
+
+  const copy = () => {
+    void diagnosticsCollect().then(
+      (text) => copyText(text, 'Diagnostics'),
+      () => copyText('(diagnostics unavailable)', 'Diagnostics'),
+    );
+  };
+
+  const clear = () => {
+    void diagnosticsClear().then(refresh);
+  };
+
+  const crashes = summary?.crash_count ?? 0;
+
+  return (
+    <div className="w-full max-w-md space-y-2.5 rounded-lg border border-border-subtle bg-bg-base/40 p-4">
+      <div className="flex items-baseline justify-between gap-3">
+        <span className="font-display text-xs uppercase tracking-widest2 text-fg-subtle">
+          Diagnostics
+        </span>
+        {crashes > 0 && summary?.last_crash_at != null && (
+          <span className="font-display text-2xs text-status-warn">
+            {crashes} crash{crashes === 1 ? '' : 'es'} logged · last{' '}
+            {new Date(summary.last_crash_at).toLocaleString()}
+          </span>
+        )}
+      </div>
+      <p className="font-display text-2xs leading-relaxed text-fg-subtle">
+        {crashes > 0
+          ? 'Paste this into a GitHub issue — it carries the version, platform, and the tail of the crash log.'
+          : 'No crashes recorded. Copy this anyway when reporting a bug: it carries the version and platform.'}
+      </p>
+      <div className="flex gap-1.5">
+        <button
+          onClick={copy}
+          className="flex flex-1 items-center justify-center gap-2 rounded-lg border border-border-subtle bg-bg-base/40 px-3 py-2 font-display text-sm font-medium tracking-tight text-fg-base transition-all duration-150 ease-apple hover:border-border-strong hover:bg-bg-base/60"
+        >
+          <ClipboardCopy size={12} strokeWidth={2.1} className="text-fg-muted" />
+          Copy diagnostics
+        </button>
+        {crashes > 0 && (
+          <button
+            onClick={clear}
+            title="Delete the crash log"
+            aria-label="Clear crash log"
+            className="rounded-lg border border-border-subtle bg-bg-base/40 px-3 py-2 text-fg-subtle transition-all duration-150 ease-apple hover:border-border-strong hover:text-fg-base"
+          >
+            <Trash2 size={12} strokeWidth={2.1} />
+          </button>
+        )}
+      </div>
+      {summary?.log_path && (
+        <p className="break-all font-mono text-2xs text-fg-subtle">{summary.log_path}</p>
+      )}
+    </div>
+  );
+}
+
 function AboutRow({ label, value }: { label: string; value: string }) {
   return (
     <div className="flex items-baseline justify-between gap-3">
@@ -1876,6 +2013,158 @@ function ClaudePane() {
       </Section>
     </div>
   );
+}
+
+/**
+ * Terminal profile editor.
+ *
+ * A profile is a named (shell, args, cwd, env) set that ⌘K can open a
+ * terminal with. The single-shell setting above it stays the fallback, so an
+ * install that never defines a profile behaves exactly as it did before.
+ *
+ * Edits write straight through to the store on every keystroke — settings
+ * already persist on a debounce, and a local draft plus an explicit save
+ * would only add a state to get out of sync.
+ */
+function TerminalProfilesSection() {
+  const profiles = useSettings((s) => s.terminalProfiles);
+  const defaultProfileId = useSettings((s) => s.defaultProfileId);
+  const setProfiles = useSettings((s) => s.setTerminalProfiles);
+  const setDefaultProfileId = useSettings((s) => s.setDefaultProfileId);
+
+  const patch = (id: string, fields: Partial<TerminalProfile>) =>
+    setProfiles(profiles.map((p) => (p.id === id ? { ...p, ...fields } : p)));
+
+  const add = () =>
+    setProfiles([
+      ...profiles,
+      {
+        id: `prof-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+        name: `Profile ${profiles.length + 1}`,
+        shell: '',
+      },
+    ]);
+
+  const remove = (id: string) => setProfiles(profiles.filter((p) => p.id !== id));
+
+  return (
+    <Section
+      title="Profiles"
+      hint="Each profile opens from the command palette as “New terminal: <name>”. Leave the shell empty to use the default above. Arguments are space-separated; quote anything containing a space."
+    >
+      <div className="space-y-2">
+        {profiles.map((p) => (
+          <div
+            key={p.id}
+            className="space-y-2 rounded-lg border border-border-subtle bg-bg-base/40 p-3"
+          >
+            <div className="flex items-center gap-2">
+              <input
+                value={p.name}
+                onChange={(e) => patch(p.id, { name: e.target.value })}
+                placeholder="Name"
+                aria-label="Profile name"
+                className="min-w-0 flex-1 rounded border border-border-subtle bg-bg-base/60 px-2 py-1 font-display text-sm text-fg-base outline-none focus:border-border-strong"
+              />
+              <button
+                onClick={() => setDefaultProfileId(defaultProfileId === p.id ? null : p.id)}
+                title={
+                  defaultProfileId === p.id
+                    ? 'This profile opens for new terminals'
+                    : 'Use this profile for new terminals'
+                }
+                aria-pressed={defaultProfileId === p.id}
+                className={cn(
+                  'rounded border px-2 py-1 font-display text-2xs transition-colors',
+                  defaultProfileId === p.id
+                    ? 'border-accent/50 bg-accent/20 text-fg-base'
+                    : 'border-border-subtle text-fg-subtle hover:text-fg-base',
+                )}
+              >
+                Default
+              </button>
+              <button
+                onClick={() => remove(p.id)}
+                title="Delete profile"
+                aria-label={`Delete ${p.name}`}
+                className="rounded p-1 text-fg-subtle transition-colors hover:bg-surface-2 hover:text-fg-base"
+              >
+                <Trash2 size={12} strokeWidth={2.1} />
+              </button>
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              <input
+                value={p.shell}
+                onChange={(e) => patch(p.id, { shell: e.target.value })}
+                placeholder="Shell path (blank = default)"
+                aria-label="Shell path"
+                spellCheck={false}
+                className="min-w-0 rounded border border-border-subtle bg-bg-base/60 px-2 py-1 font-mono text-xs text-fg-base outline-none focus:border-border-strong"
+              />
+              <input
+                value={(p.args ?? []).join(' ')}
+                onChange={(e) => patch(p.id, { args: splitArgs(e.target.value) })}
+                placeholder="Arguments (e.g. -l)"
+                aria-label="Shell arguments"
+                spellCheck={false}
+                className="min-w-0 rounded border border-border-subtle bg-bg-base/60 px-2 py-1 font-mono text-xs text-fg-base outline-none focus:border-border-strong"
+              />
+            </div>
+            <input
+              value={p.cwd ?? ''}
+              onChange={(e) => patch(p.id, { cwd: e.target.value || undefined })}
+              placeholder="Start in (blank = follow the file tree)"
+              aria-label="Working directory"
+              spellCheck={false}
+              className="w-full rounded border border-border-subtle bg-bg-base/60 px-2 py-1 font-mono text-xs text-fg-base outline-none focus:border-border-strong"
+            />
+          </div>
+        ))}
+        <button
+          onClick={add}
+          className="flex w-full items-center justify-center gap-2 rounded-lg border border-dashed border-border-subtle px-3 py-2 font-display text-sm text-fg-muted transition-colors hover:border-border-strong hover:text-fg-base"
+        >
+          <Plus size={12} strokeWidth={2.1} />
+          Add profile
+        </button>
+      </div>
+    </Section>
+  );
+}
+
+/**
+ * Split a shell-argument string on whitespace, honouring single and double
+ * quotes so a path with a space survives as one argument. Not a full shell
+ * lexer — no escapes, no variable expansion — because these go straight to
+ * the PTY spawn as an argv array, never through a shell that would expand
+ * them anyway.
+ */
+export function splitArgs(input: string): string[] {
+  const out: string[] = [];
+  let current = '';
+  let quote: '"' | "'" | null = null;
+  let has = false;
+  for (const ch of input) {
+    if (quote) {
+      if (ch === quote) quote = null;
+      else current += ch;
+      continue;
+    }
+    if (ch === '"' || ch === "'") {
+      quote = ch;
+      has = true; // `""` is a real (empty) argument
+      continue;
+    }
+    if (/\s/.test(ch)) {
+      if (has || current) out.push(current);
+      current = '';
+      has = false;
+      continue;
+    }
+    current += ch;
+  }
+  if (has || current) out.push(current);
+  return out;
 }
 
 function Section({

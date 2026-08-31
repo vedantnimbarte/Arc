@@ -747,3 +747,83 @@ html:not(.dark) ::-webkit-scrollbar-thumb:hover {
     animation-name: splash-fade-in;
   }
 }
+
+/* ─── LSP references panel ──────────────────────────────────────────────
+   Rendered by `referencesPanel` in lib/lspClient.ts as a CodeMirror bottom
+   panel (Shift+F12). CodeMirror gives a panel no chrome of its own, so all
+   of it lives here. Colours come from the active theme's CSS variables so
+   the panel tracks light/dark like everything else. */
+
+.cm-lsp-references {
+  max-height: 180px;
+  display: flex;
+  flex-direction: column;
+  border-top: 1px solid rgb(var(--border-subtle));
+  background: rgb(var(--bg-panel));
+  font-family: theme('fontFamily.display');
+}
+
+.cm-lsp-references-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 4px 10px;
+  border-bottom: 1px solid var(--border-hairline);
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: rgb(var(--fg-subtle));
+}
+
+.cm-lsp-references-header button {
+  padding: 0 4px;
+  border-radius: 4px;
+  font-size: 14px;
+  line-height: 1;
+  color: rgb(var(--fg-subtle));
+  cursor: pointer;
+}
+
+.cm-lsp-references-header button:hover {
+  background: var(--surface-2);
+  color: rgb(var(--fg-base));
+}
+
+.cm-lsp-references-list {
+  overflow-y: auto;
+}
+
+.cm-lsp-references-row {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  width: 100%;
+  padding: 3px 10px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.cm-lsp-references-row:hover {
+  background: var(--surface-2);
+}
+
+.cm-lsp-references-file {
+  flex: none;
+  font-size: 12px;
+  color: rgb(var(--fg-base));
+}
+
+/* The full path, dimmed and truncated from the left so the tail — the part
+   that actually distinguishes two same-named files — stays visible. */
+.cm-lsp-references-dir {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  direction: rtl;
+  text-align: left;
+  font-size: 11px;
+  color: rgb(var(--fg-subtle));
+}

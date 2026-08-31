@@ -31,9 +31,15 @@ use ssh_key::{Algorithm, HashAlg, LineEnding, PrivateKey};
 use tokio::sync::{mpsc, oneshot};
 use uuid::Uuid;
 
+pub mod sftp;
+
+pub use sftp::{
+    posix_join, posix_parent, RemoteDirEntry, RemoteFsOpts, SftpManager, MAX_REMOTE_FILE_BYTES,
+};
+
 const DATA_CHANNEL_CAP: usize = 256;
 const LOG_CHANNEL_CAP: usize = 64;
-const HANDSHAKE_TIMEOUT_SECS: u64 = 25;
+pub(crate) const HANDSHAKE_TIMEOUT_SECS: u64 = 25;
 
 /// Connection request handed to [`SshManager::connect`]. Sensitive material
 /// (the private-key passphrase) is resolved by the caller before this hits
@@ -157,9 +163,7 @@ impl SshManager {
         };
         let config = Arc::new(config);
 
-        let handler = ClientHandler {
-            log_tx: log_tx.clone(),
-        };
+        let handler = ClientHandler::new(log_tx.clone());
 
         let addr = (opts.host.as_str(), opts.port);
         log(&log_tx, "tcp", "connecting").await;
@@ -374,8 +378,21 @@ async fn log_blocking(tx: &mpsc::Sender<SshLogEvent>, level: &str, msg: &str) {
 /// fingerprint so the user can verify it manually); V2 will persist a
 /// `known_hosts` table.
 #[derive(Clone)]
-struct ClientHandler {
-    log_tx: mpsc::Sender<SshLogEvent>,
+pub(crate) struct ClientHandler {
+    /// `None` for connections with no UI attached (the SFTP transport), where
+    /// there is no handshake progress list to feed.
+    log_tx: Option<mpsc::Sender<SshLogEvent>>,
+}
+
+impl ClientHandler {
+    fn new(log_tx: mpsc::Sender<SshLogEvent>) -> Self {
+        Self { log_tx: Some(log_tx) }
+    }
+
+    /// A handler for connections nobody is watching.
+    pub(crate) fn silent() -> Self {
+        Self { log_tx: None }
+    }
 }
 
 #[async_trait]
@@ -387,7 +404,9 @@ impl client::Handler for ClientHandler {
         server_public_key: &PublicKey,
     ) -> Result<bool, Self::Error> {
         let fp = server_public_key.fingerprint();
-        log(&self.log_tx, "ssh", &format!("server fingerprint {fp}")).await;
+        if let Some(tx) = &self.log_tx {
+            log(tx, "ssh", &format!("server fingerprint {fp}")).await;
+        }
         Ok(true)
     }
 }

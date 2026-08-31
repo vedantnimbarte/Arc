@@ -17,7 +17,7 @@
 
 use std::sync::Arc;
 
-use arc_filesystem::{DirEntry, FileItem, SearchHit, Watcher};
+use arc_filesystem::{DirEntry, FileItem, ReplaceMatch, ReplaceSummary, SearchHit, Watcher};
 use dashmap::DashMap;
 use tauri::{AppHandle, Emitter, State};
 use uuid::Uuid;
@@ -243,4 +243,48 @@ pub async fn fs_reveal(path: String) -> Result<(), String> {
 #[tauri::command]
 pub async fn fs_create_dir(path: String) -> Result<(), String> {
     tokio::fs::create_dir_all(&path).await.map_err(|e| e.to_string())
+}
+
+// ─── find & replace across the workspace ─────────────────────────────────
+//
+//   invoke("fs_replace_find",  { root, needle, caseSensitive, limit, ignoreDirs })
+//       -> ReplaceMatch[]
+//   invoke("fs_replace_apply", { root, files, needle, replacement, caseSensitive })
+//       -> ReplaceSummary
+//
+// Two calls rather than one: the frontend previews the matches, the user
+// approves, and only the files they kept are sent to the apply. Both run on
+// the blocking pool — they walk and rewrite the tree synchronously, which
+// would otherwise stall the async runtime.
+
+#[tauri::command]
+pub async fn fs_replace_find(
+    root: String,
+    needle: String,
+    case_sensitive: bool,
+    limit: usize,
+    ignore_dirs: Vec<String>,
+) -> Result<Vec<ReplaceMatch>, String> {
+    tokio::task::spawn_blocking(move || {
+        arc_filesystem::find_literal(&root, &needle, case_sensitive, limit, &ignore_dirs)
+    })
+    .await
+    .map_err(|e| format!("replace-find task: {e}"))?
+    .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn fs_replace_apply(
+    root: String,
+    files: Vec<String>,
+    needle: String,
+    replacement: String,
+    case_sensitive: bool,
+) -> Result<ReplaceSummary, String> {
+    tokio::task::spawn_blocking(move || {
+        arc_filesystem::replace_in_files(&root, &files, &needle, &replacement, case_sensitive)
+    })
+    .await
+    .map_err(|e| format!("replace-apply task: {e}"))?
+    .map_err(|e| e.to_string())
 }

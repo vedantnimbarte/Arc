@@ -43,6 +43,10 @@ fn read_restore_window_pref(store: &SessionStore) -> bool {
 }
 
 fn main() {
+    // Before anything else: a panic in a command otherwise dies with the
+    // process, leaving the user a failed invoke and no way to say what broke.
+    commands::diagnostics::install_panic_hook();
+
     tracing_subscriber::fmt()
         .with_env_filter(
             EnvFilter::try_from_default_env().unwrap_or_else(|_| {
@@ -86,6 +90,7 @@ fn main() {
         )
         .manage(PtyState::default())
         .manage(SshState::default())
+        .manage(commands::ssh::SftpState::default())
         .manage(WatchState::default())
         .manage(commands::wingman::WingmanState::default())
         .manage(commands::claude_code::ClaudeState::default())
@@ -107,6 +112,8 @@ fn main() {
             commands::fs::fs_watch_start,
             commands::fs::fs_watch_stop,
             commands::fs::fs_search,
+            commands::fs::fs_replace_find,
+            commands::fs::fs_replace_apply,
             commands::fs::fs_index_rebuild,
             commands::fs::fs_index_status,
             commands::fs::fs_rename,
@@ -124,6 +131,10 @@ fn main() {
             commands::session::session_command_finish,
             commands::session::session_settings_load,
             commands::session::session_settings_save,
+            commands::session::session_scrollback_save,
+            commands::session::session_scrollback_load,
+            commands::session::session_scrollback_delete,
+            commands::session::session_scrollback_prune,
             commands::git::git_status,
             commands::git::git_diff_stat,
             commands::git::git_changes,
@@ -187,6 +198,15 @@ fn main() {
             commands::ssh::ssh_key_import,
             commands::ssh::ssh_key_delete,
             commands::ssh::ssh_session_logs,
+            commands::ssh::ssh_fs_connect,
+            commands::ssh::ssh_fs_disconnect,
+            commands::ssh::ssh_fs_connected,
+            commands::ssh::ssh_fs_read_dir,
+            commands::ssh::ssh_fs_read_file,
+            commands::ssh::ssh_fs_write_file,
+            commands::ssh::ssh_fs_create_dir,
+            commands::ssh::ssh_fs_rename,
+            commands::ssh::ssh_fs_remove,
             commands::lsp::lsp_start,
             commands::lsp::lsp_did_open,
             commands::lsp::lsp_did_change,
@@ -194,6 +214,9 @@ fn main() {
             commands::lsp::lsp_hover,
             commands::lsp::lsp_completion,
             commands::lsp::lsp_definition,
+            commands::lsp::lsp_references,
+            commands::lsp::lsp_rename,
+            commands::lsp::lsp_formatting,
             commands::lsp::lsp_stop,
             commands::lsp::lsp_is_running,
             commands::network::network_probe_port,
@@ -241,6 +264,9 @@ fn main() {
             commands::claude_code::claude_turn_start,
             commands::claude_code::claude_turn_cancel,
             commands::claude_code::claude_permission_respond,
+            commands::diagnostics::diagnostics_collect,
+            commands::diagnostics::diagnostics_summary,
+            commands::diagnostics::diagnostics_clear,
         ])
         .setup(|app| {
             // Open the SQLite store before the window appears so the first

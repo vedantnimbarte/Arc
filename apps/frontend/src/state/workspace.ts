@@ -6,6 +6,8 @@ import {
   ptyListAiClis,
   sessionLoad,
   sessionSaveTabs,
+  sessionScrollbackDelete,
+  sessionScrollbackPrune,
   type AiCliInfo,
   type SshHost,
   type TabInput,
@@ -56,6 +58,11 @@ export interface Tab {
    *  drafts, left-rail collapsed flag, last-seen response. Persisted as
    *  TEXT so this row survives schema additions inside the blob. */
   apiClientState?: string;
+  /** Terminal profile this tab was opened with (Settings → Terminal). Unlike
+   *  `shellOverride` this IS persisted — via the per-kind JSON blob — so a
+   *  restored tab comes back as the same shell the user chose. An id whose
+   *  profile has since been deleted falls back to the default shell. */
+  profileId?: string;
   /** Override the default shell binary for a terminal tab — used by the
    *  AI CLI launchers (Claude Code / Codex / OpenCode). Transient: not
    *  persisted across restarts (the tab would come back as a regular shell). */
@@ -258,7 +265,9 @@ interface WorkspaceState {
   /** Open a new terminal tab anchored at the user's home directory.
    *  Resets the file-tree root to home first so the spawning PTY inherits
    *  it as CWD and both panes stay in sync. */
-  newTerminal: (override?: Partial<Pick<Tab, 'title' | 'shellOverride'>>) => Promise<string>;
+  newTerminal: (
+    override?: Partial<Pick<Tab, 'title' | 'shellOverride' | 'profileId'>>,
+  ) => Promise<string>;
   /** Open a terminal tab that runs `command` in a fresh shell (task runner).
    *  The command is typed into the PTY once the shell is ready, so the shell
    *  stays open with the output visible afterward. */
@@ -351,7 +360,7 @@ function newPaneId(prefix = 'pane'): string {
 /** Build a single-leaf layout containing `tabIds` with `activeTabId` selected.
  *  Used for fresh installs and as the synthesized layout when SQLite has tabs
  *  but no `pane_layout` JSON yet. */
-function singleLeafLayout(tabIds: string[], activeTabId: string | null): PaneLeaf {
+export function singleLeafLayout(tabIds: string[], activeTabId: string | null): PaneLeaf {
   return {
     kind: 'leaf',
     id: newPaneId('leaf'),
@@ -361,7 +370,7 @@ function singleLeafLayout(tabIds: string[], activeTabId: string | null): PaneLea
 }
 
 /** Total number of tab ids referenced across all leaves. */
-function countLayoutTabs(node: PaneNode): number {
+export function countLayoutTabs(node: PaneNode): number {
   return allLeaves(node).reduce((n, l) => n + l.tabIds.length, 0);
 }
 
@@ -495,7 +504,7 @@ function groupOfMap(tabs: Tab[]): (id: string) => string | undefined {
  * is a no-op. This is what keeps a group from visually fragmenting after an
  * add/remove.
  */
-function normalizeLeafOrder(tabIds: string[], groupOf: (id: string) => string | undefined): string[] {
+export function normalizeLeafOrder(tabIds: string[], groupOf: (id: string) => string | undefined): string[] {
   const result: string[] = [];
   const placed = new Set<string>();
   for (const id of tabIds) {
@@ -512,7 +521,7 @@ function normalizeLeafOrder(tabIds: string[], groupOf: (id: string) => string | 
 }
 
 /** Replace a leaf's `tabIds` with `order` (same membership, new sequence). */
-function reorderLeafTabs(node: PaneNode, paneId: string, order: string[]): PaneNode {
+export function reorderLeafTabs(node: PaneNode, paneId: string, order: string[]): PaneNode {
   if (node.kind === 'leaf') {
     if (node.id !== paneId) return node;
     return { ...node, tabIds: order };
@@ -521,7 +530,7 @@ function reorderLeafTabs(node: PaneNode, paneId: string, order: string[]): PaneN
 }
 
 /** Drop any group that no longer has at least one member among `tabs`. */
-function pruneEmptyGroups(groups: TabGroup[], tabs: Tab[]): TabGroup[] {
+export function pruneEmptyGroups(groups: TabGroup[], tabs: Tab[]): TabGroup[] {
   const live = new Set(tabs.map((t) => t.groupId).filter(Boolean) as string[]);
   if (groups.every((g) => live.has(g.id))) return groups;
   return groups.filter((g) => live.has(g.id));
@@ -529,7 +538,7 @@ function pruneEmptyGroups(groups: TabGroup[], tabs: Tab[]): TabGroup[] {
 
 /** Replace `splitId`'s `sizes` with `sizes`. Used after a resize-handle
  *  drag so the new pane ratios survive across restarts. */
-function updateSplitSizes(node: PaneNode, splitId: string, sizes: number[]): PaneNode {
+export function updateSplitSizes(node: PaneNode, splitId: string, sizes: number[]): PaneNode {
   if (node.kind === 'leaf') return node;
   if (node.id === splitId) {
     // Defensive: if the caller passed the wrong number of sizes, leave the
@@ -555,7 +564,7 @@ function updateSplitSizes(node: PaneNode, splitId: string, sizes: number[]): Pan
 
 /** Insert a tab into a leaf at a specific position. Pulls from any other
  *  leaf that already had it (move semantics). */
-function insertTabIntoLeaf(
+export function insertTabIntoLeaf(
   node: PaneNode,
   paneId: string,
   tabId: string,
@@ -588,7 +597,7 @@ function insertTabIntoLeaf(
  *  holding only `tabId`. `side` decides direction + which child the new
  *  leaf becomes — `right`/`bottom` → new leaf is second; `left`/`top` →
  *  new leaf is first. */
-function splitLeafForTab(
+export function splitLeafForTab(
   node: PaneNode,
   targetPaneId: string,
   side: 'top' | 'bottom' | 'left' | 'right',
@@ -699,7 +708,11 @@ export const useWorkspace = create<WorkspaceState>()((set, get) => ({
         focusedPaneId: newLeaf?.id ?? s.focusedPaneId,
       };
     }),
-  closeTab: (id) =>
+  closeTab: (id) => {
+    // A tab the user closed is gone for good — its saved scrollback would
+    // otherwise sit in the DB until the next hydrate pruned it. Fire and
+    // forget; the prune on hydrate is the backstop if this write is lost.
+    if (isTauri) void sessionScrollbackDelete(id).catch(() => {});
     set((s) => {
       // Layout-aware close. Refuse if this is the last tab in the entire
       // workspace — the original UX was to keep at least one tab open and
@@ -743,7 +756,8 @@ export const useWorkspace = create<WorkspaceState>()((set, get) => ({
         // A group that just lost its last member disappears with it.
         tabGroups: pruneEmptyGroups(s.tabGroups, remaining),
       };
-    }),
+    });
+  },
   setActive: (id) =>
     set((s) => {
       const owningLeaf = findLeafContaining(s.layout, id);
@@ -1153,6 +1167,7 @@ export const useWorkspace = create<WorkspaceState>()((set, get) => ({
       title: override?.title ?? 'shell',
       kind: 'terminal',
       shellOverride: override?.shellOverride,
+      profileId: override?.profileId,
     };
     get().addTab(tab);
     return id;
@@ -1458,6 +1473,17 @@ export const useWorkspace = create<WorkspaceState>()((set, get) => ({
               /* corrupt blob — diff tab will be inert until reopened */
             }
           }
+          // Terminal tabs use the same blob to remember which profile they
+          // were opened with, so a restored tab respawns the right shell.
+          let profileId: string | undefined;
+          if (t.kind === 'terminal' && t.apiclient_state_json) {
+            try {
+              const parsed = JSON.parse(t.apiclient_state_json) as { profileId?: string };
+              profileId = parsed.profileId;
+            } catch {
+              /* corrupt blob — fall back to the default shell */
+            }
+          }
           return {
             id: t.id,
             title: t.title,
@@ -1469,6 +1495,7 @@ export const useWorkspace = create<WorkspaceState>()((set, get) => ({
             sshHostId,
             diffRoot,
             diffScope,
+            profileId,
           };
         });
         activeTabId =
@@ -1567,6 +1594,11 @@ export const useWorkspace = create<WorkspaceState>()((set, get) => ({
         );
       }
 
+      // Reap scrollback for tabs that no longer exist — closed while the app
+      // was down, or lost to a failed delete. Best-effort: a full DB is not
+      // worth failing a launch over.
+      void sessionScrollbackPrune(tabs.map((t) => t.id)).catch(() => {});
+
       set({
         tabs,
         activeTabId,
@@ -1639,7 +1671,9 @@ function toTabInputs(tabs: Tab[]): TabInput[] {
           ? JSON.stringify({ sshHostId: t.sshHostId })
           : t.kind === 'diff' && t.diffRoot
             ? JSON.stringify({ diffRoot: t.diffRoot, diffScope: t.diffScope ?? 'worktree' })
-            : null,
+            : t.kind === 'terminal' && t.profileId
+              ? JSON.stringify({ profileId: t.profileId })
+              : null,
   }));
 }
 
@@ -1668,6 +1702,7 @@ function tabSliceEqual(a: WorkspaceState, b: WorkspaceState): boolean {
       x.previewUrl !== y.previewUrl ||
       x.apiClientState !== y.apiClientState ||
       x.sshHostId !== y.sshHostId ||
+      x.profileId !== y.profileId ||
       x.groupId !== y.groupId ||
       x.workspaceId !== y.workspaceId
     ) {
@@ -1906,7 +1941,7 @@ function coercePaneNode(raw: unknown): PaneNode | null {
 /** Sanity check that a persisted layout still references the tab ids we
  *  actually loaded. Drift here would leave the user staring at empty panes,
  *  so we fall back to a synthesized layout in that case. */
-function layoutCoversTabs(layout: PaneNode, tabs: Tab[]): boolean {
+export function layoutCoversTabs(layout: PaneNode, tabs: Tab[]): boolean {
   const have = new Set(tabs.map((t) => t.id));
   const referenced = new Set<string>();
   for (const leaf of allLeaves(layout)) {

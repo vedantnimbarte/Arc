@@ -1,5 +1,4 @@
 import {
-  useCallback,
   useEffect,
   useLayoutEffect,
   useMemo,
@@ -10,6 +9,7 @@ import {
 } from 'react';
 import { createPortal } from 'react-dom';
 import { FileTree } from './FileTree';
+import { RemoteWorkspaceBar } from './RemoteWorkspaceBar';
 import { SourceControl } from './SourceControl';
 import { SearchView } from './SearchView';
 import { OutlineView } from './OutlineView';
@@ -26,19 +26,15 @@ import {
   PINNED_VIEW,
   resolveRailViews,
   SIDEBAR_VIEW_BY_ID,
-  type SidebarViewDef,
 } from '../lib/sidebarViews';
 import { formatBinding, getBinding } from '../state/shortcuts';
 import { cn } from '../lib/cn';
 
 /**
- * Left-rail container. A compact activity bar across the top switches the
- * body between the Explorer (file tree), Source Control, and SSH — all three
- * now live in this one sidebar rather than a second panel on the right.
- * Inactive items collapse to an icon; the active one expands to icon + label
- * with a soft width/opacity tween, and the body cross-fades on switch.
+ * The sidebar panel body — whichever view `SidebarRail` (the vertical strip
+ * on the window's right edge) has selected. The body cross-fades on switch.
  *
- * We keep the git poller here so all three views share one cache.
+ * We keep the git poller here so every view shares one cache.
  */
 export function Sidebar() {
   const view = useFiles((s) => s.sidebarView);
@@ -46,22 +42,6 @@ export function Sidebar() {
   const root = useFiles((s) => s.root);
   const refresh = useGit((s) => s.refresh);
   const reset = useGit((s) => s.reset);
-
-  const gitChangeCount = useGit((s) => s.entries.length);
-  const gitConflictCount = useGit((s) =>
-    s.entries.reduce((n, e) => (e.kind === 'conflict' ? n + 1 : n), 0),
-  );
-  const sshLiveCount = useSsh((s) => Object.keys(s.liveByHost).length);
-
-  const order = useSidebarLayout((s) => s.order);
-  const hidden = useSidebarLayout((s) => s.hidden);
-  const views = useMemo(() => resolveRailViews(order, hidden), [order, hidden]);
-
-  // If the active view gets hidden (via Settings / context menu), fall back to
-  // the Explorer so the rail always has a highlighted, reachable item.
-  useEffect(() => {
-    if (!views.some((v) => v.id === view)) setSidebarView(PINNED_VIEW);
-  }, [views, view, setSidebarView]);
 
   // Single git refresh driver for the whole sidebar — both `SourceControl`
   // and the FileTree header badge subscribe to the same store, so the work
@@ -112,49 +92,40 @@ export function Sidebar() {
     };
   }, [refresh, reset, root]);
 
+  // Body — cross-fades on switch. `key` re-mounts the active view so the
+  // view-in animation replays each time.
   return (
-    <div className="flex h-full min-w-0 flex-col">
-      <SidebarRail
-        views={views}
-        view={view}
-        onSelect={setSidebarView}
-        gitCount={gitChangeCount}
-        gitConflicts={gitConflictCount}
-        sshLive={sshLiveCount}
-      />
-      {/* Body — cross-fades on switch. `key` re-mounts the active view so the
-          view-in animation replays each time, while absolute positioning keeps
-          the swap from reflowing the rail above. */}
-      <div className="relative min-h-0 flex-1">
-        <div
-          key={view}
-          id={SIDEBAR_PANEL_ID}
-          role="tabpanel"
-          aria-labelledby={tabId(view)}
-          className="absolute inset-0 flex min-h-0 flex-col animate-view-in motion-reduce:animate-none"
-        >
-          {view === 'files' ? (
-            <FileTree />
-          ) : view === 'git' ? (
-            <SourceControl />
-          ) : view === 'search' ? (
-            <SearchView />
-          ) : view === 'outline' ? (
-            <OutlineView />
-          ) : view === 'wingman' ? (
-            <WingmanPanel />
-          ) : view === 'claude' ? (
-            <ClaudePanel />
-          ) : (
-            <SshPanel onClose={() => setSidebarView('files')} />
-          )}
-        </div>
-      </div>
+    <div
+      key={view}
+      id={SIDEBAR_PANEL_ID}
+      role="tabpanel"
+      aria-labelledby={tabId(view)}
+      className="flex h-full min-h-0 min-w-0 flex-col animate-view-in motion-reduce:animate-none"
+    >
+      {/* Which machine the tree is showing, above every view that can act on
+          it. Saving to the wrong host is not a recoverable mistake, so this
+          is not tucked into a menu. Renders nothing when local. */}
+      <RemoteWorkspaceBar />
+      {view === 'files' ? (
+        <FileTree />
+      ) : view === 'git' ? (
+        <SourceControl />
+      ) : view === 'search' ? (
+        <SearchView />
+      ) : view === 'outline' ? (
+        <OutlineView />
+      ) : view === 'wingman' ? (
+        <WingmanPanel />
+      ) : view === 'claude' ? (
+        <ClaudePanel />
+      ) : (
+        <SshPanel onClose={() => setSidebarView('files')} />
+      )}
     </div>
   );
 }
 
-// ── Activity rail ──────────────────────────────────────────────────────────
+// ── Rail helpers ────────────────────────────────────────────────────────────
 
 const SIDEBAR_PANEL_ID = 'sidebar-view-panel';
 const tabId = (view: SidebarView) => `sidebar-tab-${view}`;
@@ -177,71 +148,52 @@ function railBadge(
   return null;
 }
 
-function SidebarRail({
-  views,
-  view,
-  onSelect,
-  gitCount,
-  gitConflicts,
-  sshLive,
-}: {
-  views: SidebarViewDef[];
-  view: SidebarView;
-  onSelect: (view: SidebarView) => void;
-  gitCount: number;
-  gitConflicts: number;
-  sshLive: number;
-}) {
-  const containerRef = useRef<HTMLDivElement>(null);
-  const btnRefs = useRef(new Map<SidebarView, HTMLButtonElement | null>());
-  const [indicator, setIndicator] = useState({ left: 0, width: 0, ready: false });
+// ── Activity rail ────────────────────────────────────────────────────────────
+
+/**
+ * Vertical icon strip pinned to the window's right edge — the mirror of the
+ * workspace rail on the left. Clicking an icon reveals that view in the panel
+ * to its left; the rail stays put when the panel collapses (⌘B), so there is
+ * always a way back. Icon-only by design: the active view is marked by a
+ * ribbon and named in its tooltip.
+ */
+export function SidebarRail() {
+  const view = useFiles((s) => s.sidebarView);
+  const show = useFiles((s) => s.showSidebarView);
+  const setSidebarView = useFiles((s) => s.setSidebarView);
+  const gitCount = useGit((s) => s.entries.length);
+  const gitConflicts = useGit((s) =>
+    s.entries.reduce((n, e) => (e.kind === 'conflict' ? n + 1 : n), 0),
+  );
+  const sshLive = useSsh((s) => Object.keys(s.liveByHost).length);
+  const order = useSidebarLayout((s) => s.order);
+  const hidden = useSidebarLayout((s) => s.hidden);
+  const views = useMemo(() => resolveRailViews(order, hidden), [order, hidden]);
   const menu = useRailMenu();
+  const btnRefs = useRef(new Map<SidebarView, HTMLButtonElement | null>());
 
-  const measure = useCallback(() => {
-    const cont = containerRef.current;
-    const el = btnRefs.current.get(view);
-    if (!cont || !el) return;
-    const cr = cont.getBoundingClientRect();
-    const er = el.getBoundingClientRect();
-    setIndicator({ left: er.left - cr.left, width: er.width, ready: true });
-  }, [view]);
-
-  // Track the active item's rect while its pill expands/collapses so the
-  // single indicator glides + resizes with it. A short rAF loop samples the
-  // in-flight CSS transition frame by frame; a ResizeObserver backstops late
-  // reflows (font load, sidebar resize). Under reduced motion the items snap,
-  // so the first frame lands the indicator at its final spot.
-  useLayoutEffect(() => {
-    let raf = 0;
-    let start = 0;
-    const tick = (t: number) => {
-      if (!start) start = t;
-      measure();
-      if (t - start < 340) raf = requestAnimationFrame(tick);
-    };
-    raf = requestAnimationFrame(tick);
-    const ro = new ResizeObserver(() => measure());
-    if (containerRef.current) ro.observe(containerRef.current);
-    return () => {
-      cancelAnimationFrame(raf);
-      ro.disconnect();
-    };
-  }, [measure]);
+  // If the active view gets hidden (via Settings / context menu), fall back to
+  // the Explorer so the rail always has a highlighted, reachable item. Uses
+  // `setSidebarView`, not `show`, so a hidden view can't force a collapsed
+  // panel back open.
+  useEffect(() => {
+    if (!views.some((v) => v.id === view)) setSidebarView(PINNED_VIEW);
+  }, [views, view, setSidebarView]);
 
   // Arrow-key navigation with automatic activation — the standard ARIA tabs
-  // pattern. Left/Up and Right/Down wrap; Home/End jump to the ends.
+  // pattern. Up/Down (and Left/Right) wrap; Home/End jump to the ends.
   const onKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
     const len = views.length;
     if (len === 0) return;
     const idx = views.findIndex((v) => v.id === view);
     let next = idx < 0 ? 0 : idx;
     switch (e.key) {
-      case 'ArrowRight':
       case 'ArrowDown':
+      case 'ArrowRight':
         next = (next + 1) % len;
         break;
-      case 'ArrowLeft':
       case 'ArrowUp':
+      case 'ArrowLeft':
         next = (next - 1 + len) % len;
         break;
       case 'Home':
@@ -256,43 +208,22 @@ function SidebarRail({
     const nextView = views[next];
     if (!nextView) return;
     e.preventDefault();
-    onSelect(nextView.id);
+    show(nextView.id);
     btnRefs.current.get(nextView.id)?.focus();
   };
 
   return (
     <div
-      ref={containerRef}
       role="tablist"
+      aria-orientation="vertical"
       aria-label="Sidebar views"
       onKeyDown={onKeyDown}
-      className="relative flex h-8 shrink-0 items-center gap-0.5 border-b border-border-hairline px-1.5"
+      className="flex h-full w-full flex-col items-center gap-1 py-2"
     >
-      {/* Single sliding indicator — the only active background. Its left/width
-          are driven live (see measure/rAF) so it glides and resizes to wrap
-          whichever item is active. */}
-      <span
-        aria-hidden
-        style={{ left: indicator.left, width: indicator.width }}
-        className={cn(
-          'pointer-events-none absolute top-1/2 z-0 h-[22px] -translate-y-1/2 rounded-md',
-          'bg-surface-2 ring-1 ring-inset ring-accent/15 shadow-[inset_0_1px_0_0_rgba(255,255,255,0.05)]',
-          'transition-opacity duration-200 motion-reduce:transition-none',
-          indicator.ready ? 'opacity-100' : 'opacity-0',
-        )}
-      >
-        <span
-          aria-hidden
-          className="absolute inset-x-1.5 top-0 h-px bg-gradient-to-r from-transparent via-white/[0.16] to-transparent"
-        />
-      </span>
       {views.map(({ id, label, Icon, shortcut }) => {
         const active = view === id;
         const badge = railBadge(id, gitCount, gitConflicts, sshLive);
         const binding = shortcut ? getBinding(shortcut) : null;
-        const tip = [label, binding ? formatBinding(binding) : null, badge?.title]
-          .filter(Boolean)
-          .join(' · ');
         return (
           <button
             key={id}
@@ -304,102 +235,6 @@ function SidebarRail({
             aria-controls={SIDEBAR_PANEL_ID}
             aria-label={label}
             tabIndex={active ? 0 : -1}
-            title={tip}
-            onClick={() => onSelect(id)}
-            onContextMenu={(e) => menu.open(id, e)}
-            className={cn(
-              'group relative z-10 flex h-[22px] items-center overflow-hidden rounded-md outline-none',
-              'transition-all duration-[260ms] ease-out-soft active:scale-[0.97]',
-              'motion-reduce:transition-none',
-              'focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-accent/40',
-              active
-                ? 'px-1.5 text-accent-bright'
-                : 'w-[22px] justify-center text-fg-muted hover:bg-surface-1 hover:text-fg-base',
-            )}
-          >
-            <span className="relative flex h-3 w-3 shrink-0 items-center justify-center">
-              <Icon
-                size={11}
-                strokeWidth={2}
-                className={cn(
-                  'transition-transform duration-[260ms] ease-out-soft motion-reduce:transition-none',
-                  active && 'scale-[1.05]',
-                )}
-              />
-              {badge && (
-                <span
-                  aria-hidden
-                  title={badge.title}
-                  className={cn(
-                    'pointer-events-none absolute -right-0.5 -top-0.5 h-[5px] w-[5px] rounded-full ring-1 ring-bg-chrome',
-                    badge.color,
-                    badge.pulse && 'animate-pulse-soft motion-reduce:animate-none',
-                  )}
-                />
-              )}
-            </span>
-            {/* Label reveal — grid-cols 0fr→1fr tweens the width so the pill
-                grows smoothly; the inner span clips the text while it animates. */}
-            <span
-              className={cn(
-                'grid transition-all duration-[260ms] ease-out-soft motion-reduce:transition-none',
-                active ? 'ml-1 grid-cols-[1fr] opacity-100' : 'ml-0 grid-cols-[0fr] opacity-0',
-              )}
-            >
-              <span className="overflow-hidden whitespace-nowrap font-display text-2xs font-medium tracking-tight">
-                {label}
-              </span>
-            </span>
-          </button>
-        );
-      })}
-      {menu.node}
-    </div>
-  );
-}
-
-// ── Collapsed mini-rail ──────────────────────────────────────────────────────
-
-/**
- * Vertical icon strip shown when the sidebar is collapsed (⌘B). Clicking an
- * icon expands the sidebar and switches to that view — VS Code-style. Reads
- * its own state so App can mount it standalone in the collapsed slot.
- */
-export function SidebarMiniRail() {
-  const view = useFiles((s) => s.sidebarView);
-  const collapsed = useFiles((s) => s.collapsed);
-  const show = useFiles((s) => s.showSidebarView);
-  const gitCount = useGit((s) => s.entries.length);
-  const gitConflicts = useGit((s) =>
-    s.entries.reduce((n, e) => (e.kind === 'conflict' ? n + 1 : n), 0),
-  );
-  const sshLive = useSsh((s) => Object.keys(s.liveByHost).length);
-  const order = useSidebarLayout((s) => s.order);
-  const hidden = useSidebarLayout((s) => s.hidden);
-  const views = useMemo(() => resolveRailViews(order, hidden), [order, hidden]);
-  const menu = useRailMenu();
-
-  return (
-    <div
-      role="tablist"
-      aria-orientation="vertical"
-      aria-label="Sidebar views"
-      className="flex h-full w-full flex-col items-center gap-1 py-2"
-    >
-      {views.map(({ id, label, Icon, shortcut }) => {
-        const active = view === id;
-        const badge = railBadge(id, gitCount, gitConflicts, sshLive);
-        const binding = shortcut ? getBinding(shortcut) : null;
-        return (
-          <button
-            key={id}
-            type="button"
-            role="tab"
-            aria-selected={active}
-            aria-label={label}
-            // The strip is only interactive while collapsed; once expanded the
-            // horizontal rail owns the roving focus.
-            tabIndex={collapsed && active ? 0 : -1}
             title={[label, binding ? formatBinding(binding) : null, badge?.title]
               .filter(Boolean)
               .join(' · ')}
@@ -414,9 +249,8 @@ export function SidebarMiniRail() {
                 : 'text-fg-muted hover:bg-surface-1 hover:text-fg-base',
             )}
           >
-            {/* Ribbon marks the active view — on the outer (right) edge now
-                that the sidebar is docked right; the vertical analogue of the
-                horizontal rail's sliding indicator. */}
+            {/* Ribbon marks the active view — on the outer (right) edge, the
+                vertical analogue of a top rail's underline. */}
             {active && (
               <span
                 aria-hidden

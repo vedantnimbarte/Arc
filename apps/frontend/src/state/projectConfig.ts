@@ -1,3 +1,4 @@
+import { isRemotePath } from '../lib/remote';
 import { create } from 'zustand';
 import { projectConfigLoad, type ProjectConfig } from '../lib/tauri';
 import { useFiles } from './files';
@@ -56,7 +57,9 @@ export const useProjectConfig = create<ProjectConfigState>((set, get) => ({
 // reads `useProjectConfig` just gets the current snapshot.
 useFiles.subscribe((state, prev) => {
   if (state.root === prev.root) return;
-  void useProjectConfig.getState().reload(state.root);
+  // `.arc/config.toml` is loaded from the local disk; a remote root has no
+  // local file to read, so reset rather than erroring on every switch.
+  void useProjectConfig.getState().reload(isRemotePath(state.root) ? null : state.root);
 });
 
 // Kick off an initial load for whatever root files.ts has at module-init

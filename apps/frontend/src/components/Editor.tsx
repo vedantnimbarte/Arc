@@ -22,6 +22,7 @@ import {
 import { fileIcon, MOCHA } from '../lib/fileIcons';
 import { fsReadFile, fsWriteFile, gitBlame, gitDiff, isTauri, type GitBlameLine } from '../lib/tauri';
 import { changedLinesFromDiff, gitDiffGutter, setGitChanges } from '../lib/gitGutter';
+import { isRemotePath } from '../lib/remote';
 import { attachLsp, pathToFileUri, type LspAttachment } from '../lib/lspClient';
 import { lspServerFor } from '../lib/lspServers';
 import { useFiles } from '../state/files';
@@ -136,6 +137,8 @@ export function Editor({ filePath, tabId }: Props) {
     if (!view) return;
     const root = useFiles.getState().root;
     if (!root) return;
+    // git runs against a local checkout — a remote file has none.
+    if (isRemotePath(root) || isRemotePath(filePath)) return;
     try {
       const diff = await gitDiff(root, 'head', filePath);
       view.dispatch({ effects: setGitChanges.of(changedLinesFromDiff(diff)) });
@@ -149,7 +152,7 @@ export function Editor({ filePath, tabId }: Props) {
   const refreshBlame = useCallback(async () => {
     if (!isTauri) return;
     const root = useFiles.getState().root;
-    if (!root) {
+    if (!root || isRemotePath(root) || isRemotePath(filePath)) {
       setBlameLines(new Map());
       return;
     }
@@ -171,8 +174,18 @@ export function Editor({ filePath, tabId }: Props) {
       setStatus({ kind: 'error', message: 'saving requires the Tauri backend' });
       return;
     }
-    const content = currentSourceRef.current;
     setStatus({ kind: 'saving' });
+    // Format first, then read the buffer back: the formatter's edits land in
+    // the doc, so writing `currentSourceRef` before this would save the
+    // unformatted text and leave the buffer dirty against its own file.
+    if (useSettings.getState().editorFormatOnSave && lspCtlRef.current) {
+      try {
+        await lspCtlRef.current.format();
+      } catch {
+        // A formatter that fails must not block the save.
+      }
+    }
+    const content = currentSourceRef.current;
     try {
       await fsWriteFile(filePath, content);
       lastSavedRef.current = content;
@@ -322,12 +335,22 @@ export function Editor({ filePath, tabId }: Props) {
         // Attach a language server if LSP is enabled and one is registered for
         // this file's language. Failures degrade to a plain editor (attachLsp
         // returns an empty attachment).
-        if (!disposed && isTauri && useSettings.getState().editorLsp) {
+        // LSP servers run against local paths; a remote file has none. (A
+        // remote language server would mean running one on the host and
+        // tunnelling it — a separate feature, not a flag on this one.)
+        if (!disposed && isTauri && !isRemotePath(filePath) && useSettings.getState().editorLsp) {
           const server = lspServerFor(pathToLanguageId(filePath));
           if (server && viewRef.current) {
             const root = useFiles.getState().root;
             const rootUri = root ? pathToFileUri(root) : null;
-            const att = await attachLsp(viewRef.current, server, filePath, rootUri);
+            // Jump targets can land in a different file, so navigation goes
+            // through the workspace rather than moving this editor's cursor.
+            // `openFile` on the file already open just reveals the line.
+            const att = await attachLsp(viewRef.current, server, filePath, rootUri, (target) =>
+              useWorkspace
+                .getState()
+                .openFile(target.path, undefined, { line: target.line + 1 }),
+            );
             if (disposed || !viewRef.current) {
               att.dispose();
             } else {

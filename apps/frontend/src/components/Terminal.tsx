@@ -2,6 +2,9 @@ import { useEffect, useRef, useState } from 'react';
 import { Terminal as XTerm } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import { WebLinksAddon } from '@xterm/addon-web-links';
+import { SearchAddon } from '@xterm/addon-search';
+import { SerializeAddon } from '@xterm/addon-serialize';
+import { WebglAddon } from '@xterm/addon-webgl';
 import '@xterm/xterm/css/xterm.css';
 import {
   fsDefaultRoot,
@@ -15,15 +18,19 @@ import {
   ptyWrite,
   sessionCommandFinish,
   sessionCommandLog,
+  sessionScrollbackLoad,
+  sessionScrollbackSave,
   type PtyId,
 } from '../lib/tauri';
 import { createPathLinkProvider } from '../lib/links';
+import { isRemotePath } from '../lib/remote';
 import { notifyCommandFinished } from '../lib/notify';
 import { NewTabSplash } from './NewTabSplash';
+import { TerminalSearchBar } from './TerminalSearchBar';
 import { useFiles } from '../state/files';
 import { useTrust } from '../state/trust';
 import { detectRiskyPaste, usePaste } from '../state/paste';
-import { useSettings } from '../state/settings';
+import { resolveTerminalProfile, useSettings } from '../state/settings';
 import { useWorkspace } from '../state/workspace';
 import { useAi } from '../state/ai';
 import { AiCommandBar } from './AiCommandBar';
@@ -35,12 +42,45 @@ interface Props {
   sessionKey: string;
 }
 
+/** Find-bar highlight colours. Deliberately theme-independent: an amber wash
+ *  reads against every bundled xterm palette, light or dark, and the overview
+ *  ruler needs opaque values regardless. */
+const SEARCH_DECORATIONS = {
+  matchBackground: 'rgba(255, 200, 60, 0.28)',
+  matchOverviewRuler: '#e0a33c',
+  activeMatchBackground: 'rgba(255, 170, 40, 0.55)',
+  activeMatchColorOverviewRuler: '#ff8c1a',
+};
+
+/** How much of the buffer is serialized for restore-after-relaunch. The full
+ *  10k-line scrollback would be megabytes per tab; the last thousand lines is
+ *  what anyone actually scrolls back to read. */
+const SCROLLBACK_SAVE_LINES = 1000;
+
+/** How often a terminal with new output writes its buffer to the DB. The app
+ *  can be killed in ways React cleanup never sees (window close, crash, OS
+ *  shutdown), so persistence can't hang off unmount alone.
+ *  ponytail: fixed interval, dirty-gated. Worst case loses the last 15s of
+ *  scrollback — drop it if that ever matters. */
+const SCROLLBACK_SAVE_MS = 15_000;
+
 export function Terminal({ sessionKey }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const termRef = useRef<XTerm | null>(null);
+  // Find bar (⌘F / ctrl+shift+F). The addon outlives the bar so a reopened
+  // bar can keep searching the same buffer.
+  const searchRef = useRef<SearchAddon | null>(null);
+  const [searchOpen, setSearchOpen] = useState(false);
   // Snapshot the root at mount — the PTY can only be spawned with one CWD,
   // and we don't restart it when the user reroots the tree.
-  const initialCwd = useRef<string | null>(useFiles.getState().root);
+  //
+  // A remote root is not a directory this machine has: handing `ssh://…` to
+  // the local PTY spawn fails outright. Local terminals opened while a remote
+  // workspace is active start at home instead; the shell *on* that host is an
+  // SSH tab, which is a different thing entirely.
+  const initialCwd = useRef<string | null>(
+    isRemotePath(useFiles.getState().root) ? null : useFiles.getState().root,
+  );
   // New-tab splash (Tier 1.2): disabled — open straight to the terminal.
   // ponytail: hard-off; reintroduce a setting here if it's ever wanted back.
   const [showSplash, setShowSplash] = useState(false);
@@ -73,6 +113,10 @@ export function Terminal({ sessionKey }: Props) {
     let unlistens: Array<() => void> = [];
     let ptyId: PtyId | null = null;
     let disposed = false;
+    // Set on every PTY chunk, cleared on every write to the DB, so an idle
+    // terminal doesn't re-serialize its buffer every tick.
+    let scrollbackDirty = false;
+    let scrollbackTimer: ReturnType<typeof setInterval> | null = null;
 
     const initialSettings = useSettings.getState();
     const initialFont = getFont(initialSettings.fontId);
@@ -97,8 +141,34 @@ export function Terminal({ sessionKey }: Props) {
 
     const fit = new FitAddon();
     const links = new WebLinksAddon();
+    // Search + serialize are pure buffer operations — safe to load before
+    // `open()`. WebGL is not: it needs a live renderer, so it waits for
+    // `ensureOpen()` below.
+    const search = new SearchAddon();
+    const serialize = new SerializeAddon();
     term.loadAddon(fit);
     term.loadAddon(links);
+    term.loadAddon(search);
+    term.loadAddon(serialize);
+    searchRef.current = search;
+
+    // ⌘F (mac) / ctrl+shift+F (win/linux) opens the find bar. Plain ctrl+F is
+    // deliberately left alone — readline binds it to forward-char, and
+    // stealing it would break cursor movement in every shell.
+    term.attachCustomKeyEventHandler((e) => {
+      if (e.type !== 'keydown') return true;
+      const isFind = e.key === 'F' || e.key === 'f';
+      if (!isFind) return true;
+      if (e.metaKey && !e.ctrlKey && !e.altKey) {
+        setSearchOpen(true);
+        return false;
+      }
+      if (e.ctrlKey && e.shiftKey && !e.altKey && !e.metaKey) {
+        setSearchOpen(true);
+        return false;
+      }
+      return true;
+    });
     // File-path links → editor (Tier 1.1). Resolves relative paths against the
     // tree root (which tracks the shell's CWD) and opens them in an editor tab.
     const pathLinks = term.registerLinkProvider(
@@ -148,6 +218,28 @@ export function Terminal({ sessionKey }: Props) {
       while (container.firstChild) container.removeChild(container.firstChild);
       term.open(container);
       safeFit();
+      // GPU renderer. Roughly an order of magnitude faster than the DOM
+      // renderer on heavy output (a full `cargo build`, `npm test` with a
+      // spinner). Every failure path here is non-fatal — xterm keeps its DOM
+      // renderer and the terminal works exactly as before:
+      //   * construction throws when there's no WebGL2 context at all
+      //     (software rendering, remote desktop, a locked-down GPU driver);
+      //   * `onContextLoss` fires when the driver resets the context later —
+      //     disposing the addon hands rendering back to the DOM path rather
+      //     than leaving a permanently blank canvas.
+      try {
+        const webgl = new WebglAddon();
+        webgl.onContextLoss(() => {
+          try {
+            webgl.dispose();
+          } catch {
+            /* already gone */
+          }
+        });
+        term.loadAddon(webgl);
+      } catch {
+        /* no WebGL2 available — DOM renderer stays */
+      }
       // Drain on the next frame, not in this tick. `open()` does not guarantee
       // the renderer exists yet, and writing into that gap is the same
       // `dimensions`-on-undefined crash this buffer exists to avoid — PTY
@@ -379,6 +471,7 @@ export function Terminal({ sessionKey }: Props) {
       let ranPending = false;
       const onPtyChunk = (chunk: Uint8Array) => {
         sawAnyData = true;
+        scrollbackDirty = true;
         const text = decoder.decode(chunk, { stream: true });
         handleChunkText(text);
         write(text);
@@ -391,21 +484,59 @@ export function Terminal({ sessionKey }: Props) {
         }
       };
 
+      // Replay the buffer this tab had when the app last closed, before any
+      // new output arrives, so a restored tab reads in chronological order.
+      // Awaited (not fired-and-forgotten) for exactly that reason. A failure
+      // here is cosmetic — carry on and spawn the shell.
+      try {
+        const saved = await sessionScrollbackLoad(sessionKey);
+        if (saved && !disposed) {
+          write(saved);
+          writeln('\r\n\x1b[2m── session restored ──\x1b[0m');
+        }
+      } catch {
+        /* nothing stored, or the read failed — start clean */
+      }
+
+      // Persist the buffer periodically. Cheap when idle (the dirty flag
+      // short-circuits) and bounded when busy (SCROLLBACK_SAVE_LINES).
+      scrollbackTimer = setInterval(() => {
+        if (disposed || !scrollbackDirty || !opened) return;
+        scrollbackDirty = false;
+        try {
+          const data = serialize.serialize({ scrollback: SCROLLBACK_SAVE_LINES });
+          void sessionScrollbackSave(sessionKey, data).catch(() => {});
+        } catch {
+          /* buffer torn down mid-serialize */
+        }
+      }, SCROLLBACK_SAVE_MS);
+
       try {
         // Snapshot the picker choice at spawn time. `null` = let Rust
         // pick the OS default (COMSPEC / $SHELL). Changing the setting
         // only affects subsequently-opened tabs — existing PTYs keep
         // running whatever they were started with.
-        // A per-tab `shellOverride` (used by AI CLI launchers) wins over
-        // the global default shell.
+        // Precedence, most specific first:
+        //   1. `shellOverride` — an AI CLI launcher spawning a specific binary.
+        //   2. the tab's terminal profile, or the default profile.
+        //   3. `defaultShell`, the single-shell setting profiles build on.
+        // An unknown profile id (the user deleted it) resolves to null and
+        // falls through to 3 rather than spawning nothing.
         const tab = useWorkspace.getState().tabs.find((t) => t.id === sessionKey);
-        const chosenShell = tab?.shellOverride ?? useSettings.getState().defaultShell;
+        const settings = useSettings.getState();
+        const profile = resolveTerminalProfile(
+          settings.terminalProfiles,
+          tab?.profileId ?? settings.defaultProfileId,
+        );
+        const chosenShell =
+          tab?.shellOverride ?? (profile && profile.shell ? profile.shell : settings.defaultShell);
         pendingRunCommand = tab?.runCommand ?? null;
         // Layer any `.arc/config.toml` env for the terminal's actual cwd on
         // top of the inherited process env. Loaded per-cwd (not from the
         // file-tree-keyed store) so it's race-free against the home reset.
         let projectEnv: Record<string, string> | null = null;
-        const cwd = initialCwd.current;
+        // A profile's cwd pins the terminal; without one it follows the tree.
+        const cwd = profile?.cwd || initialCwd.current;
         // Only inject `.arc/config.toml` env from a folder the user has
         // trusted (state/trust.ts). Untrusted repo env is drive-by RCE via
         // PROMPT_COMMAND / BASH_ENV / LD_PRELOAD, so we don't even load it.
@@ -417,6 +548,12 @@ export function Terminal({ sessionKey }: Props) {
             // No config / unreadable → inherit env only.
           }
         }
+        // Profile env is user-authored in Settings, so unlike the project env
+        // above it needs no trust gate — and it wins over the repo's values.
+        const env =
+          profile?.env || projectEnv
+            ? { ...(projectEnv ?? {}), ...(profile?.env ?? {}) }
+            : null;
         // `onPtyChunk` is wired to the output channel *inside* ptySpawn
         // before the pty_spawn command runs, so no early output is dropped.
         ptyId = await ptySpawn(
@@ -425,8 +562,8 @@ export function Terminal({ sessionKey }: Props) {
             cwd: cwd ?? null,
             cols: term.cols,
             rows: term.rows,
-            env: projectEnv,
-            args: tab?.shellArgs ?? null,
+            env,
+            args: tab?.shellArgs ?? profile?.args ?? null,
           },
           onPtyChunk,
         );
@@ -683,6 +820,19 @@ export function Terminal({ sessionKey }: Props) {
 
     return () => {
       disposed = true;
+      // Final write before the buffer goes away. Deliberately *not* gated on
+      // the dirty flag: a tab that scrolled but produced no new output since
+      // the last tick still has the content worth keeping. Tab closes are
+      // handled separately — `closeTab` deletes the row outright.
+      if (scrollbackTimer) clearInterval(scrollbackTimer);
+      if (opened) {
+        try {
+          const data = serialize.serialize({ scrollback: SCROLLBACK_SAVE_LINES });
+          if (data) void sessionScrollbackSave(sessionKey, data).catch(() => {});
+        } catch {
+          /* renderer already torn down */
+        }
+      }
       cancelAnimationFrame(rafId);
       ro.disconnect();
       host?.removeEventListener('arc:host-shown', onHostShown);
@@ -704,6 +854,7 @@ export function Terminal({ sessionKey }: Props) {
         /* addon cleanup races — terminal is already going away */
       }
       termRef.current = null;
+      searchRef.current = null;
     };
   }, [sessionKey]);
 
@@ -714,6 +865,16 @@ export function Terminal({ sessionKey }: Props) {
         className="selectable h-full w-full"
         data-session={sessionKey}
       />
+      {searchOpen && searchRef.current && (
+        <TerminalSearchBar
+          addon={searchRef.current}
+          decorations={SEARCH_DECORATIONS}
+          onClose={() => {
+            setSearchOpen(false);
+            termRef.current?.focus();
+          }}
+        />
+      )}
       {showSplash && (
         <NewTabSplash onPasteCommand={pasteRecentCommand} onOpenFile={openRecentFile} />
       )}

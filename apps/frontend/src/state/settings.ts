@@ -60,12 +60,88 @@ export const DEFAULT_SEARCH_IGNORE_DIRS = [
   'vendor',
 ];
 
+/**
+ * A named terminal configuration — shell, arguments, starting directory, and
+ * extra environment. `defaultShell` remains the fallback for anyone who never
+ * defines one, so an existing install keeps behaving exactly as it did.
+ */
+export interface TerminalProfile {
+  id: string;
+  name: string;
+  /** Shell binary path. Empty means "the OS default", matching
+   *  `defaultShell: null`. */
+  shell: string;
+  /** Arguments passed to the shell, e.g. `['-l']` for a login shell. */
+  args?: string[];
+  /** Directory the shell starts in. Empty/undefined follows the file tree,
+   *  which is the behaviour every terminal had before profiles existed. */
+  cwd?: string;
+  /** Extra environment layered onto the inherited process env. */
+  env?: Record<string, string>;
+}
+
+/** Shape-check profiles coming out of the persisted settings blob. A
+ *  hand-edited or downgraded settings row must not be able to hand the PTY
+ *  spawn a non-string shell path. */
+export function coerceTerminalProfiles(raw: unknown): TerminalProfile[] {
+  if (!Array.isArray(raw)) return [];
+  const out: TerminalProfile[] = [];
+  const seen = new Set<string>();
+  for (const item of raw) {
+    if (!item || typeof item !== 'object') continue;
+    const r = item as Record<string, unknown>;
+    if (typeof r.id !== 'string' || !r.id) continue;
+    if (typeof r.name !== 'string' || !r.name) continue;
+    if (seen.has(r.id)) continue;
+    seen.add(r.id);
+    const args = Array.isArray(r.args)
+      ? r.args.filter((a): a is string => typeof a === 'string')
+      : undefined;
+    let env: Record<string, string> | undefined;
+    if (r.env && typeof r.env === 'object' && !Array.isArray(r.env)) {
+      env = {};
+      for (const [k, v] of Object.entries(r.env as Record<string, unknown>)) {
+        if (typeof v === 'string') env[k] = v;
+      }
+      if (Object.keys(env).length === 0) env = undefined;
+    }
+    out.push({
+      id: r.id,
+      name: r.name,
+      shell: typeof r.shell === 'string' ? r.shell : '',
+      ...(args && args.length > 0 ? { args } : {}),
+      ...(typeof r.cwd === 'string' && r.cwd ? { cwd: r.cwd } : {}),
+      ...(env ? { env } : {}),
+    });
+  }
+  return out;
+}
+
+/** Find a profile by id. Returns null for an unknown id — a profile the user
+ *  deleted while a tab still referenced it must fall back to the default
+ *  shell, not spawn nothing. */
+export function resolveTerminalProfile(
+  profiles: TerminalProfile[],
+  id: string | null | undefined,
+): TerminalProfile | null {
+  if (!id) return null;
+  return profiles.find((p) => p.id === id) ?? null;
+}
+
 export interface Settings {
   /** Path to the shell binary new terminals should spawn. `null` means
    *  "let the Rust side pick the OS default" (COMSPEC on Windows,
    *  `$SHELL` elsewhere). Applies to newly-opened tabs only; in-flight
-   *  PTYs aren't restarted. */
+   *  PTYs aren't restarted.
+   *
+   *  This is the fallback used when no terminal profile applies. */
   defaultShell: string | null;
+  /** Named terminal configurations (shell + args + cwd + env). Empty by
+   *  default — `defaultShell` alone covers the single-shell case. */
+  terminalProfiles: TerminalProfile[];
+  /** Profile new terminals use when the caller doesn't name one. `null`
+   *  falls back to `defaultShell`. */
+  defaultProfileId: string | null;
   /** User's appearance preference. `'system'` follows the OS color scheme. */
   appearance: Appearance;
   /** Specific theme id (e.g. 'catppuccin-mocha'). When set + registered, it
@@ -83,9 +159,14 @@ export interface Settings {
   /** Enable Vim keybindings in the CodeMirror editor. Multi-cursor is always
    *  on; this gates the modal Vim layer specifically. */
   editorVimMode: boolean;
-  /** Enable LSP features (diagnostics, hover, completion) in the editor.
-   *  Off by default — requires the relevant language servers on PATH. */
+  /** Enable LSP features (diagnostics, hover, completion, go-to-definition,
+   *  references, rename, formatting) in the editor. Off by default — requires
+   *  the relevant language servers on PATH. */
   editorLsp: boolean;
+  /** Run the language server's formatter on the buffer before every save.
+   *  Requires `editorLsp`; a language whose server has no formatting provider
+   *  saves unchanged. */
+  editorFormatOnSave: boolean;
   /** Address of a `wingman serve` daemon, e.g. `http://127.0.0.1:8787`. Empty
    *  disables the Wingman integration entirely.
    *
@@ -124,6 +205,10 @@ export interface Settings {
   /** True once hydrateSettings() has applied stored values. */
   settingsHydrated: boolean;
   setDefaultShell: (shell: string | null) => void;
+  /** Replace the whole profile list. The Settings editor owns the shape, so
+   *  add/edit/delete all funnel through one setter. */
+  setTerminalProfiles: (profiles: TerminalProfile[]) => void;
+  setDefaultProfileId: (id: string | null) => void;
   setAppearance: (a: Appearance) => void;
   /** Pick a specific theme id, or pass `null` to fall back to the dark/light
    *  pair from `appearance`. */
@@ -137,6 +222,7 @@ export interface Settings {
   setRestoreWindowState: (on: boolean) => void;
   setEditorVimMode: (on: boolean) => void;
   setEditorLsp: (on: boolean) => void;
+  setEditorFormatOnSave: (on: boolean) => void;
   setWingmanUrl: (url: string) => void;
   setClaudePermissionMode: (mode: ClaudePermissionMode) => void;
   setClaudeModel: (model: string) => void;
@@ -152,6 +238,8 @@ export interface Settings {
 
 const DEFAULTS = {
   defaultShell: null as string | null,
+  terminalProfiles: [] as TerminalProfile[],
+  defaultProfileId: null as string | null,
   appearance: DEFAULT_APPEARANCE,
   themeId: null as string | null,
   fontId: DEFAULT_FONT_ID,
@@ -160,6 +248,7 @@ const DEFAULTS = {
   restoreWindowState: true,
   editorVimMode: false,
   editorLsp: false,
+  editorFormatOnSave: false,
   wingmanUrl: '',
   claudePermissionMode: 'acceptEdits' as ClaudePermissionMode,
   claudeModel: '',
@@ -188,6 +277,16 @@ export const useSettings = create<Settings>()((set, get) => ({
   settingsHydrated: false,
 
   setDefaultShell: (shell) => set({ defaultShell: shell }),
+  setTerminalProfiles: (profiles) =>
+    set((s) => ({
+      terminalProfiles: profiles,
+      // A deleted profile must not stay the default — that would leave new
+      // terminals pointing at an id nothing resolves.
+      defaultProfileId: profiles.some((p) => p.id === s.defaultProfileId)
+        ? s.defaultProfileId
+        : null,
+    })),
+  setDefaultProfileId: (id) => set({ defaultProfileId: id }),
 
   setAppearance: (a) => {
     set({ appearance: a });
@@ -224,6 +323,7 @@ export const useSettings = create<Settings>()((set, get) => ({
   setRestoreWindowState: (on) => set({ restoreWindowState: on }),
   setEditorVimMode: (on) => set({ editorVimMode: on }),
   setEditorLsp: (on) => set({ editorLsp: on }),
+  setEditorFormatOnSave: (on) => set({ editorFormatOnSave: on }),
   setWingmanUrl: (url) => set({ wingmanUrl: url }),
   setClaudePermissionMode: (mode) => set({ claudePermissionMode: mode }),
   setClaudeModel: (model) => set({ claudeModel: model }),
@@ -347,6 +447,19 @@ function applyStored(
         : current.editorVimMode,
     editorLsp:
       typeof stored.editorLsp === 'boolean' ? stored.editorLsp : current.editorLsp,
+    editorFormatOnSave:
+      typeof stored.editorFormatOnSave === 'boolean'
+        ? stored.editorFormatOnSave
+        : current.editorFormatOnSave,
+    terminalProfiles: coerceTerminalProfiles(stored.terminalProfiles),
+    // Drop a default pointing at a profile that no longer survives coercion.
+    defaultProfileId:
+      typeof stored.defaultProfileId === 'string' &&
+      coerceTerminalProfiles(stored.terminalProfiles).some(
+        (p) => p.id === stored.defaultProfileId,
+      )
+        ? stored.defaultProfileId
+        : null,
     wingmanUrl:
       typeof stored.wingmanUrl === 'string' ? stored.wingmanUrl : current.wingmanUrl,
     claudePermissionMode: CLAUDE_PERMISSION_MODES.includes(
@@ -397,6 +510,9 @@ function toPersistedSettings(s: Settings): PersistedSettings {
     restoreWindowState: s.restoreWindowState,
     editorVimMode: s.editorVimMode,
     editorLsp: s.editorLsp,
+    editorFormatOnSave: s.editorFormatOnSave,
+    terminalProfiles: s.terminalProfiles,
+    defaultProfileId: s.defaultProfileId,
     wingmanUrl: s.wingmanUrl,
     claudePermissionMode: s.claudePermissionMode,
     claudeModel: s.claudeModel,

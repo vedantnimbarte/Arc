@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ArrowUp,
   Bot,
@@ -8,6 +8,7 @@ import {
   // Aliased: lucide's `History` shadows the DOM `History` interface, and TS
   // then resolves the global instead of the component.
   History as HistoryIcon,
+  LayoutGrid,
   Plus,
   ShieldCheck,
   ShieldX,
@@ -15,7 +16,8 @@ import {
   Wrench,
 } from 'lucide-react';
 import { cn } from '../../lib/cn';
-import { useWingman, type ChatItem } from '../../state/wingman';
+import { pendingReviewCount, useWingman, type ChatItem } from '../../state/wingman';
+import { useWorkspace } from '../../state/workspace';
 
 /**
  * Agent chat, backed by a `wingman serve` session.
@@ -38,6 +40,11 @@ export function WingmanPanel() {
   const usage = useWingman((s) => s.usage);
   const send = useWingman((s) => s.send);
   const newChat = useWingman((s) => s.newChat);
+
+  // Board cards, only for the review badge. The run firehose keeps them
+  // live (see `connect`), so reading them here costs nothing extra.
+  const cards = useWingman((s) => s.cards);
+  const pendingReview = useMemo(() => pendingReviewCount(cards), [cards]);
 
   const cost = useWingman((s) => s.cost);
   const loadCost = useWingman((s) => s.loadCost);
@@ -101,6 +108,34 @@ export function WingmanPanel() {
             </option>
           ))}
         </select>
+        {/* The board is the other half of Wingman: this panel drives one
+            conversation, the board dispatches durable goals across projects.
+            Opens as a tab — it's too wide for the sidebar. */}
+        <button
+          type="button"
+          onClick={() => useWorkspace.getState().openWingmanBoard()}
+          title={
+            pendingReview > 0
+              ? `Pilot board — ${pendingReview} awaiting review`
+              : 'Pilot board'
+          }
+          aria-label={
+            pendingReview > 0
+              ? `Pilot board, ${pendingReview} awaiting review`
+              : 'Pilot board'
+          }
+          className="flex items-center gap-1 rounded p-1 text-fg-subtle transition-colors hover:bg-surface-2 hover:text-fg-base"
+        >
+          <LayoutGrid size={12} strokeWidth={2.2} />
+          {pendingReview > 0 && (
+            <span
+              aria-hidden
+              className="rounded bg-status-warn/15 px-1 font-mono text-2xs tabular-nums text-status-warn"
+            >
+              {pendingReview}
+            </span>
+          )}
+        </button>
         <button
           type="button"
           onClick={() => {
