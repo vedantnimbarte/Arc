@@ -12,7 +12,7 @@ import {
   X,
 } from 'lucide-react';
 import { cn } from '../../lib/cn';
-import { reviewQueue, useWingman } from '../../state/wingman';
+import { pendingReviewCount, useWingman } from '../../state/wingman';
 import { useWorkspace } from '../../state/workspace';
 
 import { WINGMAN_COLUMNS, type WingmanCard, type WingmanSubRow } from '../../lib/tauri';
@@ -36,11 +36,7 @@ export function WingmanBoard() {
   const refresh = useWingman((s) => s.refreshBoard);
   const dispatchCard = useWingman((s) => s.dispatchCard);
 
-  // How many change sets are waiting on a human right now.
-  const pending = useMemo(
-    () => reviewQueue(cards).filter((i) => ['review', 'failed'].includes(i.task.status)).length,
-    [cards],
-  );
+  const pending = useMemo(() => pendingReviewCount(cards), [cards]);
 
   useEffect(() => {
     if (status === 'connected') void refresh();

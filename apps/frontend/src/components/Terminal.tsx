@@ -29,7 +29,7 @@ import { TerminalSearchBar } from './TerminalSearchBar';
 import { useFiles } from '../state/files';
 import { useTrust } from '../state/trust';
 import { detectRiskyPaste, usePaste } from '../state/paste';
-import { useSettings } from '../state/settings';
+import { resolveTerminalProfile, useSettings } from '../state/settings';
 import { useWorkspace } from '../state/workspace';
 import { useAi } from '../state/ai';
 import { AiCommandBar } from './AiCommandBar';
@@ -508,16 +508,27 @@ export function Terminal({ sessionKey }: Props) {
         // pick the OS default (COMSPEC / $SHELL). Changing the setting
         // only affects subsequently-opened tabs — existing PTYs keep
         // running whatever they were started with.
-        // A per-tab `shellOverride` (used by AI CLI launchers) wins over
-        // the global default shell.
+        // Precedence, most specific first:
+        //   1. `shellOverride` — an AI CLI launcher spawning a specific binary.
+        //   2. the tab's terminal profile, or the default profile.
+        //   3. `defaultShell`, the single-shell setting profiles build on.
+        // An unknown profile id (the user deleted it) resolves to null and
+        // falls through to 3 rather than spawning nothing.
         const tab = useWorkspace.getState().tabs.find((t) => t.id === sessionKey);
-        const chosenShell = tab?.shellOverride ?? useSettings.getState().defaultShell;
+        const settings = useSettings.getState();
+        const profile = resolveTerminalProfile(
+          settings.terminalProfiles,
+          tab?.profileId ?? settings.defaultProfileId,
+        );
+        const chosenShell =
+          tab?.shellOverride ?? (profile && profile.shell ? profile.shell : settings.defaultShell);
         pendingRunCommand = tab?.runCommand ?? null;
         // Layer any `.arc/config.toml` env for the terminal's actual cwd on
         // top of the inherited process env. Loaded per-cwd (not from the
         // file-tree-keyed store) so it's race-free against the home reset.
         let projectEnv: Record<string, string> | null = null;
-        const cwd = initialCwd.current;
+        // A profile's cwd pins the terminal; without one it follows the tree.
+        const cwd = profile?.cwd || initialCwd.current;
         // Only inject `.arc/config.toml` env from a folder the user has
         // trusted (state/trust.ts). Untrusted repo env is drive-by RCE via
         // PROMPT_COMMAND / BASH_ENV / LD_PRELOAD, so we don't even load it.
@@ -529,6 +540,12 @@ export function Terminal({ sessionKey }: Props) {
             // No config / unreadable → inherit env only.
           }
         }
+        // Profile env is user-authored in Settings, so unlike the project env
+        // above it needs no trust gate — and it wins over the repo's values.
+        const env =
+          profile?.env || projectEnv
+            ? { ...(projectEnv ?? {}), ...(profile?.env ?? {}) }
+            : null;
         // `onPtyChunk` is wired to the output channel *inside* ptySpawn
         // before the pty_spawn command runs, so no early output is dropped.
         ptyId = await ptySpawn(
@@ -537,8 +554,8 @@ export function Terminal({ sessionKey }: Props) {
             cwd: cwd ?? null,
             cols: term.cols,
             rows: term.rows,
-            env: projectEnv,
-            args: tab?.shellArgs ?? null,
+            env,
+            args: tab?.shellArgs ?? profile?.args ?? null,
           },
           onPtyChunk,
         );

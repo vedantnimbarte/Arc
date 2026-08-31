@@ -40,6 +40,7 @@ import {
   DEFAULT_SEARCH_IGNORE_DIRS,
   flushSettingsSave,
   useSettings,
+  type TerminalProfile,
 } from '../state/settings';
 import { checkForUpdate, installUpdate, type UpdateInfo } from '../lib/updater';
 import {
@@ -1305,6 +1306,8 @@ function TerminalPane({
     <div className="space-y-7">
       <ShellPicker shells={shells} defaultShell={defaultShell} onPick={onPickShell} />
 
+      <TerminalProfilesSection />
+
       <Section
         title="Command Suggestions"
         hint="Press ⌘K / Ctrl+K in a terminal, describe what you want, and the suggested command lands on the shell prompt for you to review. Nothing runs until you press Enter yourself."
@@ -2010,6 +2013,158 @@ function ClaudePane() {
       </Section>
     </div>
   );
+}
+
+/**
+ * Terminal profile editor.
+ *
+ * A profile is a named (shell, args, cwd, env) set that ⌘K can open a
+ * terminal with. The single-shell setting above it stays the fallback, so an
+ * install that never defines a profile behaves exactly as it did before.
+ *
+ * Edits write straight through to the store on every keystroke — settings
+ * already persist on a debounce, and a local draft plus an explicit save
+ * would only add a state to get out of sync.
+ */
+function TerminalProfilesSection() {
+  const profiles = useSettings((s) => s.terminalProfiles);
+  const defaultProfileId = useSettings((s) => s.defaultProfileId);
+  const setProfiles = useSettings((s) => s.setTerminalProfiles);
+  const setDefaultProfileId = useSettings((s) => s.setDefaultProfileId);
+
+  const patch = (id: string, fields: Partial<TerminalProfile>) =>
+    setProfiles(profiles.map((p) => (p.id === id ? { ...p, ...fields } : p)));
+
+  const add = () =>
+    setProfiles([
+      ...profiles,
+      {
+        id: `prof-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+        name: `Profile ${profiles.length + 1}`,
+        shell: '',
+      },
+    ]);
+
+  const remove = (id: string) => setProfiles(profiles.filter((p) => p.id !== id));
+
+  return (
+    <Section
+      title="Profiles"
+      hint="Each profile opens from the command palette as “New terminal: <name>”. Leave the shell empty to use the default above. Arguments are space-separated; quote anything containing a space."
+    >
+      <div className="space-y-2">
+        {profiles.map((p) => (
+          <div
+            key={p.id}
+            className="space-y-2 rounded-lg border border-border-subtle bg-bg-base/40 p-3"
+          >
+            <div className="flex items-center gap-2">
+              <input
+                value={p.name}
+                onChange={(e) => patch(p.id, { name: e.target.value })}
+                placeholder="Name"
+                aria-label="Profile name"
+                className="min-w-0 flex-1 rounded border border-border-subtle bg-bg-base/60 px-2 py-1 font-display text-sm text-fg-base outline-none focus:border-border-strong"
+              />
+              <button
+                onClick={() => setDefaultProfileId(defaultProfileId === p.id ? null : p.id)}
+                title={
+                  defaultProfileId === p.id
+                    ? 'This profile opens for new terminals'
+                    : 'Use this profile for new terminals'
+                }
+                aria-pressed={defaultProfileId === p.id}
+                className={cn(
+                  'rounded border px-2 py-1 font-display text-2xs transition-colors',
+                  defaultProfileId === p.id
+                    ? 'border-accent/50 bg-accent/20 text-fg-base'
+                    : 'border-border-subtle text-fg-subtle hover:text-fg-base',
+                )}
+              >
+                Default
+              </button>
+              <button
+                onClick={() => remove(p.id)}
+                title="Delete profile"
+                aria-label={`Delete ${p.name}`}
+                className="rounded p-1 text-fg-subtle transition-colors hover:bg-surface-2 hover:text-fg-base"
+              >
+                <Trash2 size={12} strokeWidth={2.1} />
+              </button>
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              <input
+                value={p.shell}
+                onChange={(e) => patch(p.id, { shell: e.target.value })}
+                placeholder="Shell path (blank = default)"
+                aria-label="Shell path"
+                spellCheck={false}
+                className="min-w-0 rounded border border-border-subtle bg-bg-base/60 px-2 py-1 font-mono text-xs text-fg-base outline-none focus:border-border-strong"
+              />
+              <input
+                value={(p.args ?? []).join(' ')}
+                onChange={(e) => patch(p.id, { args: splitArgs(e.target.value) })}
+                placeholder="Arguments (e.g. -l)"
+                aria-label="Shell arguments"
+                spellCheck={false}
+                className="min-w-0 rounded border border-border-subtle bg-bg-base/60 px-2 py-1 font-mono text-xs text-fg-base outline-none focus:border-border-strong"
+              />
+            </div>
+            <input
+              value={p.cwd ?? ''}
+              onChange={(e) => patch(p.id, { cwd: e.target.value || undefined })}
+              placeholder="Start in (blank = follow the file tree)"
+              aria-label="Working directory"
+              spellCheck={false}
+              className="w-full rounded border border-border-subtle bg-bg-base/60 px-2 py-1 font-mono text-xs text-fg-base outline-none focus:border-border-strong"
+            />
+          </div>
+        ))}
+        <button
+          onClick={add}
+          className="flex w-full items-center justify-center gap-2 rounded-lg border border-dashed border-border-subtle px-3 py-2 font-display text-sm text-fg-muted transition-colors hover:border-border-strong hover:text-fg-base"
+        >
+          <Plus size={12} strokeWidth={2.1} />
+          Add profile
+        </button>
+      </div>
+    </Section>
+  );
+}
+
+/**
+ * Split a shell-argument string on whitespace, honouring single and double
+ * quotes so a path with a space survives as one argument. Not a full shell
+ * lexer — no escapes, no variable expansion — because these go straight to
+ * the PTY spawn as an argv array, never through a shell that would expand
+ * them anyway.
+ */
+export function splitArgs(input: string): string[] {
+  const out: string[] = [];
+  let current = '';
+  let quote: '"' | "'" | null = null;
+  let has = false;
+  for (const ch of input) {
+    if (quote) {
+      if (ch === quote) quote = null;
+      else current += ch;
+      continue;
+    }
+    if (ch === '"' || ch === "'") {
+      quote = ch;
+      has = true; // `""` is a real (empty) argument
+      continue;
+    }
+    if (/\s/.test(ch)) {
+      if (has || current) out.push(current);
+      current = '';
+      has = false;
+      continue;
+    }
+    current += ch;
+  }
+  if (has || current) out.push(current);
+  return out;
 }
 
 function Section({

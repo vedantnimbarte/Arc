@@ -667,6 +667,14 @@ export function reviewQueue(cards: WingmanCard[]): ReviewItem[] {
 }
 
 /**
+ * How many change sets are waiting on a human right now. Every entry point
+ * into the review queue badges this same number, so it derives in one place.
+ */
+export function pendingReviewCount(cards: WingmanCard[]): number {
+  return reviewQueue(cards).filter((i) => ['review', 'failed'].includes(i.task.status)).length;
+}
+
+/**
  * Replay a stored transcript into panel rows.
  *
  * Two shapes have to reconcile. A live turn arrives as a flat event stream

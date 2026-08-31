@@ -718,6 +718,11 @@ export async function sessionWorkspaceDelete(id: string): Promise<void> {
 /** Shape stored in the `app_settings` table under key `"user_settings"`. */
 export interface PersistedSettings {
   defaultShell: string | null;
+  /** Named terminal configurations. Validated on load by
+   *  `coerceTerminalProfiles` — this row is user-editable on disk. */
+  terminalProfiles?: unknown;
+  /** Id of the profile new terminals use. `null`/missing → `defaultShell`. */
+  defaultProfileId?: string | null;
   /** Appearance preference: 'dark' | 'light' | 'system'. */
   appearance?: 'dark' | 'light' | 'system';
   /** Active theme id (e.g. 'catppuccin-mocha'). When set + registered,

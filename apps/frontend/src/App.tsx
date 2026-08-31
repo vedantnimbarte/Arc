@@ -36,6 +36,7 @@ import {
   LayoutGrid,
   ListOrdered,
   Sparkles,
+  TerminalSquare,
 } from 'lucide-react';
 // Side-effect import: subscribes to file-tree root changes and keeps the
 // project-config store fresh. Doesn't render anything itself.
@@ -46,7 +47,7 @@ import { TrustPrompt } from './components/TrustPrompt';
 import { ConfirmDialog } from './components/ConfirmDialog';
 import { Toasts } from './components/Toasts';
 import { UpdateToast } from './components/UpdateToast';
-import { useSettings } from './state/settings';
+import { useSettings, type TerminalProfile } from './state/settings';
 import { useAi } from './state/ai';
 import { autoConnectWingman, useWingman } from './state/wingman';
 import { useClaudeCode } from './state/claudeCode';
@@ -93,6 +94,7 @@ export default function App() {
 
   // Register the project's package.json scripts as ⌘K "Run: <script>" commands.
   useTaskCommands();
+  useTerminalProfileCommands();
 
   // Host-div registry — one stable DOM node per tab id. The tab's content
   // (Terminal / Editor) is portaled into its host once and stays there for
@@ -702,4 +704,47 @@ function EditorFallback() {
       <span className="h-1 w-1 animate-pulse-soft rounded-full bg-accent" style={{ animationDelay: '0.4s' }} />
     </div>
   );
+}
+
+/**
+ * Register one "New terminal: <profile>" palette command per terminal
+ * profile, re-registering whenever the profile list changes.
+ *
+ * Mirrors `useTaskCommands`: the palette is the discovery surface for things
+ * that don't earn a keybinding, and profiles are defined in Settings where
+ * the palette can't see them without a subscription.
+ */
+function useTerminalProfileCommands(): void {
+  useEffect(() => {
+    let unregister: (() => void) | null = null;
+
+    const refresh = (profiles: TerminalProfile[]) => {
+      unregister?.();
+      unregister = null;
+      if (profiles.length === 0) return;
+      const actions: CommandAction[] = profiles.map((profile) => ({
+        id: `terminal.profile.${profile.id}`,
+        title: `New terminal: ${profile.name}`,
+        group: 'Terminal',
+        keywords: ['terminal', 'shell', 'new', 'profile', profile.name, profile.shell],
+        icon: TerminalSquare,
+        run: () => {
+          void useWorkspace
+            .getState()
+            .newTerminal({ title: profile.name, profileId: profile.id });
+        },
+      }));
+      unregister = useCommands.getState().registerMany(actions);
+    };
+
+    refresh(useSettings.getState().terminalProfiles);
+    const unsub = useSettings.subscribe((s, prev) => {
+      if (s.terminalProfiles !== prev.terminalProfiles) refresh(s.terminalProfiles);
+    });
+
+    return () => {
+      unsub();
+      unregister?.();
+    };
+  }, []);
 }
