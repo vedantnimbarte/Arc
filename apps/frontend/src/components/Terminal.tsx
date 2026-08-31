@@ -23,6 +23,7 @@ import {
   type PtyId,
 } from '../lib/tauri';
 import { createPathLinkProvider } from '../lib/links';
+import { isRemotePath } from '../lib/remote';
 import { notifyCommandFinished } from '../lib/notify';
 import { NewTabSplash } from './NewTabSplash';
 import { TerminalSearchBar } from './TerminalSearchBar';
@@ -72,7 +73,14 @@ export function Terminal({ sessionKey }: Props) {
   const [searchOpen, setSearchOpen] = useState(false);
   // Snapshot the root at mount — the PTY can only be spawned with one CWD,
   // and we don't restart it when the user reroots the tree.
-  const initialCwd = useRef<string | null>(useFiles.getState().root);
+  //
+  // A remote root is not a directory this machine has: handing `ssh://…` to
+  // the local PTY spawn fails outright. Local terminals opened while a remote
+  // workspace is active start at home instead; the shell *on* that host is an
+  // SSH tab, which is a different thing entirely.
+  const initialCwd = useRef<string | null>(
+    isRemotePath(useFiles.getState().root) ? null : useFiles.getState().root,
+  );
   // New-tab splash (Tier 1.2): disabled — open straight to the terminal.
   // ponytail: hard-off; reintroduce a setting here if it's ever wanted back.
   const [showSplash, setShowSplash] = useState(false);

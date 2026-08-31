@@ -19,16 +19,25 @@ it.
 ## Features
 
 - **Real PTY Terminal** — xterm.js frontend backed by portable-pty, supporting bash, zsh,
-  PowerShell, cmd, Nu, WSL, and custom shells. Clickable file paths, smart-paste warnings,
-  long-command notifications, and per-tab command history (OSC 133).
+  PowerShell, cmd, Nu, WSL, and custom shells. GPU (WebGL) rendering, a find bar
+  (⌘F / Ctrl+Shift+F), named profiles (shell + args + cwd + env), scrollback that survives
+  a relaunch, clickable file paths, smart-paste warnings, long-command notifications, and
+  per-tab command history (OSC 133).
 - **Code Editor** — CodeMirror 6 with syntax highlighting, multi-cursor, optional Vim mode,
-  optional LSP (diagnostics/hover/completion), and real-time file watching.
+  optional LSP (diagnostics, hover, completion, go-to-definition, find references, rename,
+  and format-on-save), and real-time file watching.
 - **File Tree & Search** — Browse, open, and manage files with git status decorations, plus
-  BM25 full-text search backed by a tantivy index.
+  BM25 full-text search backed by a tantivy index and a literal find-and-replace across
+  the workspace (previewed per file before anything is written).
 - **Git Integration** — Branch status, diffs, logs, blame, staging/commit, worktrees,
   interactive rebase, cherry-pick, and GitHub pull requests, all from the UI.
 - **SSH Client** — Pure-Rust SSH (russh) with saved hosts, key generation/import, and
   per-session logs.
+- **Remote Workspaces** — Mount a saved SSH host's filesystem as the workspace root over
+  SFTP: browse the remote tree, open files, and save straight back. The file-tree
+  connection is separate from any SSH terminal tab, so closing the shell doesn't take
+  the tree down. Local-only features (git, content search, LSP, the task runner) sit out
+  rather than misreport — the terminal for that host is an SSH tab.
 - **API Client** — A built-in Postman-style REST client (collections, environments, history).
 - **Tabs & Workspaces** — Split panes, tab groups, and session state persisted to SQLite.
 - **Wingman Agents** *(optional)* — Connect a `wingman serve` daemon to get an agent panel
@@ -94,7 +103,7 @@ Tailwind CSS · Vitest.
 - `arc-filesystem` — file ops, watching, BM25 search/indexing (notify, tantivy)
 - `arc-git` / `arc-git-host` — git introspection and GitHub PRs
 - `arc-session-manager` — SQLite persistence (sqlx): workspaces, tabs, command history
-- `arc-ssh` — pure-Rust SSH client (russh)
+- `arc-ssh` — pure-Rust SSH client (russh) + SFTP remote workspaces (russh-sftp)
 - `arc-lsp` — language-server client (stdio JSON-RPC)
 - `arc-http-client` / `arc-project-config` — REST client engine + `.arc/config.toml` loader
 - `arc-wingman` — client for a `wingman serve` daemon (board, pilot runs, streaming turns)

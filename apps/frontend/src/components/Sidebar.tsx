@@ -9,6 +9,7 @@ import {
 } from 'react';
 import { createPortal } from 'react-dom';
 import { FileTree } from './FileTree';
+import { RemoteWorkspaceBar } from './RemoteWorkspaceBar';
 import { SourceControl } from './SourceControl';
 import { SearchView } from './SearchView';
 import { OutlineView } from './OutlineView';
@@ -101,6 +102,10 @@ export function Sidebar() {
       aria-labelledby={tabId(view)}
       className="flex h-full min-h-0 min-w-0 flex-col animate-view-in motion-reduce:animate-none"
     >
+      {/* Which machine the tree is showing, above every view that can act on
+          it. Saving to the wrong host is not a recoverable mistake, so this
+          is not tucked into a menu. Renders nothing when local. */}
+      <RemoteWorkspaceBar />
       {view === 'files' ? (
         <FileTree />
       ) : view === 'git' ? (

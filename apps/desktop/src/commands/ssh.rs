@@ -445,3 +445,182 @@ fn hostname() -> String {
         .or_else(|_| std::env::var("HOSTNAME"))
         .unwrap_or_else(|_| "arc".to_string())
 }
+
+// ─── remote filesystem (SFTP) ────────────────────────────────────────────
+//
+//   invoke("ssh_fs_connect",    { hostId, path? })        -> String (abs root)
+//   invoke("ssh_fs_disconnect", { hostId })               -> ()
+//   invoke("ssh_fs_connected",  { hostId })               -> bool
+//   invoke("ssh_fs_read_dir",   { hostId, path })         -> RemoteDirEntry[]
+//   invoke("ssh_fs_read_file",  { hostId, path })         -> String
+//   invoke("ssh_fs_write_file", { hostId, path, contents })-> ()
+//   invoke("ssh_fs_create_dir", { hostId, path })         -> ()
+//   invoke("ssh_fs_rename",     { hostId, from, to })     -> ()
+//   invoke("ssh_fs_remove",     { hostId, path, isDir })  -> ()
+//
+// Keyed by host id, so a host has exactly one remote-filesystem connection
+// however many tabs are open against it. It is deliberately separate from the
+// interactive session above: closing the terminal tab must not take the file
+// tree down with it.
+
+#[derive(Default)]
+pub struct SftpState {
+    pub manager: Arc<arc_ssh::SftpManager>,
+}
+
+/// Resolve a saved host into connect options, unlocking its identity from the
+/// OS credential vault. Shared with `ssh_connect`'s flow — same lookups, minus
+/// the PTY dimensions.
+async fn remote_fs_opts(
+    store: &SessionStore,
+    host_id: &str,
+) -> Result<arc_ssh::RemoteFsOpts, String> {
+    let host = ssh_db::host_get(store.pool(), host_id)
+        .await
+        .map_err(|e| format!("host lookup: {e}"))?
+        .ok_or_else(|| format!("unknown ssh host: {host_id}"))?;
+
+    let identity_id = host
+        .identity_id
+        .as_ref()
+        .ok_or_else(|| "host has no identity configured".to_string())?;
+    let identity = ssh_db::key_get(store.pool(), identity_id)
+        .await
+        .map_err(|e| format!("identity lookup: {e}"))?
+        .ok_or_else(|| format!("unknown ssh key: {identity_id}"))?;
+
+    let passphrase = if identity.has_passphrase {
+        match Entry::new(SSH_KEYRING_SERVICE, &identity.id).and_then(|e| e.get_password()) {
+            Ok(pp) => Some(pp),
+            Err(keyring::Error::NoEntry) => None,
+            Err(err) => return Err(format!("keyring: {err}")),
+        }
+    } else {
+        None
+    };
+
+    Ok(arc_ssh::RemoteFsOpts {
+        host: host.host,
+        port: host.port as u16,
+        username: host.username,
+        identity_path: identity.path,
+        passphrase,
+    })
+}
+
+/// Connect (or reconnect) the remote filesystem for `host_id` and return the
+/// absolute root to open. `path` defaults to the login directory.
+#[tauri::command]
+pub async fn ssh_fs_connect(
+    state: State<'_, SftpState>,
+    store: State<'_, SessionStore>,
+    host_id: String,
+    path: Option<String>,
+) -> Result<String, String> {
+    let opts = remote_fs_opts(&store, &host_id).await?;
+    state
+        .manager
+        .connect(&host_id, opts)
+        .await
+        .map_err(|e| format!("{e:#}"))?;
+    // "." resolves to the login directory, which is the right default root
+    // and doubles as a check that the session actually works.
+    let target = path.unwrap_or_else(|| ".".to_string());
+    state
+        .manager
+        .canonicalize(&host_id, &target)
+        .await
+        .map_err(|e| format!("{e:#}"))
+}
+
+#[tauri::command]
+pub async fn ssh_fs_disconnect(state: State<'_, SftpState>, host_id: String) -> Result<(), String> {
+    state.manager.disconnect(&host_id);
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn ssh_fs_connected(state: State<'_, SftpState>, host_id: String) -> Result<bool, String> {
+    Ok(state.manager.is_connected(&host_id))
+}
+
+#[tauri::command]
+pub async fn ssh_fs_read_dir(
+    state: State<'_, SftpState>,
+    host_id: String,
+    path: String,
+) -> Result<Vec<arc_ssh::RemoteDirEntry>, String> {
+    state
+        .manager
+        .read_dir(&host_id, &path)
+        .await
+        .map_err(|e| format!("{e:#}"))
+}
+
+#[tauri::command]
+pub async fn ssh_fs_read_file(
+    state: State<'_, SftpState>,
+    host_id: String,
+    path: String,
+) -> Result<String, String> {
+    state
+        .manager
+        .read_file(&host_id, &path)
+        .await
+        .map_err(|e| format!("{e:#}"))
+}
+
+#[tauri::command]
+pub async fn ssh_fs_write_file(
+    state: State<'_, SftpState>,
+    host_id: String,
+    path: String,
+    contents: String,
+) -> Result<(), String> {
+    state
+        .manager
+        .write_file(&host_id, &path, &contents)
+        .await
+        .map_err(|e| format!("{e:#}"))
+}
+
+#[tauri::command]
+pub async fn ssh_fs_create_dir(
+    state: State<'_, SftpState>,
+    host_id: String,
+    path: String,
+) -> Result<(), String> {
+    state
+        .manager
+        .create_dir(&host_id, &path)
+        .await
+        .map_err(|e| format!("{e:#}"))
+}
+
+#[tauri::command]
+pub async fn ssh_fs_rename(
+    state: State<'_, SftpState>,
+    host_id: String,
+    from: String,
+    to: String,
+) -> Result<(), String> {
+    state
+        .manager
+        .rename(&host_id, &from, &to)
+        .await
+        .map_err(|e| format!("{e:#}"))
+}
+
+#[tauri::command]
+pub async fn ssh_fs_remove(
+    state: State<'_, SftpState>,
+    host_id: String,
+    path: String,
+    is_dir: bool,
+) -> Result<(), String> {
+    state
+        .manager
+        .remove(&host_id, &path, is_dir)
+        .await
+        .map_err(|e| format!("{e:#}"))
+}

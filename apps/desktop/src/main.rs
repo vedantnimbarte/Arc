@@ -90,6 +90,7 @@ fn main() {
         )
         .manage(PtyState::default())
         .manage(SshState::default())
+        .manage(commands::ssh::SftpState::default())
         .manage(WatchState::default())
         .manage(commands::wingman::WingmanState::default())
         .manage(commands::claude_code::ClaudeState::default())
@@ -197,6 +198,15 @@ fn main() {
             commands::ssh::ssh_key_import,
             commands::ssh::ssh_key_delete,
             commands::ssh::ssh_session_logs,
+            commands::ssh::ssh_fs_connect,
+            commands::ssh::ssh_fs_disconnect,
+            commands::ssh::ssh_fs_connected,
+            commands::ssh::ssh_fs_read_dir,
+            commands::ssh::ssh_fs_read_file,
+            commands::ssh::ssh_fs_write_file,
+            commands::ssh::ssh_fs_create_dir,
+            commands::ssh::ssh_fs_rename,
+            commands::ssh::ssh_fs_remove,
             commands::lsp::lsp_start,
             commands::lsp::lsp_did_open,
             commands::lsp::lsp_did_change,

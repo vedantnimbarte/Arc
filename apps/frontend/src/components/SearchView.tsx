@@ -23,6 +23,7 @@ import { askConfirm } from '../state/confirm';
 import { toast, toastError } from '../state/toast';
 import { fileIcon } from '../lib/fileIcons';
 import { cn } from '../lib/cn';
+import { isRemotePath } from '../lib/remote';
 
 const SEARCH_LIMIT = 200;
 const DEBOUNCE_MS = 180;
@@ -112,7 +113,9 @@ export function SearchView() {
 
   useEffect(() => {
     const q = query.trim();
-    if (!q || !root || !isTauri) {
+    // Search indexes the local disk; a remote workspace has nothing here to
+    // walk. The empty-state below says so rather than spinning forever.
+    if (!q || !root || !isTauri || isRemotePath(root)) {
       setRows([]);
       setLoading(false);
       return;
@@ -308,7 +311,14 @@ export function SearchView() {
             desktop app.
           </p>
         )}
-        {isTauri && !q && (
+        {isTauri && isRemotePath(root) && (
+          <p className="px-3 py-2 font-display text-xs leading-relaxed text-fg-subtle">
+            <span className="text-status-warn">remote workspace</span> — content search
+            runs against the local index, which doesn&rsquo;t cover remote files. Use{' '}
+            <code className="font-mono text-2xs">grep</code> in an SSH tab.
+          </p>
+        )}
+        {isTauri && !isRemotePath(root) && !q && (
           <p className="px-3 py-2 font-display text-xs leading-relaxed text-fg-subtle">
             Type to search file contents across the workspace.
           </p>

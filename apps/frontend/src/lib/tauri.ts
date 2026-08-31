@@ -1,5 +1,13 @@
 import { Channel, invoke } from '@tauri-apps/api/core';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
+import {
+  isRemotePath,
+  makeRemotePath,
+  parseRemotePath,
+  posixJoin,
+  posixParent,
+  remoteParent,
+} from './remote';
 
 export const isTauri = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
 
@@ -141,11 +149,34 @@ export async function fsDefaultRoot(): Promise<string> {
   return invoke<string>('fs_default_root');
 }
 
+// ─── local / remote routing ──────────────────────────────────────────────
+//
+// A remote workspace addresses its files as `ssh://<hostId>/path` (see
+// lib/remote.ts). Rather than teach the file tree, the editor, and every
+// other caller about a second path type, the branch lives here — in the
+// functions they already call. A remote path goes to SFTP, anything else to
+// the local filesystem, and callers stay exactly as they were.
+//
+// Remote listings are re-stamped with `ssh://` URIs on the way out, so what
+// the tree hands back to these functions round-trips.
+
 export async function fsParent(path: string): Promise<string | null> {
+  if (isRemotePath(path)) return remoteParent(path);
   return invoke<string | null>('fs_parent', { path });
 }
 
 export async function fsReadDir(path: string): Promise<FsEntry[]> {
+  const remote = parseRemotePath(path);
+  if (remote) {
+    const entries = await sshFsReadDir(remote.hostId, remote.path);
+    return entries.map((e) => ({
+      name: e.name,
+      path: makeRemotePath(remote.hostId, e.path),
+      kind: e.is_dir ? 'dir' : ('file' as FsKind),
+      // Dotfile convention — SFTP reports no hidden attribute of its own.
+      hidden: e.name.startsWith('.'),
+    }));
+  }
   return invoke<FsEntry[]>('fs_read_dir', { path });
 }
 
@@ -177,10 +208,14 @@ export async function fsListFiles(
 }
 
 export async function fsReadFile(path: string): Promise<string> {
+  const remote = parseRemotePath(path);
+  if (remote) return sshFsReadFile(remote.hostId, remote.path);
   return invoke<string>('fs_read_file', { path });
 }
 
 export async function fsWriteFile(path: string, content: string): Promise<void> {
+  const remote = parseRemotePath(path);
+  if (remote) return sshFsWriteFile(remote.hostId, remote.path, content);
   return invoke<void>('fs_write_file', { path, content });
 }
 
@@ -293,11 +328,25 @@ export async function fsIndexStatus(root: string): Promise<boolean> {
 
 /** Rename `path` to `newName` (basename only, within the same directory). Returns the new absolute path. */
 export async function fsRename(path: string, newName: string): Promise<string> {
+  const remote = parseRemotePath(path);
+  if (remote) {
+    const target = posixJoin(posixParent(remote.path), newName);
+    await sshFsRename(remote.hostId, remote.path, target);
+    return makeRemotePath(remote.hostId, target);
+  }
   return invoke<string>('fs_rename', { path, newName });
 }
 
-/** Delete a file or directory (recursive for directories). */
-export async function fsDelete(path: string): Promise<void> {
+/** Delete a file or directory (recursive for directories, locally).
+ *
+ *  Remote deletes are NOT recursive: SFTP has no recursive remove, and
+ *  walking a remote tree to delete it file-by-file — over a link that can
+ *  drop mid-way, with no trash to recover from — is not something to do
+ *  behind a single menu click. A non-empty remote directory reports that
+ *  it is non-empty. */
+export async function fsDelete(path: string, isDir = false): Promise<void> {
+  const remote = parseRemotePath(path);
+  if (remote) return sshFsRemove(remote.hostId, remote.path, isDir);
   await invoke('fs_delete', { path });
 }
 
@@ -308,6 +357,8 @@ export async function fsReveal(path: string): Promise<void> {
 
 /** Create a directory (and any missing ancestors) at `path`. */
 export async function fsCreateDir(path: string): Promise<void> {
+  const remote = parseRemotePath(path);
+  if (remote) return sshFsCreateDir(remote.hostId, remote.path);
   await invoke('fs_create_dir', { path });
 }
 
@@ -2117,4 +2168,60 @@ export async function onClaudeTurn(
   handler: (ev: ClaudeStreamEvent) => void,
 ): Promise<UnlistenFn> {
   return listen<ClaudeStreamEvent>(topic, (e) => handler(e.payload));
+}
+
+// ─── remote filesystem (SFTP) ────────────────────────────────────────────
+//
+// The raw transport for remote workspaces. Callers should generally use the
+// `fs*` functions above, which route to these on an `ssh://` path — these are
+// exported for the connection lifecycle, which has no local equivalent.
+
+export interface RemoteDirEntry {
+  name: string;
+  /** Absolute POSIX path on the remote host (no `ssh://` prefix). */
+  path: string;
+  is_dir: boolean;
+  size: number;
+}
+
+/** Open (or reopen) the remote filesystem for a saved SSH host. Returns the
+ *  absolute remote root — the login directory when `path` is omitted. */
+export async function sshFsConnect(hostId: string, path?: string): Promise<string> {
+  return invoke<string>('ssh_fs_connect', { hostId, path: path ?? null });
+}
+
+export async function sshFsDisconnect(hostId: string): Promise<void> {
+  await invoke('ssh_fs_disconnect', { hostId });
+}
+
+export async function sshFsConnected(hostId: string): Promise<boolean> {
+  return invoke<boolean>('ssh_fs_connected', { hostId });
+}
+
+export async function sshFsReadDir(hostId: string, path: string): Promise<RemoteDirEntry[]> {
+  return invoke<RemoteDirEntry[]>('ssh_fs_read_dir', { hostId, path });
+}
+
+export async function sshFsReadFile(hostId: string, path: string): Promise<string> {
+  return invoke<string>('ssh_fs_read_file', { hostId, path });
+}
+
+export async function sshFsWriteFile(
+  hostId: string,
+  path: string,
+  contents: string,
+): Promise<void> {
+  await invoke('ssh_fs_write_file', { hostId, path, contents });
+}
+
+export async function sshFsCreateDir(hostId: string, path: string): Promise<void> {
+  await invoke('ssh_fs_create_dir', { hostId, path });
+}
+
+export async function sshFsRename(hostId: string, from: string, to: string): Promise<void> {
+  await invoke('ssh_fs_rename', { hostId, from, to });
+}
+
+export async function sshFsRemove(hostId: string, path: string, isDir: boolean): Promise<void> {
+  await invoke('ssh_fs_remove', { hostId, path, isDir });
 }

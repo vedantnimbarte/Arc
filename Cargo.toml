@@ -50,6 +50,8 @@ bytes = "1.7"
 # ssh-key gives us a stable API for generating + serialising OpenSSH keys.
 russh = "0.45"
 russh-keys = "0.45"
+# SFTP client for remote workspaces, layered over a russh channel stream.
+russh-sftp = "2.4"
 ssh-key = { version = "0.6", features = ["ed25519", "rsa", "encryption"] }
 rand_core = { version = "0.6", features = ["std"] }
 base64 = "0.22"

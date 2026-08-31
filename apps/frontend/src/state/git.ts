@@ -1,3 +1,4 @@
+import { isRemotePath } from '../lib/remote';
 import { create } from 'zustand';
 import {
   gitChanges,
@@ -88,6 +89,21 @@ export const useGit = create<GitStoreState>((set) => ({
   loading: false,
   error: null,
   refresh: async (root: string) => {
+    // Git runs against a local checkout. A remote workspace has none, and
+    // handing an `ssh://` path to the git commands would surface a parse
+    // error on every refresh — present it as "no repo" instead.
+    if (isRemotePath(root)) {
+      set({
+        info: null,
+        entries: [],
+        diffStat: null,
+        statusByPath: new Map(),
+        dirtyDirs: new Set(),
+        loading: false,
+        error: null,
+      });
+      return;
+    }
     const seq = ++refreshSeq;
     set({ loading: true, error: null });
     try {

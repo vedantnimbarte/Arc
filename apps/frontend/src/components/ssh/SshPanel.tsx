@@ -9,6 +9,7 @@ import {
   ArrowDownToLine,
   Radio,
   SendHorizontal,
+  FolderOpen,
   X,
 } from 'lucide-react';
 import { useSsh } from '../../state/ssh';
@@ -20,6 +21,7 @@ import { ImportKeyDialog } from './ImportKeyDialog';
 import { HostEditDialog } from './HostEditDialog';
 import type { SshHost, SshKey } from '../../lib/tauri';
 import { askConfirm } from '../../state/confirm';
+import { useRemoteWorkspace } from '../../state/remoteWorkspace';
 
 /** SSH view — rendered inside the left sidebar's SSH tab (the activity rail
  *  owns view switching). `onClose` lets the host collapse the panel back to
@@ -330,10 +332,11 @@ function HostList({
         const identity = h.identity_id ? keyById.get(h.identity_id) : null;
         return (
           <li key={h.id}>
+            <div className="group relative flex items-center rounded-squircle transition-colors hover:bg-bg-hover">
             <button
               type="button"
               onClick={() => onOpen(h.id)}
-              className="group flex w-full items-center gap-3 rounded-squircle px-3 py-3 text-left transition-colors hover:bg-bg-hover"
+              className="flex w-full items-center gap-3 rounded-squircle px-3 py-3 text-left"
             >
               <span
                 className={cn(
@@ -372,6 +375,21 @@ function HostList({
                 className="shrink-0 text-fg-subtle opacity-0 transition group-hover:opacity-100"
               />
             </button>
+            {/* Mount this host's filesystem as the workspace root. Distinct
+                from opening a shell on it — that is the row itself. */}
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                void useRemoteWorkspace.getState().open(h);
+              }}
+              title="Open remote folder as workspace"
+              aria-label={`Open ${h.name} as a remote workspace`}
+              className="absolute right-8 rounded p-1.5 text-fg-subtle opacity-0 transition hover:bg-surface-2 hover:text-fg-base group-hover:opacity-100"
+            >
+              <FolderOpen size={13} strokeWidth={2} />
+            </button>
+            </div>
           </li>
         );
       })}

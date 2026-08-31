@@ -1,6 +1,7 @@
 import { useEffect } from 'react';
 import { Play } from 'lucide-react';
 import { fsReadDir, fsReadFile, isTauri } from '../lib/tauri';
+import { isRemotePath } from '../lib/remote';
 import { useFiles } from './files';
 import { useCommands, type CommandAction } from './commands';
 import { useWorkspace } from './workspace';
@@ -162,6 +163,9 @@ async function readOrNull(path: string): Promise<string | null> {
  *  root has none of those files. */
 export async function loadProjectTasks(root: string): Promise<ProjectTask[]> {
   if (!isTauri) return [];
+  // Remote workspaces have no local manifest to read, and running a local
+  // `pnpm dev` against a remote checkout would be wrong anyway.
+  if (isRemotePath(root)) return [];
   const base = root.replace(/[\\/]+$/, '');
 
   // just and make each accept two spellings of their filename.
