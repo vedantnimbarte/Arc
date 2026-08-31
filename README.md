@@ -74,6 +74,10 @@ it.
   shows up in the tab-bar agent menu, the new-tab popover, the empty-workspace screen and the
   command palette; anything missing simply doesn't appear. For Claude Code specifically, the panel above
   is usually the better surface — the launcher is there when you want the real TUI.
+- **Agent Review** — Launching any of those CLIs snapshots what was already dirty in the repo,
+  so Source Control can narrow to just what the agent changed; staging, diffs and the commit box
+  all follow the filter. It reads git rather than the agent's output, so it works identically for
+  all thirteen.
 
 ## Quick Start
 
