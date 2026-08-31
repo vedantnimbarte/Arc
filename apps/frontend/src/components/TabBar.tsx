@@ -8,7 +8,6 @@ import {
   PanelRightClose,
   PanelRightOpen,
   Bot,
-  GitBranch,
   LayoutGrid,
   Monitor,
   Send,
@@ -25,8 +24,6 @@ import { cn } from '../lib/cn';
 import {
   fsPickFolder,
   fsWriteFile,
-  gitStatus,
-  gitWindowOpen,
   ptyListAiClis,
   type AiCliInfo,
 } from '../lib/tauri';
@@ -60,28 +57,6 @@ export function TabBar() {
   // Installed AI CLIs (Claude Code / Codex / OpenCode). Refreshed on mount.
   // Empty in browser-only mode or when none are on PATH.
   const [aiClis, setAiClis] = useState<AiCliInfo[]>([]);
-  // Whether the current workspace root is a git repo. Hides the toolbar
-  // git icon when there's nothing to show. Same one-shot pattern as
-  // StatusBar — re-fires whenever the workspace root changes.
-  const [isGitRepo, setIsGitRepo] = useState(false);
-
-  useEffect(() => {
-    if (!isTauri || !root) {
-      setIsGitRepo(false);
-      return;
-    }
-    let cancelled = false;
-    void gitStatus(root)
-      .then((info) => {
-        if (!cancelled) setIsGitRepo(info?.branch != null);
-      })
-      .catch(() => {
-        if (!cancelled) setIsGitRepo(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [root]);
   const plusRef = useRef<HTMLButtonElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
 
@@ -250,21 +225,7 @@ export function TabBar() {
         </Tooltip>
       </div>
 
-      {/* Right cluster — git history. SSH lives in the ⌘K palette / ⌘⇧S;
-          settings lives in the workspace rail. */}
-      <div className="ml-0.5 flex items-center gap-0.5 pr-2">
-        {isGitRepo && (
-          <Tooltip label="Git history" side="left">
-            <button
-              onClick={() => void gitWindowOpen()}
-              className="group flex h-8 w-8 items-center justify-center rounded-md text-fg-muted transition-all duration-200 ease-apple hover:bg-surface-2 hover:text-fg-base active:bg-surface-3"
-              aria-label="Open Git history"
-            >
-              <GitBranch size={13} strokeWidth={1.9} />
-            </button>
-          </Tooltip>
-        )}
-      </div>
+      <div className="ml-0.5 pr-2" />
 
       {isTauri && <WindowControls />}
     </div>

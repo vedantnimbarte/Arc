@@ -1,4 +1,6 @@
 import {
+  Suspense,
+  lazy,
   useCallback,
   useEffect,
   useLayoutEffect,
@@ -17,20 +19,20 @@ import {
   ChevronDown,
   ChevronRight,
   Copy,
-  Download,
+  CloudDownload,
   FileText,
   FolderTree,
   GitBranch,
   GitCompare,
   GitMerge,
   GitPullRequest,
+  History,
   ListOrdered,
   Minus,
   Pencil,
   Plus,
   RefreshCw,
   Trash2,
-  Upload,
   X,
   Bot,
 } from 'lucide-react';
@@ -56,6 +58,7 @@ import {
   gitStashPop,
   gitStashPush,
   gitUnstage,
+  gitWindowOpen,
   isTauri,
   type GitBranchInfo,
   type GitChangeEntry,
@@ -66,12 +69,21 @@ import { agentTouched, useAgentRun } from '../state/agentRun';
 import { useFiles } from '../state/files';
 import { useGit } from '../state/git';
 import { useGitUi } from '../state/gitUi';
+import { Tooltip } from './Tooltip';
 import { useWorkspace } from '../state/workspace';
 import { fileIcon } from '../lib/fileIcons';
 import { cn } from '../lib/cn';
 import { askConfirm } from '../state/confirm';
 import { copyText } from '../lib/clipboard';
 import { toast } from '../state/toast';
+
+// ~800 lines of worktree + rebase UI, only pulled in when one is opened.
+const WorktreePanel = lazy(() =>
+  import('./git/WorktreePanel').then((m) => ({ default: m.WorktreePanel })),
+);
+const RebasePanel = lazy(() =>
+  import('./git/RebasePanel').then((m) => ({ default: m.RebasePanel })),
+);
 
 /** Path separator that matches the workspace root style. */
 function joinPath(root: string, rel: string): string {
@@ -253,6 +265,15 @@ export function SourceControl() {
 
   // Branch management panel
   const [branchPanelOpen, setBranchPanelOpen] = useState(false);
+  // Worktrees / rebase expand inline below the launcher bar; the open flags
+  // live in `useGitUi` so the ⌘K palette and rail menu can open them too.
+  // Expanded panels move out to the App-level modal, so the panel skips them
+  // — but the launcher stays lit, since the panel is still open.
+  const worktreesOpen = useGitUi((s) => s.worktreePanelOpen);
+  const rebaseOpen = useGitUi((s) => s.rebasePanelOpen);
+  const worktreesInline = useGitUi((s) => s.worktreePanelOpen && !s.worktreeExpanded);
+  const rebaseInline = useGitUi((s) => s.rebasePanelOpen && !s.rebaseExpanded);
+  const panelOpen = worktreesInline || rebaseInline;
   const [branches, setBranches] = useState<GitBranchInfo[]>([]);
   const [branchesLoading, setBranchesLoading] = useState(false);
   const [newBranchName, setNewBranchName] = useState('');
@@ -770,7 +791,7 @@ export function SourceControl() {
                 'active:scale-[0.92] disabled:opacity-40',
               )}
             >
-              <Download size={11} strokeWidth={2.1} className={remoteOp === 'fetch' ? 'animate-pulse' : ''} />
+              <CloudDownload size={11} strokeWidth={2.1} className={remoteOp === 'fetch' ? 'animate-pulse' : ''} />
             </button>
             <button
               onClick={() => void handlePull()}
@@ -794,9 +815,23 @@ export function SourceControl() {
                 'active:scale-[0.92] disabled:opacity-40',
               )}
             >
-              <Upload size={11} strokeWidth={2.1} className={remoteOp === 'push' ? 'animate-pulse' : ''} />
+              <ArrowUpFromLine size={11} strokeWidth={2.1} className={remoteOp === 'push' ? 'animate-pulse' : ''} />
             </button>
           </>
+        )}
+        {isTauri && root && (
+          <button
+            onClick={() => void gitWindowOpen()}
+            title="Git history"
+            aria-label="Open Git history"
+            className={cn(
+              'flex h-6 w-6 items-center justify-center rounded-md text-fg-muted transition-all duration-150 ease-apple',
+              'hover:bg-surface-2 hover:text-fg-base hover:shadow-[inset_0_0_0_1px_rgba(255,255,255,0.05)]',
+              'active:scale-[0.92]',
+            )}
+          >
+            <History size={11} strokeWidth={2.1} />
+          </button>
         )}
         <button
           onClick={() => void refresh()}
@@ -818,11 +853,16 @@ export function SourceControl() {
         </button>
       </div>
 
-      {/* Git launchers — open the heavier panels (PRs / worktrees / rebase)
-          that live as ⌘K overlays, surfaced here so source control is their
-          natural home. */}
+      {/* Git launchers — Changes / Worktrees / Rebase pick what fills the
+          panel below, one at a time. PRs still open as an overlay. */}
       {isTauri && root && (
         <div className="flex shrink-0 items-center gap-1 border-b border-border-hairline px-2 py-1.5">
+          <GitLauncher
+            icon={<FileText size={11.5} strokeWidth={2} />}
+            label="Changes"
+            active={!panelOpen}
+            onClick={() => useGitUi.getState().setWorktreePanelOpen(false)}
+          />
           <GitLauncher
             icon={<GitPullRequest size={11.5} strokeWidth={2} />}
             label="Pull Requests"
@@ -831,14 +871,25 @@ export function SourceControl() {
           <GitLauncher
             icon={<FolderTree size={11.5} strokeWidth={2} />}
             label="Worktrees"
-            onClick={() => useGitUi.getState().setWorktreePanelOpen(true)}
+            active={worktreesOpen}
+            onClick={() => useGitUi.getState().setWorktreePanelOpen(!worktreesOpen)}
           />
           <GitLauncher
             icon={<ListOrdered size={11.5} strokeWidth={2} />}
             label="Rebase"
-            onClick={() => useGitUi.getState().setRebasePanelOpen(true)}
+            active={rebaseOpen}
+            onClick={() => useGitUi.getState().setRebasePanelOpen(!rebaseOpen)}
           />
         </div>
+      )}
+
+      {/* An open worktree / rebase section replaces the rest of the panel —
+          stash, composer and change list — rather than stacking above it. */}
+      {panelOpen && (
+        <Suspense fallback={null}>
+          {worktreesInline && <WorktreePanel inline />}
+          {rebaseInline && <RebasePanel inline />}
+        </Suspense>
       )}
 
       {/* Agent review bar — only while a baseline exists for this root. Names
@@ -889,7 +940,7 @@ export function SourceControl() {
       )}
 
       {/* Branch management panel */}
-      {branchPanelOpen && (
+      {branchPanelOpen && !panelOpen && (
         <div className="shrink-0 border-b border-border-hairline bg-surface-1 px-2.5 py-2">
           {/* Create branch */}
           <div className="mb-2 flex gap-1.5">
@@ -950,7 +1001,7 @@ export function SourceControl() {
       )}
 
       {/* Stash section */}
-      {isTauri && root && (
+      {isTauri && root && !panelOpen && (
         <div className="shrink-0 border-b border-border-hairline">
           <button
             onClick={() => setStashOpen((o) => !o)}
@@ -995,7 +1046,7 @@ export function SourceControl() {
       )}
 
       {/* Commit composer — card with focus bloom + gradient commit bar */}
-      {isTauri && info?.branch && (
+      {isTauri && info?.branch && !panelOpen && (
         <div className="shrink-0 border-b border-border-hairline px-2.5 py-2.5">
           <div
             className={cn(
@@ -1087,6 +1138,7 @@ export function SourceControl() {
       )}
 
       {/* Body */}
+      {!panelOpen && (
       <div className="selectable flex-1 overflow-auto px-1.5 py-2">
         {!isTauri && (
           <div className="mx-1 mb-2 flex items-start gap-2 rounded-lg border border-status-warn/20 bg-status-warn/[0.06] px-2.5 py-2 font-display text-2xs leading-relaxed">
@@ -1163,6 +1215,7 @@ export function SourceControl() {
           );
         })}
       </div>
+      )}
 
       {contextMenu && (
         <ChangeContextMenu
@@ -1222,29 +1275,35 @@ function GitLauncher({
   icon,
   label,
   onClick,
+  active = false,
 }: {
   icon: React.ReactNode;
   label: string;
   onClick: () => void;
+  /** Marks the launchers whose panel expands inline below the bar. */
+  active?: boolean;
 }) {
   return (
-    <button
-      type="button"
-      onClick={onClick}
-      title={label}
-      className={cn(
-        'group/launch flex h-[26px] min-w-0 flex-1 items-center justify-center gap-1.5 rounded-md',
-        'border border-edge-1 bg-surface-1 font-display text-2xs font-medium tracking-tight text-fg-muted',
-        'transition-all duration-150 ease-apple',
-        'hover:border-accent/25 hover:bg-surface-1 hover:text-fg-base hover:shadow-[inset_0_1px_0_0_rgba(255,255,255,0.04)]',
-        'active:scale-[0.97]',
-      )}
-    >
-      <span className="shrink-0 text-fg-subtle transition-colors duration-150 group-hover/launch:text-accent-bright">
-        {icon}
-      </span>
-      <span className="truncate">{label}</span>
-    </button>
+    <Tooltip label={label} className="min-w-0 flex-1">
+      <button
+        type="button"
+        onClick={onClick}
+        aria-label={label}
+        aria-expanded={active}
+        className={cn(
+          'group/launch flex h-[26px] w-full min-w-0 items-center justify-center rounded-md',
+          'border transition-all duration-150 ease-apple',
+          active
+            ? 'border-accent/35 bg-accent-soft text-fg-base'
+            : 'border-edge-1 bg-surface-1 text-fg-muted hover:border-accent/25 hover:text-fg-base hover:shadow-[inset_0_1px_0_0_rgba(255,255,255,0.04)]',
+          'active:scale-[0.97]',
+        )}
+      >
+        <span className="shrink-0 text-fg-subtle transition-colors duration-150 group-hover/launch:text-accent-bright">
+          {icon}
+        </span>
+      </button>
+    </Tooltip>
   );
 }
 

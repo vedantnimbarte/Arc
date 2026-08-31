@@ -110,7 +110,7 @@ export const useFiles = create<FilesState>()(
       sidebarView: 'files',
       viewByRoot: {},
       recentFiles: [],
-      railLabels: true,
+      railLabels: false,
       // Switching workspace root restores that root's last view (falling back
       // to the current view for roots we haven't seen before) and that view's
       // remembered width.
@@ -165,7 +165,7 @@ export const useFiles = create<FilesState>()(
     }),
     {
       name: STORAGE_KEY,
-      version: 3,
+      version: 4,
       // v2 stored the source-control view under the old 'source-control'
       // key; the activity rail renamed it to 'git'.
       migrate: (persisted, version) => {
@@ -173,6 +173,9 @@ export const useFiles = create<FilesState>()(
         if (state && version < 3 && (state.sidebarView as string) === 'source-control') {
           state.sidebarView = 'git';
         }
+        // v4 made the rail icon-only; drop the old stored preference so the
+        // new default applies.
+        if (state && version < 4) delete state.railLabels;
         return state as FilesState;
       },
     },

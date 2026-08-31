@@ -343,8 +343,20 @@ function railQuickActions(view: SidebarView): RailMenuItem[] {
     case 'git':
       return [
         { label: 'Pull Requests', onClick: () => useGitUi.getState().openPrList() },
-        { label: 'Worktrees', onClick: () => useGitUi.getState().setWorktreePanelOpen(true) },
-        { label: 'Rebase', onClick: () => useGitUi.getState().setRebasePanelOpen(true) },
+        {
+          label: 'Worktrees',
+          onClick: () => {
+            useFiles.getState().showSidebarView('git');
+            useGitUi.getState().setWorktreePanelOpen(true);
+          },
+        },
+        {
+          label: 'Rebase',
+          onClick: () => {
+            useFiles.getState().showSidebarView('git');
+            useGitUi.getState().setRebasePanelOpen(true);
+          },
+        },
       ];
     case 'ssh':
       return [
