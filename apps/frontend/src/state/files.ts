@@ -9,7 +9,14 @@ export const SIDEBAR_RAIL_WIDTH = 44;
 
 /** Which panel is showing in the left sidebar. Driven by the sidebar's
  *  activity rail (Explorer / Source Control / SSH / Search / Outline). */
-export type SidebarView = 'files' | 'git' | 'ssh' | 'search' | 'outline' | 'wingman';
+export type SidebarView =
+  | 'files'
+  | 'git'
+  | 'ssh'
+  | 'search'
+  | 'outline'
+  | 'wingman'
+  | 'claude';
 
 interface FilesState {
   /**

@@ -98,10 +98,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "arc-claude-code"
+version = "0.2.0"
+dependencies = [
+ "anyhow",
+ "arc-pty",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "arc-desktop"
 version = "0.2.0"
 dependencies = [
  "anyhow",
+ "arc-claude-code",
  "arc-filesystem",
  "arc-git",
  "arc-git-host",

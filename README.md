@@ -35,6 +35,13 @@ it.
   with streamed turns (text, reasoning, tool calls, verification results, token cost), the
   pilot board of agent runs, and a review queue that opens each finished task's git worktree
   in ARC's own diff viewer.
+- **Claude Code** *(optional)* — Drive your installed `claude` CLI from a sidebar panel:
+  streamed replies, foldable reasoning, one row per tool call with its result, per-turn cost,
+  and a list of every file the turn edited that opens straight into ARC's diff viewer.
+  Nothing to connect and no key to store — it runs the CLI you already signed in to.
+  Claude asks before it acts: each tool call it needs permission for pauses the turn on an
+  approve/deny prompt showing the actual command or path. Permission mode and a per-turn
+  spend cap live in **Settings → Claude Code**.
 - **In-App Updates** — ARC checks for a new release on launch, offers it in a corner
   card, and installs it in place. Every download is minisign-verified against the key
   baked into the build before it runs. Turn the check off in **Settings → About**.
@@ -42,7 +49,8 @@ it.
   shell prompt for review; nothing runs until you press Enter. Needs an Anthropic API key
   (**Settings → Terminal**), stored in your OS credential vault.
 - **AI CLI Launcher** — Optionally launch external coding CLIs (Claude Code, Codex, OpenCode,
-  Wingman) in a terminal tab when installed on your PATH.
+  Wingman) in a terminal tab when installed on your PATH. For Claude Code specifically, the panel above
+  is usually the better surface — the launcher is there when you want the real TUI.
 
 ## Quick Start
 

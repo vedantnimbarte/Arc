@@ -4,6 +4,7 @@ import {
   sessionSettingsLoad,
   sessionSettingsSave,
   settingsBroadcastChanged,
+  type ClaudePermissionMode,
   type PersistedSettings,
 } from '../lib/tauri';
 import {
@@ -25,6 +26,18 @@ import { loadInstalledThemes } from '../lib/themeMarketplace';
 /** Default model for the ⌘K command bar. Overridable in Settings → Terminal
  *  for anyone who wants a cheaper or faster one. */
 export const DEFAULT_AI_MODEL = 'claude-opus-5';
+
+/** The Claude Code CLI's `--permission-mode` values, ordered least to most
+ *  permissive. Ordering is what the Settings picker renders, and it is the
+ *  honest way to present a choice where the last entry disables every check. */
+export const CLAUDE_PERMISSION_MODES: ClaudePermissionMode[] = [
+  'plan',
+  'manual',
+  'auto',
+  'acceptEdits',
+  'dontAsk',
+  'bypassPermissions',
+];
 
 export const DEFAULT_SEARCH_IGNORE_DIRS = [
   'node_modules',
@@ -80,6 +93,17 @@ export interface Settings {
    *  rows in SQLite, so it lives in the OS credential vault instead (see
    *  `WINGMAN_TOKEN_KEY`). */
   wingmanUrl: string;
+  /** How much Claude Code is allowed to do without asking, as the CLI's
+   *  `--permission-mode`. `acceptEdits` is the default: file edits apply and
+   *  are reviewed afterwards in ARC's diff viewer, matching what the CLI does
+   *  interactively once you accept edits. `plan` never writes;
+   *  `bypassPermissions` skips every check, shell commands included. */
+  claudePermissionMode: ClaudePermissionMode;
+  /** Model for the Claude Code panel — an alias (`opus`, `sonnet`, `haiku`) or
+   *  a full id. Empty means "whatever the CLI is configured to use". */
+  claudeModel: string;
+  /** Hard spend ceiling per turn, in USD. 0 disables the cap. */
+  claudeMaxBudgetUsd: number;
   /** Fire a system notification when an OSC133-tracked command runs longer
    *  than `notifyThresholdSecs` and the window is unfocused (Tier 1.5). */
   notifyLongCommands: boolean;
@@ -114,6 +138,9 @@ export interface Settings {
   setEditorVimMode: (on: boolean) => void;
   setEditorLsp: (on: boolean) => void;
   setWingmanUrl: (url: string) => void;
+  setClaudePermissionMode: (mode: ClaudePermissionMode) => void;
+  setClaudeModel: (model: string) => void;
+  setClaudeMaxBudgetUsd: (usd: number) => void;
   setNotifyLongCommands: (on: boolean) => void;
   setNotifyThresholdSecs: (secs: number) => void;
   setNotifySound: (on: boolean) => void;
@@ -134,6 +161,9 @@ const DEFAULTS = {
   editorVimMode: false,
   editorLsp: false,
   wingmanUrl: '',
+  claudePermissionMode: 'acceptEdits' as ClaudePermissionMode,
+  claudeModel: '',
+  claudeMaxBudgetUsd: 0,
   notifyLongCommands: true,
   notifyThresholdSecs: 30,
   notifySound: false,
@@ -195,6 +225,12 @@ export const useSettings = create<Settings>()((set, get) => ({
   setEditorVimMode: (on) => set({ editorVimMode: on }),
   setEditorLsp: (on) => set({ editorLsp: on }),
   setWingmanUrl: (url) => set({ wingmanUrl: url }),
+  setClaudePermissionMode: (mode) => set({ claudePermissionMode: mode }),
+  setClaudeModel: (model) => set({ claudeModel: model }),
+  // Negative or non-finite budgets would be passed straight to the CLI as a
+  // flag value; clamp to "no cap" instead of letting the child refuse to start.
+  setClaudeMaxBudgetUsd: (usd) =>
+    set({ claudeMaxBudgetUsd: Number.isFinite(usd) && usd > 0 ? usd : 0 }),
   setNotifyLongCommands: (on) => set({ notifyLongCommands: on }),
   setNotifyThresholdSecs: (secs) => set({ notifyThresholdSecs: clampNotifySecs(secs) }),
   setNotifySound: (on) => set({ notifySound: on }),
@@ -313,6 +349,17 @@ function applyStored(
       typeof stored.editorLsp === 'boolean' ? stored.editorLsp : current.editorLsp,
     wingmanUrl:
       typeof stored.wingmanUrl === 'string' ? stored.wingmanUrl : current.wingmanUrl,
+    claudePermissionMode: CLAUDE_PERMISSION_MODES.includes(
+      stored.claudePermissionMode as ClaudePermissionMode,
+    )
+      ? (stored.claudePermissionMode as ClaudePermissionMode)
+      : current.claudePermissionMode,
+    claudeModel:
+      typeof stored.claudeModel === 'string' ? stored.claudeModel : current.claudeModel,
+    claudeMaxBudgetUsd:
+      typeof stored.claudeMaxBudgetUsd === 'number' && stored.claudeMaxBudgetUsd > 0
+        ? stored.claudeMaxBudgetUsd
+        : current.claudeMaxBudgetUsd,
     notifyLongCommands:
       typeof stored.notifyLongCommands === 'boolean'
         ? stored.notifyLongCommands
@@ -351,6 +398,9 @@ function toPersistedSettings(s: Settings): PersistedSettings {
     editorVimMode: s.editorVimMode,
     editorLsp: s.editorLsp,
     wingmanUrl: s.wingmanUrl,
+    claudePermissionMode: s.claudePermissionMode,
+    claudeModel: s.claudeModel,
+    claudeMaxBudgetUsd: s.claudeMaxBudgetUsd,
     notifyLongCommands: s.notifyLongCommands,
     notifyThresholdSecs: s.notifyThresholdSecs,
     notifySound: s.notifySound,
