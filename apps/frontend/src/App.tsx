@@ -309,6 +309,18 @@ export default function App() {
         console.error(`[shortcut] launch ${id} failed:`, err);
       }
     };
+    // AI CLI launchers are derived from AI_CLIS rather than enumerated, so
+    // they're dispatched by prefix here; Wingman's extra pilot/headless modes
+    // aren't plain launches and fall through to the switch.
+    if (
+      action.startsWith('launch-') &&
+      action !== 'launch-wingman-pilot' &&
+      action !== 'launch-wingman-headless'
+    ) {
+      if (action === 'launch-wingman-cli') void launchWingman('tui');
+      else void launchCli(action.slice('launch-'.length) as AiCliId);
+      return;
+    }
     switch (action) {
       case 'new-terminal':
         void newTerminal();
@@ -350,21 +362,6 @@ export default function App() {
         return;
       case 'toggle-ssh-panel':
         useFiles.getState().toggleSidebarView('ssh');
-        return;
-      case 'launch-claude-cli':
-        void launchCli('claude-cli');
-        return;
-      case 'launch-codex-cli':
-        void launchCli('codex-cli');
-        return;
-      case 'launch-opencode-cli':
-        void launchCli('opencode-cli');
-        return;
-      case 'launch-kimi-code-cli':
-        void launchCli('kimi-code-cli');
-        return;
-      case 'launch-wingman-cli':
-        void launchWingman('tui');
         return;
       case 'launch-wingman-pilot':
         void launchWingman('pilot');
