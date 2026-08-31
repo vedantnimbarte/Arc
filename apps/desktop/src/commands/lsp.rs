@@ -8,6 +8,9 @@
 //!   invoke("lsp_hover",      { id, uri, line, character })               -> Hover | null (JSON)
 //!   invoke("lsp_completion", { id, uri, line, character })               -> CompletionList (JSON)
 //!   invoke("lsp_definition", { id, uri, line, character })               -> Location[] (JSON)
+//!   invoke("lsp_references", { id, uri, line, character })               -> Location[] (JSON)
+//!   invoke("lsp_rename",     { id, uri, line, character, newName })      -> WorkspaceEdit (JSON)
+//!   invoke("lsp_formatting", { id, uri, tabSize, insertSpaces })         -> TextEdit[] (JSON)
 //!   invoke("lsp_stop",       { id })                                     -> ()
 //!   invoke("lsp_is_running", { id })                                     -> bool
 //!
@@ -125,6 +128,46 @@ pub async fn lsp_definition(
     character: u32,
 ) -> Result<Value, String> {
     state.manager.definition(&id, &uri, line, character).await
+}
+
+#[tauri::command]
+pub async fn lsp_references(
+    state: State<'_, LspState>,
+    id: String,
+    uri: String,
+    line: u32,
+    character: u32,
+) -> Result<Value, String> {
+    state.manager.references(&id, &uri, line, character).await
+}
+
+#[tauri::command]
+pub async fn lsp_rename(
+    state: State<'_, LspState>,
+    id: String,
+    uri: String,
+    line: u32,
+    character: u32,
+    new_name: String,
+) -> Result<Value, String> {
+    state
+        .manager
+        .rename(&id, &uri, line, character, &new_name)
+        .await
+}
+
+#[tauri::command]
+pub async fn lsp_formatting(
+    state: State<'_, LspState>,
+    id: String,
+    uri: String,
+    tab_size: u32,
+    insert_spaces: bool,
+) -> Result<Value, String> {
+    state
+        .manager
+        .formatting(&id, &uri, tab_size, insert_spaces)
+        .await
 }
 
 #[tauri::command]

@@ -573,6 +573,34 @@ export async function lspDefinition(
   return invoke('lsp_definition', { id, uri, line, character });
 }
 
+export async function lspReferences(
+  id: string,
+  uri: string,
+  line: number,
+  character: number,
+): Promise<unknown> {
+  return invoke('lsp_references', { id, uri, line, character });
+}
+
+export async function lspRename(
+  id: string,
+  uri: string,
+  line: number,
+  character: number,
+  newName: string,
+): Promise<unknown> {
+  return invoke('lsp_rename', { id, uri, line, character, newName });
+}
+
+export async function lspFormatting(
+  id: string,
+  uri: string,
+  tabSize: number,
+  insertSpaces: boolean,
+): Promise<unknown> {
+  return invoke('lsp_formatting', { id, uri, tabSize, insertSpaces });
+}
+
 export async function lspStop(id: string): Promise<void> {
   await invoke('lsp_stop', { id });
 }
@@ -707,9 +735,13 @@ export interface PersistedSettings {
   restoreWindowState?: boolean;
   /** Enable Vim keybindings in the CodeMirror editor. */
   editorVimMode?: boolean;
-  /** Enable Language Server Protocol features (diagnostics, hover, completion)
-   *  in the editor. Requires the relevant language servers on PATH. */
+  /** Enable Language Server Protocol features (diagnostics, hover, completion,
+   *  go-to-definition, references, rename, formatting) in the editor. Requires
+   *  the relevant language servers on PATH. */
   editorLsp?: boolean;
+  /** Run the language server's formatter before every save. Requires
+   *  `editorLsp`. */
+  editorFormatOnSave?: boolean;
   /** Address of a `wingman serve` daemon. Empty disables the integration.
    *  The token is not persisted here — it lives in the OS credential vault. */
   wingmanUrl?: string;

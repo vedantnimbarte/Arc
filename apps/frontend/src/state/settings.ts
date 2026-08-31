@@ -83,9 +83,14 @@ export interface Settings {
   /** Enable Vim keybindings in the CodeMirror editor. Multi-cursor is always
    *  on; this gates the modal Vim layer specifically. */
   editorVimMode: boolean;
-  /** Enable LSP features (diagnostics, hover, completion) in the editor.
-   *  Off by default — requires the relevant language servers on PATH. */
+  /** Enable LSP features (diagnostics, hover, completion, go-to-definition,
+   *  references, rename, formatting) in the editor. Off by default — requires
+   *  the relevant language servers on PATH. */
   editorLsp: boolean;
+  /** Run the language server's formatter on the buffer before every save.
+   *  Requires `editorLsp`; a language whose server has no formatting provider
+   *  saves unchanged. */
+  editorFormatOnSave: boolean;
   /** Address of a `wingman serve` daemon, e.g. `http://127.0.0.1:8787`. Empty
    *  disables the Wingman integration entirely.
    *
@@ -137,6 +142,7 @@ export interface Settings {
   setRestoreWindowState: (on: boolean) => void;
   setEditorVimMode: (on: boolean) => void;
   setEditorLsp: (on: boolean) => void;
+  setEditorFormatOnSave: (on: boolean) => void;
   setWingmanUrl: (url: string) => void;
   setClaudePermissionMode: (mode: ClaudePermissionMode) => void;
   setClaudeModel: (model: string) => void;
@@ -160,6 +166,7 @@ const DEFAULTS = {
   restoreWindowState: true,
   editorVimMode: false,
   editorLsp: false,
+  editorFormatOnSave: false,
   wingmanUrl: '',
   claudePermissionMode: 'acceptEdits' as ClaudePermissionMode,
   claudeModel: '',
@@ -224,6 +231,7 @@ export const useSettings = create<Settings>()((set, get) => ({
   setRestoreWindowState: (on) => set({ restoreWindowState: on }),
   setEditorVimMode: (on) => set({ editorVimMode: on }),
   setEditorLsp: (on) => set({ editorLsp: on }),
+  setEditorFormatOnSave: (on) => set({ editorFormatOnSave: on }),
   setWingmanUrl: (url) => set({ wingmanUrl: url }),
   setClaudePermissionMode: (mode) => set({ claudePermissionMode: mode }),
   setClaudeModel: (model) => set({ claudeModel: model }),
@@ -347,6 +355,10 @@ function applyStored(
         : current.editorVimMode,
     editorLsp:
       typeof stored.editorLsp === 'boolean' ? stored.editorLsp : current.editorLsp,
+    editorFormatOnSave:
+      typeof stored.editorFormatOnSave === 'boolean'
+        ? stored.editorFormatOnSave
+        : current.editorFormatOnSave,
     wingmanUrl:
       typeof stored.wingmanUrl === 'string' ? stored.wingmanUrl : current.wingmanUrl,
     claudePermissionMode: CLAUDE_PERMISSION_MODES.includes(
@@ -397,6 +409,7 @@ function toPersistedSettings(s: Settings): PersistedSettings {
     restoreWindowState: s.restoreWindowState,
     editorVimMode: s.editorVimMode,
     editorLsp: s.editorLsp,
+    editorFormatOnSave: s.editorFormatOnSave,
     wingmanUrl: s.wingmanUrl,
     claudePermissionMode: s.claudePermissionMode,
     claudeModel: s.claudeModel,

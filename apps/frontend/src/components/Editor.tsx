@@ -171,8 +171,18 @@ export function Editor({ filePath, tabId }: Props) {
       setStatus({ kind: 'error', message: 'saving requires the Tauri backend' });
       return;
     }
-    const content = currentSourceRef.current;
     setStatus({ kind: 'saving' });
+    // Format first, then read the buffer back: the formatter's edits land in
+    // the doc, so writing `currentSourceRef` before this would save the
+    // unformatted text and leave the buffer dirty against its own file.
+    if (useSettings.getState().editorFormatOnSave && lspCtlRef.current) {
+      try {
+        await lspCtlRef.current.format();
+      } catch {
+        // A formatter that fails must not block the save.
+      }
+    }
+    const content = currentSourceRef.current;
     try {
       await fsWriteFile(filePath, content);
       lastSavedRef.current = content;
@@ -327,7 +337,14 @@ export function Editor({ filePath, tabId }: Props) {
           if (server && viewRef.current) {
             const root = useFiles.getState().root;
             const rootUri = root ? pathToFileUri(root) : null;
-            const att = await attachLsp(viewRef.current, server, filePath, rootUri);
+            // Jump targets can land in a different file, so navigation goes
+            // through the workspace rather than moving this editor's cursor.
+            // `openFile` on the file already open just reveals the line.
+            const att = await attachLsp(viewRef.current, server, filePath, rootUri, (target) =>
+              useWorkspace
+                .getState()
+                .openFile(target.path, undefined, { line: target.line + 1 }),
+            );
             if (disposed || !viewRef.current) {
               att.dispose();
             } else {

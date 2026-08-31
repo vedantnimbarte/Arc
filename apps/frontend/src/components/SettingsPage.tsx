@@ -112,6 +112,7 @@ export function SettingsPage() {
     restoreWindowState,
     editorVimMode,
     editorLsp,
+    editorFormatOnSave,
     notifyLongCommands,
     notifyThresholdSecs,
     notifySound,
@@ -123,6 +124,7 @@ export function SettingsPage() {
     setLaunchAtLogin,
     setRestoreWindowState,
     setEditorVimMode,
+    setEditorFormatOnSave,
     setEditorLsp,
     setNotifyLongCommands,
     setNotifyThresholdSecs,
@@ -240,6 +242,8 @@ export function SettingsPage() {
                   onVimModeChange={setEditorVimMode}
                   lsp={editorLsp}
                   onLspChange={setEditorLsp}
+                  formatOnSave={editorFormatOnSave}
+                  onFormatOnSaveChange={setEditorFormatOnSave}
                 />
               )}
               {pane === 'sidebar' && <SidebarSettingsPane />}
@@ -482,14 +486,23 @@ function ToggleRow({
   hint,
   checked,
   onChange,
+  disabled = false,
 }: {
   label: string;
   hint?: string;
   checked: boolean;
   onChange: () => void;
+  /** Dims the row and blocks the switch — for a setting that only means
+   *  something while another one is on. */
+  disabled?: boolean;
 }) {
   return (
-    <div className="flex items-center justify-between gap-4 rounded-lg border border-border-subtle bg-bg-base/40 px-3 py-2.5">
+    <div
+      className={cn(
+        'flex items-center justify-between gap-4 rounded-lg border border-border-subtle bg-bg-base/40 px-3 py-2.5',
+        disabled && 'opacity-50',
+      )}
+    >
       <div className="min-w-0">
         <p className="font-display text-sm font-medium tracking-tight text-fg-base">
           {label}
@@ -500,7 +513,20 @@ function ToggleRow({
           </p>
         )}
       </div>
-      <Switch checked={checked} onChange={onChange} ariaLabel={label} />
+      <Switch checked={checked} onChange={onChange} ariaLabel={label} disabled={disabled} />
+    </div>
+  );
+}
+
+/** A read-only keys → action row. Used where the feature has no toggle of its
+ *  own and the useful thing to show is how to invoke it. */
+function ShortcutHint({ keys, label }: { keys: string; label: string }) {
+  return (
+    <div className="flex items-center justify-between gap-4 rounded-lg border border-border-subtle bg-bg-base/40 px-3 py-2">
+      <span className="font-display text-sm tracking-tight text-fg-base">{label}</span>
+      <kbd className="rounded border border-border-subtle bg-bg-base/60 px-1.5 py-0.5 font-mono text-2xs text-fg-muted">
+        {keys}
+      </kbd>
     </div>
   );
 }
@@ -509,10 +535,12 @@ function Switch({
   checked,
   onChange,
   ariaLabel,
+  disabled = false,
 }: {
   checked: boolean;
   onChange: () => void;
   ariaLabel: string;
+  disabled?: boolean;
 }) {
   return (
     <button
@@ -520,9 +548,11 @@ function Switch({
       role="switch"
       aria-checked={checked}
       aria-label={ariaLabel}
+      disabled={disabled}
       onClick={onChange}
       className={cn(
-        'relative inline-flex h-[20px] w-[34px] shrink-0 cursor-pointer items-center rounded-full border transition-colors duration-150 ease-apple',
+        'relative inline-flex h-[20px] w-[34px] shrink-0 items-center rounded-full border transition-colors duration-150 ease-apple',
+        disabled ? 'cursor-not-allowed' : 'cursor-pointer',
         checked
           ? 'border-accent/50 bg-accent/80'
           : 'border-border-subtle bg-bg-base/60 hover:bg-bg-base/80',
@@ -997,11 +1027,15 @@ function EditorPane({
   onVimModeChange,
   lsp,
   onLspChange,
+  formatOnSave,
+  onFormatOnSaveChange,
 }: {
   vimMode: boolean;
   onVimModeChange: (on: boolean) => void;
   lsp: boolean;
   onLspChange: (on: boolean) => void;
+  formatOnSave: boolean;
+  onFormatOnSaveChange: (on: boolean) => void;
 }) {
   return (
     <div className="space-y-7">
@@ -1018,7 +1052,7 @@ function EditorPane({
       </Section>
       <Section
         title="Language servers (LSP)"
-        hint="Diagnostics, hover docs, and completion from real language servers. Requires the server binaries on your PATH — e.g. typescript-language-server, rust-analyzer, pyright-langserver, gopls, clangd."
+        hint="Diagnostics, hover docs, completion, go-to-definition, references, rename, and formatting from real language servers. Requires the server binaries on your PATH — e.g. typescript-language-server, rust-analyzer, pyright-langserver, gopls, clangd."
       >
         <ToggleRow
           label="Enable LSP"
@@ -1026,6 +1060,22 @@ function EditorPane({
           checked={lsp}
           onChange={() => onLspChange(!lsp)}
         />
+        <ToggleRow
+          label="Format on save"
+          hint="Run the language server's formatter before writing the file. Languages whose server has no formatter save unchanged."
+          checked={formatOnSave}
+          disabled={!lsp}
+          onChange={() => onFormatOnSaveChange(!formatOnSave)}
+        />
+      </Section>
+      <Section
+        title="Navigation"
+        hint="Available whenever LSP is on and the file's server is running."
+      >
+        <ShortcutHint keys="F12 / ⌘-click" label="Go to definition" />
+        <ShortcutHint keys="⇧F12" label="Find all references" />
+        <ShortcutHint keys="F2" label="Rename symbol" />
+        <ShortcutHint keys="⇧⌥F" label="Format document" />
       </Section>
     </div>
   );
