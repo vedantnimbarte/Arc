@@ -9,7 +9,7 @@ import { WindowResizeHandles } from './components/WindowResizeHandles';
 import { CommandPalette } from './components/CommandPalette';
 import { CommandHistoryPalette } from './components/CommandHistoryPalette';
 import { CommandBlocks } from './components/CommandBlocks';
-import { Sidebar, SidebarMiniRail } from './components/Sidebar';
+import { Sidebar, SidebarRail } from './components/Sidebar';
 import { ResizeHandle } from './components/ResizeHandle';
 import { SearchPalette } from './components/SearchPalette';
 import { ShortcutsDialog } from './components/ShortcutsDialog';
@@ -102,9 +102,9 @@ export default function App() {
   // and pane splits.
   const hostsRef = useRef<Map<string, HTMLDivElement>>(new Map());
   const stageRef = useRef<HTMLDivElement>(null);
-  // The sidebar's two halves — the collapsed icon rail and the full panel.
-  // Both stay mounted so the width transition can play, which means the
-  // off-screen one needs deactivating rather than just hiding.
+  // The sidebar's two columns — the always-on icon rail on the window edge
+  // and the panel it drives. The panel stays mounted while collapsed so the
+  // width transition can play, which means it needs deactivating, not hiding.
   const railAsideRef = useRef<HTMLElement>(null);
   const panelAsideRef = useRef<HTMLElement>(null);
 
@@ -362,25 +362,22 @@ export default function App() {
     return () => window.removeEventListener('keydown', onKey, true);
   }, []);
 
-  // Deactivate whichever sidebar half is currently off-screen. `aria-hidden`
+  // Deactivate the panel while it's collapsed to zero width. `aria-hidden`
   // alone (what this used to rely on) hides the subtree from the a11y tree
   // but leaves its controls in the tab order, so Tab landed on an invisible
-  // sidebar tab — a lot more obvious now that focus rings are visible.
+  // panel — a lot more obvious now that focus rings are visible.
   //
   // `inert` covers both, but it does not blur a descendant that is already
   // focused, so collapsing while focus sat in the panel left the user parked
-  // on a control the a11y tree says does not exist. Hand focus to the same
-  // view's tab on the half that replaced it.
+  // on a control the a11y tree says does not exist. Hand focus back to the
+  // rail's active tab, which is still on screen.
   useEffect(() => {
     const rail = railAsideRef.current;
     const panel = panelAsideRef.current;
     if (!rail || !panel) return;
-    const outgoing = sidebarCollapsed ? panel : rail;
-    const incoming = sidebarCollapsed ? rail : panel;
-    rail.inert = !sidebarCollapsed;
     panel.inert = sidebarCollapsed;
-    if (outgoing.contains(document.activeElement)) {
-      incoming.querySelector<HTMLElement>('[role="tab"][aria-selected="true"]')?.focus();
+    if (sidebarCollapsed && panel.contains(document.activeElement)) {
+      rail.querySelector<HTMLElement>('[role="tab"][aria-selected="true"]')?.focus();
     }
   }, [sidebarCollapsed]);
 
@@ -539,69 +536,69 @@ export default function App() {
         {/* Discord/Slack-style workspace rail — leftmost full-height column. */}
         <WorkspaceRail onOpenSettings={openSettings} />
 
+        {/* Everything right of the workspace rail. The title bar spans this
+            whole column — over the panes *and* the sidebar — so the window
+            controls sit flush against the window's right edge. */}
         <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-        <TabBar />
+          <TabBar />
 
-        {/* Layout: main | file-tree (right side) */}
-        <div className="relative flex min-h-0 flex-1 px-3 pb-2 pt-1">
-          <div className="material-content flex min-h-0 w-full overflow-hidden rounded-window shadow-panel ring-1 ring-border-subtle">
-            <main className="relative min-w-0 flex-1 overflow-hidden p-1.5">
-              {/* Split-pane tree — each leaf hosts a tab and can be split
-                  right/down into a new pane, with draggable dividers. */}
-              <PaneTreeView
-                hostsRef={hostsRef}
-                stageRef={stageRef}
-                onOpenCommandPalette={() => setPaletteOpen(true)}
+          {/* Layout: main | sidebar panel | sidebar rail (right edge) */}
+          <div className="flex min-h-0 min-w-0 flex-1">
+            <div className="relative flex min-h-0 min-w-0 flex-1 px-3 pb-2 pt-1">
+              <div className="material-content flex min-h-0 w-full overflow-hidden rounded-window shadow-panel ring-1 ring-border-subtle">
+                <main className="relative min-w-0 flex-1 overflow-hidden p-1.5">
+                  {/* Split-pane tree — each leaf hosts a tab and can be split
+                      right/down into a new pane, with draggable dividers. */}
+                  <PaneTreeView
+                    hostsRef={hostsRef}
+                    stageRef={stageRef}
+                    onOpenCommandPalette={() => setPaletteOpen(true)}
+                  />
+                </main>
+              </div>
+
+              {sshLogPanelOpen && (
+                <Suspense fallback={null}>
+                  <SshSessionLogPanel onClose={() => setSshLogPanelOpen(false)} />
+                </Suspense>
+              )}
+            </div>
+
+            {/* Sidebar — columns on the right edge, mirroring the workspace
+                rail on the left: the panel, then its activity rail pinned
+                outboard against the window edge. They run from under the
+                title bar to the bottom of the window. The rail never
+                collapses, so there is always a way back to a view. */}
+            {!sidebarCollapsed && (
+              <ResizeHandle
+                edge="right"
+                getWidth={() => useFiles.getState().sidebarWidth}
+                onResize={setSidebarWidth}
+                resetWidth={defaultWidthForView(sidebarView)}
               />
-            </main>
+            )}
+            <aside
+              ref={panelAsideRef}
+              className="shrink-0 overflow-hidden transition-[width] duration-300 ease-apple"
+              style={{ width: sidebarCollapsed ? 0 : sidebarWidth }}
+              aria-hidden={sidebarCollapsed}
+            >
+              <div
+                className="material-sidebar h-full border-l border-border-hairline"
+                style={{ width: sidebarWidth }}
+              >
+                <Sidebar />
+              </div>
+            </aside>
+            <aside
+              ref={railAsideRef}
+              className="material-sidebar shrink-0 border-l border-border-hairline"
+              style={{ width: SIDEBAR_RAIL_WIDTH }}
+            >
+              <SidebarRail />
+            </aside>
           </div>
-
-          {sshLogPanelOpen && (
-            <Suspense fallback={null}>
-              <SshSessionLogPanel onClose={() => setSshLogPanelOpen(false)} />
-            </Suspense>
-          )}
         </div>
-        </div>
-
-        {/* File-tree sidebar — full-height column on the right edge, mirroring
-            the workspace rail on the left. Lives at the top-level flex row so
-            it spans the whole window height (alongside the tab bar + dock),
-            not just the pane panel. */}
-        {!sidebarCollapsed && (
-          <ResizeHandle
-            edge="right"
-            getWidth={() => useFiles.getState().sidebarWidth}
-            onResize={setSidebarWidth}
-            resetWidth={defaultWidthForView(sidebarView)}
-          />
-        )}
-        <aside
-          ref={railAsideRef}
-          className="shrink-0 overflow-hidden transition-[width] duration-300 ease-apple"
-          style={{ width: sidebarCollapsed ? SIDEBAR_RAIL_WIDTH : 0 }}
-          aria-hidden={!sidebarCollapsed}
-        >
-          <div
-            className="material-sidebar h-full border-l border-border-hairline"
-            style={{ width: SIDEBAR_RAIL_WIDTH }}
-          >
-            <SidebarMiniRail />
-          </div>
-        </aside>
-        <aside
-          ref={panelAsideRef}
-          className="shrink-0 overflow-hidden transition-[width] duration-300 ease-apple"
-          style={{ width: sidebarCollapsed ? 0 : sidebarWidth }}
-          aria-hidden={sidebarCollapsed}
-        >
-          <div
-            className="material-sidebar h-full border-l border-border-hairline"
-            style={{ width: sidebarWidth }}
-          >
-            <Sidebar />
-          </div>
-        </aside>
       </div>
 
       <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} />

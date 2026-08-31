@@ -746,6 +746,27 @@ export async function sessionSettingsSave(settings: PersistedSettings): Promise<
   await invoke('session_settings_save', { value: JSON.stringify(settings) });
 }
 
+// ─── terminal scrollback ─────────────────────────────────────────────────
+// Serialized xterm buffers keyed by tab id, so a terminal restored after a
+// relaunch comes back showing its previous output instead of an empty pane.
+
+export async function sessionScrollbackSave(tabId: string, data: string): Promise<void> {
+  await invoke('session_scrollback_save', { tabId, data });
+}
+
+export async function sessionScrollbackLoad(tabId: string): Promise<string | null> {
+  return invoke<string | null>('session_scrollback_load', { tabId });
+}
+
+export async function sessionScrollbackDelete(tabId: string): Promise<void> {
+  await invoke('session_scrollback_delete', { tabId });
+}
+
+/** Drop stored scrollback for every tab not in `keepTabIds`. */
+export async function sessionScrollbackPrune(keepTabIds: string[]): Promise<void> {
+  await invoke('session_scrollback_prune', { keepTabIds });
+}
+
 /** The running app's version, straight from tauri.conf.json. `null` in the
  *  browser-only build, where there is no bundle to ask. */
 export async function getAppVersion(): Promise<string | null> {
