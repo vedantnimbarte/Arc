@@ -2,6 +2,7 @@ import { describe, expect, it, beforeEach } from 'vitest';
 import {
   __applyEventForTests as applyEvent,
   __resetWingmanForTests,
+  pendingReviewCount,
   reviewQueue,
   transcriptToChat,
   useWingman,
@@ -254,6 +255,26 @@ describe('review queue', () => {
     expect(reviewQueue(undefined as never)).toEqual([]);
     // A card whose run has not produced a rollup yet.
     expect(reviewQueue([{ ...card('a', []), rollup: null }])).toEqual([]);
+  });
+
+  // The number badged on every entry point into the queue — the panel's board
+  // button and the board's own review button both render this.
+  it('counts only the tasks actually waiting on a human', () => {
+    const cards = [
+      card('a', [
+        task({ task_id: 'needs-review', status: 'review' }),
+        task({ task_id: 'broke', status: 'failed' }),
+        task({ task_id: 'shipped', status: 'done' }),
+        task({ task_id: 'running', status: 'in_progress' }),
+      ]),
+      card('b', [
+        // No worktree — nothing to diff, so it never reaches the queue.
+        task({ task_id: 'no-worktree', status: 'review', worktree: null }),
+        task({ task_id: 'also-broke', status: 'failed' }),
+      ]),
+    ];
+    expect(pendingReviewCount(cards)).toBe(3);
+    expect(pendingReviewCount([])).toBe(0);
   });
 });
 

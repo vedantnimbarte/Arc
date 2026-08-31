@@ -247,7 +247,7 @@ describe('reorderLeafTabs', () => {
 describe('pruneEmptyGroups', () => {
   const groups: TabGroup[] = [
     { id: 'g1', name: 'one', color: 'blue', collapsed: false },
-    { id: 'g2', name: 'two', color: 'red', collapsed: false },
+    { id: 'g2', name: 'two', color: 'rose', collapsed: false },
   ];
 
   it('drops groups with no remaining members', () => {

@@ -221,6 +221,62 @@ export async function fsSearch(
   return invoke<SearchHit[]>('fs_search', { root, query, limit, ignoreDirs });
 }
 
+// ─── find & replace ──────────────────────────────────────────────────────
+//
+// Separate from `fsSearch`, which is BM25-ranked and token-based: right for
+// "show me relevant files", wrong for a replace, where missing one occurrence
+// silently corrupts the refactor. These do an exact literal scan.
+
+export interface ReplaceMatch {
+  path: string;
+  name: string;
+  /** One-based. */
+  line: number;
+  snippet: string;
+  /** Occurrences on this line. */
+  count: number;
+}
+
+export interface ReplaceSummary {
+  files_changed: number;
+  replacements: number;
+}
+
+/** Preview: every literal match under `root`. */
+export async function fsReplaceFind(
+  root: string,
+  needle: string,
+  caseSensitive: boolean,
+  limit: number,
+  ignoreDirs: string[],
+): Promise<ReplaceMatch[]> {
+  return invoke<ReplaceMatch[]>('fs_replace_find', {
+    root,
+    needle,
+    caseSensitive,
+    limit,
+    ignoreDirs,
+  });
+}
+
+/** Apply: rewrite exactly the `files` the user kept from the preview. Paths
+ *  outside `root` are rejected by the Rust side. */
+export async function fsReplaceApply(
+  root: string,
+  files: string[],
+  needle: string,
+  replacement: string,
+  caseSensitive: boolean,
+): Promise<ReplaceSummary> {
+  return invoke<ReplaceSummary>('fs_replace_apply', {
+    root,
+    files,
+    needle,
+    replacement,
+    caseSensitive,
+  });
+}
+
 /**
  * Build (or rebuild) the persistent tantivy index for `root`. Returns the
  * number of documents indexed. Subsequent `fsSearch` calls will use the

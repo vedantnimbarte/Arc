@@ -111,6 +111,8 @@ fn main() {
             commands::fs::fs_watch_start,
             commands::fs::fs_watch_stop,
             commands::fs::fs_search,
+            commands::fs::fs_replace_find,
+            commands::fs::fs_replace_apply,
             commands::fs::fs_index_rebuild,
             commands::fs::fs_index_status,
             commands::fs::fs_rename,
