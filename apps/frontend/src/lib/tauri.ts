@@ -738,6 +738,8 @@ export type TabKind =
   | 'apiclient'
   | 'ssh'
   | 'diff'
+  | 'db'
+  | 'merge'
   | 'wingman-board'
   | 'wingman-review';
 
@@ -2224,4 +2226,112 @@ export async function sshFsRename(hostId: string, from: string, to: string): Pro
 
 export async function sshFsRemove(hostId: string, path: string, isDir: boolean): Promise<void> {
   await invoke('ssh_fs_remove', { hostId, path, isDir });
+}
+
+// ----- Process runner ----------------------------------------------------
+//
+// Runs a program to completion and returns its captured output. The test
+// explorer needs a runner's exit code as *data*; a PTY tab shows it to a
+// human but gives the UI nothing to build a pass/fail tree from.
+
+export interface ProcOutput {
+  /** Exit status, or null when killed by a signal or the timeout. */
+  code: number | null;
+  stdout: string;
+  stderr: string;
+  duration_ms: number;
+  timed_out: boolean;
+  truncated: boolean;
+}
+
+export async function procRun(
+  cwd: string,
+  program: string,
+  args: string[],
+  timeoutMs?: number,
+): Promise<ProcOutput> {
+  return invoke<ProcOutput>('proc_run', {
+    cwd,
+    program,
+    args,
+    timeoutMs: timeoutMs ?? null,
+  });
+}
+
+// ----- Database client ---------------------------------------------------
+
+export type DbBackend = 'postgres' | 'mysql' | 'sqlite';
+
+export interface DbConnection {
+  id: string;
+  name: string;
+  backend: DbBackend;
+  /** Connection URL with the password removed — the password itself lives in
+   *  the OS credential vault, keyed by this connection's id. */
+  url: string;
+  has_password: boolean;
+  created_at: number;
+  last_used_at: number | null;
+}
+
+export interface DbConnectionInput {
+  id?: string | null;
+  name: string;
+  backend: DbBackend;
+  url: string;
+  has_password: boolean;
+}
+
+export interface DbQueryResult {
+  columns: string[];
+  /** Row-major cells. `null` is SQL NULL, distinct from an empty string. */
+  rows: Array<Array<string | null>>;
+  rows_affected: number;
+  duration_ms: number;
+  truncated: boolean;
+}
+
+export async function dbConnList(): Promise<DbConnection[]> {
+  return invoke<DbConnection[]>('db_conn_list');
+}
+
+export async function dbConnUpsert(input: DbConnectionInput): Promise<DbConnection> {
+  return invoke<DbConnection>('db_conn_upsert', { input });
+}
+
+export async function dbConnDelete(id: string): Promise<void> {
+  await invoke('db_conn_delete', { id });
+}
+
+/** Store the connection's password in the OS vault. An empty string clears it. */
+export async function dbPasswordSet(id: string, password: string): Promise<void> {
+  await invoke('db_password_set', { id, password });
+}
+
+export async function dbConnect(id: string): Promise<DbBackend> {
+  return invoke<DbBackend>('db_connect', { id });
+}
+
+export async function dbDisconnect(id: string): Promise<void> {
+  await invoke('db_disconnect', { id });
+}
+
+export async function dbIsConnected(id: string): Promise<boolean> {
+  return invoke<boolean>('db_is_connected', { id });
+}
+
+export async function dbQuery(id: string, sql: string): Promise<DbQueryResult> {
+  return invoke<DbQueryResult>('db_query', { id, sql });
+}
+
+export async function dbTables(id: string): Promise<string[]> {
+  return invoke<string[]>('db_tables', { id });
+}
+
+export async function dbPreview(
+  id: string,
+  table: string,
+  limit?: number,
+): Promise<DbQueryResult> {
+  return invoke<DbQueryResult>('db_preview', { id, table, limit: limit ?? null });
 }

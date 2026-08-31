@@ -34,7 +34,17 @@ export interface WorkspaceMeta {
 export interface Tab {
   id: string;
   title: string;
-  kind: 'terminal' | 'editor' | 'preview' | 'apiclient' | 'ssh' | 'diff' | 'wingman-board' | 'wingman-review';
+  kind:
+    | 'terminal'
+    | 'editor'
+    | 'preview'
+    | 'apiclient'
+    | 'ssh'
+    | 'diff'
+    | 'db'
+    | 'merge'
+    | 'wingman-board'
+    | 'wingman-review';
   /** Which workspace this tab belongs to. Every tab has one after hydrate;
    *  new tabs inherit the active workspace (stamped in `addTab`). */
   workspaceId?: string;
@@ -87,6 +97,12 @@ export interface Tab {
   diffRoot?: string;
   /** Diff scope for `kind: 'diff'` tabs. */
   diffScope?: 'worktree' | 'staged' | 'head';
+  /** Git repository root for `kind: 'merge'` tabs. The conflicted file is in
+   *  `filePath`; the merge view reads and rewrites it in place. */
+  mergeRoot?: string;
+  /** Saved connection id for `kind: 'db'` tabs. Persisted so the tab comes
+   *  back pointing at the same database (disconnected — the user reconnects). */
+  dbConnectionId?: string;
 }
 
 /** A Chrome-style tab group: a named, colour-coded, collapsible container for
@@ -248,6 +264,14 @@ interface WorkspaceState {
   /** Open a git diff tab for a file. Re-focuses an existing diff tab for the
    *  same path+scope rather than duplicating it. */
   openDiff: (absPath: string, root: string, scope: 'worktree' | 'staged' | 'head') => string;
+  /** Open (or focus) the three-way merge view for a conflicted file. */
+  openMerge: (absPath: string, root: string) => string;
+  /** Open a database client tab, optionally pre-selecting a saved connection. */
+  openDbClient: (connectionId?: string) => string;
+  /** Remember which saved connection a db tab is pointed at, so it restores
+   *  there. Also renames the tab, since one "Database" per project is not a
+   *  useful tab strip. */
+  setTabDbConnection: (id: string, connectionId: string | undefined, name?: string) => void;
   /** Spawn a new terminal tab that runs an AI CLI (Claude Code / Codex /
    *  OpenCode) directly instead of the default shell. Anchors the new tab
    *  (and the file tree) at the user's home directory. `opts.args` runs the
@@ -1109,6 +1133,29 @@ export const useWorkspace = create<WorkspaceState>()((set, get) => ({
     get().addTab(tab);
     return id;
   },
+  openMerge: (absPath, root) => {
+    // One merge view per file — a second would let the two disagree about
+    // which hunks are resolved and race each other on save.
+    const existing = get().tabs.find((t) => t.kind === 'merge' && t.filePath === absPath);
+    if (existing) {
+      get().setActive(existing.id);
+      return existing.id;
+    }
+    const id = `merge-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+    get().addTab({
+      id,
+      title: basename(absPath),
+      kind: 'merge',
+      filePath: absPath,
+      mergeRoot: root,
+    });
+    return id;
+  },
+  openDbClient: (connectionId) => {
+    const id = `db-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+    get().addTab({ id, title: 'Database', kind: 'db', dbConnectionId: connectionId });
+    return id;
+  },
   launchAiCli: async (cli, opts) => {
     await resetRootToHome();
     const id = `${cli.id}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
@@ -1198,6 +1245,14 @@ export const useWorkspace = create<WorkspaceState>()((set, get) => ({
   setPreviewUrl: (id, url) =>
     set((s) => ({
       tabs: s.tabs.map((t) => (t.id === id ? { ...t, previewUrl: url } : t)),
+    })),
+  setTabDbConnection: (id, connectionId, name) =>
+    set((s) => ({
+      tabs: s.tabs.map((t) =>
+        t.id === id
+          ? { ...t, dbConnectionId: connectionId, title: name ?? t.title }
+          : t,
+      ),
     })),
   openApiClient: () => {
     const id = `apiclient-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
@@ -1473,6 +1528,23 @@ export const useWorkspace = create<WorkspaceState>()((set, get) => ({
               /* corrupt blob — diff tab will be inert until reopened */
             }
           }
+          // Merge and DB tabs each stash their one extra field in the same
+          // blob — the conflicted file's repo root, and which saved
+          // connection the tab was pointed at.
+          let mergeRoot: string | undefined;
+          let dbConnectionId: string | undefined;
+          if ((t.kind === 'merge' || t.kind === 'db') && t.apiclient_state_json) {
+            try {
+              const parsed = JSON.parse(t.apiclient_state_json) as {
+                mergeRoot?: string;
+                dbConnectionId?: string;
+              };
+              mergeRoot = parsed.mergeRoot;
+              dbConnectionId = parsed.dbConnectionId;
+            } catch {
+              /* corrupt blob — the tab opens in its empty state */
+            }
+          }
           // Terminal tabs use the same blob to remember which profile they
           // were opened with, so a restored tab respawns the right shell.
           let profileId: string | undefined;
@@ -1495,6 +1567,8 @@ export const useWorkspace = create<WorkspaceState>()((set, get) => ({
             sshHostId,
             diffRoot,
             diffScope,
+            mergeRoot,
+            dbConnectionId,
             profileId,
           };
         });
@@ -1671,9 +1745,13 @@ function toTabInputs(tabs: Tab[]): TabInput[] {
           ? JSON.stringify({ sshHostId: t.sshHostId })
           : t.kind === 'diff' && t.diffRoot
             ? JSON.stringify({ diffRoot: t.diffRoot, diffScope: t.diffScope ?? 'worktree' })
-            : t.kind === 'terminal' && t.profileId
-              ? JSON.stringify({ profileId: t.profileId })
-              : null,
+            : t.kind === 'merge' && t.mergeRoot
+              ? JSON.stringify({ mergeRoot: t.mergeRoot })
+              : t.kind === 'db' && t.dbConnectionId
+                ? JSON.stringify({ dbConnectionId: t.dbConnectionId })
+                : t.kind === 'terminal' && t.profileId
+                  ? JSON.stringify({ profileId: t.profileId })
+                  : null,
   }));
 }
 
@@ -1702,6 +1780,8 @@ function tabSliceEqual(a: WorkspaceState, b: WorkspaceState): boolean {
       x.previewUrl !== y.previewUrl ||
       x.apiClientState !== y.apiClientState ||
       x.sshHostId !== y.sshHostId ||
+      x.mergeRoot !== y.mergeRoot ||
+      x.dbConnectionId !== y.dbConnectionId ||
       x.profileId !== y.profileId ||
       x.groupId !== y.groupId ||
       x.workspaceId !== y.workspaceId

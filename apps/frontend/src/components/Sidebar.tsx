@@ -13,6 +13,7 @@ import { RemoteWorkspaceBar } from './RemoteWorkspaceBar';
 import { SourceControl } from './SourceControl';
 import { SearchView } from './SearchView';
 import { OutlineView } from './OutlineView';
+import { TestExplorer } from './TestExplorer';
 import { WingmanPanel } from './wingman/WingmanPanel';
 import { ClaudePanel } from './claude/ClaudePanel';
 import { SshPanel } from './ssh/SshPanel';
@@ -117,6 +118,8 @@ export function Sidebar() {
         <SearchView />
       ) : view === 'outline' ? (
         <OutlineView />
+      ) : view === 'tests' ? (
+        <TestExplorer />
       ) : view === 'wingman' ? (
         <WingmanPanel />
       ) : view === 'claude' ? (

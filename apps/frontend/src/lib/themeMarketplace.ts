@@ -1,6 +1,7 @@
 import {
   fsCreateDir,
   fsDefaultRoot,
+  fsPickFiles,
   fsReadDir,
   fsReadFile,
   fsWriteFile,
@@ -8,9 +9,15 @@ import {
   isTauri,
 } from './tauri';
 import { registerTheme, validateThemeJson, type ThemeDef } from '../themes';
+import { convertVscodeTheme, looksLikeVscodeTheme, parseJsonc } from './vscodeTheme';
 
 // User-installed themes live in `<home>/.arc/themes/*.json` (Tier 1.7). These
-// load on boot and any "Install from URL" theme is written here so it sticks.
+// load on boot and any installed theme is written here so it sticks.
+//
+// Two input formats are accepted everywhere: ARC's own `ThemeDef` JSON, and a
+// VS Code colour theme, which is converted on the way in (see
+// `lib/vscodeTheme.ts`). Sniffing the format rather than asking means "install
+// this file" works for whatever the user actually has.
 
 function joinHome(home: string, ...parts: string[]): string {
   const sep = home.includes('\\') ? '\\' : '/';
@@ -26,6 +33,21 @@ async function themesDir(): Promise<string | null> {
   } catch {
     return null;
   }
+}
+
+export type InstallResult =
+  | { ok: true; theme: ThemeDef }
+  | { ok: false; error: string };
+
+/** Parse raw JSON in either supported format into a validated `ThemeDef`. */
+function parseEitherFormat(raw: string): InstallResult {
+  let json: unknown;
+  try {
+    json = parseJsonc(raw);
+  } catch {
+    return { ok: false, error: 'not valid JSON' };
+  }
+  return looksLikeVscodeTheme(json) ? convertVscodeTheme(json) : validateThemeJson(json);
 }
 
 /**
@@ -46,8 +68,7 @@ export async function loadInstalledThemes(): Promise<string[]> {
   for (const e of entries) {
     if (e.kind !== 'file' || !e.name.toLowerCase().endsWith('.json')) continue;
     try {
-      const raw = await fsReadFile(e.path);
-      const parsed = validateThemeJson(JSON.parse(raw));
+      const parsed = parseEitherFormat(await fsReadFile(e.path));
       if (parsed.ok) {
         registerTheme(parsed.theme);
         ids.push(parsed.theme.id);
@@ -61,15 +82,69 @@ export async function loadInstalledThemes(): Promise<string[]> {
   return ids;
 }
 
+/** Write a registered theme to `~/.arc/themes/<id>.json`.
+ *
+ *  Best-effort: a failure here doesn't undo the in-memory registration — the
+ *  theme just won't survive a restart. */
+async function persistTheme(theme: ThemeDef): Promise<void> {
+  const dir = await themesDir();
+  if (!dir) return;
+  try {
+    await fsCreateDir(dir);
+    const sep = dir.includes('\\') ? '\\' : '/';
+    const slug = theme.id.replace(/[^\w.-]/g, '_');
+    await fsWriteFile(`${dir}${sep}${slug}.json`, JSON.stringify(theme, null, 2));
+  } catch (err) {
+    console.warn('[themes] could not persist installed theme:', err);
+  }
+}
+
+/** Validate raw theme JSON, register it, and persist it for next launch. */
+export async function installThemeJson(raw: string): Promise<InstallResult> {
+  const parsed = parseEitherFormat(raw);
+  if (!parsed.ok) return parsed;
+  registerTheme(parsed.theme);
+  await persistTheme(parsed.theme);
+  return parsed;
+}
+
 /**
- * Fetch a theme JSON from a URL, validate it, register it, and persist it to
+ * Pick theme files from disk and install them.
+ *
+ * Returns the last one installed, so the caller can select it — or the first
+ * failure, so the message names the file that broke. Cancelling the picker
+ * returns null, which is not an error.
+ */
+export async function installThemeFromFile(): Promise<InstallResult | null> {
+  if (!isTauri) return { ok: false, error: 'theme install requires the Tauri backend' };
+  let paths: string[];
+  try {
+    paths = await fsPickFiles(null);
+  } catch (err) {
+    return { ok: false, error: String(err) };
+  }
+  if (paths.length === 0) return null;
+
+  let last: InstallResult | null = null;
+  for (const path of paths) {
+    try {
+      last = await installThemeJson(await fsReadFile(path));
+    } catch (err) {
+      const name = path.split(/[\\/]/).pop() ?? path;
+      last = { ok: false, error: `${name}: ${err instanceof Error ? err.message : String(err)}` };
+    }
+    if (last && !last.ok) return last;
+  }
+  return last;
+}
+
+/**
+ * Fetch a theme JSON from a URL, install it, and persist it to
  * `~/.arc/themes/<id>.json` so it survives a restart. Returns the theme on
  * success or an error string on any failure (bad URL, non-2xx, invalid JSON,
  * schema violation).
  */
-export async function installThemeFromUrl(
-  url: string,
-): Promise<{ ok: true; theme: ThemeDef } | { ok: false; error: string }> {
+export async function installThemeFromUrl(url: string): Promise<InstallResult> {
   if (!isTauri) return { ok: false, error: 'theme install requires the Tauri backend' };
   let body: string | null;
   try {
@@ -88,30 +163,5 @@ export async function installThemeFromUrl(
     return { ok: false, error: `fetch failed: ${err instanceof Error ? err.message : String(err)}` };
   }
   if (!body) return { ok: false, error: 'response had no text body' };
-
-  let json: unknown;
-  try {
-    json = JSON.parse(body);
-  } catch {
-    return { ok: false, error: 'response was not valid JSON' };
-  }
-  const parsed = validateThemeJson(json);
-  if (!parsed.ok) return { ok: false, error: parsed.error };
-
-  registerTheme(parsed.theme);
-
-  // Persist — failure here doesn't undo the in-memory registration, the theme
-  // just won't survive a restart.
-  const dir = await themesDir();
-  if (dir) {
-    try {
-      await fsCreateDir(dir);
-      const sep = dir.includes('\\') ? '\\' : '/';
-      const slug = parsed.theme.id.replace(/[^\w.-]/g, '_');
-      await fsWriteFile(`${dir}${sep}${slug}.json`, JSON.stringify(parsed.theme, null, 2));
-    } catch (err) {
-      console.warn('[themes] could not persist installed theme:', err);
-    }
-  }
-  return { ok: true, theme: parsed.theme };
+  return installThemeJson(body);
 }

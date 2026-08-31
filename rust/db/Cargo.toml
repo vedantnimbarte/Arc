@@ -1,0 +1,17 @@
+[package]
+name = "arc-db"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+description = "Postgres / MySQL / SQLite query executor for ARC's database client."
+
+[dependencies]
+anyhow = { workspace = true }
+dashmap = { workspace = true }
+futures-util = { workspace = true }
+serde = { workspace = true }
+sqlx = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }

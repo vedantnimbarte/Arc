@@ -1,4 +1,5 @@
 import {
+  FlaskConical,
   FolderTree,
   GitBranch,
   ListTree,
@@ -33,6 +34,7 @@ export const SIDEBAR_VIEWS: SidebarViewDef[] = [
   { id: 'git', label: 'Source Control', Icon: GitBranch, shortcut: 'show-source-control' },
   { id: 'search', label: 'Search', Icon: Search },
   { id: 'outline', label: 'Outline', Icon: ListTree },
+  { id: 'tests', label: 'Tests', Icon: FlaskConical },
   { id: 'ssh', label: 'SSH', Icon: Server, shortcut: 'toggle-ssh-panel' },
   { id: 'wingman', label: 'Wingman', Icon: Bot },
   { id: 'claude', label: 'Claude Code', Icon: Sparkles },

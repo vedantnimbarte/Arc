@@ -13,6 +13,7 @@ members = [
     "rust/lsp",
     "rust/wingman",
     "rust/claude-code",
+    "rust/db",
 ]
 
 [workspace.package]
@@ -84,7 +85,10 @@ async-trait = "0.1"
 toml = "0.8"
 
 # Persistence
-sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio", "sqlite", "macros", "migrate", "chrono"] }
+# `postgres` / `mysql` are here for arc-db (the database client tab); the
+# session store itself only ever touches sqlite. TLS uses rustls with the
+# OS trust store so a server behind a corporate CA still verifies.
+sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio", "sqlite", "postgres", "mysql", "tls-rustls-ring-native-roots", "macros", "migrate", "chrono"] }
 # Force the bundled libsqlite3 so the binary doesn't need system sqlite on Windows.
 libsqlite3-sys = { version = "0.30", features = ["bundled"] }
 chrono = { version = "0.4", default-features = false, features = ["clock", "serde"] }
@@ -111,6 +115,7 @@ arc-git-host = { path = "rust/git-host" }
 arc-lsp = { path = "rust/lsp" }
 arc-wingman = { path = "rust/wingman" }
 arc-claude-code = { path = "rust/claude-code" }
+arc-db = { path = "rust/db" }
 
 [profile.dev]
 opt-level = 0

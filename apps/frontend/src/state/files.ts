@@ -15,6 +15,7 @@ export type SidebarView =
   | 'ssh'
   | 'search'
   | 'outline'
+  | 'tests'
   | 'wingman'
   | 'claude';
 

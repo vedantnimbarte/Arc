@@ -218,6 +218,7 @@ export function SourceControl() {
   const root = useFiles((s) => s.root);
   const openFile = useWorkspace((s) => s.openFile);
   const openDiff = useWorkspace((s) => s.openDiff);
+  const openMerge = useWorkspace((s) => s.openMerge);
 
   // Single shared refresh driver lives in `Sidebar`; we just subscribe to the cache.
   const info = useGit((s) => s.info);
@@ -541,8 +542,13 @@ export function SourceControl() {
   const handleOpen = useCallback(
     (entry: GitChangeEntry) => {
       if (!root) return;
-      if (entry.kind === 'conflict') return;
       const abs = joinPath(root, entry.path);
+      // A conflicted file opens in the merge view. `--ours` / `--theirs`
+      // stay on the row for the cases where one side is simply right.
+      if (entry.kind === 'conflict') {
+        openMerge(abs, root);
+        return;
+      }
       if (entry.kind === 'untracked') {
         openFile(abs);
         return;
@@ -550,7 +556,7 @@ export function SourceControl() {
       const scope = entry.kind === 'staged' ? 'staged' : 'worktree';
       openDiff(abs, root, scope);
     },
-    [openDiff, openFile, root],
+    [openDiff, openFile, openMerge, root],
   );
 
   const runWithRefresh = useCallback(
@@ -1078,6 +1084,11 @@ export function SourceControl() {
                   onUnstage={() => handleUnstage([entry.path])}
                   onCheckoutOurs={section === 'conflict' ? () => handleCheckoutOurs(entry.path) : undefined}
                   onCheckoutTheirs={section === 'conflict' ? () => handleCheckoutTheirs(entry.path) : undefined}
+                  onResolve={
+                    section === 'conflict' && root
+                      ? () => openMerge(joinPath(root, entry.path), root)
+                      : undefined
+                  }
                   onContextMenu={(e) => {
                     e.preventDefault();
                     e.stopPropagation();
@@ -1339,6 +1350,7 @@ function ChangeRow({
   onUnstage,
   onCheckoutOurs,
   onCheckoutTheirs,
+  onResolve,
   onContextMenu,
 }: {
   entry: GitChangeEntry;
@@ -1349,6 +1361,7 @@ function ChangeRow({
   onUnstage: () => void;
   onCheckoutOurs?: () => void;
   onCheckoutTheirs?: () => void;
+  onResolve?: () => void;
   onContextMenu: (e: React.MouseEvent) => void;
 }) {
   const name = basename(entry.path);
@@ -1422,6 +1435,14 @@ function ChangeRow({
             label="Stage"
             disabled={busy}
             onClick={onStage}
+          />
+        )}
+        {isConflict && onResolve && (
+          <RowAction
+            icon={<GitMerge size={11} strokeWidth={2.2} />}
+            label="Resolve conflicts"
+            disabled={busy}
+            onClick={onResolve}
           />
         )}
         {isConflict && onCheckoutOurs && (

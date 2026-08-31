@@ -110,11 +110,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "arc-db"
+version = "0.2.0"
+dependencies = [
+ "anyhow",
+ "dashmap",
+ "futures-util",
+ "serde",
+ "sqlx",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "arc-desktop"
 version = "0.2.0"
 dependencies = [
  "anyhow",
  "arc-claude-code",
+ "arc-db",
  "arc-filesystem",
  "arc-git",
  "arc-git-host",
@@ -5578,6 +5592,8 @@ dependencies = [
  "memchr",
  "once_cell",
  "percent-encoding",
+ "rustls",
+ "rustls-native-certs",
  "serde",
  "serde_json",
  "sha2",

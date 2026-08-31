@@ -59,6 +59,12 @@ const Editor = lazy(() =>
 const DiffView = lazy(() =>
   import('./components/DiffView').then((m) => ({ default: m.DiffView })),
 );
+const MergeView = lazy(() =>
+  import('./components/MergeView').then((m) => ({ default: m.MergeView })),
+);
+const DbClient = lazy(() =>
+  import('./components/DbClient').then((m) => ({ default: m.DbClient })),
+);
 // Everything below is reachable but rarely on the boot path — a REST client,
 // an SSH terminal, the SSH log drawer and the git overlays. Each is only
 // rendered behind a tab kind or an open flag, so deferring them keeps the
@@ -181,6 +187,14 @@ export default function App() {
       ) : tab.kind === 'wingman-review' ? (
         <Suspense fallback={<EditorFallback />}>
           <WingmanReview />
+        </Suspense>
+      ) : tab.kind === 'db' ? (
+        <Suspense fallback={<EditorFallback />}>
+          <DbClient tabId={tab.id} />
+        </Suspense>
+      ) : tab.kind === 'merge' && tab.filePath && tab.mergeRoot ? (
+        <Suspense fallback={<EditorFallback />}>
+          <MergeView filePath={tab.filePath} mergeRoot={tab.mergeRoot} />
         </Suspense>
       ) : tab.kind === 'diff' && tab.filePath && tab.diffRoot ? (
         <Suspense fallback={<EditorFallback />}>

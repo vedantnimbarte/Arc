@@ -1,5 +1,6 @@
 pub mod apiclient;
 pub mod claude_code;
+pub mod db;
 pub mod diagnostics;
 pub mod fonts;
 pub mod fs;
@@ -8,6 +9,7 @@ pub mod git_host;
 pub mod http;
 pub mod lsp;
 pub mod network;
+pub mod proc;
 pub mod project_config;
 pub mod pty;
 pub mod secrets;
