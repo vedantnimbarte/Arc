@@ -364,7 +364,9 @@ export function FileTree() {
   const confirmDelete = useCallback(async () => {
     if (!deleteTarget) return;
     try {
-      await fsDelete(deleteTarget.path);
+      // The kind matters remotely: SFTP has separate rmdir/unlink calls, and
+      // sending a directory to unlink just fails.
+      await fsDelete(deleteTarget.path, deleteTarget.kind === 'dir');
     } catch (e) {
       console.error('[FileTree] delete failed:', e);
     }
