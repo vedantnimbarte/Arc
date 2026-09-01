@@ -14,6 +14,8 @@ import { SourceControl } from './SourceControl';
 import { SearchView } from './SearchView';
 import { OutlineView } from './OutlineView';
 import { TestExplorer } from './TestExplorer';
+import { ProblemsPanel } from './ProblemsPanel';
+import { DockerPanel } from './DockerPanel';
 import { WingmanPanel } from './wingman/WingmanPanel';
 import { ClaudePanel } from './claude/ClaudePanel';
 import { SshPanel } from './ssh/SshPanel';
@@ -119,8 +121,12 @@ export function Sidebar() {
         <SearchView />
       ) : view === 'outline' ? (
         <OutlineView />
+      ) : view === 'problems' ? (
+        <ProblemsPanel />
       ) : view === 'tests' ? (
         <TestExplorer />
+      ) : view === 'docker' ? (
+        <DockerPanel />
       ) : view === 'wingman' ? (
         <WingmanPanel />
       ) : view === 'claude' ? (
@@ -362,6 +368,13 @@ function railQuickActions(view: SidebarView): RailMenuItem[] {
           onClick: () => {
             useFiles.getState().showSidebarView('git');
             useGitUi.getState().setReflogPanelOpen(true);
+          },
+        },
+        {
+          label: 'Bisect',
+          onClick: () => {
+            useFiles.getState().showSidebarView('git');
+            useGitUi.getState().setBisectPanelOpen(true);
           },
         },
       ];

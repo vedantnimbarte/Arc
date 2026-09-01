@@ -2591,6 +2591,225 @@ fn parse_submodule_status(out: &str) -> Vec<SubmoduleEntry> {
     entries
 }
 
+
+// ----- bisect ---------------------------------------------------------------
+
+/// One mark the user has already made during the current bisect.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BisectMark {
+    /// `good`, `bad` or `skip`.
+    pub term: String,
+    pub oid: String,
+    /// First 7 chars of `oid`, for display.
+    pub short: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BisectStatus {
+    /// False when the repo isn't mid-bisect — every other field is then empty.
+    pub active: bool,
+    /// Short oid of the commit git has checked out for the user to test.
+    pub head_short: String,
+    /// That commit's subject line.
+    pub subject: String,
+    /// Every mark so far, oldest first.
+    pub marks: Vec<BisectMark>,
+    /// Set once git has converged and named the culprit; `None` while the
+    /// search is still narrowing.
+    pub first_bad: Option<String>,
+}
+
+impl BisectStatus {
+    fn inactive() -> Self {
+        Self {
+            active: false,
+            head_short: String::new(),
+            subject: String::new(),
+            marks: Vec::new(),
+            first_bad: None,
+        }
+    }
+}
+
+/// The three verdicts a user can give a commit. Anything else is rejected
+/// before it reaches a command line — `term` is caller-supplied and is
+/// concatenated into a `git bisect <term>` invocation.
+fn valid_bisect_term(term: &str) -> bool {
+    matches!(term, "good" | "bad" | "skip")
+}
+
+/// Where the bisect stands: what git has checked out for testing, what has
+/// been marked, and whether it has already found the first bad commit.
+///
+/// `git bisect log` is the probe for "are we bisecting at all" — it exits
+/// non-zero outside a bisect, which saves resolving the git dir and stat-ing
+/// `BISECT_START` ourselves.
+pub async fn bisect_status<P: AsRef<Path>>(path: P) -> Result<BisectStatus> {
+    let path = path.as_ref();
+    let log = git_cmd()
+        .arg("-C")
+        .arg(path)
+        .args(["bisect", "log"])
+        .output()
+        .await
+        .map_err(|e| Error::Spawn(e.to_string()))?;
+    if !log.status.success() {
+        return Ok(BisectStatus::inactive());
+    }
+
+    let (marks, first_bad) = parse_bisect_log(&String::from_utf8_lossy(&log.stdout));
+
+    // Which commit the user is being asked to test. Best-effort: a bisect
+    // that has converged leaves HEAD on the culprit, which is still what we
+    // want to show.
+    let head = git_cmd()
+        .arg("-C")
+        .arg(path)
+        .args(["log", "-1", "--format=%h%x09%s"])
+        .output()
+        .await
+        .map_err(|e| Error::Spawn(e.to_string()))?;
+    let head_line = String::from_utf8_lossy(&head.stdout);
+    let (head_short, subject) = match head_line.trim_end().split_once('\t') {
+        Some((h, s)) => (h.to_string(), s.to_string()),
+        None => (head_line.trim().to_string(), String::new()),
+    };
+
+    Ok(BisectStatus {
+        active: true,
+        head_short,
+        subject,
+        marks,
+        first_bad,
+    })
+}
+
+/// Parse `git bisect log`. Two line shapes matter:
+///
+///   `git bisect bad 1a2b3c...`             a mark the user made
+///   `# first bad commit: [1a2b3c...] msg`  git's verdict, once converged
+///
+/// Everything else (the `# good:`/`# bad:` echoes, `git bisect start`, the
+/// `# status:` notes) is commentary we do not need.
+fn parse_bisect_log(out: &str) -> (Vec<BisectMark>, Option<String>) {
+    let mut marks = Vec::new();
+    let mut first_bad = None;
+    for line in out.lines() {
+        let line = line.trim();
+        if let Some(rest) = line.strip_prefix("# first bad commit: [") {
+            if let Some((oid, _)) = rest.split_once(']') {
+                first_bad = Some(oid.to_string());
+            }
+            continue;
+        }
+        let Some(rest) = line.strip_prefix("git bisect ") else {
+            continue;
+        };
+        let mut parts = rest.split_whitespace();
+        let Some(term) = parts.next() else { continue };
+        if !valid_bisect_term(term) {
+            continue;
+        }
+        // `git bisect good` with no argument means "the commit checked out
+        // right now", which the log always spells out — but a hand-edited log
+        // might not, so skip the line rather than invent an oid.
+        let Some(oid) = parts.next() else { continue };
+        marks.push(BisectMark {
+            term: term.to_string(),
+            oid: oid.to_string(),
+            short: oid.chars().take(7).collect(),
+        });
+    }
+    (marks, first_bad)
+}
+
+/// `git bisect start [<bad> [<good>]]`.
+///
+/// Returns git's own output. It says which commit to test and how many steps
+/// are left ("Bisecting: 12 revisions left to test after this (roughly 4
+/// steps)") — numbers we would otherwise have to re-derive and get subtly
+/// wrong.
+pub async fn bisect_start<P: AsRef<Path>>(
+    path: P,
+    bad: Option<&str>,
+    good: Option<&str>,
+) -> Result<String> {
+    let path = path.as_ref();
+    let mut cmd = git_cmd();
+    cmd.arg("-C").arg(path).args(["bisect", "start"]);
+    // git's positional order is bad-then-good, so a good rev passed without a
+    // bad one would be read *as* the bad one. Only pass good alongside bad.
+    if let Some(bad) = bad.filter(|b| !b.trim().is_empty()) {
+        cmd.arg(bad);
+        if let Some(good) = good.filter(|g| !g.trim().is_empty()) {
+            cmd.arg(good);
+        }
+    }
+    let output = cmd.output().await.map_err(|e| Error::Spawn(e.to_string()))?;
+    if !output.status.success() {
+        return Err(Error::Failed(
+            String::from_utf8_lossy(&output.stderr).trim().to_string(),
+        ));
+    }
+    Ok(combined(&output))
+}
+
+/// `git bisect good|bad|skip` on the currently checked-out commit. Returns
+/// git's output, for the same reason [`bisect_start`] does.
+pub async fn bisect_mark<P: AsRef<Path>>(path: P, term: &str) -> Result<String> {
+    if !valid_bisect_term(term) {
+        return Err(Error::Failed(format!("not a bisect verdict: {term}")));
+    }
+    let path = path.as_ref();
+    let output = git_cmd()
+        .arg("-C")
+        .arg(path)
+        .args(["bisect", term])
+        .output()
+        .await
+        .map_err(|e| Error::Spawn(e.to_string()))?;
+    if !output.status.success() {
+        return Err(Error::Failed(
+            String::from_utf8_lossy(&output.stderr).trim().to_string(),
+        ));
+    }
+    Ok(combined(&output))
+}
+
+/// `git bisect reset` — end the bisect and put HEAD back where it started.
+pub async fn bisect_reset<P: AsRef<Path>>(path: P) -> Result<()> {
+    let path = path.as_ref();
+    let output = git_cmd()
+        .arg("-C")
+        .arg(path)
+        .args(["bisect", "reset"])
+        .output()
+        .await
+        .map_err(|e| Error::Spawn(e.to_string()))?;
+    if !output.status.success() {
+        return Err(Error::Failed(
+            String::from_utf8_lossy(&output.stderr).trim().to_string(),
+        ));
+    }
+    Ok(())
+}
+
+/// git splits bisect progress across both streams — the "Bisecting: N
+/// revisions left" line goes to stderr while the commit summary goes to
+/// stdout. The panel shows one blob, so join them.
+fn combined(output: &std::process::Output) -> String {
+    let mut s = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    let err = String::from_utf8_lossy(&output.stderr);
+    let err = err.trim();
+    if !err.is_empty() {
+        if !s.is_empty() {
+            s.push('\n');
+        }
+        s.push_str(err);
+    }
+    s
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2765,6 +2984,152 @@ u UU N... 100644 100644 100644 100644 eee fff ggg conflict.rs
             status(&dir).await.expect("status").expect("repo").in_progress.is_none(),
             "the rebase finished rather than stopping"
         );
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn parses_a_converged_bisect_log() {
+        let raw = "# bad: [aaaaaaaaaaaaaaaaaaaa] broke it
+# good: [bbbbbbbbbbbbbbbbbbbb] worked
+git bisect start 'aaaaaaaaaaaaaaaaaaaa' 'bbbbbbbbbbbbbbbbbbbb'
+# status: waiting for both good and bad commits
+git bisect bad cccccccccccccccccccc
+git bisect good dddddddddddddddddddd
+git bisect skip eeeeeeeeeeeeeeeeeeee
+# first bad commit: [cccccccccccccccccccc] the culprit
+";
+        let (marks, first_bad) = parse_bisect_log(raw);
+        let terms: Vec<&str> = marks.iter().map(|m| m.term.as_str()).collect();
+        assert_eq!(terms, vec!["bad", "good", "skip"], "one entry per real mark");
+        assert_eq!(marks[0].short, "ccccccc", "short oid is the first 7 chars");
+        assert_eq!(first_bad.as_deref(), Some("cccccccccccccccccccc"));
+    }
+
+    #[test]
+    fn ignores_commentary_in_a_fresh_bisect_log() {
+        // `git bisect start` itself is not a mark, and the `# bad:`/`# good:`
+        // echo lines must not be counted twice.
+        let (marks, first_bad) = parse_bisect_log("git bisect start
+# status: waiting
+");
+        assert!(marks.is_empty());
+        assert!(first_bad.is_none());
+    }
+
+    #[test]
+    fn rejects_bisect_terms_that_are_not_verdicts() {
+        // `term` reaches a command line, so nothing outside the trio passes.
+        assert!(valid_bisect_term("good") && valid_bisect_term("bad") && valid_bisect_term("skip"));
+        assert!(!valid_bisect_term("reset"));
+        assert!(!valid_bisect_term("--help"));
+        assert!(!valid_bisect_term(""));
+    }
+
+    /// Drives a real bisect to convergence. The unit tests above cover the
+    /// log parser on fixed text; this covers the part that can silently break
+    /// — that `bisect_status` reads a live repo correctly, that a verdict
+    /// actually advances the search, and that convergence is detected.
+    #[tokio::test]
+    async fn bisect_finds_the_first_bad_commit() {
+        use std::process::Command as Sync;
+
+        let stamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0);
+        let dir = std::env::temp_dir().join(format!("arc-git-bisect-{stamp}"));
+        std::fs::create_dir_all(&dir).expect("tempdir");
+
+        let git = |args: &[&str]| {
+            let out = Sync::new("git")
+                .arg("-C")
+                .arg(&dir)
+                .args(args)
+                .output()
+                .expect("git runs");
+            assert!(
+                out.status.success(),
+                "git {args:?} failed: {}",
+                String::from_utf8_lossy(&out.stderr)
+            );
+        };
+        let rev = |spec: &str| -> String {
+            let out = Sync::new("git")
+                .arg("-C")
+                .arg(&dir)
+                .args(["rev-parse", spec])
+                .output()
+                .expect("git runs");
+            String::from_utf8_lossy(&out.stdout).trim().to_string()
+        };
+
+        git(&["init", "--quiet"]);
+        git(&["config", "user.email", "test@example.com"]);
+        git(&["config", "user.name", "Test"]);
+        git(&["config", "commit.gpgsign", "false"]);
+
+        // Ten commits. `flag.txt` flips to "broken" at commit 6 and stays
+        // broken, which is exactly the shape bisect assumes.
+        let mut oids = Vec::new();
+        for n in 1..=10 {
+            std::fs::write(dir.join("flag.txt"), if n >= 6 { "broken" } else { "ok" })
+                .expect("write flag");
+            std::fs::write(dir.join(format!("f{n}.txt")), "x").expect("write");
+            git(&["add", "."]);
+            git(&["commit", "--quiet", "-m", &format!("commit {n}")]);
+            oids.push(rev("HEAD"));
+        }
+        let first_bad = oids[5].clone(); // commit 6
+
+        // Not bisecting yet.
+        let before = bisect_status(&dir).await.expect("status");
+        assert!(!before.active, "a clean repo is not mid-bisect");
+
+        let out = bisect_start(&dir, Some("HEAD"), Some(&oids[0]))
+            .await
+            .expect("start");
+        assert!(
+            out.contains("Bisecting"),
+            "git should report how many steps are left, got: {out}"
+        );
+
+        let mid = bisect_status(&dir).await.expect("status");
+        assert!(mid.active, "the repo is mid-bisect after start");
+        assert!(mid.first_bad.is_none(), "not converged after one step");
+
+        // Answer honestly from the worktree until git names the culprit. The
+        // loop is bounded well above log2(10) so a non-advancing bisect fails
+        // the test rather than hanging it.
+        let mut converged = None;
+        for _ in 0..12 {
+            let status = bisect_status(&dir).await.expect("status");
+            if let Some(found) = status.first_bad {
+                converged = Some(found);
+                break;
+            }
+            let broken = std::fs::read_to_string(dir.join("flag.txt")).unwrap_or_default() == "broken";
+            bisect_mark(&dir, if broken { "bad" } else { "good" })
+                .await
+                .expect("mark");
+        }
+
+        assert_eq!(
+            converged.as_deref(),
+            Some(first_bad.as_str()),
+            "bisect should land on commit 6"
+        );
+
+        let final_status = bisect_status(&dir).await.expect("status");
+        assert!(
+            !final_status.marks.is_empty(),
+            "the marks we made are readable from the log"
+        );
+
+        bisect_reset(&dir).await.expect("reset");
+        let after = bisect_status(&dir).await.expect("status");
+        assert!(!after.active, "reset ends the bisect");
+        assert_eq!(rev("HEAD"), oids[9], "reset puts HEAD back on commit 10");
 
         let _ = std::fs::remove_dir_all(&dir);
     }

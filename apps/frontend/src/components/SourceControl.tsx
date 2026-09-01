@@ -41,6 +41,7 @@ import {
   PenLine,
   ShieldCheck,
   Tag,
+  Target,
 } from 'lucide-react';
 import {
   fsReadFile,
@@ -107,6 +108,9 @@ const RebasePanel = lazy(() =>
 );
 const ReflogPanel = lazy(() =>
   import('./git/ReflogPanel').then((m) => ({ default: m.ReflogPanel })),
+);
+const BisectPanel = lazy(() =>
+  import('./git/BisectPanel').then((m) => ({ default: m.BisectPanel })),
 );
 
 /** Path separator that matches the workspace root style. */
@@ -296,10 +300,12 @@ export function SourceControl() {
   const worktreesOpen = useGitUi((s) => s.worktreePanelOpen);
   const rebaseOpen = useGitUi((s) => s.rebasePanelOpen);
   const reflogOpen = useGitUi((s) => s.reflogPanelOpen);
+  const bisectOpen = useGitUi((s) => s.bisectPanelOpen);
   const worktreesInline = useGitUi((s) => s.worktreePanelOpen && !s.worktreeExpanded);
   const rebaseInline = useGitUi((s) => s.rebasePanelOpen && !s.rebaseExpanded);
   const reflogInline = useGitUi((s) => s.reflogPanelOpen && !s.reflogExpanded);
-  const panelOpen = worktreesInline || rebaseInline || reflogInline;
+  const bisectInline = useGitUi((s) => s.bisectPanelOpen && !s.bisectExpanded);
+  const panelOpen = worktreesInline || rebaseInline || reflogInline || bisectInline;
 
   // Commit switches — `-S` and `-s`, remembered across sessions.
   const signCommits = useGitUi((s) => s.signCommits);
@@ -1160,6 +1166,12 @@ export function SourceControl() {
             active={reflogOpen}
             onClick={() => useGitUi.getState().setReflogPanelOpen(!reflogOpen)}
           />
+          <GitLauncher
+            icon={<Target size={11.5} strokeWidth={2} />}
+            label="Bisect"
+            active={bisectOpen}
+            onClick={() => useGitUi.getState().setBisectPanelOpen(!bisectOpen)}
+          />
         </div>
       )}
 
@@ -1206,6 +1218,7 @@ export function SourceControl() {
           {worktreesInline && <WorktreePanel inline />}
           {rebaseInline && <RebasePanel inline />}
           {reflogInline && <ReflogPanel inline />}
+          {bisectInline && <BisectPanel inline />}
         </Suspense>
       )}
 
