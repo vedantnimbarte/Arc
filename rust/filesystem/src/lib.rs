@@ -20,7 +20,7 @@ pub use file::{read_file, write_file, MAX_EDITOR_BYTES};
 pub use index::{is_built as index_is_built, rebuild as index_rebuild, search as index_search,
     update_paths as index_update_paths, IndexHit};
 pub use listing::{list_files, FileItem};
-pub use paths::{default_root, parent};
+pub use paths::{default_root, parent, scratch_file};
 pub use replace::{find as find_literal, replace_in_files, ReplaceMatch, ReplaceSummary};
 pub use search::{search as search_files, SearchHit};
 pub use watch::Watcher;

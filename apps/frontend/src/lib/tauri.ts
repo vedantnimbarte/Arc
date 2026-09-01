@@ -240,6 +240,13 @@ export async function fsWriteFile(path: string, content: string): Promise<void> 
   return invoke<void>('fs_write_file', { path, content });
 }
 
+/** Create an empty scratch file under the app data dir and return its path.
+ *  `ext` is the language suffix without the dot. A scratch buffer is a real
+ *  file, so the caller just `openFile`s it — see `arc_filesystem::scratch_file`. */
+export async function fsScratchFile(ext: string): Promise<string> {
+  return invoke<string>('fs_scratch_file', { ext });
+}
+
 /**
  * Start watching `path` recursively. Returns a `watchId` and an
  * `UnlistenFn` for the change-event listener; debounced "something
@@ -1271,6 +1278,52 @@ export interface GitSubmoduleEntry {
 
 export async function gitSubmodules(path: string): Promise<GitSubmoduleEntry[]> {
   return invoke<GitSubmoduleEntry[]>('git_submodules', { path });
+}
+
+// ── Bisect ───────────────────────────────────────────────────────────────────
+
+/** A verdict the user has already given a commit during the current bisect. */
+export interface GitBisectMark {
+  term: 'good' | 'bad' | 'skip';
+  oid: string;
+  short: string;
+}
+
+export interface GitBisectStatus {
+  /** False when the repo isn't mid-bisect; every other field is then empty. */
+  active: boolean;
+  /** The commit git wants tested (or the culprit, once converged). */
+  head_short: string;
+  subject: string;
+  marks: GitBisectMark[];
+  /** Set once git has named the first bad commit. */
+  first_bad: string | null;
+}
+
+export async function gitBisectStatus(path: string): Promise<GitBisectStatus> {
+  return invoke<GitBisectStatus>('git_bisect_status', { path });
+}
+
+/** `git bisect start [<bad> [<good>]]`. Resolves to git's own output, which
+ *  names the commit to test and how many steps remain. */
+export async function gitBisectStart(
+  path: string,
+  bad?: string,
+  good?: string,
+): Promise<string> {
+  return invoke<string>('git_bisect_start', { path, bad: bad ?? null, good: good ?? null });
+}
+
+/** Mark the checked-out commit. Resolves to git's output (next commit + steps left). */
+export async function gitBisectMark(
+  path: string,
+  term: 'good' | 'bad' | 'skip',
+): Promise<string> {
+  return invoke<string>('git_bisect_mark', { path, term });
+}
+
+export async function gitBisectReset(path: string): Promise<void> {
+  return invoke<void>('git_bisect_reset', { path });
 }
 
 // ── Remotes ──────────────────────────────────────────────────────────────────

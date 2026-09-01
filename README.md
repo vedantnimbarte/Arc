@@ -23,6 +23,9 @@ it.
   (⌘F / Ctrl+Shift+F), named profiles (shell + args + cwd + env), scrollback that survives
   a relaunch, clickable file paths, smart-paste warnings, long-command notifications, and
   per-tab command history (OSC 133).
+- **Scratch Buffers** — Open a throwaway file to jot in without naming or placing it
+  (⇧⌘N, or pick a language from the palette). They're real files under the app data dir,
+  so they save, highlight and restore like anything else.
 - **Code Editor** — CodeMirror 6 with syntax highlighting, multi-cursor, optional Vim mode,
   optional LSP (diagnostics, hover, completion, go-to-definition, find references, rename,
   and format-on-save), and real-time file watching.
@@ -34,7 +37,9 @@ it.
   requests, all from the UI. Commits can be signed (`-S`) or signed-off (`-s`); a rejected
   push offers force-with-lease. Interactive rebase does reword and edit as well as
   squash/fixup/drop, and a stopped rebase gets a continue/abort bar in the panel. The
-  reflog is browsable, so a bad reset or rebase is one click from being undone. Merge
+  reflog is browsable, so a bad reset or rebase is one click from being undone. Bisect
+  runs from the panel too: name a good and a bad commit, then mark each one git checks
+  out until it names the culprit. Merge
   conflicts open in a three-way view that resolves one hunk at a time — take ours,
   theirs, both, or hand-edit the result — then writes and stages the file.
 - **SSH Client** — Pure-Rust SSH (russh) with saved hosts, key generation/import, and
@@ -48,10 +53,21 @@ it.
 - **Database Client** — Query PostgreSQL, MySQL, and SQLite from a tab: saved connections,
   a table list, a SQL editor, and a results grid. Passwords go to your OS credential
   vault; only `user@host` is stored alongside the connection.
+- **Problems Panel** — Runs the project's own checkers — `tsc`, `cargo check`, ESLint,
+  Ruff, `go vet` — and turns what they print into rows that open the file at the offending
+  line. Whichever apply are detected from the workspace root; run them all or one at a
+  time. This is the whole-project answer LSP can't give, since LSP diagnostics only cover
+  files you have open.
 - **Test Explorer** — Discovers vitest, jest, pytest, `cargo test`, and `go test` suites
   and runs any framework, file, or single test from the sidebar. A failed row opens the
   runner's actual output.
+- **Containers** — Lists Docker containers, running or not, grouped by compose project,
+  with start / stop / restart / remove on each row. Logs and `compose up` open a terminal
+  tab rather than a cramped pane. Says plainly whether Docker is missing or just not
+  running.
 - **Tabs & Workspaces** — Split panes, tab groups, and session state persisted to SQLite.
+- **Keymaps** — Every shortcut is rebindable, and one click swaps the whole set to a
+  **VS Code** or **JetBrains** preset if that's what your hands already know.
 - **Themes** — Bundled dark/light plus Catppuccin, or import your own from a file or URL.
   VS Code colour themes import directly: the workbench palette is mapped across and the
   text ramp is re-solved so it still clears WCAG AA on the new background.

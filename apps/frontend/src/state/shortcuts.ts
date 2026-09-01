@@ -17,6 +17,8 @@ export type ActionId =
   | 'open-shortcuts'
   | 'show-explorer'
   | 'show-source-control'
+  | 'show-problems'
+  | 'new-scratch'
   | 'toggle-ssh-panel'
   /** One launcher per detected CLI, derived from AI_CLIS — see LAUNCH_IDS. */
   | LaunchActionId
@@ -114,6 +116,18 @@ export const ACTION_META: Record<ActionId, ActionMeta> = {
     description: 'Reveal source control in the sidebar.',
     category: 'Workspace',
   },
+  'show-problems': {
+    id: 'show-problems',
+    label: 'Show Problems',
+    description: 'Run the project checkers and list what they report.',
+    category: 'Workspace',
+  },
+  'new-scratch': {
+    id: 'new-scratch',
+    label: 'New Scratch Buffer',
+    description: 'Open a throwaway file to jot in, without naming or placing it.',
+    category: 'Workspace',
+  },
   'toggle-ssh-panel': {
     id: 'toggle-ssh-panel',
     label: 'Toggle SSH Panel',
@@ -157,6 +171,8 @@ export const ACTION_ORDER: ActionId[] = [
   'open-shortcuts',
   'show-explorer',
   'show-source-control',
+  'show-problems',
+  'new-scratch',
   'toggle-ssh-panel',
   ...LAUNCH_IDS.map((cli) => `launch-${cli}` as LaunchActionId),
   'launch-wingman-pilot',
@@ -181,6 +197,8 @@ export const DEFAULT_BINDINGS: Record<ActionId, KeyBinding | null> = {
   'open-shortcuts': { code: 'Slash', shift: true, alt: false, ...mod() },
   'show-explorer': { code: 'KeyE', shift: true, alt: false, ...mod() },
   'show-source-control': { code: 'KeyG', shift: true, alt: false, ...mod() },
+  'show-problems': { code: 'KeyM', shift: true, alt: false, ...mod() },
+  'new-scratch': { code: 'KeyN', shift: true, alt: false, ...mod() },
   'toggle-ssh-panel': { code: 'KeyS', shift: true, alt: false, ...mod() },
   // AI CLI launchers ship unbound by default — users can assign keys via the
   // shortcuts dialog, and they're discoverable through the TabBar dropdown
@@ -193,6 +211,116 @@ export const DEFAULT_BINDINGS: Record<ActionId, KeyBinding | null> = {
   'launch-wingman-headless': null,
 };
 
+// ─── Keymap presets ─────────────────────────────────────────────────────────
+// Muscle memory is the whole reason someone rebinds anything, so the fastest
+// path to a comfortable ARC is "make it behave like the editor I already
+// use". A preset is just a batch of the same overrides the rebind UI writes,
+// which is why this is a table and not a system: applying one is
+// `setOverrides`, and "Arc defaults" is the empty table.
+//
+// Only the bindings that actually differ are listed. Anything a preset omits
+// falls through to DEFAULT_BINDINGS, so a new action does not need touching
+// in three places to get a sane key everywhere.
+
+export type KeymapPresetId = 'arc' | 'vscode' | 'jetbrains';
+
+export interface KeymapPreset {
+  id: KeymapPresetId;
+  label: string;
+  description: string;
+  overrides: Partial<Record<ActionId, KeyBinding | null>>;
+}
+
+/** Shorthand for a preset entry: `k('KeyJ', { shift: true })`. */
+const k = (
+  code: string,
+  extra: Partial<Pick<KeyBinding, 'shift' | 'alt' | 'ctrl' | 'meta'>> = {},
+): KeyBinding => ({
+  code,
+  ctrl: extra.ctrl ?? true,
+  meta: extra.meta ?? true,
+  shift: extra.shift ?? false,
+  alt: extra.alt ?? false,
+});
+
+export const KEYMAP_PRESETS: KeymapPreset[] = [
+  {
+    id: 'arc',
+    label: 'ARC',
+    description: 'The defaults.',
+    overrides: {},
+  },
+  {
+    id: 'vscode',
+    label: 'VS Code',
+    description: 'Ctrl+Shift+P for the palette, Ctrl+` for a terminal, Ctrl+Shift+M for problems.',
+    overrides: {
+      // VS Code puts the *action* palette on ⇧⌘P and file quick-open on ⌘P —
+      // which is already ARC's split, so those two stay put.
+      'new-terminal': k('Backquote'),
+      'show-explorer': k('KeyE', { shift: true }),
+      'show-source-control': k('KeyG', { shift: true }),
+      'show-problems': k('KeyM', { shift: true }),
+      'new-scratch': k('KeyN'),
+      'open-shortcuts': k('KeyK', { shift: true }),
+      // ⌘K is VS Code's chord leader, so the AI bar moves off it. ARC has no
+      // chord support, and leaving it bound would shadow every chord a VS
+      // Code user starts to type.
+      'ai-command': k('KeyI'),
+    },
+  },
+  {
+    id: 'jetbrains',
+    label: 'JetBrains',
+    description: 'Alt+F12 terminal, ⇧⌘A actions, ⌘E recent files.',
+    overrides: {
+      'new-terminal': { code: 'F12', ctrl: false, meta: false, shift: false, alt: true },
+      'open-command-palette': k('KeyA', { shift: true }),
+      'open-search': k('KeyE'),
+      'show-explorer': { code: 'Digit1', ctrl: false, meta: false, shift: false, alt: true },
+      'show-source-control': { code: 'Digit9', ctrl: false, meta: false, shift: false, alt: true },
+      'show-problems': { code: 'Digit6', ctrl: false, meta: false, shift: false, alt: true },
+      'new-scratch': k('KeyN', { shift: true, alt: true }),
+      'open-settings': k('Comma'),
+    },
+  },
+];
+
+export const KEYMAP_PRESET_BY_ID: Record<KeymapPresetId, KeymapPreset> = Object.fromEntries(
+  KEYMAP_PRESETS.map((p) => [p.id, p]),
+) as Record<KeymapPresetId, KeymapPreset>;
+
+/**
+ * Which preset the current overrides correspond to, or `null` when they match
+ * none of them (the user has since rebound something).
+ *
+ * Compared by resolved binding rather than by the override map, so a user who
+ * hand-sets a key to the value a preset already uses still reads as that
+ * preset instead of "custom".
+ */
+export function activePreset(
+  overrides: Partial<Record<ActionId, KeyBinding | null>>,
+): KeymapPresetId | null {
+  for (const preset of KEYMAP_PRESETS) {
+    if (ACTION_ORDER.every((id) => sameResolved(overrides, preset.overrides, id))) {
+      return preset.id;
+    }
+  }
+  return null;
+}
+
+function sameResolved(
+  a: Partial<Record<ActionId, KeyBinding | null>>,
+  b: Partial<Record<ActionId, KeyBinding | null>>,
+  id: ActionId,
+): boolean {
+  const left = a[id] === undefined ? DEFAULT_BINDINGS[id] : a[id];
+  const right = b[id] === undefined ? DEFAULT_BINDINGS[id] : b[id];
+  if (left === null || right === null) return left === right;
+  if (!left || !right) return left === right;
+  return bindingsEqual(left, right);
+}
+
 interface ShortcutsState {
   /** Sparse — only entries the user has changed. Falls back to DEFAULT_BINDINGS. */
   overrides: Partial<Record<ActionId, KeyBinding | null>>;
@@ -201,6 +329,10 @@ interface ShortcutsState {
   clearBinding: (id: ActionId) => void;
   resetBinding: (id: ActionId) => void;
   resetAll: () => void;
+  /** Replace every override with a preset's. Wholesale on purpose: merging
+   *  would leave a stale rebind from the previous preset in place, and the
+   *  point of picking one is to know exactly what you have. */
+  applyPreset: (id: KeymapPresetId) => void;
 }
 
 export const useShortcuts = create<ShortcutsState>()(
@@ -217,6 +349,7 @@ export const useShortcuts = create<ShortcutsState>()(
           return { overrides: rest };
         }),
       resetAll: () => set({ overrides: {} }),
+      applyPreset: (id) => set({ overrides: { ...KEYMAP_PRESET_BY_ID[id].overrides } }),
     }),
     { name: 'arc-shortcuts', version: 1 },
   ),

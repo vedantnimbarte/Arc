@@ -45,9 +45,13 @@
 //!   invoke("git_remote_set_url", { path, name, url })                   -> ()
 //!   invoke("git_reflog",         { path, limit })                       -> Vec<ReflogEntry>
 //!   invoke("git_submodules",     { path })                              -> Vec<SubmoduleEntry>
+//!   invoke("git_bisect_status",  { path })                              -> BisectStatus
+//!   invoke("git_bisect_start",   { path, bad?, good? })                 -> String
+//!   invoke("git_bisect_mark",    { path, term })                        -> String
+//!   invoke("git_bisect_reset",   { path })                              -> ()
 
 use arc_git::{
-    AuthorInfo, BlameLine, BranchInfo, ChangeEntry, CheckoutResult, CommitResult, DiffScope,
+    AuthorInfo, BisectStatus, BlameLine, BranchInfo, ChangeEntry, CheckoutResult, CommitResult, DiffScope,
     DiffStat, GitInfo, LogEntry, LogOptions, MergeResult, RebaseTodoEntry, ReflogEntry, RemoteInfo,
     RemoteOpResult, ResetMode, StashEntry, SubmoduleEntry, TagInfo, WorktreeEntry,
 };
@@ -439,4 +443,38 @@ pub async fn git_reflog(path: String, limit: Option<usize>) -> Result<Vec<Reflog
 #[tauri::command]
 pub async fn git_submodules(path: String) -> Result<Vec<SubmoduleEntry>, String> {
     arc_git::submodules(&path).await.map_err(|e| e.to_string())
+}
+
+// ----- bisect ---------------------------------------------------------------
+
+#[tauri::command]
+pub async fn git_bisect_status(path: String) -> Result<BisectStatus, String> {
+    arc_git::bisect_status(&path)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn git_bisect_start(
+    path: String,
+    bad: Option<String>,
+    good: Option<String>,
+) -> Result<String, String> {
+    arc_git::bisect_start(&path, bad.as_deref(), good.as_deref())
+        .await
+        .map_err(|e| e.to_string())
+}
+
+/// `term` is one of `good`, `bad`, `skip` — validated in `arc_git` before it
+/// reaches a command line, since it comes from the renderer.
+#[tauri::command]
+pub async fn git_bisect_mark(path: String, term: String) -> Result<String, String> {
+    arc_git::bisect_mark(&path, &term)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn git_bisect_reset(path: String) -> Result<(), String> {
+    arc_git::bisect_reset(&path).await.map_err(|e| e.to_string())
 }

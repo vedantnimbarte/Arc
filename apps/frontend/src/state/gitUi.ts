@@ -25,6 +25,8 @@ interface GitUiState {
   setRebaseExpanded: (v: boolean) => void;
   reflogExpanded: boolean;
   setReflogExpanded: (v: boolean) => void;
+  bisectExpanded: boolean;
+  setBisectExpanded: (v: boolean) => void;
 
   /** Commit currently being cherry-picked. `null` = dialog closed. */
   cherryPickTarget: CherryPickContext | null;
@@ -36,6 +38,9 @@ interface GitUiState {
 
   reflogPanelOpen: boolean;
   setReflogPanelOpen: (open: boolean) => void;
+
+  bisectPanelOpen: boolean;
+  setBisectPanelOpen: (open: boolean) => void;
 
   /** Commit switches, remembered across sessions: `-S` (signature) and `-s`
    *  (Signed-off-by trailer). Off by default — a repo without a signing key
@@ -64,6 +69,8 @@ const CLOSED = {
   rebaseExpanded: false,
   reflogPanelOpen: false,
   reflogExpanded: false,
+  bisectPanelOpen: false,
+  bisectExpanded: false,
 } as const;
 
 export const useGitUi = create<GitUiState>()(
@@ -78,6 +85,7 @@ export const useGitUi = create<GitUiState>()(
       setWorktreeExpanded: (v) => set({ worktreeExpanded: v }),
       setRebaseExpanded: (v) => set({ rebaseExpanded: v }),
       setReflogExpanded: (v) => set({ reflogExpanded: v }),
+      setBisectExpanded: (v) => set({ bisectExpanded: v }),
 
       cherryPickTarget: null,
       openCherryPick: (ctx) => set({ cherryPickTarget: ctx }),
@@ -85,6 +93,7 @@ export const useGitUi = create<GitUiState>()(
 
       setRebasePanelOpen: (open) => set(open ? { ...CLOSED, rebasePanelOpen: true } : CLOSED),
       setReflogPanelOpen: (open) => set(open ? { ...CLOSED, reflogPanelOpen: true } : CLOSED),
+      setBisectPanelOpen: (open) => set(open ? { ...CLOSED, bisectPanelOpen: true } : CLOSED),
 
       signCommits: false,
       setSignCommits: (v) => set({ signCommits: v }),
@@ -106,6 +115,7 @@ export const useGitUi = create<GitUiState>()(
         worktreePanelOpen: s.worktreePanelOpen,
         rebasePanelOpen: s.rebasePanelOpen,
         reflogPanelOpen: s.reflogPanelOpen,
+        bisectPanelOpen: s.bisectPanelOpen,
         signCommits: s.signCommits,
         signoffCommits: s.signoffCommits,
       }),
