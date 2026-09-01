@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import { dwindleSide } from '../lib/paneMetrics';
 import {
   fsDefaultRoot,
+  fsScratchFile,
   isTauri,
   ptyListAiClis,
   sessionLoad,
@@ -267,6 +268,10 @@ interface WorkspaceState {
   openDiff: (absPath: string, root: string, scope: 'worktree' | 'staged' | 'head') => string;
   /** Open (or focus) the three-way merge view for a conflicted file. */
   openMerge: (absPath: string, root: string) => string;
+  /** Open a throwaway buffer for jotting — a real file under the app data
+   *  dir, so it saves, highlights and restores like any other editor tab.
+   *  `ext` picks the language (default `md`). */
+  openScratch: (ext?: string) => Promise<string | null>;
   /** Open a database client tab, optionally pre-selecting a saved connection. */
   openDbClient: (connectionId?: string) => string;
   /** Remember which saved connection a db tab is pointed at, so it restores
@@ -1151,6 +1156,14 @@ export const useWorkspace = create<WorkspaceState>()((set, get) => ({
       mergeRoot: root,
     });
     return id;
+  },
+  openScratch: async (ext = 'md') => {
+    // A scratch buffer is a real file (see `arc_filesystem::scratch_file`),
+    // which is what lets it reuse the whole editor — save, LSP, syntax,
+    // session restore — instead of needing a tab kind of its own.
+    if (!isTauri) return null;
+    const path = await fsScratchFile(ext);
+    return get().openFile(path, undefined, { forceNew: true });
   },
   openDbClient: (connectionId) => {
     const id = `db-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;

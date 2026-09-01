@@ -15,10 +15,12 @@ export const SIDEBAR_RAIL_WIDTH_LABELED = 128;
 export type SidebarView =
   | 'files'
   | 'git'
-  | 'ssh'
   | 'search'
   | 'outline'
+  | 'problems'
   | 'tests'
+  | 'docker'
+  | 'ssh'
   | 'wingman'
   | 'claude';
 

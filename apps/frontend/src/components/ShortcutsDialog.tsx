@@ -6,6 +6,8 @@ import {
   DEFAULT_BINDINGS,
   REFERENCE_CATEGORIES,
   REFERENCE_SHORTCUTS,
+  KEYMAP_PRESETS,
+  activePreset,
   bindingFromEvent,
   findConflict,
   formatBinding,
@@ -29,6 +31,8 @@ export function ShortcutsDialog({ open, onClose }: Props) {
   const resetBinding = useShortcuts((s) => s.resetBinding);
   const resetAll = useShortcuts((s) => s.resetAll);
   const clearBinding = useShortcuts((s) => s.clearBinding);
+  const applyPreset = useShortcuts((s) => s.applyPreset);
+  const preset = activePreset(overrides);
 
   const [query, setQuery] = useState('');
   const [capturing, setCapturing] = useState<ActionId | null>(null);
@@ -125,6 +129,34 @@ export function ShortcutsDialog({ open, onClose }: Props) {
               <X size={13} strokeWidth={2.2} />
             </button>
           </div>
+        </div>
+
+        {/* Keymap presets — a batch of the same overrides the rows below
+            write, so picking one and then rebinding a single key is normal
+            and just reads as "custom" afterwards. */}
+        <div className="flex items-center gap-2 border-b border-border-hairline px-3.5 py-2">
+          <span className="font-display text-xs text-fg-subtle">Keymap</span>
+          <div className="flex items-center gap-1">
+            {KEYMAP_PRESETS.map((p) => (
+              <button
+                key={p.id}
+                onClick={() => applyPreset(p.id)}
+                title={p.description}
+                aria-pressed={preset === p.id}
+                className={cn(
+                  'rounded-md px-2 py-0.5 font-display text-xs transition-all',
+                  preset === p.id
+                    ? 'bg-accent/15 text-accent ring-1 ring-inset ring-accent/30'
+                    : 'text-fg-muted hover:bg-surface-2 hover:text-fg-base',
+                )}
+              >
+                {p.label}
+              </button>
+            ))}
+          </div>
+          {preset === null && (
+            <span className="font-display text-xs italic text-fg-subtle">custom</span>
+          )}
         </div>
 
         {/* Search */}

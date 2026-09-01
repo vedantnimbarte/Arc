@@ -11,6 +11,7 @@
 //!   invoke("fs_write_file", { path, content }) -> ()
 //!   invoke("fs_watch_start", { path })     -> String (watchId)
 //!   invoke("fs_watch_stop",  { watchId })  -> ()
+//!   invoke("fs_scratch_file", { ext })    -> String (path)
 //!
 //! Emitted events:
 //!   "fs://change/<watchId>" -> ()  (one per debounced ~150 ms batch)
@@ -53,6 +54,13 @@ pub async fn fs_read_file(path: String) -> Result<String, String> {
 #[tauri::command]
 pub async fn fs_write_file(path: String, content: String) -> Result<(), String> {
     arc_filesystem::write_file(&path, &content).map_err(|e| e.to_string())
+}
+
+/// Create an empty scratch file and hand back its path. The caller opens it
+/// like any other file — see `arc_filesystem::scratch_file`.
+#[tauri::command]
+pub async fn fs_scratch_file(ext: String) -> Result<String, String> {
+    arc_filesystem::scratch_file(&ext).map_err(|e| e.to_string())
 }
 
 #[tauri::command]

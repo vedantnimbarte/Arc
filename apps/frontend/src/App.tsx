@@ -18,6 +18,9 @@ import { ShortcutsDialog } from './components/ShortcutsDialog';
 import { PaneTreeView } from './components/PaneTreeView';
 import { WorkspaceRail } from './components/WorkspaceRail';
 import { useWorkspace } from './state/workspace';
+import { toast } from './state/toast';
+import { useProblems } from './state/problems';
+import { useDocker } from './state/docker';
 import {
   useFiles,
   SIDEBAR_RAIL_WIDTH,
@@ -34,8 +37,22 @@ import {
 import { useCommands, type CommandAction, type CommandGroup } from './state/commands';
 import { useTaskCommands } from './state/tasks';
 import { WingmanPromptDialog } from './components/WingmanPromptDialog';
+
+/** Languages offered as scratch buffers in the palette. Kept short on
+ *  purpose — the point of a scratch buffer is not choosing one. */
+const SCRATCH_KINDS = [
+  { ext: 'md', label: 'Markdown' },
+  { ext: 'txt', label: 'Plain text' },
+  { ext: 'json', label: 'JSON' },
+  { ext: 'sql', label: 'SQL' },
+  { ext: 'sh', label: 'Shell' },
+  { ext: 'py', label: 'Python' },
+  { ext: 'ts', label: 'TypeScript' },
+] as const;
 import {
   Bot,
+  Boxes,
+  CircleAlert,
   FolderOpen,
   FolderTree,
   GitPullRequest,
@@ -43,7 +60,9 @@ import {
   Inbox,
   LayoutGrid,
   ListOrdered,
+  NotebookPen,
   Sparkles,
+  Target,
   TerminalSquare,
 } from 'lucide-react';
 // Side-effect import: subscribes to file-tree root changes and keeps the
@@ -246,6 +265,7 @@ export default function App() {
       s.worktreeExpanded ||
       s.rebaseExpanded ||
       s.reflogExpanded ||
+      s.bisectExpanded ||
       s.cherryPickTarget !== null ||
       s.prPanelView.kind !== 'closed',
   );
@@ -361,6 +381,15 @@ export default function App() {
         return;
       case 'show-source-control':
         useFiles.getState().showSidebarView('git');
+        return;
+      case 'show-problems':
+        useFiles.getState().showSidebarView('problems');
+        return;
+      case 'new-scratch':
+        void useWorkspace
+          .getState()
+          .openScratch()
+          .catch((err) => toast(`Could not open a scratch buffer: ${err}`));
         return;
       case 'toggle-ssh-panel':
         useFiles.getState().toggleSidebarView('ssh');
@@ -573,6 +602,61 @@ export default function App() {
         run: () => {
           useClaudeCode.getState().newChat();
           useFiles.getState().showSidebarView('claude');
+        },
+      },
+      // Problems: one entry to open the panel, one to actually run the
+      // checkers — the second is the common intent, and it saves the extra
+      // click on a panel whose whole job is behind a play button.
+      {
+        id: 'problems.run',
+        title: 'Problems: Check the project',
+        description: 'Run every detected checker (tsc, cargo, eslint, ruff, go vet) and list what they report.',
+        group: 'View',
+        keywords: ['problems', 'errors', 'lint', 'typecheck', 'diagnostics', 'build'],
+        icon: CircleAlert,
+        run: () => {
+          useFiles.getState().showSidebarView('problems');
+          void useProblems.getState().runAll();
+        },
+      },
+      {
+        id: 'docker.panel',
+        title: 'Containers: Show Docker containers',
+        description: 'List running and stopped containers, with start / stop / restart / logs.',
+        group: 'View',
+        keywords: ['docker', 'container', 'compose', 'image', 'logs'],
+        icon: Boxes,
+        run: () => {
+          useFiles.getState().showSidebarView('docker');
+          void useDocker.getState().refresh();
+        },
+      },
+      // Scratch buffers, one per language worth jotting in. Each is a real
+      // file, so the only difference between them is the suffix.
+      ...SCRATCH_KINDS.map(({ ext, label }) => ({
+        id: `workspace.scratch-${ext}`,
+        title: `New Scratch Buffer (${label})`,
+        description: `Open a throwaway .${ext} file to jot in.`,
+        group: 'Workspace' as const,
+        keywords: ['scratch', 'notes', 'temp', 'draft', 'buffer', ext, label],
+        icon: NotebookPen,
+        run: () => {
+          void useWorkspace
+            .getState()
+            .openScratch(ext)
+            .catch((err) => toast(`Could not open a scratch buffer: ${err}`));
+        },
+      })),
+      {
+        id: 'git.bisect',
+        title: 'Git: Bisect',
+        description: 'Binary-search history for the commit that introduced a bug.',
+        group: 'Git',
+        keywords: ['bisect', 'regression', 'blame', 'search', 'history', 'culprit'],
+        icon: Target,
+        run: () => {
+          useFiles.getState().showSidebarView('git');
+          useGitUi.getState().setBisectPanelOpen(true);
         },
       },
     ];
