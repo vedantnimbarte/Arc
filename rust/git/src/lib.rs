@@ -69,6 +69,10 @@ pub struct GitInfo {
     pub unstaged: usize,
     pub untracked: usize,
     pub conflicted: usize,
+    /// Multi-step operation the repo is halfway through — `rebase`, `merge`,
+    /// `cherry-pick`, `revert` or `bisect`. `None` when the repo is idle.
+    /// Detected from the marker files git leaves in its dir.
+    pub in_progress: Option<String>,
 }
 
 /// Discover the repository containing `path` and return its current state.
@@ -99,7 +103,52 @@ pub async fn status<P: AsRef<Path>>(path: P) -> Result<Option<GitInfo>> {
     }
 
     let stdout = String::from_utf8_lossy(&output.stdout);
-    Ok(Some(parse_porcelain_v2(&stdout)))
+    let mut info = parse_porcelain_v2(&stdout);
+    if let Some(dir) = git_dir(path).await {
+        info.in_progress = in_progress_op(&dir);
+    }
+    Ok(Some(info))
+}
+
+/// Absolute path to the repo's git dir — a real directory for a normal
+/// clone, the linked worktree's own dir for a worktree. `None` when `path`
+/// isn't in a repo.
+async fn git_dir(path: &Path) -> Option<std::path::PathBuf> {
+    let out = git_cmd()
+        .arg("-C")
+        .arg(path)
+        .args(["rev-parse", "--absolute-git-dir"])
+        .output()
+        .await
+        .ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    let s = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    if s.is_empty() {
+        None
+    } else {
+        Some(std::path::PathBuf::from(s))
+    }
+}
+
+/// git leaves a marker per multi-step operation. Order matters: a conflicted
+/// rebase also writes MERGE_HEAD, and the rebase is the more useful label.
+fn in_progress_op(git_dir: &Path) -> Option<String> {
+    let marker = |name: &str| git_dir.join(name).exists();
+    if marker("rebase-merge") || marker("rebase-apply") {
+        Some("rebase".into())
+    } else if marker("CHERRY_PICK_HEAD") {
+        Some("cherry-pick".into())
+    } else if marker("REVERT_HEAD") {
+        Some("revert".into())
+    } else if marker("MERGE_HEAD") {
+        Some("merge".into())
+    } else if marker("BISECT_LOG") {
+        Some("bisect".into())
+    } else {
+        None
+    }
 }
 
 fn parse_porcelain_v2(out: &str) -> GitInfo {
@@ -114,6 +163,7 @@ fn parse_porcelain_v2(out: &str) -> GitInfo {
         unstaged: 0,
         untracked: 0,
         conflicted: 0,
+        in_progress: None,
     };
 
     for line in out.lines() {
@@ -459,19 +509,34 @@ pub struct CommitResult {
 
 /// Create a new commit from whatever is currently staged.
 ///
+/// `sign` adds `-S` (GPG/SSH signature, per the repo's `user.signingkey`),
+/// `signoff` adds `-s` (a `Signed-off-by` trailer). Both surface git's own
+/// error if the repo isn't configured for them.
+///
 /// Fails (with the git error surfaced) when there's nothing staged, when the
 /// message is empty, or when a hook rejects the commit. We deliberately do
 /// **not** pass `-a` — the UI's stage/unstage model is the source of truth.
-pub async fn commit<P: AsRef<Path>>(path: P, message: &str) -> Result<CommitResult> {
+pub async fn commit<P: AsRef<Path>>(
+    path: P,
+    message: &str,
+    sign: bool,
+    signoff: bool,
+) -> Result<CommitResult> {
     let msg = message.trim();
     if msg.is_empty() {
         return Err(Error::Failed("empty commit message".into()));
     }
     let path = path.as_ref();
-    let output = git_cmd()
-        .arg("-C")
-        .arg(path)
-        .args(["commit", "-m", msg])
+    let mut cmd = git_cmd();
+    cmd.arg("-C").arg(path).arg("commit");
+    if sign {
+        cmd.arg("-S");
+    }
+    if signoff {
+        cmd.arg("-s");
+    }
+    let output = cmd
+        .args(["-m", msg])
         .output()
         .await
         .map_err(|e| Error::Spawn(e.to_string()))?;
@@ -1607,16 +1672,27 @@ pub async fn merge<P: AsRef<Path>>(path: P, branch: &str) -> Result<MergeResult>
 
 // ----- commit operations ---------------------------------------------------
 
-pub async fn commit_amend<P: AsRef<Path>>(path: P, message: &str) -> Result<CommitResult> {
+pub async fn commit_amend<P: AsRef<Path>>(
+    path: P,
+    message: &str,
+    sign: bool,
+    signoff: bool,
+) -> Result<CommitResult> {
     let msg = message.trim();
     if msg.is_empty() {
         return Err(Error::Failed("empty commit message".into()));
     }
     let path = path.as_ref();
-    let output = git_cmd()
-        .arg("-C")
-        .arg(path)
-        .args(["commit", "--amend", "-m", msg])
+    let mut cmd = git_cmd();
+    cmd.arg("-C").arg(path).args(["commit", "--amend"]);
+    if sign {
+        cmd.arg("-S");
+    }
+    if signoff {
+        cmd.arg("-s");
+    }
+    let output = cmd
+        .args(["-m", msg])
         .output()
         .await
         .map_err(|e| Error::Spawn(e.to_string()))?;
@@ -1700,9 +1776,7 @@ pub async fn cherry_pick<P: AsRef<Path>>(path: P, oid: &str) -> Result<()> {
 
 // ─── Interactive rebase ───────────────────────────────────────────────────
 
-/// One row of a `git rebase -i` TODO list. V1 omits `edit` and `reword`
-/// because both require interactive user input mid-rebase; the UI nudges
-/// users toward `git commit --amend` after the rebase instead.
+/// One row of a `git rebase -i` TODO list.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum RebaseAction {
@@ -1714,6 +1788,14 @@ pub enum RebaseAction {
     Squash,
     /// Combine with the previous commit, discard this commit's message.
     Fixup,
+    /// Keep the commit, replace its message with the entry's `message`.
+    /// Emitted as `pick` plus an `exec git commit --amend --file`, which
+    /// keeps the whole rebase non-interactive — a real `reword` would stop
+    /// to open an editor.
+    Reword,
+    /// Stop the rebase at this commit so the user can change the tree, then
+    /// resume with [`rebase_continue`].
+    Edit,
 }
 
 impl RebaseAction {
@@ -1723,6 +1805,9 @@ impl RebaseAction {
             RebaseAction::Drop => "drop",
             RebaseAction::Squash => "squash",
             RebaseAction::Fixup => "fixup",
+            // The message swap rides along as a following `exec` line.
+            RebaseAction::Reword => "pick",
+            RebaseAction::Edit => "edit",
         }
     }
 }
@@ -1731,6 +1816,9 @@ impl RebaseAction {
 pub struct RebaseTodoEntry {
     pub oid: String,
     pub action: RebaseAction,
+    /// New commit message. Only read for [`RebaseAction::Reword`].
+    #[serde(default)]
+    pub message: Option<String>,
 }
 
 /// Run `git rebase -i <base>` with a pre-built TODO list.
@@ -1759,13 +1847,43 @@ pub async fn rebase_interactive<P: AsRef<Path>>(
         return Err(Error::Failed("empty rebase todo list".into()));
     }
 
-    // Build the TODO file content. Each line is `<action> <oid>`.
+    // Reworded messages have to outlive this call: a conflict or an `edit`
+    // stops the rebase, and the remaining `exec` lines only run on the later
+    // `rebase --continue`. So they go in the git dir, not the tempdir that
+    // gets cleaned up below. Each new rebase clears the previous set.
+    let msg_dir = git_dir(repo_path).await.map(|d| d.join("arc-rebase-msgs"));
+    if entries.iter().any(|e| e.action == RebaseAction::Reword) {
+        let dir = msg_dir
+            .as_ref()
+            .ok_or_else(|| Error::Failed("not a git repository".into()))?;
+        let _ = std::fs::remove_dir_all(dir);
+        std::fs::create_dir_all(dir).map_err(|e| Error::Spawn(format!("msg dir: {e}")))?;
+    }
+
+    // Build the TODO file content. Each line is `<action> <oid>`; a reword
+    // adds an `exec` that amends the message git just picked.
     let mut todo = String::new();
     for entry in entries {
         todo.push_str(entry.action.keyword());
         todo.push(' ');
         todo.push_str(&entry.oid);
         todo.push('\n');
+        if entry.action != RebaseAction::Reword {
+            continue;
+        }
+        let msg = entry.message.as_deref().unwrap_or("").trim();
+        if msg.is_empty() {
+            return Err(Error::Failed(format!("reword of {} has no message", &entry.oid)));
+        }
+        let dir = msg_dir
+            .as_ref()
+            .ok_or_else(|| Error::Failed("not a git repository".into()))?;
+        let file = dir.join(format!("{}.txt", &entry.oid));
+        std::fs::write(&file, msg).map_err(|e| Error::Spawn(format!("write message: {e}")))?;
+        // git runs `exec` through a shell, on Windows too — forward slashes
+        // keep the path from being read as escapes.
+        let quoted = file.to_string_lossy().replace('\\', "/");
+        todo.push_str(&format!("exec git commit --amend --file \"{quoted}\"\n"));
     }
 
     // Drop everything into a unique tempdir so we can clean up reliably.
@@ -1790,7 +1908,7 @@ pub async fn rebase_interactive<P: AsRef<Path>>(
         .args(["rebase", "-i", base])
         .env("GIT_SEQUENCE_EDITOR", &seq_editor_path)
         .env("GIT_EDITOR", &no_op_editor)
-        .env("ARC_REBASE_TODO", &todo_path)
+        .env("ARC_REBASE_TODO", shell_path(&todo_path))
         .output()
         .await
         .map_err(|e| Error::Spawn(e.to_string()))?;
@@ -1851,24 +1969,31 @@ pub async fn rebase_continue<P: AsRef<Path>>(repo_path: P) -> Result<()> {
     Ok(())
 }
 
-#[cfg(windows)]
-fn write_helpers(dir: &Path, _todo: &Path) -> Result<(std::path::PathBuf, String)> {
-    let seq = dir.join("arc-seq-editor.cmd");
-    // `>NUL 2>&1` swallows copy's chatter so it doesn't poison git's stderr.
-    std::fs::write(&seq, "@echo off\r\ncopy /Y \"%ARC_REBASE_TODO%\" \"%1\" >NUL 2>&1\r\n")
-        .map_err(|e| Error::Spawn(format!("write helper: {e}")))?;
-    Ok((seq, no_op_editor_command()))
-}
-
-#[cfg(not(windows))]
-fn write_helpers(dir: &Path, _todo: &Path) -> Result<(std::path::PathBuf, String)> {
-    use std::os::unix::fs::PermissionsExt;
+/// Writes the sequence-editor helper and returns `(editor command, no-op
+/// editor command)`, both ready to hand to git as env vars.
+///
+/// git doesn't exec these directly — it runs them through a shell, its own
+/// bundled `sh` on Windows included. So the helper is a `sh` script on every
+/// platform, and its path goes over with forward slashes inside quotes: a
+/// Windows path handed across raw comes back with every backslash eaten
+/// (`C:UsersPRENEEL...: command not found`).
+fn write_helpers(dir: &Path, _todo: &Path) -> Result<(String, String)> {
     let seq = dir.join("arc-seq-editor.sh");
     std::fs::write(&seq, "#!/bin/sh\ncp \"$ARC_REBASE_TODO\" \"$1\"\n")
         .map_err(|e| Error::Spawn(format!("write helper: {e}")))?;
-    std::fs::set_permissions(&seq, std::fs::Permissions::from_mode(0o755))
-        .map_err(|e| Error::Spawn(format!("chmod helper: {e}")))?;
-    Ok((seq, no_op_editor_command()))
+    #[cfg(not(windows))]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&seq, std::fs::Permissions::from_mode(0o755))
+            .map_err(|e| Error::Spawn(format!("chmod helper: {e}")))?;
+    }
+    Ok((format!("sh \"{}\"", shell_path(&seq)), no_op_editor_command()))
+}
+
+/// A path the way git's shell wants it: forward slashes, so it survives the
+/// trip through `sh` on Windows.
+fn shell_path(path: &Path) -> String {
+    path.to_string_lossy().replace('\\', "/")
 }
 
 /// Command that does nothing and exits 0 — used as `GIT_EDITOR` to accept
@@ -1876,13 +2001,9 @@ fn write_helpers(dir: &Path, _todo: &Path) -> Result<(std::path::PathBuf, String
 /// message buffers. `true` is available on every POSIX shell; on Windows
 /// the equivalent is `cmd /c exit 0`.
 fn no_op_editor_command() -> String {
-    if cfg!(windows) {
-        // Quoting is awkward — git invokes the value as a command with the
-        // file path appended. `rem` is the cmd built-in for a no-op.
-        "cmd /c rem".to_string()
-    } else {
-        "true".to_string()
-    }
+    // Runs through git's shell on every platform, so `true` is enough — it's
+    // a POSIX built-in, present in the `sh` git ships on Windows too.
+    "true".to_string()
 }
 
 // ─── Worktree management ───────────────────────────────────────────────────
@@ -2163,6 +2284,313 @@ pub async fn checkout_theirs<P: AsRef<Path>>(path: P, paths: &[String]) -> Resul
     Ok(())
 }
 
+// ----- tags ----------------------------------------------------------------
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TagInfo {
+    pub name: String,
+    /// Short oid the tag points at (the commit, for annotated tags).
+    pub head_short: String,
+    /// Annotation message for annotated tags, commit subject for lightweight
+    /// ones — whichever git has to describe the tag.
+    pub subject: String,
+    pub annotated: bool,
+}
+
+/// Tags, newest first by the commit they point at.
+pub async fn tags<P: AsRef<Path>>(path: P) -> Result<Vec<TagInfo>> {
+    let path = path.as_ref();
+    let output = git_cmd()
+        .arg("-C")
+        .arg(path)
+        .args([
+            "for-each-ref",
+            "--sort=-creatordate",
+            "--format=%(refname:short)%09%(objectname:short)%09%(objecttype)%09%(contents:subject)",
+            "refs/tags",
+        ])
+        .output()
+        .await
+        .map_err(|e| Error::Spawn(e.to_string()))?;
+    if !output.status.success() {
+        return Ok(Vec::new());
+    }
+    let mut out = Vec::new();
+    for line in String::from_utf8_lossy(&output.stdout).lines() {
+        let mut parts = line.split('\t');
+        let name = parts.next().unwrap_or("").to_string();
+        if name.is_empty() {
+            continue;
+        }
+        out.push(TagInfo {
+            name,
+            head_short: parts.next().unwrap_or("").to_string(),
+            annotated: parts.next().unwrap_or("") == "tag",
+            subject: parts.next().unwrap_or("").to_string(),
+        });
+    }
+    Ok(out)
+}
+
+/// Create a tag at `oid` (default HEAD). A `message` makes it annotated.
+pub async fn tag_create<P: AsRef<Path>>(
+    path: P,
+    name: &str,
+    message: Option<&str>,
+    oid: Option<&str>,
+) -> Result<()> {
+    reject_option_like(name, "tag")?;
+    if let Some(o) = oid {
+        reject_option_like(o, "commit")?;
+    }
+    let path = path.as_ref();
+    let mut cmd = git_cmd();
+    cmd.arg("-C").arg(path).arg("tag");
+    match message.map(str::trim).filter(|m| !m.is_empty()) {
+        Some(m) => {
+            cmd.args(["-a", name, "-m", m]);
+        }
+        None => {
+            cmd.arg(name);
+        }
+    }
+    if let Some(o) = oid {
+        cmd.arg(o);
+    }
+    let output = cmd.output().await.map_err(|e| Error::Spawn(e.to_string()))?;
+    if !output.status.success() {
+        let err = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        return Err(Error::Failed(if err.is_empty() {
+            "tag failed".into()
+        } else {
+            err
+        }));
+    }
+    Ok(())
+}
+
+/// Delete a local tag. The remote copy is untouched — see [`tag_push`] for
+/// the counterpart that publishes one.
+pub async fn tag_delete<P: AsRef<Path>>(path: P, name: &str) -> Result<()> {
+    reject_option_like(name, "tag")?;
+    let path = path.as_ref();
+    let output = git_cmd()
+        .arg("-C")
+        .arg(path)
+        .args(["tag", "-d", name])
+        .output()
+        .await
+        .map_err(|e| Error::Spawn(e.to_string()))?;
+    if !output.status.success() {
+        let err = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        return Err(Error::Failed(err));
+    }
+    Ok(())
+}
+
+/// Push one tag to a remote (default `origin`).
+pub async fn tag_push<P: AsRef<Path>>(
+    path: P,
+    name: &str,
+    remote: Option<&str>,
+) -> Result<RemoteOpResult> {
+    reject_option_like(name, "tag")?;
+    let remote = remote.unwrap_or("origin");
+    reject_option_like(remote, "remote")?;
+    let path = path.as_ref();
+    let output = git_cmd()
+        .arg("-C")
+        .arg(path)
+        .args(["push", remote, &format!("refs/tags/{name}")])
+        .output()
+        .await
+        .map_err(|e| Error::Spawn(e.to_string()))?;
+    let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+    if !output.status.success() {
+        return Err(Error::Failed(if stderr.is_empty() {
+            "tag push failed".into()
+        } else {
+            stderr
+        }));
+    }
+    Ok(RemoteOpResult {
+        message: if stderr.is_empty() {
+            format!("Pushed {name} to {remote}.")
+        } else {
+            stderr
+        },
+    })
+}
+
+// ----- remote management ---------------------------------------------------
+
+pub async fn remote_add<P: AsRef<Path>>(path: P, name: &str, url: &str) -> Result<()> {
+    reject_option_like(name, "remote")?;
+    reject_option_like(url, "url")?;
+    remote_cmd(path, &["remote", "add", name, url]).await
+}
+
+pub async fn remote_remove<P: AsRef<Path>>(path: P, name: &str) -> Result<()> {
+    reject_option_like(name, "remote")?;
+    remote_cmd(path, &["remote", "remove", name]).await
+}
+
+pub async fn remote_set_url<P: AsRef<Path>>(path: P, name: &str, url: &str) -> Result<()> {
+    reject_option_like(name, "remote")?;
+    reject_option_like(url, "url")?;
+    remote_cmd(path, &["remote", "set-url", name, url]).await
+}
+
+async fn remote_cmd<P: AsRef<Path>>(path: P, args: &[&str]) -> Result<()> {
+    let output = git_cmd()
+        .arg("-C")
+        .arg(path.as_ref())
+        .args(args)
+        .output()
+        .await
+        .map_err(|e| Error::Spawn(e.to_string()))?;
+    if !output.status.success() {
+        let err = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        return Err(Error::Failed(if err.is_empty() {
+            "remote command failed".into()
+        } else {
+            err
+        }));
+    }
+    Ok(())
+}
+
+// ----- reflog ---------------------------------------------------------------
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ReflogEntry {
+    /// `HEAD@{3}` — what you pass to checkout/reset to get back here.
+    pub selector: String,
+    pub oid: String,
+    pub head_short: String,
+    /// What moved HEAD: `commit`, `rebase (finish)`, `reset`, …
+    pub action: String,
+    pub subject: String,
+    /// Relative time, as git formats it (`2 hours ago`).
+    pub when: String,
+}
+
+/// `git reflog` — every position HEAD has held, newest first. This is the
+/// undo net behind reset, rebase and discard, so the UI can offer a way back
+/// from anything destructive.
+pub async fn reflog<P: AsRef<Path>>(path: P, limit: usize) -> Result<Vec<ReflogEntry>> {
+    let path = path.as_ref();
+    let output = git_cmd()
+        .arg("-C")
+        .arg(path)
+        .args([
+            "reflog",
+            "--date=relative",
+            &format!("--max-count={}", limit.clamp(1, 500)),
+            "--format=%gd%x09%H%x09%h%x09%gs%x09%cr",
+        ])
+        .output()
+        .await
+        .map_err(|e| Error::Spawn(e.to_string()))?;
+    if !output.status.success() {
+        return Ok(Vec::new());
+    }
+    let mut out = Vec::new();
+    for line in String::from_utf8_lossy(&output.stdout).lines() {
+        let mut parts = line.split('\t');
+        let selector = parts.next().unwrap_or("").to_string();
+        if selector.is_empty() {
+            continue;
+        }
+        let oid = parts.next().unwrap_or("").to_string();
+        let head_short = parts.next().unwrap_or("").to_string();
+        // `%gs` is "<action>: <subject>" for most entries.
+        let raw = parts.next().unwrap_or("");
+        let (action, subject) = match raw.split_once(": ") {
+            Some((a, rest)) => (a.to_string(), rest.to_string()),
+            None => (raw.to_string(), String::new()),
+        };
+        out.push(ReflogEntry {
+            selector,
+            oid,
+            head_short,
+            action,
+            subject,
+            when: parts.next().unwrap_or("").to_string(),
+        });
+    }
+    Ok(out)
+}
+
+// ----- submodules -----------------------------------------------------------
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SubmoduleEntry {
+    /// Path relative to the superproject root.
+    pub path: String,
+    pub head_short: String,
+    /// `git describe` output git appends, when the submodule has one.
+    pub describe: Option<String>,
+    /// `uninitialized`, `out-of-sync`, `conflict` or `ok` — decoded from the
+    /// status prefix so callers don't have to know git's single-char codes.
+    pub state: String,
+}
+
+/// `git submodule status`. Empty for a repo without submodules, which is the
+/// common case — the caller can hide the section on an empty list.
+pub async fn submodules<P: AsRef<Path>>(path: P) -> Result<Vec<SubmoduleEntry>> {
+    let path = path.as_ref();
+    let output = git_cmd()
+        .arg("-C")
+        .arg(path)
+        .args(["submodule", "status", "--recursive"])
+        .output()
+        .await
+        .map_err(|e| Error::Spawn(e.to_string()))?;
+    if !output.status.success() {
+        return Ok(Vec::new());
+    }
+    Ok(parse_submodule_status(&String::from_utf8_lossy(
+        &output.stdout,
+    )))
+}
+
+fn parse_submodule_status(out: &str) -> Vec<SubmoduleEntry> {
+    let mut entries = Vec::new();
+    for line in out.lines() {
+        if line.trim().is_empty() {
+            continue;
+        }
+        // `<prefix><sha> <path> (<describe>)`, prefix being one of ' -+U'.
+        let (state, rest) = match line.chars().next() {
+            Some('-') => ("uninitialized", &line[1..]),
+            Some('+') => ("out-of-sync", &line[1..]),
+            Some('U') => ("conflict", &line[1..]),
+            Some(' ') => ("ok", &line[1..]),
+            _ => ("ok", line),
+        };
+        // git writes the prefix flush against the sha (`+abc123 path`), but
+        // tolerate a space after it either way.
+        let mut parts = rest.trim_start().splitn(3, ' ');
+        let sha = parts.next().unwrap_or("");
+        let path = parts.next().unwrap_or("").to_string();
+        if path.is_empty() {
+            continue;
+        }
+        let describe = parts
+            .next()
+            .map(|d| d.trim().trim_start_matches('(').trim_end_matches(')').to_string())
+            .filter(|d| !d.is_empty());
+        entries.push(SubmoduleEntry {
+            path,
+            head_short: sha.chars().take(7).collect(),
+            describe,
+            state: state.to_string(),
+        });
+    }
+    entries
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2244,6 +2672,101 @@ u UU N... 100644 100644 100644 100644 eee fff ggg conflict.rs
         assert_eq!(parsed[1].branch.as_deref(), Some("feature"));
         assert!(parsed[2].branch.is_none());
         assert!(parsed[3].locked);
+    }
+
+    #[test]
+    fn parses_submodule_status() {
+        let raw = " abc1234567890 vendor/lib (v1.2.0)\n-def4567890123 vendor/off\n+aaa1111111111 vendor/drift (heads/main)\nUbbb2222222222 vendor/conflicted\n";
+        let parsed = parse_submodule_status(raw);
+        assert_eq!(parsed.len(), 4);
+        assert_eq!(parsed[0].state, "ok");
+        assert_eq!(parsed[0].path, "vendor/lib");
+        assert_eq!(parsed[0].describe.as_deref(), Some("v1.2.0"));
+        assert_eq!(parsed[1].state, "uninitialized");
+        assert!(parsed[1].describe.is_none());
+        assert_eq!(parsed[2].state, "out-of-sync");
+        assert_eq!(parsed[3].state, "conflict");
+        assert_eq!(parsed[3].head_short, "bbb2222");
+    }
+
+    /// Reword goes through an `exec git commit --amend --file <path>` line in
+    /// the rebase TODO, so this covers the part that can silently break: the
+    /// path quoting, which differs on Windows.
+    #[tokio::test]
+    async fn rebase_reword_rewrites_the_message() {
+        use std::process::Command as Sync;
+
+        let stamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0);
+        let dir = std::env::temp_dir().join(format!("arc-git-reword-{stamp}"));
+        std::fs::create_dir_all(&dir).expect("tempdir");
+
+        let git = |args: &[&str]| {
+            let out = Sync::new("git")
+                .arg("-C")
+                .arg(&dir)
+                .args(args)
+                .output()
+                .expect("git runs");
+            assert!(
+                out.status.success(),
+                "git {args:?} failed: {}",
+                String::from_utf8_lossy(&out.stderr)
+            );
+        };
+
+        git(&["init", "--quiet"]);
+        git(&["config", "user.email", "test@example.com"]);
+        git(&["config", "user.name", "Test"]);
+        git(&["config", "commit.gpgsign", "false"]);
+        // Four commits, but only the newest three get rebased: the base is
+        // the parent of the oldest included commit, and the root commit has
+        // none.
+        for n in 1..=4 {
+            std::fs::write(dir.join(format!("f{n}.txt")), "x").expect("write");
+            git(&["add", "."]);
+            git(&["commit", "--quiet", "-m", &format!("commit {n}")]);
+        }
+
+        let before = log(&dir, 3, &LogOptions::default()).await.expect("log");
+        assert_eq!(before.len(), 3);
+        // Oldest first, matching the TODO order.
+        let ordered: Vec<_> = before.iter().rev().collect();
+        let base = format!("{}^", ordered[0].oid);
+        let entries: Vec<RebaseTodoEntry> = ordered
+            .iter()
+            .enumerate()
+            .map(|(i, c)| RebaseTodoEntry {
+                oid: c.oid.clone(),
+                action: if i == 1 {
+                    RebaseAction::Reword
+                } else {
+                    RebaseAction::Pick
+                },
+                message: if i == 1 {
+                    Some("reworded subject".into())
+                } else {
+                    None
+                },
+            })
+            .collect();
+
+        rebase_interactive(&dir, &base, &entries)
+            .await
+            .expect("rebase runs");
+
+        let after = log(&dir, 3, &LogOptions::default()).await.expect("log after");
+        assert_eq!(after.len(), 3, "history length is unchanged");
+        let subjects: Vec<&str> = after.iter().map(|c| c.subject.as_str()).collect();
+        assert_eq!(subjects, vec!["commit 4", "reworded subject", "commit 2"]);
+        assert!(
+            status(&dir).await.expect("status").expect("repo").in_progress.is_none(),
+            "the rebase finished rather than stopping"
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[tokio::test]

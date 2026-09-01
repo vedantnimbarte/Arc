@@ -36,11 +36,20 @@
 //!   invoke("git_rebase_interactive", { path, base, entries })           -> ()
 //!   invoke("git_rebase_abort",   { path })                              -> ()
 //!   invoke("git_rebase_continue",{ path })                              -> ()
+//!   invoke("git_tags",           { path })                              -> Vec<TagInfo>
+//!   invoke("git_tag_create",     { path, name, message?, oid? })        -> ()
+//!   invoke("git_tag_delete",     { path, name })                        -> ()
+//!   invoke("git_tag_push",       { path, name, remote? })               -> RemoteOpResult
+//!   invoke("git_remote_add",     { path, name, url })                   -> ()
+//!   invoke("git_remote_remove",  { path, name })                        -> ()
+//!   invoke("git_remote_set_url", { path, name, url })                   -> ()
+//!   invoke("git_reflog",         { path, limit })                       -> Vec<ReflogEntry>
+//!   invoke("git_submodules",     { path })                              -> Vec<SubmoduleEntry>
 
 use arc_git::{
     AuthorInfo, BlameLine, BranchInfo, ChangeEntry, CheckoutResult, CommitResult, DiffScope,
-    DiffStat, GitInfo, LogEntry, LogOptions, MergeResult, RebaseTodoEntry, RemoteInfo,
-    RemoteOpResult, ResetMode, StashEntry, WorktreeEntry,
+    DiffStat, GitInfo, LogEntry, LogOptions, MergeResult, RebaseTodoEntry, ReflogEntry, RemoteInfo,
+    RemoteOpResult, ResetMode, StashEntry, SubmoduleEntry, TagInfo, WorktreeEntry,
 };
 
 #[tauri::command]
@@ -132,10 +141,20 @@ pub async fn git_unstage(path: String, paths: Vec<String>) -> Result<(), String>
 }
 
 #[tauri::command]
-pub async fn git_commit(path: String, message: String) -> Result<CommitResult, String> {
-    arc_git::commit(&path, &message)
-        .await
-        .map_err(|e| e.to_string())
+pub async fn git_commit(
+    path: String,
+    message: String,
+    sign: Option<bool>,
+    signoff: Option<bool>,
+) -> Result<CommitResult, String> {
+    arc_git::commit(
+        &path,
+        &message,
+        sign.unwrap_or(false),
+        signoff.unwrap_or(false),
+    )
+    .await
+    .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -244,10 +263,20 @@ pub async fn git_merge(path: String, branch: String) -> Result<MergeResult, Stri
 }
 
 #[tauri::command]
-pub async fn git_commit_amend(path: String, message: String) -> Result<CommitResult, String> {
-    arc_git::commit_amend(&path, &message)
-        .await
-        .map_err(|e| e.to_string())
+pub async fn git_commit_amend(
+    path: String,
+    message: String,
+    sign: Option<bool>,
+    signoff: Option<bool>,
+) -> Result<CommitResult, String> {
+    arc_git::commit_amend(
+        &path,
+        &message,
+        sign.unwrap_or(false),
+        signoff.unwrap_or(false),
+    )
+    .await
+    .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -342,4 +371,72 @@ pub async fn git_rebase_abort(path: String) -> Result<(), String> {
 #[tauri::command]
 pub async fn git_rebase_continue(path: String) -> Result<(), String> {
     arc_git::rebase_continue(&path).await.map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn git_tags(path: String) -> Result<Vec<TagInfo>, String> {
+    arc_git::tags(&path).await.map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn git_tag_create(
+    path: String,
+    name: String,
+    message: Option<String>,
+    oid: Option<String>,
+) -> Result<(), String> {
+    arc_git::tag_create(&path, &name, message.as_deref(), oid.as_deref())
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn git_tag_delete(path: String, name: String) -> Result<(), String> {
+    arc_git::tag_delete(&path, &name)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn git_tag_push(
+    path: String,
+    name: String,
+    remote: Option<String>,
+) -> Result<RemoteOpResult, String> {
+    arc_git::tag_push(&path, &name, remote.as_deref())
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn git_remote_add(path: String, name: String, url: String) -> Result<(), String> {
+    arc_git::remote_add(&path, &name, &url)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn git_remote_remove(path: String, name: String) -> Result<(), String> {
+    arc_git::remote_remove(&path, &name)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn git_remote_set_url(path: String, name: String, url: String) -> Result<(), String> {
+    arc_git::remote_set_url(&path, &name, &url)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn git_reflog(path: String, limit: Option<usize>) -> Result<Vec<ReflogEntry>, String> {
+    arc_git::reflog(&path, limit.unwrap_or(100))
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn git_submodules(path: String) -> Result<Vec<SubmoduleEntry>, String> {
+    arc_git::submodules(&path).await.map_err(|e| e.to_string())
 }

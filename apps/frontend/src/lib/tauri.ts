@@ -1065,6 +1065,9 @@ export interface GitInfo {
   unstaged: number;
   untracked: number;
   conflicted: number;
+  /** Multi-step operation the repo is halfway through — 'rebase', 'merge',
+   *  'cherry-pick', 'revert' or 'bisect'. Null when the repo is idle. */
+  in_progress: string | null;
 }
 
 /** Returns null when `path` isn't inside a git repo (or git is unavailable). */
@@ -1186,6 +1189,90 @@ export async function gitApply(
   return invoke<void>('git_apply', { path, patch, cached, reverse });
 }
 
+// ── Tags ─────────────────────────────────────────────────────────────────────
+
+export interface GitTagInfo {
+  name: string;
+  head_short: string;
+  subject: string;
+  annotated: boolean;
+}
+
+export async function gitTags(path: string): Promise<GitTagInfo[]> {
+  return invoke<GitTagInfo[]>('git_tags', { path });
+}
+
+/** A `message` makes it annotated; `oid` defaults to HEAD. */
+export async function gitTagCreate(
+  path: string,
+  name: string,
+  message?: string | null,
+  oid?: string | null,
+): Promise<void> {
+  await invoke('git_tag_create', {
+    path,
+    name,
+    message: message ?? null,
+    oid: oid ?? null,
+  });
+}
+
+export async function gitTagDelete(path: string, name: string): Promise<void> {
+  await invoke('git_tag_delete', { path, name });
+}
+
+export async function gitTagPush(
+  path: string,
+  name: string,
+  remote?: string | null,
+): Promise<GitRemoteOpResult> {
+  return invoke<GitRemoteOpResult>('git_tag_push', { path, name, remote: remote ?? null });
+}
+
+// ── Remote management ────────────────────────────────────────────────────────
+
+export async function gitRemoteAdd(path: string, name: string, url: string): Promise<void> {
+  await invoke('git_remote_add', { path, name, url });
+}
+
+export async function gitRemoteRemove(path: string, name: string): Promise<void> {
+  await invoke('git_remote_remove', { path, name });
+}
+
+export async function gitRemoteSetUrl(path: string, name: string, url: string): Promise<void> {
+  await invoke('git_remote_set_url', { path, name, url });
+}
+
+// ── Reflog ───────────────────────────────────────────────────────────────────
+
+export interface GitReflogEntry {
+  /** `HEAD@{3}` — pass this to checkout/reset to get back to that position. */
+  selector: string;
+  oid: string;
+  head_short: string;
+  action: string;
+  subject: string;
+  when: string;
+}
+
+export async function gitReflog(path: string, limit?: number): Promise<GitReflogEntry[]> {
+  return invoke<GitReflogEntry[]>('git_reflog', { path, limit: limit ?? 100 });
+}
+
+// ── Submodules ───────────────────────────────────────────────────────────────
+
+export interface GitSubmoduleEntry {
+  path: string;
+  head_short: string;
+  describe: string | null;
+  /** 'ok' | 'uninitialized' | 'out-of-sync' | 'conflict' */
+  state: string;
+}
+
+export async function gitSubmodules(path: string): Promise<GitSubmoduleEntry[]> {
+  return invoke<GitSubmoduleEntry[]>('git_submodules', { path });
+}
+
 // ── Remotes ──────────────────────────────────────────────────────────────────
 
 export interface GitRemoteInfo {
@@ -1290,8 +1377,17 @@ export async function gitMerge(path: string, branch: string): Promise<GitMergeRe
 
 // ── Commit operations ─────────────────────────────────────────────────────────
 
-export async function gitCommitAmend(path: string, message: string): Promise<GitCommitResult> {
-  return invoke<GitCommitResult>('git_commit_amend', { path, message });
+export async function gitCommitAmend(
+  path: string,
+  message: string,
+  opts?: { sign?: boolean; signoff?: boolean },
+): Promise<GitCommitResult> {
+  return invoke<GitCommitResult>('git_commit_amend', {
+    path,
+    message,
+    sign: opts?.sign ?? false,
+    signoff: opts?.signoff ?? false,
+  });
 }
 
 export async function gitRevert(path: string, oid: string): Promise<GitCommitResult> {
@@ -1370,12 +1466,14 @@ export async function gitWorktreeRemove(
 }
 
 /** Mirrors `arc_git::RebaseAction`. */
-export type GitRebaseAction = 'pick' | 'drop' | 'squash' | 'fixup';
+export type GitRebaseAction = 'pick' | 'drop' | 'squash' | 'fixup' | 'reword' | 'edit';
 
 export interface GitRebaseTodoEntry {
   /** Full commit oid — order in the array = new history order (oldest first). */
   oid: string;
   action: GitRebaseAction;
+  /** Replacement commit message. Only read for `reword`. */
+  message?: string | null;
 }
 
 /** Run `git rebase -i <base>` with a pre-built TODO. Never opens an editor;
@@ -1616,8 +1714,14 @@ export interface GitCommitResult {
 export async function gitCommit(
   path: string,
   message: string,
+  opts?: { sign?: boolean; signoff?: boolean },
 ): Promise<GitCommitResult> {
-  return invoke<GitCommitResult>('git_commit', { path, message });
+  return invoke<GitCommitResult>('git_commit', {
+    path,
+    message,
+    sign: opts?.sign ?? false,
+    signoff: opts?.signoff ?? false,
+  });
 }
 
 /**

@@ -29,8 +29,12 @@ it.
 - **File Tree & Search** — Browse, open, and manage files with git status decorations, plus
   BM25 full-text search backed by a tantivy index and a literal find-and-replace across
   the workspace (previewed per file before anything is written).
-- **Git Integration** — Branch status, diffs, logs, blame, staging/commit, worktrees,
-  interactive rebase, cherry-pick, and GitHub pull requests, all from the UI. Merge
+- **Git Integration** — Branch status, diffs, logs, blame, staging/commit, tags, remotes,
+  stashes, worktrees, interactive rebase, cherry-pick, submodule status, and GitHub pull
+  requests, all from the UI. Commits can be signed (`-S`) or signed-off (`-s`); a rejected
+  push offers force-with-lease. Interactive rebase does reword and edit as well as
+  squash/fixup/drop, and a stopped rebase gets a continue/abort bar in the panel. The
+  reflog is browsable, so a bad reset or rebase is one click from being undone. Merge
   conflicts open in a three-way view that resolves one hunk at a time — take ours,
   theirs, both, or hand-edit the result — then writes and stages the file.
 - **SSH Client** — Pure-Rust SSH (russh) with saved hosts, key generation/import, and

@@ -6,6 +6,8 @@ import {
   GitCommitHorizontal,
   ListOrdered,
   Maximize2,
+  Pause,
+  Pencil,
   Minimize2,
   Minus,
   RotateCcw,
@@ -32,9 +34,10 @@ import { cn } from '../../lib/cn';
  * GIT_SEQUENCE_EDITOR to a helper script and GIT_EDITOR to a no-op so the
  * rebase never opens a real editor.
  *
- * V1 omits `reword` and `edit` because both demand mid-rebase user input;
- * the recommended workflow is to `git commit --amend` after the rebase if
- * a message needs changing.
+ * `reword` types the new message here and rides along as an `exec git commit
+ * --amend`, so the rebase still never opens an editor. `edit` is the one
+ * action that stops mid-flight: git halts at that commit and the source
+ * control panel's "rebase in progress" bar drives continue / abort.
  */
 export function RebasePanel({ inline = false }: { inline?: boolean }) {
   const open = useGitUi((s) => s.rebasePanelOpen);
@@ -45,6 +48,9 @@ export function RebasePanel({ inline = false }: { inline?: boolean }) {
   const [count, setCount] = useState(10);
   const [commits, setCommits] = useState<GitLogEntry[]>([]);
   const [actions, setActions] = useState<Record<string, GitRebaseAction>>({});
+  // Reworded messages, keyed by oid. Seeded from the commit subject the
+  // first time a row switches to `reword`.
+  const [messages, setMessages] = useState<Record<string, string>>({});
   const [order, setOrder] = useState<string[]>([]); // oids in display order
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -117,10 +123,19 @@ export function RebasePanel({ inline = false }: { inline?: boolean }) {
     // Skip commits the user dropped: the rebase TODO list expresses drop
     // as a `drop` keyword on the row, so we keep them — just emit a TODO
     // entry per visible row.
-    const entries: GitRebaseTodoEntry[] = order.map((oid) => ({
-      oid,
-      action: actions[oid] ?? 'pick',
-    }));
+    const entries: GitRebaseTodoEntry[] = order.map((oid) => {
+      const action = actions[oid] ?? 'pick';
+      return {
+        oid,
+        action,
+        message: action === 'reword' ? (messages[oid] ?? '').trim() : null,
+      };
+    });
+    const blankReword = entries.find((e) => e.action === 'reword' && !e.message);
+    if (blankReword) {
+      setErr('A reworded commit needs a message.');
+      return;
+    }
     // git refuses `fixup` or `squash` as the first row — there's nothing
     // for them to fold into. Surface that early so the rebase doesn't
     // start and leave the repo mid-flight.
@@ -210,9 +225,9 @@ export function RebasePanel({ inline = false }: { inline?: boolean }) {
       {root && (
         <>
           <div className="border-b border-border-hairline bg-bg-base/30 px-4 py-1.5 font-display text-2xs text-fg-subtle">
-            Order is oldest-first (top), matching git&rsquo;s rebase TODO. Squash and fixup fold
-            into the row above. Reword + edit aren&rsquo;t supported yet — use{' '}
-            <span className="font-mono">git commit --amend</span> after.
+            Order is oldest-first (top), matching git&rsquo;s rebase TODO. Squash and fixup
+            fold into the row above; reword takes a new message here; edit stops the rebase
+            at that commit for you to continue from the panel.
           </div>
 
           <div className={cn('overflow-y-auto', inline ? 'min-h-0 flex-1' : 'max-h-[55vh]')}>
@@ -231,6 +246,8 @@ export function RebasePanel({ inline = false }: { inline?: boolean }) {
                     key={oid}
                     commit={commit}
                     action={action}
+                    message={messages[oid] ?? ''}
+                    onMessage={(m) => setMessages((s) => ({ ...s, [oid]: m }))}
                     onAction={(a) => setAction(oid, a)}
                     onUp={() => move(oid, -1)}
                     onDown={() => move(oid, 1)}
@@ -294,6 +311,8 @@ export function RebasePanel({ inline = false }: { inline?: boolean }) {
 function RebaseRow({
   commit,
   action,
+  message,
+  onMessage,
   onAction,
   onUp,
   onDown,
@@ -302,6 +321,8 @@ function RebaseRow({
 }: {
   commit: GitLogEntry;
   action: GitRebaseAction;
+  message: string;
+  onMessage: (m: string) => void;
   onAction: (a: GitRebaseAction) => void;
   onUp: () => void;
   onDown: () => void;
@@ -310,9 +331,10 @@ function RebaseRow({
 }) {
   const dropped = action === 'drop';
   return (
+    <div className="border-b border-border-hairline/60 last:border-b-0">
     <div
       className={cn(
-        'flex items-center gap-2 border-b border-border-hairline/60 px-4 py-1.5 last:border-b-0',
+        'flex items-center gap-2 px-4 py-1.5',
         dropped && 'opacity-50',
       )}
     >
@@ -355,6 +377,28 @@ function RebaseRow({
         {commit.author}
       </span>
     </div>
+    {action === 'reword' && (
+      <div className="px-4 pb-1.5 pl-[52px]">
+        <input
+          value={message}
+          onChange={(e) => onMessage(e.target.value)}
+          placeholder="new commit message"
+          aria-label={`New message for ${commit.short}`}
+          className={cn(
+            'w-full rounded border border-border-subtle bg-bg-base/60 px-2 py-1',
+            'font-display text-xs text-fg-base placeholder:text-fg-subtle',
+            'focus:border-accent/45 focus:outline-none',
+          )}
+        />
+      </div>
+    )}
+    {action === 'edit' && (
+      <div className="px-4 pb-1.5 pl-[52px] font-display text-2xs text-fg-subtle">
+        The rebase stops here — change what you like, then hit continue on the
+        source control panel&rsquo;s rebase bar.
+      </div>
+    )}
+    </div>
   );
 }
 
@@ -371,6 +415,18 @@ const ACTIONS: { id: GitRebaseAction; label: string; icon: typeof Minus; hint: s
     label: 'fixup',
     icon: RotateCcw,
     hint: 'fold into the row above, drop this message',
+  },
+  {
+    id: 'reword',
+    label: 'reword',
+    icon: Pencil,
+    hint: 'keep the commit, replace its message',
+  },
+  {
+    id: 'edit',
+    label: 'edit',
+    icon: Pause,
+    hint: 'stop the rebase here so you can change the tree',
   },
   { id: 'drop', label: 'drop', icon: Minus, hint: 'remove this commit from history' },
 ];
