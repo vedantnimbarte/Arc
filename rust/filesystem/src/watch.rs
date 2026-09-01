@@ -119,15 +119,20 @@ mod tests {
     }
 
     fn uuid_like() -> String {
-        // Avoid pulling uuid into dev-deps for one test helper.
+        // Avoid pulling uuid into dev-deps for one test helper. The counter
+        // matters: coarse clock granularity means two calls can read the same
+        // nanos and collide.
+        use std::sync::atomic::{AtomicU32, Ordering};
         use std::time::{SystemTime, UNIX_EPOCH};
+        static N: AtomicU32 = AtomicU32::new(0);
         format!(
-            "{}-{}",
+            "{}-{}-{}",
             SystemTime::now()
                 .duration_since(UNIX_EPOCH)
                 .unwrap()
                 .as_nanos(),
-            std::process::id()
+            std::process::id(),
+            N.fetch_add(1, Ordering::Relaxed)
         )
     }
 }

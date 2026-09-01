@@ -204,13 +204,18 @@ mod tests {
     use std::path::PathBuf;
 
     fn tempdir() -> PathBuf {
+        // Counter-suffixed: coarse clock granularity means two dirs can be
+        // made in the same nanosecond and collide.
+        use std::sync::atomic::{AtomicU32, Ordering};
+        static N: AtomicU32 = AtomicU32::new(0);
         let p = std::env::temp_dir().join(format!(
-            "arc-search-{}-{}",
+            "arc-search-{}-{}-{}",
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap()
                 .as_nanos(),
             std::process::id(),
+            N.fetch_add(1, Ordering::Relaxed),
         ));
         fs::create_dir_all(&p).unwrap();
         p
