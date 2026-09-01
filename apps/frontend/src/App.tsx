@@ -39,6 +39,7 @@ import {
   FolderOpen,
   FolderTree,
   GitPullRequest,
+  History,
   Inbox,
   LayoutGrid,
   ListOrdered,
@@ -244,6 +245,7 @@ export default function App() {
     (s) =>
       s.worktreeExpanded ||
       s.rebaseExpanded ||
+      s.reflogExpanded ||
       s.cherryPickTarget !== null ||
       s.prPanelView.kind !== 'closed',
   );
@@ -474,6 +476,19 @@ export default function App() {
           void import('./state/gitUi').then(({ useGitUi }) => {
             useFiles.getState().showSidebarView('git');
             useGitUi.getState().setRebasePanelOpen(true);
+          });
+        },
+      },
+      {
+        id: 'git.reflog',
+        title: 'Git Reflog',
+        group: 'Git',
+        keywords: ['reflog', 'undo', 'recover', 'lost', 'history'],
+        icon: History,
+        run: () => {
+          void import('./state/gitUi').then(({ useGitUi }) => {
+            useFiles.getState().showSidebarView('git');
+            useGitUi.getState().setReflogPanelOpen(true);
           });
         },
       },

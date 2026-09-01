@@ -33,8 +33,14 @@ import {
   Plus,
   RefreshCw,
   Trash2,
+  Upload,
   X,
   Bot,
+  Boxes,
+  Cloud,
+  PenLine,
+  ShieldCheck,
+  Tag,
 } from 'lucide-react';
 import {
   fsReadFile,
@@ -57,13 +63,28 @@ import {
   gitStashList,
   gitStashPop,
   gitStashPush,
+  gitRebaseAbort,
+  gitRebaseContinue,
+  gitReflog,
+  gitRemoteAdd,
+  gitRemoteRemove,
+  gitRemoteSetUrl,
+  gitRemotes,
+  gitSubmodules,
+  gitTagCreate,
+  gitTagDelete,
+  gitTagPush,
+  gitTags,
   gitUnstage,
   gitWindowOpen,
   isTauri,
   type GitBranchInfo,
   type GitChangeEntry,
   type GitDiffScope,
+  type GitRemoteInfo,
   type GitStashEntry,
+  type GitSubmoduleEntry,
+  type GitTagInfo,
 } from '../lib/tauri';
 import { agentTouched, useAgentRun } from '../state/agentRun';
 import { useFiles } from '../state/files';
@@ -73,7 +94,7 @@ import { Tooltip } from './Tooltip';
 import { useWorkspace } from '../state/workspace';
 import { fileIcon } from '../lib/fileIcons';
 import { cn } from '../lib/cn';
-import { askConfirm } from '../state/confirm';
+import { askConfirm, askText } from '../state/confirm';
 import { copyText } from '../lib/clipboard';
 import { toast } from '../state/toast';
 
@@ -83,6 +104,9 @@ const WorktreePanel = lazy(() =>
 );
 const RebasePanel = lazy(() =>
   import('./git/RebasePanel').then((m) => ({ default: m.RebasePanel })),
+);
+const ReflogPanel = lazy(() =>
+  import('./git/ReflogPanel').then((m) => ({ default: m.ReflogPanel })),
 );
 
 /** Path separator that matches the workspace root style. */
@@ -271,9 +295,33 @@ export function SourceControl() {
   // — but the launcher stays lit, since the panel is still open.
   const worktreesOpen = useGitUi((s) => s.worktreePanelOpen);
   const rebaseOpen = useGitUi((s) => s.rebasePanelOpen);
+  const reflogOpen = useGitUi((s) => s.reflogPanelOpen);
   const worktreesInline = useGitUi((s) => s.worktreePanelOpen && !s.worktreeExpanded);
   const rebaseInline = useGitUi((s) => s.rebasePanelOpen && !s.rebaseExpanded);
-  const panelOpen = worktreesInline || rebaseInline;
+  const reflogInline = useGitUi((s) => s.reflogPanelOpen && !s.reflogExpanded);
+  const panelOpen = worktreesInline || rebaseInline || reflogInline;
+
+  // Commit switches — `-S` and `-s`, remembered across sessions.
+  const signCommits = useGitUi((s) => s.signCommits);
+  const signoffCommits = useGitUi((s) => s.signoffCommits);
+
+  // Tags / remotes / submodules — collapsible sections beside Stash.
+  const [tags, setTags] = useState<GitTagInfo[]>([]);
+  const [tagsOpen, setTagsOpen] = useState(false);
+  const [tagBusy, setTagBusy] = useState(false);
+  const [newTagName, setNewTagName] = useState('');
+  const [remotes, setRemotes] = useState<GitRemoteInfo[]>([]);
+  const [remotesOpen, setRemotesOpen] = useState(false);
+  const [remoteBusy, setRemoteBusy] = useState(false);
+  const [newRemoteName, setNewRemoteName] = useState('');
+  const [newRemoteUrl, setNewRemoteUrl] = useState('');
+  const [submodules, setSubmodules] = useState<GitSubmoduleEntry[]>([]);
+  const [submodulesOpen, setSubmodulesOpen] = useState(false);
+
+  // Set when a push comes back rejected, so the banner can offer the
+  // force-with-lease retry rather than hiding it behind a modifier key.
+  const [pushRejected, setPushRejected] = useState(false);
+  const [rebaseBusy, setRebaseBusy] = useState(false);
   const [branches, setBranches] = useState<GitBranchInfo[]>([]);
   const [branchesLoading, setBranchesLoading] = useState(false);
   const [newBranchName, setNewBranchName] = useState('');
@@ -335,22 +383,41 @@ export function SourceControl() {
     }
   }, [root, remoteOp, refreshStore]);
 
-  const handlePush = useCallback(async () => {
-    if (!root || remoteOp) return;
-    setRemoteOp('push');
-    setRemoteMsg(null);
-    setOpError(null);
-    try {
-      const hasUpstream = !!info?.upstream;
-      const res = await gitPushRemote(root, undefined, undefined, false, !hasUpstream);
-      setRemoteMsg(res.message || 'Push complete.');
-      await refreshStore(root);
-    } catch (e) {
-      setOpError(String(e));
-    } finally {
-      setRemoteOp(null);
-    }
-  }, [root, remoteOp, info?.upstream, refreshStore]);
+  const handlePush = useCallback(
+    async (force = false) => {
+      if (!root || remoteOp) return;
+      setRemoteOp('push');
+      setRemoteMsg(null);
+      setOpError(null);
+      setPushRejected(false);
+      try {
+        const hasUpstream = !!info?.upstream;
+        const res = await gitPushRemote(root, undefined, undefined, force, !hasUpstream);
+        setRemoteMsg(res.message || 'Push complete.');
+        await refreshStore(root);
+      } catch (e) {
+        const msg = String(e);
+        setOpError(msg);
+        // A rebase or amend leaves the remote ahead of a history that no
+        // longer contains it; that's the one case force-with-lease is for.
+        setPushRejected(/rejected|non-fast-forward|fetch first/i.test(msg));
+      } finally {
+        setRemoteOp(null);
+      }
+    },
+    [root, remoteOp, info?.upstream, refreshStore],
+  );
+
+  const handleForcePush = useCallback(async () => {
+    if (!root) return;
+    const ok = await askConfirm({
+      title: 'Force push with lease?',
+      body: 'Overwrites the remote branch with your local history. The lease still refuses if someone else pushed since your last fetch.',
+      confirmLabel: 'Force push',
+      destructive: true,
+    });
+    if (ok) await handlePush(true);
+  }, [root, handlePush]);
 
   // ── Stash ────────────────────────────────────────────────────────────────────
 
@@ -438,7 +505,10 @@ export function SourceControl() {
     setBusy(true);
     setOpError(null);
     try {
-      const res = await gitCommitAmend(root, msg);
+      const res = await gitCommitAmend(root, msg, {
+        sign: signCommits,
+        signoff: signoffCommits,
+      });
       setMessage('');
       setAmendMode(false);
       toast(res.short ? `Amended as ${res.short}` : 'Commit amended');
@@ -448,7 +518,208 @@ export function SourceControl() {
     } finally {
       setBusy(false);
     }
-  }, [busy, message, refresh, root]);
+  }, [busy, message, refresh, root, signCommits, signoffCommits]);
+
+  // ── Rebase in progress ───────────────────────────────────────────────────────
+
+  const handleRebaseStep = useCallback(
+    async (step: 'continue' | 'abort') => {
+      if (!root || rebaseBusy) return;
+      setRebaseBusy(true);
+      setOpError(null);
+      try {
+        if (step === 'continue') {
+          await gitRebaseContinue(root);
+          toast('Rebase continued');
+        } else {
+          await gitRebaseAbort(root);
+          toast('Rebase aborted');
+        }
+        await refreshStore(root);
+      } catch (e) {
+        setOpError(String(e));
+      } finally {
+        setRebaseBusy(false);
+      }
+    },
+    [root, rebaseBusy, refreshStore],
+  );
+
+  // ── Tags ─────────────────────────────────────────────────────────────────────
+
+  const loadTags = useCallback(async () => {
+    if (!root) return;
+    try {
+      setTags(await gitTags(root));
+    } catch {
+      setTags([]);
+    }
+  }, [root]);
+
+  useEffect(() => {
+    if (tagsOpen) void loadTags();
+  }, [tagsOpen, loadTags]);
+
+  const handleTagCreate = useCallback(async () => {
+    const name = newTagName.trim();
+    if (!root || !name || tagBusy) return;
+    setTagBusy(true);
+    setOpError(null);
+    try {
+      await gitTagCreate(root, name);
+      setNewTagName('');
+      await loadTags();
+      toast(`Tagged HEAD as ${name}`);
+    } catch (e) {
+      setOpError(String(e));
+    } finally {
+      setTagBusy(false);
+    }
+  }, [root, newTagName, tagBusy, loadTags]);
+
+  const handleTagDelete = useCallback(
+    async (name: string) => {
+      if (!root || tagBusy) return;
+      const ok = await askConfirm({
+        title: `Delete tag ${name}?`,
+        body: 'Only the local tag — a copy already pushed to a remote stays there.',
+        confirmLabel: 'Delete',
+        destructive: true,
+      });
+      if (!ok) return;
+      setTagBusy(true);
+      try {
+        await gitTagDelete(root, name);
+        await loadTags();
+        toast(`Deleted ${name}`);
+      } catch (e) {
+        setOpError(String(e));
+      } finally {
+        setTagBusy(false);
+      }
+    },
+    [root, tagBusy, loadTags],
+  );
+
+  const handleTagPush = useCallback(
+    async (name: string) => {
+      if (!root || tagBusy) return;
+      setTagBusy(true);
+      setOpError(null);
+      try {
+        const res = await gitTagPush(root, name);
+        setRemoteMsg(res.message);
+      } catch (e) {
+        setOpError(String(e));
+      } finally {
+        setTagBusy(false);
+      }
+    },
+    [root, tagBusy],
+  );
+
+  // ── Remotes ──────────────────────────────────────────────────────────────────
+
+  const loadRemotes = useCallback(async () => {
+    if (!root) return;
+    try {
+      setRemotes(await gitRemotes(root));
+    } catch {
+      setRemotes([]);
+    }
+  }, [root]);
+
+  useEffect(() => {
+    if (remotesOpen) void loadRemotes();
+  }, [remotesOpen, loadRemotes]);
+
+  const handleRemoteAdd = useCallback(async () => {
+    const name = newRemoteName.trim();
+    const url = newRemoteUrl.trim();
+    if (!root || !name || !url || remoteBusy) return;
+    setRemoteBusy(true);
+    setOpError(null);
+    try {
+      await gitRemoteAdd(root, name, url);
+      setNewRemoteName('');
+      setNewRemoteUrl('');
+      await loadRemotes();
+      toast(`Added remote ${name}`);
+    } catch (e) {
+      setOpError(String(e));
+    } finally {
+      setRemoteBusy(false);
+    }
+  }, [root, newRemoteName, newRemoteUrl, remoteBusy, loadRemotes]);
+
+  const handleRemoteSetUrl = useCallback(
+    async (name: string, current: string) => {
+      if (!root || remoteBusy) return;
+      const url = await askText(
+        `URL for ${name}`,
+        { label: 'Fetch and push URL', value: current, placeholder: 'git@host:owner/repo.git' },
+        'Save',
+      );
+      if (url === null || !url.trim() || url.trim() === current) return;
+      setRemoteBusy(true);
+      setOpError(null);
+      try {
+        await gitRemoteSetUrl(root, name, url.trim());
+        await loadRemotes();
+        toast(`Updated ${name}`);
+      } catch (e) {
+        setOpError(String(e));
+      } finally {
+        setRemoteBusy(false);
+      }
+    },
+    [root, remoteBusy, loadRemotes],
+  );
+
+  const handleRemoteRemove = useCallback(
+    async (name: string) => {
+      if (!root || remoteBusy) return;
+      const ok = await askConfirm({
+        title: `Remove remote ${name}?`,
+        body: 'Local branches tracking it lose their upstream.',
+        confirmLabel: 'Remove',
+        destructive: true,
+      });
+      if (!ok) return;
+      setRemoteBusy(true);
+      try {
+        await gitRemoteRemove(root, name);
+        await loadRemotes();
+      } catch (e) {
+        setOpError(String(e));
+      } finally {
+        setRemoteBusy(false);
+      }
+    },
+    [root, remoteBusy, loadRemotes],
+  );
+
+  // ── Submodules ───────────────────────────────────────────────────────────────
+
+  // Probed once per root rather than on expand: the section hides itself
+  // entirely when the repo has none, which is the common case.
+  useEffect(() => {
+    if (!isTauri || !root) {
+      setSubmodules([]);
+      return;
+    }
+    let cancelled = false;
+    void gitSubmodules(root)
+      .then((list) => {
+        if (!cancelled) setSubmodules(list);
+      })
+      .catch(() => {
+        if (!cancelled) setSubmodules([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [root]);
 
   // ── Branch management ────────────────────────────────────────────────────────
 
@@ -672,7 +943,10 @@ export function SourceControl() {
     setBusy(true);
     setOpError(null);
     try {
-      const res = await gitCommit(root, msg);
+      const res = await gitCommit(root, msg, {
+        sign: signCommits,
+        signoff: signoffCommits,
+      });
       setMessage('');
       toast(res.short ? `Committed ${res.short}` : 'Committed');
       await refresh();
@@ -681,7 +955,7 @@ export function SourceControl() {
     } finally {
       setBusy(false);
     }
-  }, [busy, message, refresh, root, stagedCount]);
+  }, [busy, message, refresh, root, stagedCount, signCommits, signoffCommits]);
 
   const handleDiscard = useCallback(
     async (entry: GitChangeEntry, section: Section) => {
@@ -880,6 +1154,48 @@ export function SourceControl() {
             active={rebaseOpen}
             onClick={() => useGitUi.getState().setRebasePanelOpen(!rebaseOpen)}
           />
+          <GitLauncher
+            icon={<History size={11.5} strokeWidth={2} />}
+            label="Reflog"
+            active={reflogOpen}
+            onClick={() => useGitUi.getState().setReflogPanelOpen(!reflogOpen)}
+          />
+        </div>
+      )}
+
+      {/* Mid-operation bar — a stopped rebase (conflict, or an `edit` row)
+          needs continue / abort, and the other multi-step operations at
+          least need saying out loud. */}
+      {isTauri && info?.in_progress && (
+        <div className="flex shrink-0 items-center gap-2 border-b border-border-hairline bg-status-warn/[0.08] px-2.5 py-1.5">
+          <AlertCircle size={11} strokeWidth={2.2} className="shrink-0 text-status-warn" />
+          <span className="min-w-0 flex-1 font-display text-2xs text-fg-muted">
+            <span className="font-medium capitalize text-status-warn">
+              {info.in_progress}
+            </span>{' '}
+            in progress
+            {grouped.conflict.length > 0 && ` · ${grouped.conflict.length} conflicted`}
+          </span>
+          {info.in_progress === 'rebase' && (
+            <>
+              <button
+                onClick={() => void handleRebaseStep('continue')}
+                disabled={rebaseBusy}
+                title="git rebase --continue"
+                className="shrink-0 rounded-md bg-accent/15 px-2 py-0.5 font-display text-2xs text-accent ring-1 ring-inset ring-accent/30 hover:bg-accent/25 disabled:opacity-40"
+              >
+                Continue
+              </button>
+              <button
+                onClick={() => void handleRebaseStep('abort')}
+                disabled={rebaseBusy}
+                title="git rebase --abort"
+                className="shrink-0 rounded-md px-2 py-0.5 font-display text-2xs text-fg-muted hover:bg-surface-2 hover:text-red-300 disabled:opacity-40"
+              >
+                Abort
+              </button>
+            </>
+          )}
         </div>
       )}
 
@@ -889,6 +1205,7 @@ export function SourceControl() {
         <Suspense fallback={null}>
           {worktreesInline && <WorktreePanel inline />}
           {rebaseInline && <RebasePanel inline />}
+          {reflogInline && <ReflogPanel inline />}
         </Suspense>
       )}
 
@@ -936,6 +1253,32 @@ export function SourceControl() {
         <div className="flex shrink-0 items-start gap-2 border-b border-border-hairline bg-surface-1 px-3 py-1.5 font-mono text-2xs text-fg-muted">
           <span className="flex-1 break-all">{remoteMsg}</span>
           <button onClick={() => setRemoteMsg(null)} className="shrink-0 text-fg-subtle hover:text-fg-base"><X size={11} /></button>
+        </div>
+      )}
+
+      {/* The remote refused the push — after a rebase or amend that's
+          expected, and force-with-lease is the way through. */}
+      {pushRejected && (
+        <div className="flex shrink-0 items-center gap-2 border-b border-border-hairline bg-status-warn/[0.08] px-2.5 py-1.5">
+          <Upload size={11} strokeWidth={2.2} className="shrink-0 text-status-warn" />
+          <span className="min-w-0 flex-1 font-display text-2xs text-fg-muted">
+            Push rejected — your history has moved.
+          </span>
+          <button
+            onClick={() => void handleForcePush()}
+            disabled={!!remoteOp}
+            title="git push --force-with-lease"
+            className="shrink-0 rounded-md px-2 py-0.5 font-display text-2xs text-fg-muted ring-1 ring-inset ring-edge-1 hover:bg-surface-2 hover:text-red-300 disabled:opacity-40"
+          >
+            Force with lease
+          </button>
+          <button
+            onClick={() => setPushRejected(false)}
+            className="shrink-0 text-fg-subtle hover:text-fg-base"
+            aria-label="Dismiss"
+          >
+            <X size={11} />
+          </button>
         </div>
       )}
 
@@ -1133,7 +1476,185 @@ export function SourceControl() {
             >
               <Pencil size={9} strokeWidth={2.2} /> Amend
             </button>
+            <CommitSwitch
+              on={signCommits}
+              onClick={() => useGitUi.getState().setSignCommits(!signCommits)}
+              label="Sign commits (-S)"
+              icon={<ShieldCheck size={11} strokeWidth={2.2} />}
+            />
+            <CommitSwitch
+              on={signoffCommits}
+              onClick={() => useGitUi.getState().setSignoffCommits(!signoffCommits)}
+              label="Add Signed-off-by (-s)"
+              icon={<PenLine size={11} strokeWidth={2.2} />}
+            />
           </div>
+        </div>
+      )}
+
+      {/* Tags */}
+      {isTauri && root && !panelOpen && (
+        <div className="shrink-0 border-b border-border-hairline">
+          <button
+            onClick={() => setTagsOpen((o) => !o)}
+            className="flex w-full items-center gap-1.5 px-2.5 py-1.5 text-left hover:bg-surface-1"
+          >
+            {tagsOpen ? <ChevronDown size={10} strokeWidth={2} className="text-fg-subtle" /> : <ChevronRight size={10} strokeWidth={2} className="text-fg-subtle" />}
+            <Tag size={11} strokeWidth={2} className="text-fg-muted" />
+            <span className="flex-1 font-sans text-xs text-fg-muted">Tags</span>
+            {tags.length > 0 && (
+              <span className="rounded-full bg-surface-2 px-1.5 font-mono text-2xs text-fg-subtle">{tags.length}</span>
+            )}
+          </button>
+          {tagsOpen && (
+            <div className="px-2 pb-1.5">
+              <div className="mb-1.5 flex gap-1.5">
+                <input
+                  value={newTagName}
+                  onChange={(e) => setNewTagName(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === 'Enter') void handleTagCreate(); }}
+                  placeholder="v1.0.0 — tags HEAD"
+                  aria-label="New tag name"
+                  className="flex-1 rounded-md bg-surface-1 px-2 py-1 font-mono text-xs text-fg-base placeholder:text-fg-subtle outline-none focus:ring-1 focus:ring-accent/40"
+                />
+                <button
+                  onClick={() => void handleTagCreate()}
+                  disabled={!newTagName.trim() || tagBusy}
+                  title="Create tag at HEAD"
+                  className="flex h-6 items-center gap-1 rounded-md bg-accent/10 px-2 font-sans text-2xs text-accent hover:bg-accent/20 disabled:opacity-40"
+                >
+                  <Plus size={10} strokeWidth={2.5} /> Tag
+                </button>
+              </div>
+              {tags.length === 0 ? (
+                <p className="px-1 font-sans text-2xs text-fg-subtle/60">No tags</p>
+              ) : (
+                <ul className="max-h-40 space-y-px overflow-y-auto">
+                  {tags.map((t) => (
+                    <li key={t.name} className="group flex items-center gap-1.5 rounded px-1 py-[3px] hover:bg-surface-1">
+                      <span className="flex-1 truncate font-mono text-xs text-fg-base/85" title={t.subject}>
+                        {t.name}
+                      </span>
+                      <span className="shrink-0 font-mono text-2xs text-fg-subtle/70">{t.head_short}</span>
+                      <span className="hidden items-center gap-1 group-hover:flex">
+                        <button onClick={() => void handleTagPush(t.name)} title="Push to origin" disabled={tagBusy} className="text-fg-muted hover:text-accent disabled:opacity-40"><Upload size={10} strokeWidth={2} /></button>
+                        <button onClick={() => void handleTagDelete(t.name)} title="Delete" disabled={tagBusy} className="text-fg-muted hover:text-red-400 disabled:opacity-40"><Trash2 size={10} strokeWidth={2} /></button>
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Remotes */}
+      {isTauri && root && !panelOpen && (
+        <div className="shrink-0 border-b border-border-hairline">
+          <button
+            onClick={() => setRemotesOpen((o) => !o)}
+            className="flex w-full items-center gap-1.5 px-2.5 py-1.5 text-left hover:bg-surface-1"
+          >
+            {remotesOpen ? <ChevronDown size={10} strokeWidth={2} className="text-fg-subtle" /> : <ChevronRight size={10} strokeWidth={2} className="text-fg-subtle" />}
+            <Cloud size={11} strokeWidth={2} className="text-fg-muted" />
+            <span className="flex-1 font-sans text-xs text-fg-muted">Remotes</span>
+            {remotes.length > 0 && (
+              <span className="rounded-full bg-surface-2 px-1.5 font-mono text-2xs text-fg-subtle">{remotes.length}</span>
+            )}
+          </button>
+          {remotesOpen && (
+            <div className="px-2 pb-1.5">
+              <div className="mb-1.5 flex gap-1.5">
+                <input
+                  value={newRemoteName}
+                  onChange={(e) => setNewRemoteName(e.target.value)}
+                  placeholder="name"
+                  aria-label="New remote name"
+                  className="w-16 shrink-0 rounded-md bg-surface-1 px-2 py-1 font-mono text-xs text-fg-base placeholder:text-fg-subtle outline-none focus:ring-1 focus:ring-accent/40"
+                />
+                <input
+                  value={newRemoteUrl}
+                  onChange={(e) => setNewRemoteUrl(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === 'Enter') void handleRemoteAdd(); }}
+                  placeholder="url"
+                  aria-label="New remote URL"
+                  className="min-w-0 flex-1 rounded-md bg-surface-1 px-2 py-1 font-mono text-xs text-fg-base placeholder:text-fg-subtle outline-none focus:ring-1 focus:ring-accent/40"
+                />
+                <button
+                  onClick={() => void handleRemoteAdd()}
+                  disabled={!newRemoteName.trim() || !newRemoteUrl.trim() || remoteBusy}
+                  title="Add remote"
+                  aria-label="Add remote"
+                  className="flex h-6 shrink-0 items-center rounded-md bg-accent/10 px-1.5 text-accent hover:bg-accent/20 disabled:opacity-40"
+                >
+                  <Plus size={10} strokeWidth={2.5} />
+                </button>
+              </div>
+              {remotes.length === 0 ? (
+                <p className="px-1 font-sans text-2xs text-fg-subtle/60">No remotes</p>
+              ) : (
+                <ul className="space-y-px">
+                  {remotes.map((r) => (
+                    <li key={r.name} className="group flex items-center gap-1.5 rounded px-1 py-[3px] hover:bg-surface-1">
+                      <span className="w-14 shrink-0 truncate font-mono text-xs text-fg-base/85">{r.name}</span>
+                      <span className="min-w-0 flex-1 truncate font-mono text-2xs text-fg-subtle" title={r.fetch_url}>
+                        {r.fetch_url}
+                      </span>
+                      <span className="hidden items-center gap-1 group-hover:flex">
+                        <button onClick={() => void handleRemoteSetUrl(r.name, r.fetch_url)} title="Change URL" disabled={remoteBusy} className="text-fg-muted hover:text-fg-base disabled:opacity-40"><Pencil size={10} strokeWidth={2} /></button>
+                        <button onClick={() => void handleRemoteRemove(r.name)} title="Remove" disabled={remoteBusy} className="text-fg-muted hover:text-red-400 disabled:opacity-40"><Trash2 size={10} strokeWidth={2} /></button>
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Submodules — hidden entirely for the repos that have none. */}
+      {isTauri && root && !panelOpen && submodules.length > 0 && (
+        <div className="shrink-0 border-b border-border-hairline">
+          <button
+            onClick={() => setSubmodulesOpen((o) => !o)}
+            className="flex w-full items-center gap-1.5 px-2.5 py-1.5 text-left hover:bg-surface-1"
+          >
+            {submodulesOpen ? <ChevronDown size={10} strokeWidth={2} className="text-fg-subtle" /> : <ChevronRight size={10} strokeWidth={2} className="text-fg-subtle" />}
+            <Boxes size={11} strokeWidth={2} className="text-fg-muted" />
+            <span className="flex-1 font-sans text-xs text-fg-muted">Submodules</span>
+            <span className="rounded-full bg-surface-2 px-1.5 font-mono text-2xs text-fg-subtle">{submodules.length}</span>
+          </button>
+          {submodulesOpen && (
+            <ul className="space-y-px px-2 pb-1.5">
+              {submodules.map((m) => (
+                <li key={m.path} className="flex items-center gap-1.5 rounded px-1 py-[3px] hover:bg-surface-1">
+                  <span className="min-w-0 flex-1 truncate font-mono text-xs text-fg-base/85" title={m.describe ?? undefined}>
+                    {m.path}
+                  </span>
+                  <span className="shrink-0 font-mono text-2xs text-fg-subtle/70">{m.head_short}</span>
+                  {m.state !== 'ok' && (
+                    <span
+                      className={cn(
+                        'shrink-0 rounded px-1 font-sans text-2xs',
+                        m.state === 'conflict' ? 'text-red-400' : 'text-status-warn',
+                      )}
+                      title={
+                        m.state === 'uninitialized'
+                          ? 'not checked out — run git submodule update --init'
+                          : m.state === 'out-of-sync'
+                            ? "checked out at a commit the superproject doesn't record"
+                            : 'merge conflict'
+                      }
+                    >
+                      {m.state}
+                    </span>
+                  )}
+                </li>
+              ))}
+            </ul>
+          )}
         </div>
       )}
 
@@ -1304,6 +1825,36 @@ function GitLauncher({
         </span>
       </button>
     </Tooltip>
+  );
+}
+
+/** Sticky on/off pill for a commit flag (`-S`, `-s`). */
+function CommitSwitch({
+  on,
+  onClick,
+  label,
+  icon,
+}: {
+  on: boolean;
+  onClick: () => void;
+  label: string;
+  icon: React.ReactNode;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      title={label}
+      aria-label={label}
+      aria-pressed={on}
+      className={cn(
+        'flex h-[28px] w-[28px] items-center justify-center rounded-lg transition-all',
+        on
+          ? 'bg-accent/15 text-accent ring-1 ring-inset ring-accent/30'
+          : 'bg-surface-1 text-fg-subtle ring-1 ring-inset ring-edge-1 hover:bg-surface-2 hover:text-fg-base',
+      )}
+    >
+      {icon}
+    </button>
   );
 }
 

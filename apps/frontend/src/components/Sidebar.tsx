@@ -357,6 +357,13 @@ function railQuickActions(view: SidebarView): RailMenuItem[] {
             useGitUi.getState().setRebasePanelOpen(true);
           },
         },
+        {
+          label: 'Reflog',
+          onClick: () => {
+            useFiles.getState().showSidebarView('git');
+            useGitUi.getState().setReflogPanelOpen(true);
+          },
+        },
       ];
     case 'ssh':
       return [
