@@ -2657,7 +2657,8 @@ pub async fn bisect_status<P: AsRef<Path>>(path: P) -> Result<BisectStatus> {
         return Ok(BisectStatus::inactive());
     }
 
-    let (marks, first_bad) = parse_bisect_log(&String::from_utf8_lossy(&log.stdout));
+    let marks = parse_bisect_log(&String::from_utf8_lossy(&log.stdout));
+    let first_bad = bisect_first_bad(path).await;
 
     // Which commit the user is being asked to test. Best-effort: a bisect
     // that has converged leaves HEAD on the culprit, which is still what we
@@ -2684,24 +2685,23 @@ pub async fn bisect_status<P: AsRef<Path>>(path: P) -> Result<BisectStatus> {
     })
 }
 
-/// Parse `git bisect log`. Two line shapes matter:
+/// Parse the marks out of `git bisect log`. The line shape that matters is
+/// the replayable one:
 ///
-///   `git bisect bad 1a2b3c...`             a mark the user made
-///   `# first bad commit: [1a2b3c...] msg`  git's verdict, once converged
+///   `git bisect bad 1a2b3c...`
 ///
+/// which is stable because the log doubles as input to `git bisect replay`.
 /// Everything else (the `# good:`/`# bad:` echoes, `git bisect start`, the
 /// `# status:` notes) is commentary we do not need.
-fn parse_bisect_log(out: &str) -> (Vec<BisectMark>, Option<String>) {
+///
+/// Convergence is deliberately *not* read from here. Older git does not write
+/// the `# first bad commit:` line into the log at all, so a reader that
+/// depends on it silently reports an converged bisect as still running — see
+/// [`bisect_first_bad`].
+fn parse_bisect_log(out: &str) -> Vec<BisectMark> {
     let mut marks = Vec::new();
-    let mut first_bad = None;
     for line in out.lines() {
         let line = line.trim();
-        if let Some(rest) = line.strip_prefix("# first bad commit: [") {
-            if let Some((oid, _)) = rest.split_once(']') {
-                first_bad = Some(oid.to_string());
-            }
-            continue;
-        }
         let Some(rest) = line.strip_prefix("git bisect ") else {
             continue;
         };
@@ -2720,7 +2720,74 @@ fn parse_bisect_log(out: &str) -> (Vec<BisectMark>, Option<String>) {
             short: oid.chars().take(7).collect(),
         });
     }
-    (marks, first_bad)
+    marks
+}
+
+/// The first bad commit, or `None` while the search is still narrowing.
+///
+/// Computed from the refs git maintains during a bisect rather than from the
+/// `# first bad commit:` line in `git bisect log`: that line is absent on
+/// older git (Ubuntu 22.04 ships 2.34), which would leave a finished bisect
+/// looking like a running one forever.
+///
+/// The refs are load-bearing plumbing that has not changed in a decade.
+/// `refs/bisect/bad` is the current known-bad commit and `refs/bisect/good-*`
+/// the known-good ones, so the commits still to test are
+/// `rev-list bad --not good...`. That list always contains the bad commit
+/// itself, so a count of exactly one means nothing is left to test and the
+/// bad commit is the answer.
+///
+/// Best-effort throughout: any git failure here means "not converged", which
+/// degrades to the panel showing the search as still running rather than
+/// claiming a culprit it cannot support.
+async fn bisect_first_bad(path: &Path) -> Option<String> {
+    let goods = git_cmd()
+        .arg("-C")
+        .arg(path)
+        .args(["for-each-ref", "--format=%(refname)", "refs/bisect/good-*"])
+        .output()
+        .await
+        .ok()?;
+    if !goods.status.success() {
+        return None;
+    }
+    let good_refs: Vec<String> = String::from_utf8_lossy(&goods.stdout)
+        .lines()
+        .map(|l| l.trim().to_string())
+        .filter(|l| !l.is_empty())
+        .collect();
+    // No good commit marked yet: everything reachable is still a candidate,
+    // so there is nothing to converge on.
+    if good_refs.is_empty() {
+        return None;
+    }
+
+    let mut cmd = git_cmd();
+    cmd.arg("-C")
+        .arg(path)
+        .args(["rev-list", "--count", "refs/bisect/bad", "--not"])
+        .args(&good_refs);
+    let remaining = cmd.output().await.ok()?;
+    if !remaining.status.success() {
+        return None;
+    }
+    let count: usize = String::from_utf8_lossy(&remaining.stdout).trim().parse().ok()?;
+    if count != 1 {
+        return None;
+    }
+
+    let bad = git_cmd()
+        .arg("-C")
+        .arg(path)
+        .args(["rev-parse", "refs/bisect/bad"])
+        .output()
+        .await
+        .ok()?;
+    if !bad.status.success() {
+        return None;
+    }
+    let oid = String::from_utf8_lossy(&bad.stdout).trim().to_string();
+    (!oid.is_empty()).then_some(oid)
 }
 
 /// `git bisect start [<bad> [<good>]]`.
@@ -2989,7 +3056,7 @@ u UU N... 100644 100644 100644 100644 eee fff ggg conflict.rs
     }
 
     #[test]
-    fn parses_a_converged_bisect_log() {
+    fn parses_the_marks_out_of_a_bisect_log() {
         let raw = "# bad: [aaaaaaaaaaaaaaaaaaaa] broke it
 # good: [bbbbbbbbbbbbbbbbbbbb] worked
 git bisect start 'aaaaaaaaaaaaaaaaaaaa' 'bbbbbbbbbbbbbbbbbbbb'
@@ -2999,22 +3066,21 @@ git bisect good dddddddddddddddddddd
 git bisect skip eeeeeeeeeeeeeeeeeeee
 # first bad commit: [cccccccccccccccccccc] the culprit
 ";
-        let (marks, first_bad) = parse_bisect_log(raw);
+        let marks = parse_bisect_log(raw);
         let terms: Vec<&str> = marks.iter().map(|m| m.term.as_str()).collect();
         assert_eq!(terms, vec!["bad", "good", "skip"], "one entry per real mark");
         assert_eq!(marks[0].short, "ccccccc", "short oid is the first 7 chars");
-        assert_eq!(first_bad.as_deref(), Some("cccccccccccccccccccc"));
+        // The `# bad:`/`# good:` echoes at the top describe the same commits
+        // as the start line and must not be counted as marks.
+        assert_eq!(marks.len(), 3);
     }
 
     #[test]
     fn ignores_commentary_in_a_fresh_bisect_log() {
-        // `git bisect start` itself is not a mark, and the `# bad:`/`# good:`
-        // echo lines must not be counted twice.
-        let (marks, first_bad) = parse_bisect_log("git bisect start
+        // `git bisect start` itself is not a mark.
+        assert!(parse_bisect_log("git bisect start
 # status: waiting
-");
-        assert!(marks.is_empty());
-        assert!(first_bad.is_none());
+").is_empty());
     }
 
     #[test]
