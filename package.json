@@ -1,7 +1,7 @@
 {
   "name": "arc",
   "private": true,
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "ARC — terminal, editor & git workspace with optional Wingman agents",
   "packageManager": "pnpm@9.15.9",
   "scripts": {
