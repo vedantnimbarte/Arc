@@ -116,10 +116,16 @@ mod tests {
     use super::*;
 
     fn tmp() -> PathBuf {
+        use std::sync::atomic::{AtomicUsize, Ordering};
         use std::time::{SystemTime, UNIX_EPOCH};
+        // The clock alone is not unique: Windows timer granularity is ~15ms, so
+        // parallel tests can read the same nanos and share a directory.
+        static N: AtomicUsize = AtomicUsize::new(0);
         let p = std::env::temp_dir().join(format!(
-            "arc-project-config-test-{}",
-            SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos()
+            "arc-project-config-test-{}-{}-{}",
+            std::process::id(),
+            SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos(),
+            N.fetch_add(1, Ordering::Relaxed)
         ));
         std::fs::create_dir_all(&p).unwrap();
         p
