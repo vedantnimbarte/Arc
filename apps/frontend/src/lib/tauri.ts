@@ -1421,6 +1421,30 @@ export async function gitStashPush(path: string, message?: string | null): Promi
   return invoke<void>('git_stash_push', { path, message: message ?? null });
 }
 
+/**
+ * Take a restore point for `path`'s working tree without disturbing it.
+ *
+ * Returns the checkpoint id, or `null` when the tree was clean and there is
+ * nothing to restore to. Tracked files only — a file created afterwards is
+ * untracked at both ends and survives a restore.
+ */
+export async function gitCheckpointCreate(
+  path: string,
+  label: string,
+): Promise<string | null> {
+  return invoke<string | null>('git_checkpoint_create', { path, label });
+}
+
+/** Put tracked files back as they were at `oid`. Leaves the index alone. */
+export async function gitCheckpointRestore(path: string, oid: string): Promise<void> {
+  return invoke<void>('git_checkpoint_restore', { path, oid });
+}
+
+/** Release a checkpoint's anchor once it is no longer offered. */
+export async function gitCheckpointForget(path: string, oid: string): Promise<void> {
+  return invoke<void>('git_checkpoint_forget', { path, oid });
+}
+
 export async function gitStashPop(path: string, index?: number | null): Promise<void> {
   return invoke<void>('git_stash_pop', { path, index: index ?? null });
 }

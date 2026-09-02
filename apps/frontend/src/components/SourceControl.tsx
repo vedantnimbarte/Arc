@@ -97,7 +97,7 @@ import { fileIcon } from '../lib/fileIcons';
 import { cn } from '../lib/cn';
 import { askConfirm, askText } from '../state/confirm';
 import { copyText } from '../lib/clipboard';
-import { toast } from '../state/toast';
+import { toast, toastError } from '../state/toast';
 
 // ~800 lines of worktree + rebase UI, only pulled in when one is opened.
 const WorktreePanel = lazy(() =>
@@ -274,6 +274,7 @@ export function SourceControl() {
   const baseline = useAgentRun((s) => (root ? s.baselines[root] : undefined));
   const filtering = useAgentRun((s) => s.filtering);
   const reviewing = !!baseline && filtering;
+  const [restoring, setRestoring] = useState(false);
 
   const [opError, setOpError] = useState<string | null>(null);
   const [message, setMessage] = useState('');
@@ -354,6 +355,35 @@ export function SourceControl() {
     if (!isTauri || !root) return;
     await refreshStore(root);
   }, [refreshStore, root]);
+
+  /**
+   * Put the tree back as it was before the agent started.
+   *
+   * Confirmed, and named for what it actually does: tracked files are
+   * restored, files the agent created are left in place. Promising a clean
+   * undo and then leaving new files behind would be the worse outcome, so the
+   * dialog says which is which.
+   */
+  const restoreCheckpoint = useCallback(async () => {
+    if (!root || !baseline?.checkpoint) return;
+    const ok = await askConfirm({
+      title: `Undo ${baseline.agent}'s changes?`,
+      body: 'Restores every tracked file to how it was when the agent started. Files it created are left in place for you to delete. Your staged selection is untouched.',
+      confirmLabel: 'Undo run',
+      destructive: true,
+    });
+    if (!ok) return;
+    setRestoring(true);
+    try {
+      await useAgentRun.getState().restore(root);
+      await refresh();
+      toast(`Restored to before ${baseline.agent} started.`);
+    } catch (err) {
+      toastError(`Undo failed: ${err instanceof Error ? err.message : String(err)}`);
+    } finally {
+      setRestoring(false);
+    }
+  }, [root, baseline, refresh]);
 
   // ── Remote ops ──────────────────────────────────────────────────────────────
 
@@ -1250,6 +1280,18 @@ export function SourceControl() {
           >
             Agent only
           </button>
+          {/* Roll the run back. Only offered when a checkpoint was actually
+              taken — a clean tree at launch has nothing to restore to. */}
+          {baseline.checkpoint && agentCount > 0 && (
+            <button
+              onClick={() => void restoreCheckpoint()}
+              disabled={restoring}
+              className="shrink-0 rounded-md px-1.5 py-0.5 font-display text-2xs text-fg-subtle transition-colors hover:bg-surface-2 hover:text-fg-base disabled:opacity-50"
+              title={`Put tracked files back as they were before ${baseline.agent} started. Files it created are left in place.`}
+            >
+              {restoring ? 'Restoring…' : 'Undo run'}
+            </button>
+          )}
           <button
             onClick={() => root && useAgentRun.getState().clear(root)}
             className="shrink-0 text-fg-subtle transition-colors hover:text-fg-base"

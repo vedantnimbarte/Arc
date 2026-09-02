@@ -1,5 +1,12 @@
 import { create } from 'zustand';
-import { gitChanges, gitRoot, isTauri } from '../lib/tauri';
+import {
+  gitChanges,
+  gitCheckpointCreate,
+  gitCheckpointForget,
+  gitCheckpointRestore,
+  isTauri,
+  gitRoot,
+} from '../lib/tauri';
 
 /**
  * "What did the agent just change?", for every AI CLI ARC can launch.
@@ -32,6 +39,15 @@ export interface AgentBaseline {
    * anything that moved between the index and the worktree.
    */
   before: Record<string, string>;
+  /**
+   * Commit holding the tree as it stood when the agent started, so the run can
+   * be rolled back. Null when the tree was already clean (nothing to restore
+   * to) or when the checkpoint could not be taken.
+   *
+   * Tracked files only — see `gitCheckpointCreate`. A file the agent creates
+   * survives a restore, which is the safe way round.
+   */
+  checkpoint: string | null;
 }
 
 interface AgentRunState {
@@ -44,6 +60,9 @@ interface AgentRunState {
   mark: (root: string | null, agent: string) => Promise<void>;
   clear: (root: string) => void;
   setFiltering: (on: boolean) => void;
+  /** Put tracked files back as they were when the run started. Resolves to
+   *  false when there was no checkpoint to restore. */
+  restore: (root: string) => Promise<boolean>;
 }
 
 /** Did `entry` change since the baseline was taken? */
@@ -64,12 +83,28 @@ export const useAgentRun = create<AgentRunState>((set) => ({
       if (!(await gitRoot(root))) return;
       const before: AgentBaseline['before'] = {};
       for (const e of await gitChanges(root)) before[e.path] = e.status;
-      set((s) => ({
-        baselines: { ...s.baselines, [root]: { agent, startedAt: Date.now(), before } },
+      // Taken after the baseline so a slow checkpoint cannot make the baseline
+      // itself stale. A failure here costs the undo, not the review.
+      let checkpoint: string | null = null;
+      try {
+        checkpoint = await gitCheckpointCreate(root, `arc: before ${agent}`);
+      } catch (err) {
+        console.error('[agent-run] checkpoint failed:', err);
+      }
+      set((s) => {
+        // Release the previous run's anchor — only the current one is offered.
+        const prior = s.baselines[root]?.checkpoint;
+        if (prior && prior !== checkpoint) void gitCheckpointForget(root, prior).catch(() => {});
+        return {
+        baselines: {
+          ...s.baselines,
+          [root]: { agent, startedAt: Date.now(), before, checkpoint },
+        },
         // A fresh run re-arms the filter: the reason you launched an agent is
         // to see what it did.
         filtering: true,
-      }));
+        };
+      });
     } catch (err) {
       // Best-effort. Without a baseline the panel just behaves as it always
       // has, which is a fine thing to fall back to.
@@ -79,9 +114,18 @@ export const useAgentRun = create<AgentRunState>((set) => ({
 
   clear: (root) =>
     set((s) => {
-      const { [root]: _dropped, ...rest } = s.baselines;
+      const dropped = s.baselines[root];
+      if (dropped?.checkpoint) void gitCheckpointForget(root, dropped.checkpoint).catch(() => {});
+      const { [root]: _gone, ...rest } = s.baselines;
       return { baselines: rest };
     }),
+
+  restore: async (root) => {
+    const checkpoint = useAgentRun.getState().baselines[root]?.checkpoint;
+    if (!checkpoint) return false;
+    await gitCheckpointRestore(root, checkpoint);
+    return true;
+  },
 
   setFiltering: (on) => set({ filtering: on }),
 }));
