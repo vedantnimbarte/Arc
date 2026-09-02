@@ -545,7 +545,10 @@ export default function App() {
         keywords: ['ai', 'agent', 'chat', 'wingman', 'ask'],
         icon: Bot,
         when: () => useWingman.getState().status === 'connected',
-        run: () => useFiles.getState().showSidebarView('wingman'),
+        run: () => {
+          useFiles.getState().setAgentPanelTab('wingman');
+          useFiles.getState().showSidebarView('agents');
+        },
       },
       {
         id: 'wingman.board',
@@ -580,7 +583,8 @@ export default function App() {
           // Answered by the daemon's `explain` route, not an agent turn — the
           // result lands in the panel transcript either way, but this costs no
           // tokens and returns in one round trip.
-          useFiles.getState().showSidebarView('wingman');
+          useFiles.getState().setAgentPanelTab('wingman');
+          useFiles.getState().showSidebarView('agents');
           void useWingman.getState().explainChanges();
         },
       },
@@ -593,7 +597,10 @@ export default function App() {
         keywords: ['ai', 'agent', 'chat', 'claude', 'ask', 'code'],
         icon: Sparkles,
         when: () => useClaudeCode.getState().status === 'ready',
-        run: () => useFiles.getState().showSidebarView('claude'),
+        run: () => {
+          useFiles.getState().setAgentPanelTab('claude');
+          useFiles.getState().showSidebarView('agents');
+        },
       },
       {
         id: 'claude.new-chat',
@@ -604,7 +611,8 @@ export default function App() {
         when: () => useClaudeCode.getState().status === 'ready',
         run: () => {
           useClaudeCode.getState().newChat();
-          useFiles.getState().showSidebarView('claude');
+          useFiles.getState().setAgentPanelTab('claude');
+          useFiles.getState().showSidebarView('agents');
         },
       },
       // Problems: one entry to open the panel, one to actually run the
