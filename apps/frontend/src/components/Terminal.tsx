@@ -549,7 +549,9 @@ export function Terminal({ sessionKey }: Props) {
         // file-tree-keyed store) so it's race-free against the home reset.
         let projectEnv: Record<string, string> | null = null;
         // A profile's cwd pins the terminal; without one it follows the tree.
-        const cwd = profile?.cwd || initialCwd.current;
+        // A tab that was launched into its own worktree pins itself there;
+        // otherwise a profile's cwd wins, and failing that the file tree's root.
+        const cwd = tab?.launchCwd || profile?.cwd || initialCwd.current;
         // Only inject `.arc/config.toml` env from a folder the user has
         // trusted (state/trust.ts). Untrusted repo env is drive-by RCE via
         // PROMPT_COMMAND / BASH_ENV / LD_PRELOAD, so we don't even load it.

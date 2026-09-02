@@ -74,6 +74,12 @@ export interface Tab {
   groupId?: string;
   /** PTY id for terminal tabs. Transient — stripped from persisted state. */
   ptyId?: string;
+  /** Directory this tab's shell should *start* in, overriding the file tree's
+   *  root. Set by the agent launcher when it isolates each agent in its own
+   *  git worktree. Transient: a restored tab has no worktree to return to, so
+   *  it opens at the tree root like any other. Distinct from `cwd`, which is
+   *  an observation of where the shell has since wandered. */
+  launchCwd?: string;
   /** Best-effort current working directory of a terminal tab, tracked live
    *  from OSC 7 / cd-sniffing. Powers the per-cell git-branch pill in the
    *  grid. Transient — not persisted (whitelisted out by `toTabInputs`). */
@@ -315,7 +321,16 @@ interface WorkspaceState {
    *  OpenCode) directly instead of the default shell. Anchors the new tab
    *  (and the file tree) at the user's home directory. `opts.args` runs the
    *  CLI with a subcommand; `opts.title` overrides the tab label. */
-  launchAiCli: (cli: AiCliInfo, opts?: { args?: string[]; title?: string }) => Promise<string>;
+  launchAiCli: (
+    cli: AiCliInfo,
+    opts?: {
+      args?: string[];
+      title?: string;
+      /** Start the agent's shell here instead of the file tree's root — used
+       *  to drop each racing agent into its own git worktree. */
+      cwd?: string;
+    },
+  ) => Promise<string>;
   /** Launch Wingman in one of its modes. `tui` opens the interactive TUI
    *  immediately; `pilot`/`headless` need an argument, so they open the
    *  Wingman prompt dialog (see `wingmanPrompt`) instead of launching now. */
@@ -1318,7 +1333,9 @@ export const useWorkspace = create<WorkspaceState>()((set, get) => ({
     // root to home: you launch a coding agent to work on the project you have
     // open, so it inherits that cwd. That is also what makes the Source
     // Control review baseline below mean anything.
-    const root = useFiles.getState().root;
+    // Baseline (and checkpoint) the tree the agent will actually edit — for an
+    // isolated run that is its worktree, not the workspace root.
+    const root = opts?.cwd ?? useFiles.getState().root;
     void useAgentRun.getState().mark(root, cli.label);
     const id = `${cli.id}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
     const tab: Tab = {
@@ -1327,6 +1344,7 @@ export const useWorkspace = create<WorkspaceState>()((set, get) => ({
       kind: 'terminal',
       shellOverride: cli.path,
       shellArgs: opts?.args,
+      launchCwd: opts?.cwd,
     };
     get().addTab(tab);
     return id;

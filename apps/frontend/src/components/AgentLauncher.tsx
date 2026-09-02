@@ -1,10 +1,13 @@
 import { useMemo, useState } from 'react';
-import { ChevronLeft, RotateCcw } from 'lucide-react';
+import { ChevronLeft, GitBranch, RotateCcw } from 'lucide-react';
 import { useSettings } from '../state/settings';
 import { layoutModeOf, useWorkspace } from '../state/workspace';
 import { AI_CLI_COMMANDS, AI_CLIS, type AiCliId, type AiCliInfo } from '../lib/tauri';
 import { groupColorDef, rgba, type TabGroupColorId } from '../lib/tabGroups';
 import { cn } from '../lib/cn';
+import { createRaceWorktrees } from '../lib/agentRace';
+import { useFiles } from '../state/files';
+import { toastError } from '../state/toast';
 
 /** A stable hue per agent from the shared tab-group palette — the same eight
  *  ARC already uses for workspaces and tab groups. Hand-assigned rather than
@@ -34,7 +37,7 @@ const AGENT_HUE: Record<AiCliId, TabGroupColorId> = {
  *  without measuring. Approximate on purpose — a few pixels out just shifts the
  *  clamp, and the hosts pair it with a `max-h` backstop. */
 export const AGENT_PANEL_W = 318;
-export const AGENT_PANEL_H = 500;
+export const AGENT_PANEL_H = 620;
 
 /** How many agents one launch can start. Four is where a tiled grid stops
  *  being readable on a laptop display — past that the panes are too narrow to
@@ -180,6 +183,11 @@ export function AgentLauncher({ detected, onBack, onDone }: Props) {
   const available = useMemo(() => ids.filter((id) => installed.has(id)), [ids, installed]);
   const missing = useMemo(() => ids.filter((id) => !installed.has(id)), [ids, installed]);
   const [count, setCount] = useState(1);
+  // The task every agent in this launch is given, and whether each gets its
+  // own checkout to do it in.
+  const [task, setTask] = useState('');
+  const [isolate, setIsolate] = useState(false);
+  const root = useFiles((s) => s.root);
   // `null` means "follow the stored/default command" — typing forks it, Reset
   // and switching agents return to following.
   const [draft, setDraft] = useState<string | null>(null);
@@ -205,12 +213,40 @@ export function AgentLauncher({ detected, onBack, onDone }: Props) {
     // the command it found — an edited binary name has to go back through PATH.
     const hit = installed.get(selected);
     const path = hit && bin === AI_CLI_COMMANDS[selected] ? hit.path : bin!;
+    const goal = task.trim();
     onDone();
     void (async () => {
+      // Isolation first: if the checkouts cannot be made, nothing should spawn.
+      // Racing agents that all land in the same tree is the failure this whole
+      // option exists to prevent, so falling back to it silently would be worse
+      // than not launching.
+      let worktrees: { path: string; branch: string }[] = [];
+      if (isolate && root) {
+        try {
+          worktrees = await createRaceWorktrees(root, goal || label, count);
+        } catch (err) {
+          toastError(
+            `Could not create isolated checkouts: ${err instanceof Error ? err.message : String(err)}`,
+          );
+          return;
+        }
+      }
+
       for (let i = 0; i < count; i++) {
+        const wt = worktrees[i];
         await launchAiCli(
           { id: selected, label, path },
-          { args, title: count > 1 ? `${label} ${i + 1}` : label },
+          {
+            // The task goes on the agent's own command line, which every CLI
+            // here accepts as a positional prompt — typing it into the PTY
+            // instead would race the program's startup.
+            args: goal ? [...args, goal] : args,
+            title: count > 1 ? `${label} ${i + 1}` : label,
+            // Each racing agent starts in its own checkout. The pane header
+            // already renders a branch pill from a terminal's cwd, so which
+            // result you are looking at labels itself.
+            cwd: wt?.path,
+          },
         );
         // Yield a frame between launches. `addTab` picks its split direction
         // from `dwindleSide`, which reads pane rects kept current by a
@@ -326,6 +362,54 @@ export function AgentLauncher({ detected, onBack, onDone }: Props) {
             );
           })}
         </div>
+      </div>
+
+      <div className="px-3 pt-3">
+        <SectionLabel>Task</SectionLabel>
+        <input
+          value={task}
+          onChange={(e) => setTask(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' && runnable) launch();
+          }}
+          placeholder={count > 1 ? 'What should they all work on?' : 'What should it work on?'}
+          aria-label="Task"
+          className={cn(
+            'w-full rounded-lg border border-border-hairline bg-bg-base/50 px-2.5 py-1.5',
+            'font-display text-xs text-fg-base placeholder:text-fg-subtle/60',
+            'transition-colors focus:border-accent/45 focus:outline-none focus:shadow-focus',
+          )}
+        />
+
+        {/* Racing the same task only means anything if the agents cannot see
+            each other's edits, so this is offered as soon as there is more
+            than one — but it works for a single run too, as a scratch branch. */}
+        <button
+          onClick={() => setIsolate((v) => !v)}
+          disabled={!root}
+          aria-pressed={isolate}
+          className={cn(
+            'mt-1.5 flex w-full items-center gap-2 rounded-lg border px-2.5 py-1.5 text-left',
+            'transition-all duration-150 ease-apple disabled:opacity-40',
+            isolate
+              ? 'border-accent/40 bg-accent/10 text-fg-base'
+              : 'border-border-hairline text-fg-muted hover:bg-surface-1 hover:text-fg-base',
+          )}
+        >
+          <GitBranch size={12} strokeWidth={2} className="shrink-0" />
+          <span className="min-w-0 flex-1">
+            <span className="block font-display text-xs tracking-tight">
+              {count > 1 ? 'Give each its own checkout' : 'Work in its own checkout'}
+            </span>
+            <span className="block truncate font-display text-2xs text-fg-subtle">
+              {root
+                ? isolate
+                  ? 'A git worktree and branch per agent, cut from HEAD'
+                  : 'They share this working tree'
+                : 'Open a folder to isolate runs'}
+            </span>
+          </span>
+        </button>
       </div>
 
       <div className="px-3 pt-3">
