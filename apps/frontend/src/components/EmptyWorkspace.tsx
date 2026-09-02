@@ -22,13 +22,7 @@ import { groupColorDef, rgba, type TabGroupColorId } from '../lib/tabGroups';
 import { formatBinding, getBinding } from '../state/shortcuts';
 import { cn } from '../lib/cn';
 import { WorkspaceEditPanel, DEFAULT_WORKSPACE_COLOR } from './WorkspaceEditPanel';
-import { AgentLauncher } from './AgentLauncher';
-
-/** Footprint of the agent panel, used only to keep it inside the viewport.
- *  Approximate on purpose — a few pixels out just shifts the clamp, and
- *  measuring would mean rendering it offscreen first. */
-const AGENT_PANEL_W = 318;
-const AGENT_PANEL_H = 500;
+import { AgentLauncher, AGENT_PANEL_H, AGENT_PANEL_W } from './AgentLauncher';
 
 /** Two-letter monogram from a workspace name ("Workspace 1" → "W1"). */
 function initials(name: string): string {

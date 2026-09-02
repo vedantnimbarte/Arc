@@ -29,6 +29,13 @@ const AGENT_HUE: Record<AiCliId, TabGroupColorId> = {
   'wingman-cli': 'blue',
 };
 
+/** Footprint of the rendered panel, exported so the surfaces that anchor it
+ *  (the top-bar button, the launcher's entry) can keep it inside the viewport
+ *  without measuring. Approximate on purpose — a few pixels out just shifts the
+ *  clamp, and the hosts pair it with a `max-h` backstop. */
+export const AGENT_PANEL_W = 318;
+export const AGENT_PANEL_H = 500;
+
 /** How many agents one launch can start. Four is where a tiled grid stops
  *  being readable on a laptop display — past that the panes are too narrow to
  *  hold an agent's output without wrapping every line. */
@@ -94,11 +101,28 @@ function LayoutGlyph({ n, tabbed }: { n: number; tabbed: boolean }) {
 
 /** Resolve after the browser has laid out and run resize observers. Two frames
  *  because the observer fires between them: React commits the new pane in one,
- *  the observer reports its size before the next. */
+ *  the observer reports its size before the next.
+ *
+ *  The timeout is not belt-and-braces: `requestAnimationFrame` does not fire
+ *  while the window is minimised or otherwise not painting, so a launch of
+ *  several agents would stall midway if the user looked away right after
+ *  clicking, and stay stalled until they came back. Spawning every agent
+ *  matters more than the tidy grid, so time wins the race if frames stop. */
 function nextFrame(): Promise<void> {
-  return new Promise((resolve) =>
-    requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
-  );
+  return new Promise((resolve) => {
+    let settled = false;
+    const finish = () => {
+      if (settled) return;
+      settled = true;
+      resolve();
+    };
+    requestAnimationFrame(() => requestAnimationFrame(finish));
+    // Generous enough that two frames win this race whenever the window is
+    // painting at all — even at 30fps that is ~66ms — so the fallback only
+    // takes over when frames have genuinely stopped. Too short and it beats
+    // rAF on a slow frame, the rects stay stale, and every split opens right.
+    setTimeout(finish, 400);
+  });
 }
 
 /** Split a start command into argv, honouring double quotes so a flag value
@@ -199,7 +223,7 @@ export function AgentLauncher({ detected, onBack, onDone }: Props) {
   };
 
   return (
-    <div className="flex w-[318px] flex-col">
+    <div className="flex flex-col" style={{ width: AGENT_PANEL_W }}>
       <header className="flex items-center gap-2 border-b border-border-hairline px-3 py-2.5">
         {onBack && (
           <button

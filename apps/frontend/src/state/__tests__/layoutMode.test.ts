@@ -12,6 +12,7 @@ import {
   type PaneNode,
   type Tab,
 } from '../workspace';
+import { useSettings } from '../settings';
 
 // Switching layout mode rewrites the pane tree in place. The failure that
 // matters is a tab surviving in `tabs[]` while dropping out of the tree — in
@@ -56,6 +57,7 @@ function shape(node: PaneNode): unknown {
 
 beforeEach(() => {
   useWorkspace.setState({ modeStash: {} });
+  useSettings.setState({ defaultLayoutMode: 'tiling' });
 });
 
 describe('tileAll', () => {
@@ -183,6 +185,93 @@ describe('setLayoutMode', () => {
     useWorkspace.getState().setLayoutMode('tiling');
     useWorkspace.getState().setLayoutMode('standard');
     expect(shape(useWorkspace.getState().layout)).toEqual(before);
+  });
+});
+
+describe('closeTab', () => {
+  it('closes the last tab, leaving an empty leaf for the launcher', () => {
+    const ids = seed(1);
+    useWorkspace.getState().closeTab(ids[0]!);
+    const s = useWorkspace.getState();
+
+    expect(s.tabs).toHaveLength(0);
+    expect(s.activeTabId).toBeNull();
+    // Same shape `PaneTreeView` checks before rendering EmptyWorkspace.
+    expect(s.layout.kind).toBe('leaf');
+    expect(countLayoutTabs(s.layout)).toBe(0);
+  });
+
+  it('closes down to empty one tab at a time', () => {
+    const ids = seed(3);
+    for (const id of ids) useWorkspace.getState().closeTab(id);
+    const s = useWorkspace.getState();
+    expect(s.tabs).toHaveLength(0);
+    expect(countLayoutTabs(s.layout)).toBe(0);
+    expect(allLeaves(s.layout)).toHaveLength(1);
+  });
+
+  it('leaves other workspaces untouched when one empties', () => {
+    seed(1);
+    const first = useWorkspace.getState().activeWorkspaceId;
+    const kept = useWorkspace.getState().tabs[0]!.id;
+    const second = useWorkspace.getState().createWorkspace('Second');
+    useWorkspace.getState().addTab({ id: 'x1', title: 'x1', kind: 'terminal' });
+
+    useWorkspace.getState().closeTab('x1');
+    const s = useWorkspace.getState();
+    expect(s.activeWorkspaceId).toBe(second);
+    expect(countLayoutTabs(s.layout)).toBe(0); // the emptied one shows the launcher
+    // The other workspace still holds its tab, parked.
+    expect(s.tabs.map((t) => t.id)).toEqual([kept]);
+    expect(s.tabs[0]!.workspaceId).toBe(first);
+  });
+});
+
+describe('createWorkspace', () => {
+  it('opens the new workspace empty, so the launcher shows instead of a shell', () => {
+    seed(2);
+    const before = useWorkspace.getState().tabs.length;
+    const id = useWorkspace.getState().createWorkspace('Second');
+    const s = useWorkspace.getState();
+
+    expect(s.activeWorkspaceId).toBe(id);
+    expect(s.tabs).toHaveLength(before); // nothing was spawned into it
+    expect(s.tabs.filter((t) => t.workspaceId === id)).toHaveLength(0);
+    expect(s.activeTabId).toBeNull();
+    // The exact shape `PaneTreeView` tests for before rendering EmptyWorkspace:
+    // a single leaf holding nothing. A seeded tab here would hide the launcher.
+    expect(s.layout.kind).toBe('leaf');
+    expect(countLayoutTabs(s.layout)).toBe(0);
+    expect(allLeaves(s.layout)).toHaveLength(1);
+  });
+
+  it('stamps the default layout mode from settings onto the new workspace', () => {
+    seed(1);
+    useSettings.getState().setDefaultLayoutMode('standard');
+    const id = useWorkspace.getState().createWorkspace('Tabbed');
+    expect(layoutModeOf(useWorkspace.getState().workspaces, id)).toBe('standard');
+
+    useSettings.getState().setDefaultLayoutMode('tiling');
+    const other = useWorkspace.getState().createWorkspace('Tiled');
+    expect(layoutModeOf(useWorkspace.getState().workspaces, other)).toBe('tiling');
+  });
+
+  it('leaves workspaces that already exist on their own mode', () => {
+    seed(1);
+    const first = useWorkspace.getState().activeWorkspaceId;
+    useSettings.getState().setDefaultLayoutMode('standard');
+    useWorkspace.getState().createWorkspace('Second');
+    // Changing the default is not retroactive.
+    expect(layoutModeOf(useWorkspace.getState().workspaces, first)).toBe('tiling');
+  });
+
+  it('parks the previous workspace rather than dropping its tabs', () => {
+    const ids = seed(2);
+    const from = useWorkspace.getState().activeWorkspaceId;
+    useWorkspace.getState().createWorkspace('Second');
+    const s = useWorkspace.getState();
+    expect(s.layoutStash[from]).toBeDefined();
+    expect(s.tabs.filter((t) => t.workspaceId === from).map((t) => t.id)).toEqual(ids);
   });
 });
 

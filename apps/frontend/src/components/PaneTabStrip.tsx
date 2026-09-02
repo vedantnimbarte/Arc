@@ -95,10 +95,8 @@ export function PaneTabStrip({ paneId, variant = 'leaf' }: Props) {
   const isFocused = paneId === focusedPaneId;
 
   const requestClose = (id: string, title: string) => {
-    // Refuse if this is the last tab in the workspace — closeTab in the
-    // store has the same guard, but no-op here keeps the dirty-confirm
-    // prompt from firing pointlessly.
-    if (tabs.length <= 1) return;
+    // Every tab is closable, the last one included; the workspace falls back
+    // to the launcher once it empties.
     if (tabDirty[id]) {
       const ok = window.confirm(`"${title}" has unsaved changes. Discard them?`);
       if (!ok) return;
@@ -241,45 +239,38 @@ export function PaneTabStrip({ paneId, variant = 'leaf' }: Props) {
               )}
             />
             <span className="flex-1 truncate text-left">{tab.title}</span>
-            {tabs.length > 1 ? (
-              <span
-                role="button"
-                tabIndex={0}
-                aria-label={dirty ? 'Close tab (unsaved changes)' : 'Close tab'}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  requestClose(tabId, tab.title);
-                }}
-                className={cn(
-                  'relative -mr-1 ml-0.5 flex h-[18px] w-[18px] items-center justify-center rounded-full',
-                  'transition-all duration-150 hover:bg-white/15 hover:text-fg-base',
-                  dirty
-                    ? 'text-accent hover:text-fg-base'
-                    : 'text-fg-subtle opacity-0 group-hover/tab:opacity-100',
-                )}
-              >
-                {dirty ? (
-                  <>
-                    <span className="absolute inset-0 m-auto h-1.5 w-1.5 rounded-full bg-accent shadow-glow-sm transition-opacity duration-150 group-hover/tab:opacity-0" />
-                    <X
-                      size={10}
-                      strokeWidth={2.5}
-                      className="opacity-0 transition-opacity duration-150 group-hover/tab:opacity-100"
-                    />
-                  </>
-                ) : (
-                  <X size={10} strokeWidth={2.5} />
-                )}
-              </span>
-            ) : dirty ? (
-              <span
-                aria-label="Unsaved changes"
-                title="Unsaved changes"
-                className="relative -mr-1 ml-0.5 flex h-[18px] w-[18px] items-center justify-center"
-              >
-                <span className="h-1.5 w-1.5 rounded-full bg-accent shadow-glow-sm" />
-              </span>
-            ) : null}
+            {/* Close is always offered now, so the old "dirty dot only" branch
+                for an unclosable last tab is gone — this control already shows
+                the dot and swaps it for an X on hover. */}
+            <span
+              role="button"
+              tabIndex={0}
+              aria-label={dirty ? 'Close tab (unsaved changes)' : 'Close tab'}
+              onClick={(e) => {
+                e.stopPropagation();
+                requestClose(tabId, tab.title);
+              }}
+              className={cn(
+                'relative -mr-1 ml-0.5 flex h-[18px] w-[18px] items-center justify-center rounded-full',
+                'transition-all duration-150 hover:bg-white/15 hover:text-fg-base',
+                dirty
+                  ? 'text-accent hover:text-fg-base'
+                  : 'text-fg-subtle opacity-0 group-hover/tab:opacity-100',
+              )}
+            >
+              {dirty ? (
+                <>
+                  <span className="absolute inset-0 m-auto h-1.5 w-1.5 rounded-full bg-accent shadow-glow-sm transition-opacity duration-150 group-hover/tab:opacity-0" />
+                  <X
+                    size={10}
+                    strokeWidth={2.5}
+                    className="opacity-0 transition-opacity duration-150 group-hover/tab:opacity-100"
+                  />
+                </>
+              ) : (
+                <X size={10} strokeWidth={2.5} />
+              )}
+            </span>
           </button>
         )}
       </div>
@@ -357,7 +348,7 @@ export function PaneTabStrip({ paneId, variant = 'leaf' }: Props) {
         <TabContextMenu
           x={contextMenu.x}
           y={contextMenu.y}
-          closable={tabs.length > 1}
+          closable
           inGroup={!!tabById.get(contextMenu.tabId)?.groupId}
           groupOptions={groupOptionsFor(contextMenu.tabId)}
           onClose={() => setContextMenu(null)}

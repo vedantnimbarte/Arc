@@ -935,6 +935,9 @@ export interface PersistedSettings {
   /** Folder names excluded from file search. Fully user-editable; seeded with
    *  sensible defaults (node_modules, .venv, target, …). */
   searchIgnoreDirs?: string[];
+  /** Layout mode stamped onto a newly created workspace: 'tiling' | 'standard'.
+   *  Existing workspaces keep whatever they were set to. */
+  defaultLayoutMode?: string;
   /** Per-agent overrides of the launcher's start command, keyed by `AiCliId`.
    *  Sparse — only agents whose command the user edited away from
    *  `AI_CLI_COMMANDS` appear, so Reset is "delete the key". */

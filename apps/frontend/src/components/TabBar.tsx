@@ -22,7 +22,7 @@ import { layoutModeOf, useWorkspace, type LayoutMode } from '../state/workspace'
 import { useFiles } from '../state/files';
 import { runCommand } from '../state/commands';
 import { Tooltip } from './Tooltip';
-import { AgentLauncher } from './AgentLauncher';
+import { AgentLauncher, AGENT_PANEL_H, AGENT_PANEL_W } from './AgentLauncher';
 import { formatBinding, getBinding } from '../state/shortcuts';
 import { cn } from '../lib/cn';
 import {
@@ -171,11 +171,6 @@ export function TabBar() {
     setMenuOpen(false);
   };
 
-  const launchCli = (cli: AiCliInfo) => {
-    void launchAiCli(cli);
-    setMenuOpen(false);
-  };
-
   const launchWingmanMode = (mode: 'pilot' | 'headless') => {
     void launchWingman(mode);
     setMenuOpen(false);
@@ -226,7 +221,7 @@ export function TabBar() {
 
       {/* AI CLI launcher + keyboard shortcuts — relocated here from the old
           bottom status bar, sitting between the sidebar toggle and the +. */}
-      <AiCliMenuButton clis={aiClis} onLaunch={(cli) => void launchAiCli(cli)} />
+      <AiCliMenuButton clis={aiClis} />
       <Tooltip label="Keyboard shortcuts" kbd={formatBinding(getBinding('open-shortcuts'))}>
         <button
           onClick={() => void runCommand('shortcut.open-shortcuts')}
@@ -471,13 +466,7 @@ function LayoutModeSwitch({
   );
 }
 
-function AiCliMenuButton({
-  clis,
-  onLaunch,
-}: {
-  clis: AiCliInfo[];
-  onLaunch: (cli: AiCliInfo) => void;
-}) {
+function AiCliMenuButton({ clis }: { clis: AiCliInfo[] }) {
   const [open, setOpen] = useState(false);
   const [pos, setPos] = useState<{ top: number; left: number } | null>(null);
   const btnRef = useRef<HTMLButtonElement>(null);
@@ -491,7 +480,13 @@ function AiCliMenuButton({
     const update = () => {
       const r = btnRef.current?.getBoundingClientRect();
       if (!r) return;
-      setPos({ top: r.bottom + 4, left: r.left });
+      // The panel is far taller than the old menu, so a short window would push
+      // its command field and Launch button off the bottom with nothing to
+      // scroll. Clamp both axes; `max-h` on the sheet is the backstop.
+      setPos({
+        top: Math.max(8, Math.min(r.bottom + 4, window.innerHeight - AGENT_PANEL_H - 8)),
+        left: Math.max(8, Math.min(r.left, window.innerWidth - AGENT_PANEL_W - 8)),
+      });
     };
     update();
     window.addEventListener('resize', update);
@@ -546,41 +541,17 @@ function AiCliMenuButton({
         <Bot size={14} strokeWidth={1.9} />
       </button>
 
+      {/* The same panel the new-tab menu's Agents row opens: this button used
+          to list the detected CLIs and launch one with no options, which could
+          not say what else ARC supports or start more than one. */}
       {open && pos && typeof document !== 'undefined' &&
         createPortal(
           <div
             ref={menuRef}
-            role="menu"
             style={{ position: 'fixed', top: pos.top, left: pos.left }}
-            className="material-sheet z-50 w-48 animate-popover-in overflow-hidden rounded-md shadow-sheet ring-1 ring-edge-2"
+            className="material-sheet z-50 max-h-[calc(100vh-16px)] animate-popover-in overflow-y-auto rounded-lg bg-bg-panel shadow-sheet ring-1 ring-edge-2"
           >
-            {clis.length === 0 ? (
-              <div className="px-3 py-3 font-display text-xs leading-snug text-fg-muted">
-                <div className="mb-1 font-medium text-fg-base">No AI CLIs found</div>
-                <div className="text-fg-subtle">
-                  Install <code className="font-mono">claude</code>,{' '}
-                  <code className="font-mono">codex</code>, or{' '}
-                  <code className="font-mono">opencode</code> on your{' '}
-                  <code className="font-mono">PATH</code>.
-                </div>
-              </div>
-            ) : (
-              clis.map((cli) => (
-                <button
-                  key={cli.id}
-                  role="menuitem"
-                  onClick={() => {
-                    onLaunch(cli);
-                    setOpen(false);
-                  }}
-                  className="flex w-full items-center gap-2 px-3 py-2 text-left font-display text-sm text-fg-base/90 transition-colors hover:bg-surface-2"
-                  title={cli.path}
-                >
-                  <Bot size={12} strokeWidth={2} className="text-fg-subtle" />
-                  <span className="flex-1 truncate">{cli.label}</span>
-                </button>
-              ))
-            )}
+            <AgentLauncher detected={clis} onDone={() => setOpen(false)} />
           </div>,
           document.body,
         )}

@@ -15,6 +15,7 @@ import {
 } from '../lib/tauri';
 import { useAgentRun } from './agentRun';
 import { useFiles } from './files';
+import { useSettings } from './settings';
 import { useReveal } from './reveal';
 import { nextGroupColor, type TabGroupColorId } from '../lib/tabGroups';
 
@@ -827,30 +828,32 @@ export const useWorkspace = create<WorkspaceState>()((set, get) => ({
     // forget; the prune on hydrate is the backstop if this write is lost.
     if (isTauri) void sessionScrollbackDelete(id).catch(() => {});
     set((s) => {
-      // Layout-aware close. Refuse if this is the last tab in the entire
-      // workspace — the original UX was to keep at least one tab open and
-      // we honor that here. With splits, closing the last tab in a *leaf*
-      // collapses the leaf (its sibling expands to fill the parent split)
-      // but the workspace as a whole never goes empty.
-      if (s.tabs.length <= 1) return s;
+      // Layout-aware close. Every tab is closable, the last one included:
+      // closing the last tab in a *leaf* collapses the leaf (its sibling
+      // expands to fill the parent split), and emptying the workspace leaves
+      // an empty leaf, which `PaneTreeView` renders as the launcher. There is
+      // nothing left to protect the user from by refusing.
       const remaining = s.tabs.filter((t) => t.id !== id);
       const pruned = pruneLayout(s.layout, new Set([id]));
       const { [id]: _omit, ...nextDirty } = s.tabDirty;
       if (!pruned) {
-        // The active workspace's tree emptied (closed its last tab while other
-        // workspaces still hold tabs). Reseed from the active workspace's
-        // remaining tabs only — an empty result leaves an empty leaf, which
-        // PaneTreeView renders as an empty-workspace prompt.
+        // The active workspace's tree emptied — the ordinary outcome of closing
+        // its last tab. Reseed from whatever that workspace still holds, which
+        // is normally nothing: an empty result leaves an empty leaf, and
+        // `PaneTreeView` renders the launcher for it. Routed through
+        // `restoreWorkspaceLayout` so a tiling workspace that somehow still has
+        // tabs comes back tiled rather than stacked into one unreachable pane.
         const activeRemaining = remaining.filter((t) => t.workspaceId === s.activeWorkspaceId);
-        const fresh = singleLeafLayout(
-          activeRemaining.map((t) => t.id),
-          activeRemaining[0]?.id ?? null,
+        const fresh = restoreWorkspaceLayout(
+          undefined,
+          activeRemaining,
+          layoutModeOf(s.workspaces, s.activeWorkspaceId),
         );
         return {
           tabs: remaining,
-          activeTabId: activeRemaining[0]?.id ?? null,
-          layout: fresh,
-          focusedPaneId: fresh.id,
+          activeTabId: fresh.activeTabId,
+          layout: fresh.layout,
+          focusedPaneId: fresh.focusedPaneId,
           tabDirty: nextDirty,
           tabGroups: pruneEmptyGroups(s.tabGroups, remaining),
         };
@@ -1035,11 +1038,18 @@ export const useWorkspace = create<WorkspaceState>()((set, get) => ({
       s.workspaces.map((w) => w.color).filter(Boolean) as TabGroupColorId[],
     );
     // Park the current workspace's layout, then switch to a fresh empty leaf.
-    // The newTerminal() below appends into that leaf (addTab targets the
-    // focused pane of the now-active workspace).
+    // The leaf stays empty on purpose: `PaneTreeView` renders `EmptyWorkspace`
+    // for a tabless workspace, so a new one opens on the launcher and the user
+    // picks what it is for. Seeding a shell here decided that for them, and
+    // dragged the file tree to the home directory as a side effect of
+    // `newTerminal` — picking Terminal from the launcher still does both.
     const empty = singleLeafLayout([], null);
+    // Stamp the mode explicitly rather than leaving it undefined: undefined
+    // means tiling, so a user whose default is `standard` would otherwise get
+    // a tiled workspace every time.
+    const mode = useSettings.getState().defaultLayoutMode;
     set({
-      workspaces: [...s.workspaces, { id, name: finalName, color }],
+      workspaces: [...s.workspaces, { id, name: finalName, color, mode }],
       activeWorkspaceId: id,
       layoutStash: {
         ...s.layoutStash,
@@ -1049,7 +1059,6 @@ export const useWorkspace = create<WorkspaceState>()((set, get) => ({
       focusedPaneId: empty.id,
       activeTabId: null,
     });
-    void get().newTerminal();
     return id;
   },
 
@@ -1113,8 +1122,10 @@ export const useWorkspace = create<WorkspaceState>()((set, get) => ({
       tabDirty: nextDirty,
       tabGroups: pruneEmptyGroups(s.tabGroups, remaining),
     });
-    // Never leave the app with zero tabs — seed one in the now-active workspace.
-    if (targetTabs.length === 0) void get().newTerminal();
+    // Landing on a tabless workspace is a normal state now that a new one
+    // starts empty, and it shows the launcher rather than nothing — so this no
+    // longer seeds a shell either. Doing so would have the delete decide what
+    // the surviving workspace is for.
   },
 
   switchWorkspace: (id) =>

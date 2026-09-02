@@ -21,6 +21,9 @@ import {
   type Appearance,
 } from '../themes';
 import { loadInstalledThemes } from '../lib/themeMarketplace';
+// Type-only: `workspace.ts` imports this store at runtime, so a value import
+// here would close the cycle. `import type` is erased, leaving one direction.
+import type { LayoutMode } from './workspace';
 
 /** Folder names excluded from file search by default. Mirrors the Rust
  *  crate's built-in skip list; the setting is fully editable, so the frontend
@@ -196,6 +199,9 @@ export interface Settings {
   notifySound: boolean;
   /** Folder names excluded from file search (Ctrl+P). Fully editable. */
   searchIgnoreDirs: string[];
+  /** Layout mode a newly created workspace starts in. Existing workspaces are
+   *  untouched — each already carries its own `mode`. */
+  defaultLayoutMode: LayoutMode;
   /** Per-agent start-command overrides for the agent launcher, keyed by
    *  `AiCliId`. Sparse: an agent left at its default has no entry, which is
    *  what makes the launcher's Reset a delete rather than a re-write. */
@@ -237,6 +243,7 @@ export interface Settings {
   setNotifyThresholdSecs: (secs: number) => void;
   setNotifySound: (on: boolean) => void;
   setSearchIgnoreDirs: (dirs: string[]) => void;
+  setDefaultLayoutMode: (mode: LayoutMode) => void;
   /** Override an agent's start command, or clear the override when `command`
    *  is blank or matches the built-in default. */
   setAgentCommand: (id: AiCliId, command: string) => void;
@@ -266,6 +273,7 @@ const DEFAULTS = {
   notifyThresholdSecs: 30,
   notifySound: false,
   searchIgnoreDirs: DEFAULT_SEARCH_IGNORE_DIRS,
+  defaultLayoutMode: 'tiling' as LayoutMode,
   agentCommands: {} as Partial<Record<AiCliId, string>>,
   autoUpdateCheck: true,
   aiModel: DEFAULT_AI_MODEL,
@@ -345,6 +353,7 @@ export const useSettings = create<Settings>()((set, get) => ({
   setNotifyThresholdSecs: (secs) => set({ notifyThresholdSecs: clampNotifySecs(secs) }),
   setNotifySound: (on) => set({ notifySound: on }),
   setSearchIgnoreDirs: (dirs) => set({ searchIgnoreDirs: dirs }),
+  setDefaultLayoutMode: (mode) => set({ defaultLayoutMode: mode }),
   setAgentCommand: (id, command) =>
     set((s) => {
       const trimmed = command.trim();
@@ -508,6 +517,10 @@ function applyStored(
       stored.searchIgnoreDirs.every((d) => typeof d === 'string')
         ? stored.searchIgnoreDirs
         : current.searchIgnoreDirs,
+    defaultLayoutMode:
+      stored.defaultLayoutMode === 'standard' || stored.defaultLayoutMode === 'tiling'
+        ? stored.defaultLayoutMode
+        : current.defaultLayoutMode,
     agentCommands: coerceAgentCommands(stored.agentCommands, current.agentCommands),
     autoUpdateCheck:
       typeof stored.autoUpdateCheck === 'boolean'
@@ -542,6 +555,7 @@ function toPersistedSettings(s: Settings): PersistedSettings {
     notifyThresholdSecs: s.notifyThresholdSecs,
     notifySound: s.notifySound,
     searchIgnoreDirs: s.searchIgnoreDirs,
+    defaultLayoutMode: s.defaultLayoutMode,
     agentCommands: s.agentCommands,
     autoUpdateCheck: s.autoUpdateCheck,
     aiModel: s.aiModel,
