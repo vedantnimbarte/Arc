@@ -1,9 +1,11 @@
 import { create } from 'zustand';
 import {
+  AI_CLI_COMMANDS,
   isTauri,
   sessionSettingsLoad,
   sessionSettingsSave,
   settingsBroadcastChanged,
+  type AiCliId,
   type ClaudePermissionMode,
   type PersistedSettings,
 } from '../lib/tauri';
@@ -194,6 +196,10 @@ export interface Settings {
   notifySound: boolean;
   /** Folder names excluded from file search (Ctrl+P). Fully editable. */
   searchIgnoreDirs: string[];
+  /** Per-agent start-command overrides for the agent launcher, keyed by
+   *  `AiCliId`. Sparse: an agent left at its default has no entry, which is
+   *  what makes the launcher's Reset a delete rather than a re-write. */
+  agentCommands: Partial<Record<AiCliId, string>>;
   /** Check for a new ARC release on launch and offer it in-app. Off means
    *  ARC never contacts the update endpoint on its own — Settings → About
    *  still has a manual "Check for updates" button. */
@@ -231,6 +237,9 @@ export interface Settings {
   setNotifyThresholdSecs: (secs: number) => void;
   setNotifySound: (on: boolean) => void;
   setSearchIgnoreDirs: (dirs: string[]) => void;
+  /** Override an agent's start command, or clear the override when `command`
+   *  is blank or matches the built-in default. */
+  setAgentCommand: (id: AiCliId, command: string) => void;
   setAutoUpdateCheck: (on: boolean) => void;
   setAiModel: (model: string) => void;
   hydrateSettings: () => Promise<void>;
@@ -257,6 +266,7 @@ const DEFAULTS = {
   notifyThresholdSecs: 30,
   notifySound: false,
   searchIgnoreDirs: DEFAULT_SEARCH_IGNORE_DIRS,
+  agentCommands: {} as Partial<Record<AiCliId, string>>,
   autoUpdateCheck: true,
   aiModel: DEFAULT_AI_MODEL,
 };
@@ -335,6 +345,16 @@ export const useSettings = create<Settings>()((set, get) => ({
   setNotifyThresholdSecs: (secs) => set({ notifyThresholdSecs: clampNotifySecs(secs) }),
   setNotifySound: (on) => set({ notifySound: on }),
   setSearchIgnoreDirs: (dirs) => set({ searchIgnoreDirs: dirs }),
+  setAgentCommand: (id, command) =>
+    set((s) => {
+      const trimmed = command.trim();
+      const next = { ...s.agentCommands };
+      // Storing a value equal to the default would make Reset a no-op the next
+      // time the launcher opened, so treat "same as default" as "no override".
+      if (!trimmed || trimmed === AI_CLI_COMMANDS[id]) delete next[id];
+      else next[id] = trimmed;
+      return { agentCommands: next };
+    }),
   setAutoUpdateCheck: (on) => set({ autoUpdateCheck: on }),
   setAiModel: (model) => set({ aiModel: model.trim() || DEFAULT_AI_MODEL }),
 
@@ -488,6 +508,7 @@ function applyStored(
       stored.searchIgnoreDirs.every((d) => typeof d === 'string')
         ? stored.searchIgnoreDirs
         : current.searchIgnoreDirs,
+    agentCommands: coerceAgentCommands(stored.agentCommands, current.agentCommands),
     autoUpdateCheck:
       typeof stored.autoUpdateCheck === 'boolean'
         ? stored.autoUpdateCheck
@@ -521,9 +542,27 @@ function toPersistedSettings(s: Settings): PersistedSettings {
     notifyThresholdSecs: s.notifyThresholdSecs,
     notifySound: s.notifySound,
     searchIgnoreDirs: s.searchIgnoreDirs,
+    agentCommands: s.agentCommands,
     autoUpdateCheck: s.autoUpdateCheck,
     aiModel: s.aiModel,
   };
+}
+
+/** Keep only overrides that name a real agent and a non-empty string. The
+ *  settings row is user-editable on disk, so an unknown key here would other-
+ *  wise ride along forever and a non-string would reach a command line. */
+function coerceAgentCommands(
+  raw: unknown,
+  fallback: Partial<Record<AiCliId, string>>,
+): Partial<Record<AiCliId, string>> {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return fallback;
+  const out: Partial<Record<AiCliId, string>> = {};
+  for (const [k, v] of Object.entries(raw as Record<string, unknown>)) {
+    if (!(k in AI_CLI_COMMANDS)) continue;
+    if (typeof v !== 'string' || !v.trim()) continue;
+    out[k as AiCliId] = v.trim();
+  }
+  return out;
 }
 
 // Suppress save during programmatic hydrate. Set true around set(), cleared

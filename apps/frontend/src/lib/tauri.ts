@@ -104,11 +104,40 @@ export const AI_CLIS = {
   'aider-cli': 'Aider',
   'crush-cli': 'Crush',
   'droid-cli': 'Factory Droid',
+  'grok-cli': 'Grok',
+  'pi-cli': 'Pi',
   'wingman-cli': 'Wingman',
 } as const;
 
 /** Stable id assigned to each AI CLI by the Rust detector. */
 export type AiCliId = keyof typeof AI_CLIS;
+
+/** The command each agent is launched with by default — the same binary stems
+ *  `discover_ai_clis` probes PATH for, in its preference order's first slot.
+ *  Duplicated from Rust deliberately: the agent launcher prefills its editable
+ *  "start command" field from this, and has to name a command for agents the
+ *  detector did NOT find (which return no path at all).
+ *
+ *  Not derivable from the id — `kimi-code-cli` runs `kimi`, `qwen-code-cli`
+ *  runs `qwen` — so stripping the `-cli` suffix would spawn the wrong binary
+ *  for two of the thirteen. */
+export const AI_CLI_COMMANDS: Record<AiCliId, string> = {
+  'claude-cli': 'claude',
+  'codex-cli': 'codex',
+  'opencode-cli': 'opencode',
+  'kimi-code-cli': 'kimi',
+  'gemini-cli': 'gemini',
+  'qwen-code-cli': 'qwen',
+  'cursor-agent-cli': 'cursor-agent',
+  'copilot-cli': 'copilot',
+  'amp-cli': 'amp',
+  'aider-cli': 'aider',
+  'crush-cli': 'crush',
+  'droid-cli': 'droid',
+  'grok-cli': 'grok',
+  'pi-cli': 'pi',
+  'wingman-cli': 'wingman',
+};
 
 /** One installed AI coding-agent CLI discovered on PATH. */
 export interface AiCliInfo {
@@ -906,6 +935,10 @@ export interface PersistedSettings {
   /** Folder names excluded from file search. Fully user-editable; seeded with
    *  sensible defaults (node_modules, .venv, target, …). */
   searchIgnoreDirs?: string[];
+  /** Per-agent overrides of the launcher's start command, keyed by `AiCliId`.
+   *  Sparse — only agents whose command the user edited away from
+   *  `AI_CLI_COMMANDS` appear, so Reset is "delete the key". */
+  agentCommands?: Record<string, string>;
 }
 
 /** Returns the stored settings blob, or `null` on first launch. */

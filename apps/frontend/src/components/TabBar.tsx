@@ -14,6 +14,7 @@ import {
   Send,
   Database,
   Keyboard,
+  ChevronRight,
   type LucideIcon,
 } from 'lucide-react';
 import { getCurrentWindow } from '@tauri-apps/api/window';
@@ -21,6 +22,7 @@ import { layoutModeOf, useWorkspace, type LayoutMode } from '../state/workspace'
 import { useFiles } from '../state/files';
 import { runCommand } from '../state/commands';
 import { Tooltip } from './Tooltip';
+import { AgentLauncher } from './AgentLauncher';
 import { formatBinding, getBinding } from '../state/shortcuts';
 import { cn } from '../lib/cn';
 import {
@@ -59,6 +61,9 @@ export function TabBar() {
   const root = useFiles((s) => s.root);
 
   const [menuOpen, setMenuOpen] = useState(false);
+  // Which face of the + popover is showing. Reset to 'root' on every open so
+  // the menu never reappears mid-flow in the agent panel.
+  const [menuView, setMenuView] = useState<'root' | 'agents'>('root');
   const [menuPos, setMenuPos] = useState<{ top: number; left: number } | null>(null);
   const [newFileOpen, setNewFileOpen] = useState(false);
   // Installed AI CLIs (Claude Code / Codex / OpenCode). Refreshed on mount.
@@ -98,6 +103,7 @@ export function TabBar() {
   useLayoutEffect(() => {
     if (!menuOpen) {
       setMenuPos(null);
+      setMenuView('root');
       return;
     }
     const update = () => {
@@ -121,7 +127,10 @@ export function TabBar() {
       setMenuOpen(false);
     };
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setMenuOpen(false);
+      if (e.key !== 'Escape') return;
+      // Escape steps back out of the agent panel first, then closes.
+      if (menuView === 'agents') setMenuView('root');
+      else setMenuOpen(false);
     };
     window.addEventListener('mousedown', onDown);
     window.addEventListener('keydown', onKey);
@@ -129,7 +138,7 @@ export function TabBar() {
       window.removeEventListener('mousedown', onDown);
       window.removeEventListener('keydown', onKey);
     };
-  }, [menuOpen]);
+  }, [menuOpen, menuView]);
 
   // Re-detect when the +menu opens — picks up CLIs installed mid-session.
   useEffect(() => {
@@ -267,8 +276,19 @@ export function TabBar() {
           ref={menuRef}
           role="menu"
           style={{ position: 'fixed', top: menuPos.top, left: menuPos.left }}
-          className="material-sheet z-50 w-52 animate-popover-in overflow-hidden rounded-md bg-bg-panel shadow-sheet ring-1 ring-edge-2"
+          className={cn(
+            'material-sheet z-50 animate-popover-in overflow-hidden rounded-md bg-bg-panel shadow-sheet ring-1 ring-edge-2',
+            menuView === 'root' && 'w-52',
+          )}
         >
+          {menuView === 'agents' ? (
+            <AgentLauncher
+              detected={aiClis}
+              onBack={() => setMenuView('root')}
+              onDone={() => setMenuOpen(false)}
+            />
+          ) : (
+          <>
           <button
             role="menuitem"
             onClick={() => {
@@ -324,47 +344,44 @@ export function TabBar() {
             <Database size={12} strokeWidth={2} className="text-fg-subtle" />
             <span className="flex-1">Database</span>
           </button>
-          {aiClis.length > 0 && (
+          <div className="my-1 border-t border-edge-1" />
+          {/* One row into the launch panel, rather than a flat list of every
+              detected CLI — the panel offers all thirteen ARC supports plus
+              the instance count, which a menu row cannot carry. */}
+          <button
+            role="menuitem"
+            onClick={() => setMenuView('agents')}
+            className="flex w-full items-center gap-2 px-3 py-2 text-left font-display text-sm text-fg-base/90 transition-colors hover:bg-surface-2"
+          >
+            <Bot size={12} strokeWidth={2} className="text-fg-subtle" />
+            <span className="flex-1">Agents</span>
+            <ChevronRight size={12} strokeWidth={2} className="text-fg-subtle" />
+          </button>
+          {hasWingman && (
             <>
-              <div className="my-1 border-t border-edge-1" />
-              <div className="px-3 pb-1 pt-1.5 font-display text-2xs uppercase tracking-wider text-fg-subtle/80">
-                AI Agents
-              </div>
-              {aiClis.map((cli) => (
-                <button
-                  key={cli.id}
-                  role="menuitem"
-                  onClick={() => launchCli(cli)}
-                  className="flex w-full items-center gap-2 px-3 py-2 text-left font-display text-sm text-fg-base/90 transition-colors hover:bg-surface-2"
-                  title={cli.path}
-                >
-                  <Bot size={12} strokeWidth={2} className="text-fg-subtle" />
-                  <span className="flex-1 truncate">{cli.label}</span>
-                </button>
-              ))}
-              {hasWingman && (
-                <>
-                  <button
-                    role="menuitem"
-                    onClick={() => launchWingmanMode('pilot')}
-                    className="flex w-full items-center gap-2 px-3 py-2 text-left font-display text-sm text-fg-base/90 transition-colors hover:bg-surface-2"
-                    title="Prompt for a goal, then run Wingman pilot mode"
-                  >
-                    <Bot size={12} strokeWidth={2} className="text-fg-subtle" />
-                    <span className="flex-1 truncate">Wingman Pilot</span>
-                  </button>
-                  <button
-                    role="menuitem"
-                    onClick={() => launchWingmanMode('headless')}
-                    className="flex w-full items-center gap-2 px-3 py-2 text-left font-display text-sm text-fg-base/90 transition-colors hover:bg-surface-2"
-                    title="Prompt for a message, then run a one-shot headless response"
-                  >
-                    <Bot size={12} strokeWidth={2} className="text-fg-subtle" />
-                    <span className="flex-1 truncate">Wingman (headless)</span>
-                  </button>
-                </>
-              )}
+              {/* Pilot and headless stay here: both need a typed goal before
+                  anything spawns, so they do not fit the panel's flow. */}
+              <button
+                role="menuitem"
+                onClick={() => launchWingmanMode('pilot')}
+                className="flex w-full items-center gap-2 px-3 py-2 text-left font-display text-sm text-fg-base/90 transition-colors hover:bg-surface-2"
+                title="Prompt for a goal, then run Wingman pilot mode"
+              >
+                <Bot size={12} strokeWidth={2} className="text-fg-subtle" />
+                <span className="flex-1 truncate">Wingman Pilot</span>
+              </button>
+              <button
+                role="menuitem"
+                onClick={() => launchWingmanMode('headless')}
+                className="flex w-full items-center gap-2 px-3 py-2 text-left font-display text-sm text-fg-base/90 transition-colors hover:bg-surface-2"
+                title="Prompt for a message, then run a one-shot headless response"
+              >
+                <Bot size={12} strokeWidth={2} className="text-fg-subtle" />
+                <span className="flex-1 truncate">Wingman (headless)</span>
+              </button>
             </>
+          )}
+          </>
           )}
         </div>,
         document.body,

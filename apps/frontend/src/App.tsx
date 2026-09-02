@@ -812,7 +812,14 @@ function LauncherOverlay({
   return (
     <div
       className="fixed inset-0 z-50 animate-view-in bg-scrim-2 backdrop-blur-sm motion-reduce:animate-none"
-      onClick={onClose}
+      // Honour `data-launcher-stay` here too, not just in the capture handler
+      // below: every click inside also bubbles up to this one, so without the
+      // same guard an opted-out control still tore the launcher down — which
+      // is why the workspace-edit chip's popover only ever flashed.
+      onClick={(e) => {
+        if ((e.target as HTMLElement | null)?.closest('[data-launcher-stay]')) return;
+        onClose();
+      }}
     >
       {/* Every launcher action either opens a tab or reveals a sidebar view, so
           a click is a dismissal — let it through, then close on the next tick.

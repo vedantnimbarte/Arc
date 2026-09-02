@@ -22,6 +22,13 @@ import { groupColorDef, rgba, type TabGroupColorId } from '../lib/tabGroups';
 import { formatBinding, getBinding } from '../state/shortcuts';
 import { cn } from '../lib/cn';
 import { WorkspaceEditPanel, DEFAULT_WORKSPACE_COLOR } from './WorkspaceEditPanel';
+import { AgentLauncher } from './AgentLauncher';
+
+/** Footprint of the agent panel, used only to keep it inside the viewport.
+ *  Approximate on purpose — a few pixels out just shifts the clamp, and
+ *  measuring would mean rendering it offscreen first. */
+const AGENT_PANEL_W = 318;
+const AGENT_PANEL_H = 500;
 
 /** Two-letter monogram from a workspace name ("Workspace 1" → "W1"). */
 function initials(name: string): string {
@@ -73,6 +80,30 @@ export function EmptyWorkspace({ onOpenCommandPalette }: Props) {
       cancelled = true;
     };
   }, []);
+
+  // Agent launch panel, anchored under the button that opens it.
+  const [agentPos, setAgentPos] = useState<{ x: number; y: number } | null>(null);
+  useEffect(() => {
+    if (!agentPos) return;
+    const onDown = (e: MouseEvent) => {
+      const t = e.target as HTMLElement | null;
+      if (t?.closest('[data-agent-popover]')) return;
+      setAgentPos(null);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return;
+      // Swallow it: the launcher overlay closes on Escape too, and dismissing
+      // both at once would drop the user out of the launcher entirely.
+      e.stopPropagation();
+      setAgentPos(null);
+    };
+    window.addEventListener('mousedown', onDown);
+    window.addEventListener('keydown', onKey, true);
+    return () => {
+      window.removeEventListener('mousedown', onDown);
+      window.removeEventListener('keydown', onKey, true);
+    };
+  }, [agentPos]);
 
   // Workspace edit popover, anchored under the identity chip.
   const [editPos, setEditPos] = useState<{ x: number; y: number } | null>(null);
@@ -184,28 +215,43 @@ export function EmptyWorkspace({ onOpenCommandPalette }: Props) {
           })}
         </div>
 
-        {/* AI agents — detected CLIs. */}
+        {/* AI agents — a chip per detected CLI for the one-click case, then the
+            full panel for choosing a count or editing the command. With none
+            detected the panel entry stands alone: an empty row should still
+            offer the way forward rather than just reporting the absence. */}
         <section className="mt-6">
           <SectionLabel icon={Sparkles}>AI Agents</SectionLabel>
-          {aiClis.length > 0 ? (
-            <div className="flex flex-wrap gap-2">
-              {aiClis.map((cli) => (
-                <button
-                  key={cli.id}
-                  onClick={() => void launchAiCli(cli)}
-                  title={cli.path}
-                  className="flex items-center gap-2 rounded-lg border border-border-hairline bg-surface-1 px-3 py-2 text-sm font-medium text-fg-base/90 transition-colors hover:border-border-subtle hover:bg-surface-1"
-                >
-                  <Bot size={13} strokeWidth={1.9} className="text-accent-bright" />
-                  <span className="truncate">{cli.label}</span>
-                </button>
-              ))}
-            </div>
-          ) : (
-            <p className="text-xs text-fg-subtle">
-              No AI CLIs found on your PATH. Install Claude Code, Codex, or OpenCode to launch one here.
-            </p>
-          )}
+          <div className="flex flex-wrap gap-2">
+            {aiClis.map((cli) => (
+              <button
+                key={cli.id}
+                onClick={() => void launchAiCli(cli)}
+                title={cli.path}
+                className="flex items-center gap-2 rounded-lg border border-border-hairline bg-surface-1 px-3 py-2 text-sm font-medium text-fg-base/90 transition-colors hover:border-border-subtle hover:bg-surface-1"
+              >
+                <Bot size={13} strokeWidth={1.9} className="text-accent-bright" />
+                <span className="truncate">{cli.label}</span>
+              </button>
+            ))}
+            <button
+              onClick={(e) => {
+                const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
+                // Anchor under the button, but keep the whole panel on screen —
+                // the launcher is often open on a short window, where a naive
+                // `r.bottom` would push the command field and Launch button
+                // below the fold with no way to scroll to them.
+                setAgentPos({
+                  x: Math.max(12, Math.min(r.left, window.innerWidth - AGENT_PANEL_W - 12)),
+                  y: Math.max(12, Math.min(r.bottom + 8, window.innerHeight - AGENT_PANEL_H - 12)),
+                });
+              }}
+              data-launcher-stay
+              className="flex items-center gap-2 rounded-lg border border-dashed border-border-subtle px-3 py-2 text-sm font-medium text-fg-muted transition-colors hover:border-border-subtle hover:bg-surface-1 hover:text-fg-base"
+            >
+              <Sparkles size={13} strokeWidth={1.9} className="text-fg-subtle" />
+              <span>{aiClis.length > 0 ? 'More agents…' : 'Browse agents…'}</span>
+            </button>
+          </div>
         </section>
 
         {/* Utilities + recent files. */}
@@ -250,6 +296,19 @@ export function EmptyWorkspace({ onOpenCommandPalette }: Props) {
           )}
         </div>
       </div>
+
+      {agentPos &&
+        createPortal(
+          <div
+            data-agent-popover
+            data-launcher-stay
+            style={{ position: 'fixed', top: agentPos.y, left: agentPos.x }}
+            className="material-sheet z-50 max-h-[calc(100vh-24px)] animate-popover-in overflow-y-auto rounded-lg bg-bg-panel shadow-sheet ring-1 ring-edge-2"
+          >
+            <AgentLauncher detected={aiClis} onDone={() => setAgentPos(null)} />
+          </div>,
+          document.body,
+        )}
 
       {active &&
         editPos &&
