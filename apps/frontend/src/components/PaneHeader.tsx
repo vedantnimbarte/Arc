@@ -92,7 +92,6 @@ export function PaneHeader({ paneId }: Props) {
 
   const isFocused = paneId === focusedPaneId;
   const isMaximized = maximizedPaneId === paneId;
-  const closable = tabs.length > 1;
   const folder = tab.cwd ? basename(tab.cwd) : null;
   const Icon = iconForKind(tab.kind);
 
@@ -210,11 +209,11 @@ export function PaneHeader({ paneId }: Props) {
           ))
         )}
 
-        {closable && (
-          <HeaderButton label="Close pane" onClick={() => closeTab(tab.id)}>
-            <X size={13} strokeWidth={2.2} />
-          </HeaderButton>
-        )}
+        {/* Always offered, last tab included — emptying the workspace shows
+            the launcher rather than nothing. */}
+        <HeaderButton label="Close pane" onClick={() => closeTab(tab.id)}>
+          <X size={13} strokeWidth={2.2} />
+        </HeaderButton>
       </div>
 
       {menuAnchor && (

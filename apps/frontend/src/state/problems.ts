@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { notifyEvent } from '../lib/notifyEvent';
 import { fsReadDir, isTauri, procRun } from '../lib/tauri';
 import { isRemotePath } from '../lib/remote';
 import {
@@ -169,6 +170,23 @@ export const useProblems = create<ProblemsState>((set, get) => ({
     for (const checker of get().checkers) {
       await get().run(checker.id);
     }
+    // A full run is long enough to walk away from, which is exactly when a
+    // notification earns its place. Single-checker runs stay silent — you
+    // pressed one chip and are watching it.
+    const problems = allProblems(get().results);
+    const errors = problems.filter((p) => p.severity === 'error').length;
+    notifyEvent({
+      source: 'checks',
+      title:
+        problems.length === 0
+          ? 'Checkers found nothing'
+          : `${errors} error${errors === 1 ? '' : 's'}, ${problems.length - errors} warning${problems.length - errors === 1 ? '' : 's'}`,
+      body: get()
+        .checkers.map((c) => c.label)
+        .join(', '),
+      tone: errors > 0 ? 'error' : undefined,
+      target: { kind: 'sidebar', view: 'problems' },
+    });
   },
 
   toggleFile: (file) =>

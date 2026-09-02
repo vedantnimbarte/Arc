@@ -18,6 +18,9 @@
 //!   invoke("git_stash_list",     { path })                              -> Vec<StashEntry>
 //!   invoke("git_stash_push",     { path, message? })                    -> ()
 //!   invoke("git_stash_pop",      { path, index? })                      -> ()
+//!   invoke("git_checkpoint_create",  { path, label })                    -> Option<String>
+//!   invoke("git_checkpoint_restore", { path, oid })                      -> ()
+//!   invoke("git_checkpoint_forget",  { path, oid })                      -> ()
 //!   invoke("git_stash_drop",     { path, index })                       -> ()
 //!   invoke("git_branch_create",  { path, name, checkout })              -> ()
 //!   invoke("git_branch_rename",  { path, oldName, newName })            -> ()
@@ -234,6 +237,31 @@ pub async fn git_stash_pop(path: String, index: Option<usize>) -> Result<(), Str
 #[tauri::command]
 pub async fn git_stash_drop(path: String, index: usize) -> Result<(), String> {
     arc_git::stash_drop(&path, index).await.map_err(|e| e.to_string())
+}
+
+/// Take a restore point before an agent edits the tree. `None` means the tree
+/// was clean and there is nothing to restore to.
+#[tauri::command]
+pub async fn git_checkpoint_create(path: String, label: String) -> Result<Option<String>, String> {
+    arc_git::checkpoint_create(&path, &label)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+/// Put tracked files back as they were at `oid`. Files created since are left
+/// alone — see `arc_git::checkpoint_create`.
+#[tauri::command]
+pub async fn git_checkpoint_restore(path: String, oid: String) -> Result<(), String> {
+    arc_git::checkpoint_restore(&path, &oid)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn git_checkpoint_forget(path: String, oid: String) -> Result<(), String> {
+    arc_git::checkpoint_forget(&path, &oid)
+        .await
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]

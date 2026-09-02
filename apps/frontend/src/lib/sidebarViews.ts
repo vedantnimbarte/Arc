@@ -6,7 +6,6 @@ import {
   GitBranch,
   ListTree,
   Search,
-  Bot,
   Server,
   Sparkles,
   type LucideIcon,
@@ -40,8 +39,7 @@ export const SIDEBAR_VIEWS: SidebarViewDef[] = [
   { id: 'tests', label: 'Tests', Icon: FlaskConical },
   { id: 'docker', label: 'Containers', Icon: Boxes },
   { id: 'ssh', label: 'SSH', Icon: Server, shortcut: 'toggle-ssh-panel' },
-  { id: 'wingman', label: 'Wingman', Icon: Bot },
-  { id: 'claude', label: 'Claude Code', Icon: Sparkles },
+  { id: 'agents', label: 'Agents', Icon: Sparkles },
 ];
 
 /** Lookup by id — convenient for the body switch / customization UI. */

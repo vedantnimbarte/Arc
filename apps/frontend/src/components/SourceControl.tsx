@@ -97,7 +97,8 @@ import { fileIcon } from '../lib/fileIcons';
 import { cn } from '../lib/cn';
 import { askConfirm, askText } from '../state/confirm';
 import { copyText } from '../lib/clipboard';
-import { toast } from '../state/toast';
+import { toast, toastError } from '../state/toast';
+import { notifyEvent } from '../lib/notifyEvent';
 
 // ~800 lines of worktree + rebase UI, only pulled in when one is opened.
 const WorktreePanel = lazy(() =>
@@ -274,6 +275,7 @@ export function SourceControl() {
   const baseline = useAgentRun((s) => (root ? s.baselines[root] : undefined));
   const filtering = useAgentRun((s) => s.filtering);
   const reviewing = !!baseline && filtering;
+  const [restoring, setRestoring] = useState(false);
 
   const [opError, setOpError] = useState<string | null>(null);
   const [message, setMessage] = useState('');
@@ -355,7 +357,51 @@ export function SourceControl() {
     await refreshStore(root);
   }, [refreshStore, root]);
 
-  // ── Remote ops ──────────────────────────────────────────────────────────────
+  /**
+   * Put the tree back as it was before the agent started.
+   *
+   * Confirmed, and named for what it actually does: tracked files are
+   * restored, files the agent created are left in place. Promising a clean
+   * undo and then leaving new files behind would be the worse outcome, so the
+   * dialog says which is which.
+   */
+  const restoreCheckpoint = useCallback(async () => {
+    if (!root || !baseline?.checkpoint) return;
+    const ok = await askConfirm({
+      title: `Undo ${baseline.agent}'s changes?`,
+      body: 'Restores every tracked file to how it was when the agent started. Files it created are left in place for you to delete. Your staged selection is untouched.',
+      confirmLabel: 'Undo run',
+      destructive: true,
+    });
+    if (!ok) return;
+    setRestoring(true);
+    try {
+      await useAgentRun.getState().restore(root);
+      await refresh();
+      toast(`Restored to before ${baseline.agent} started.`);
+    } catch (err) {
+      toastError(`Undo failed: ${err instanceof Error ? err.message : String(err)}`);
+    } finally {
+      setRestoring(false);
+    }
+  }, [root, baseline, refresh]);
+
+  /** Remote ops flash their result inline, so only a failure is worth a
+ *  notification: it is the outcome you want to find later, having switched
+ *  away while the push ran. */
+function notifyGitFailure(title: string, err: unknown): void {
+  const msg = err instanceof Error ? err.message : String(err);
+  notifyEvent({
+    source: 'git',
+    title,
+    // git's first line names the failure; the rest is usually a hint block.
+    body: msg.split('\n')[0]?.slice(0, 160),
+    tone: 'error',
+    target: { kind: 'sidebar', view: 'git' },
+  });
+}
+
+// ── Remote ops ──────────────────────────────────────────────────────────────
 
   const handleFetch = useCallback(async () => {
     if (!root || remoteOp) return;
@@ -368,6 +414,7 @@ export function SourceControl() {
       await refreshStore(root);
     } catch (e) {
       setOpError(String(e));
+      notifyGitFailure('Fetch failed', e);
     } finally {
       setRemoteOp(null);
     }
@@ -384,6 +431,7 @@ export function SourceControl() {
       await refreshStore(root);
     } catch (e) {
       setOpError(String(e));
+      notifyGitFailure('Pull failed', e);
     } finally {
       setRemoteOp(null);
     }
@@ -406,7 +454,9 @@ export function SourceControl() {
         setOpError(msg);
         // A rebase or amend leaves the remote ahead of a history that no
         // longer contains it; that's the one case force-with-lease is for.
-        setPushRejected(/rejected|non-fast-forward|fetch first/i.test(msg));
+        const rejected = /rejected|non-fast-forward|fetch first/i.test(msg);
+        setPushRejected(rejected);
+        notifyGitFailure(rejected ? 'Push rejected' : 'Push failed', e);
       } finally {
         setRemoteOp(null);
       }
@@ -1250,6 +1300,18 @@ export function SourceControl() {
           >
             Agent only
           </button>
+          {/* Roll the run back. Only offered when a checkpoint was actually
+              taken — a clean tree at launch has nothing to restore to. */}
+          {baseline.checkpoint && agentCount > 0 && (
+            <button
+              onClick={() => void restoreCheckpoint()}
+              disabled={restoring}
+              className="shrink-0 rounded-md px-1.5 py-0.5 font-display text-2xs text-fg-subtle transition-colors hover:bg-surface-2 hover:text-fg-base disabled:opacity-50"
+              title={`Put tracked files back as they were before ${baseline.agent} started. Files it created are left in place.`}
+            >
+              {restoring ? 'Restoring…' : 'Undo run'}
+            </button>
+          )}
           <button
             onClick={() => root && useAgentRun.getState().clear(root)}
             className="shrink-0 text-fg-subtle transition-colors hover:text-fg-base"

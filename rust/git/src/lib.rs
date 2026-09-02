@@ -1568,6 +1568,99 @@ pub async fn stash_drop<P: AsRef<Path>>(path: P, index: usize) -> Result<()> {
     Ok(())
 }
 
+// ----- agent checkpoints ---------------------------------------------------
+//
+// A restore point taken before an agent is let loose on the working tree.
+//
+// `git stash create` is the whole trick: it writes a commit object for the
+// current working tree and prints its oid *without touching the tree or the
+// stash list*. That is exactly the shape wanted here — the agent must start
+// from the state the user was looking at, not from a cleaned tree, and the
+// user's own stash stack is not ARC's to push onto.
+//
+// Scope, deliberately: this captures tracked files only, because that is what
+// `stash create` records. A file the agent creates is untracked at both ends,
+// so restoring leaves it in place rather than deleting it. Erring toward
+// leaving a file behind is the right way round — an unwanted new file is one
+// `rm` away, whereas deleting one the user wanted is not recoverable. The UI
+// says so rather than promising a full undo.
+
+/// Take a checkpoint of `path`'s working tree.
+///
+/// Returns the commit oid, or `None` when the tree is clean and there is
+/// therefore nothing to restore to. The oid is also written to a ref under
+/// `refs/arc/checkpoint/` so routine garbage collection cannot reclaim it
+/// while the run is still in progress.
+pub async fn checkpoint_create<P: AsRef<Path>>(path: P, label: &str) -> Result<Option<String>> {
+    let path = path.as_ref();
+    let output = git_cmd()
+        .arg("-C")
+        .arg(path)
+        .args(["stash", "create", label])
+        .output()
+        .await
+        .map_err(|e| Error::Spawn(e.to_string()))?;
+    if !output.status.success() {
+        let err = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        return Err(Error::Failed(err));
+    }
+    let oid = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    // A clean tree produces no commit and no error — nothing to check point.
+    if oid.is_empty() {
+        return Ok(None);
+    }
+
+    // Anchor it. A dangling commit survives a fortnight by default, but that
+    // is a promise about gc's schedule rather than about our data.
+    let anchored = git_cmd()
+        .arg("-C")
+        .arg(path)
+        .args(["update-ref", &format!("refs/arc/checkpoint/{oid}"), &oid])
+        .output()
+        .await;
+    // Failing to anchor is not worth losing the checkpoint over: the oid is
+    // still valid and still restorable for as long as gc leaves it alone.
+    if let Ok(out) = anchored {
+        debug_assert!(out.status.success(), "update-ref failed for {oid}");
+    }
+    Ok(Some(oid))
+}
+
+/// Restore `path`'s tracked files to the state captured in `oid`.
+///
+/// Files that did not exist in the checkpoint are left untouched — see the
+/// note above. Uses `git restore --worktree`, so the index is not disturbed
+/// and a partially staged review survives the rollback.
+pub async fn checkpoint_restore<P: AsRef<Path>>(path: P, oid: &str) -> Result<()> {
+    reject_option_like(oid, "checkpoint id")?;
+    let path = path.as_ref();
+    let output = git_cmd()
+        .arg("-C")
+        .arg(path)
+        .args(["restore", "--source", oid, "--worktree", "--", "."])
+        .output()
+        .await
+        .map_err(|e| Error::Spawn(e.to_string()))?;
+    if !output.status.success() {
+        let err = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        return Err(Error::Failed(err));
+    }
+    Ok(())
+}
+
+/// Drop a checkpoint's anchoring ref, letting gc reclaim it in its own time.
+pub async fn checkpoint_forget<P: AsRef<Path>>(path: P, oid: &str) -> Result<()> {
+    reject_option_like(oid, "checkpoint id")?;
+    let path = path.as_ref();
+    let _ = git_cmd()
+        .arg("-C")
+        .arg(path)
+        .args(["update-ref", "-d", &format!("refs/arc/checkpoint/{oid}")])
+        .output()
+        .await;
+    Ok(())
+}
+
 // ----- branch management ---------------------------------------------------
 
 pub async fn branch_create<P: AsRef<Path>>(

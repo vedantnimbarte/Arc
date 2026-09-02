@@ -8,10 +8,14 @@ import {
   Loader2,
   Play,
   RefreshCw,
+  Sparkles,
 } from 'lucide-react';
 import { useFiles } from '../state/files';
 import { useWorkspace } from '../state/workspace';
 import { allProblems, useProblems } from '../state/problems';
+import { problemsPrompt } from '../lib/agentPrompt';
+import { useClaudeCode } from '../state/claudeCode';
+import { copyText } from '../lib/clipboard';
 import { countBySeverity, groupByFile, type Problem, type Severity } from '../lib/problemMatchers';
 import { isRemotePath } from '../lib/remote';
 import { fileIcon } from '../lib/fileIcons';
@@ -40,6 +44,27 @@ export function ProblemsPanel() {
   const problems = useMemo(() => allProblems(results), [results]);
   const groups = useMemo(() => groupByFile(problems), [problems]);
   const counts = useMemo(() => countBySeverity(problems), [problems]);
+
+  /**
+   * Hand the current diagnostics to an agent.
+   *
+   * Prefers the Claude Code panel, which ARC drives directly, so the prompt
+   * lands in a conversation rather than on a command line. When that CLI is
+   * not available the prompt goes to the clipboard instead of the action
+   * silently doing nothing — every other supported agent runs in a terminal
+   * ARC cannot type a multi-line prompt into safely.
+   */
+  const sendToAgent = () => {
+    const prompt = problemsPrompt(problems);
+    const claude = useClaudeCode.getState();
+    if (claude.status === 'ready') {
+      useFiles.getState().setAgentPanelTab('claude');
+      useFiles.getState().showSidebarView('agents');
+      void claude.send(prompt);
+      return;
+    }
+    copyText(prompt, 'Agent prompt');
+  };
   const anyRunning = Object.keys(running).length > 0;
   const ranAnything = Object.keys(results).length > 0;
 
@@ -70,6 +95,19 @@ export function ProblemsPanel() {
               <span className="text-amber-300/90">{counts.warnings} warn</span>
             )}
           </span>
+        )}
+        {/* Hand the diagnostics to an agent instead of retyping them. Only
+            offered when there is something to hand over. */}
+        {problems.length > 0 && (
+          <button
+            type="button"
+            onClick={sendToAgent}
+            title="Send these problems to an agent"
+            aria-label="Send these problems to an agent"
+            className="flex h-5 w-5 items-center justify-center rounded text-fg-muted transition hover:bg-surface-2 hover:text-fg-base"
+          >
+            <Sparkles size={12} />
+          </button>
         )}
         <button
           type="button"

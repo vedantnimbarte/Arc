@@ -56,3 +56,26 @@ describe('moveView', () => {
     expect(moveView(base, base[base.length - 1]!, 1)).toEqual(base);
   });
 });
+
+describe('the Wingman + Claude Code merge', () => {
+  // Those two views became one `agents` panel. Anyone upgrading has the old
+  // ids in their persisted rail order, and `normalizeOrder` is what has to
+  // drop them — a stale id would index `SIDEBAR_VIEW_BY_ID` to undefined and
+  // render an empty rail slot.
+  it('drops the retired ids from a saved order', () => {
+    const out = normalizeOrder(['git', 'wingman', 'claude', 'ssh'] as unknown as SidebarView[]);
+    expect(out).not.toContain('wingman' as SidebarView);
+    expect(out).not.toContain('claude' as SidebarView);
+    expect(out.slice(0, 2)).toEqual(['git', 'ssh']);
+  });
+
+  it('appends the merged view for someone who never had it', () => {
+    expect(normalizeOrder(['files'])).toContain('agents' as SidebarView);
+    expect(ALL).toContain('agents' as SidebarView);
+  });
+
+  it('leaves every rail entry resolvable', () => {
+    const rail = resolveRailViews(['wingman', 'claude'] as unknown as SidebarView[], []);
+    expect(rail.every((v) => v && v.id && v.label)).toBe(true);
+  });
+});

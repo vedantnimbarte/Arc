@@ -22,11 +22,37 @@ async function ensurePermission(): Promise<boolean> {
   }
 }
 
+/**
+ * Raise a system notification.
+ *
+ * Best-effort by design: a denied permission, a missing plugin or a browser
+ * build all no-op rather than throw. Callers decide *whether* to interrupt —
+ * this only knows how.
+ */
+export async function notifyOs(title: string, body: string, sound = false): Promise<void> {
+  if (!(await ensurePermission())) return;
+  try {
+    const { sendNotification } = await import('@tauri-apps/plugin-notification');
+    sendNotification({ title, body, ...(sound ? { sound: 'default' } : {}) });
+  } catch (err) {
+    console.warn('[notify] send failed:', err);
+  }
+}
+
 export interface CommandNotifyArgs {
   command: string;
   exitCode: number | null;
   durationMs: number;
   sound: boolean;
+}
+
+/** Human-readable elapsed time. Exported so notification titles elsewhere
+ *  phrase durations the same way. */
+export function formatDuration(secs: number): string {
+  if (secs < 60) return `${secs}s`;
+  const m = Math.floor(secs / 60);
+  const s = secs % 60;
+  return s === 0 ? `${m}m` : `${m}m ${s}s`;
 }
 
 /** Fire a system notification summarizing a finished command. Best-effort —
@@ -45,11 +71,4 @@ export async function notifyCommandFinished(args: CommandNotifyArgs): Promise<vo
   } catch (err) {
     console.warn('[notify] send failed:', err);
   }
-}
-
-function formatDuration(secs: number): string {
-  if (secs < 60) return `${secs}s`;
-  const m = Math.floor(secs / 60);
-  const s = secs % 60;
-  return s === 0 ? `${m}m` : `${m}m ${s}s`;
 }

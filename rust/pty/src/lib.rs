@@ -614,6 +614,13 @@ pub fn discover_ai_clis() -> Vec<AiCliInfo> {
         ("aider-cli", "Aider", &["aider"]),
         ("crush-cli", "Crush", &["crush"]),
         ("droid-cli", "Factory Droid", &["droid"]),
+        ("grok-cli", "Grok", &["grok"]),
+        // `pi` is two letters and generic enough to be somebody's own script,
+        // which is the same objection that keeps `goose` off this list. It is
+        // here because the tool ships under that name and the alternative is
+        // not offering it at all — but the launcher's command field is
+        // editable, so a collision is one edit away from being fixed.
+        ("pi-cli", "Pi", &["pi"]),
         ("wingman-cli", "Wingman", &["wingman"]),
     ];
 

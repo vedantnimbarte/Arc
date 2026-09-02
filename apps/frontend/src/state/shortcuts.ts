@@ -20,6 +20,7 @@ export type ActionId =
   | 'show-problems'
   | 'new-scratch'
   | 'toggle-ssh-panel'
+  | 'toggle-layout-mode'
   /** One launcher per detected CLI, derived from AI_CLIS — see LAUNCH_IDS. */
   | LaunchActionId
   | 'launch-wingman-pilot'
@@ -134,6 +135,12 @@ export const ACTION_META: Record<ActionId, ActionMeta> = {
     description: 'Open or close the SSH host & key manager.',
     category: 'SSH',
   },
+  'toggle-layout-mode': {
+    id: 'toggle-layout-mode',
+    label: 'Toggle Layout Mode',
+    description: 'Switch this workspace between tiled panes and a tab strip.',
+    category: 'Workspace',
+  },
   ...(Object.fromEntries(
     LAUNCH_IDS.map((cli) => [
       `launch-${cli}`,
@@ -174,6 +181,7 @@ export const ACTION_ORDER: ActionId[] = [
   'show-problems',
   'new-scratch',
   'toggle-ssh-panel',
+  'toggle-layout-mode',
   ...LAUNCH_IDS.map((cli) => `launch-${cli}` as LaunchActionId),
   'launch-wingman-pilot',
   'launch-wingman-headless',
@@ -200,6 +208,7 @@ export const DEFAULT_BINDINGS: Record<ActionId, KeyBinding | null> = {
   'show-problems': { code: 'KeyM', shift: true, alt: false, ...mod() },
   'new-scratch': { code: 'KeyN', shift: true, alt: false, ...mod() },
   'toggle-ssh-panel': { code: 'KeyS', shift: true, alt: false, ...mod() },
+  'toggle-layout-mode': { code: 'KeyL', shift: true, alt: false, ...mod() },
   // AI CLI launchers ship unbound by default — users can assign keys via the
   // shortcuts dialog, and they're discoverable through the TabBar dropdown
   // and the new-tab popover regardless.

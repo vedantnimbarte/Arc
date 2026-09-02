@@ -1,9 +1,11 @@
 import { create } from 'zustand';
 import {
+  AI_CLI_COMMANDS,
   isTauri,
   sessionSettingsLoad,
   sessionSettingsSave,
   settingsBroadcastChanged,
+  type AiCliId,
   type ClaudePermissionMode,
   type PersistedSettings,
 } from '../lib/tauri';
@@ -19,6 +21,10 @@ import {
   type Appearance,
 } from '../themes';
 import { loadInstalledThemes } from '../lib/themeMarketplace';
+// Type-only: `workspace.ts` imports this store at runtime, so a value import
+// here would close the cycle. `import type` is erased, leaving one direction.
+import type { LayoutMode } from './workspace';
+import { NOTIFICATION_SOURCES, type NotificationSource } from './notifications';
 
 /** Folder names excluded from file search by default. Mirrors the Rust
  *  crate's built-in skip list; the setting is fully editable, so the frontend
@@ -194,6 +200,20 @@ export interface Settings {
   notifySound: boolean;
   /** Folder names excluded from file search (Ctrl+P). Fully editable. */
   searchIgnoreDirs: string[];
+  /** Notification sources the user has silenced. Absent means everything is
+   *  delivered — the panel is only useful if it starts out complete. */
+  notifyMuted: NotificationSource[];
+  /** Sources that also raise an OS notification while the window is
+   *  unfocused. Everything lands in the panel regardless; this is only about
+   *  interrupting. Defaults to the two worth interrupting for. */
+  notifyOs: NotificationSource[];
+  /** Layout mode a newly created workspace starts in. Existing workspaces are
+   *  untouched — each already carries its own `mode`. */
+  defaultLayoutMode: LayoutMode;
+  /** Per-agent start-command overrides for the agent launcher, keyed by
+   *  `AiCliId`. Sparse: an agent left at its default has no entry, which is
+   *  what makes the launcher's Reset a delete rather than a re-write. */
+  agentCommands: Partial<Record<AiCliId, string>>;
   /** Check for a new ARC release on launch and offer it in-app. Off means
    *  ARC never contacts the update endpoint on its own — Settings → About
    *  still has a manual "Check for updates" button. */
@@ -231,6 +251,14 @@ export interface Settings {
   setNotifyThresholdSecs: (secs: number) => void;
   setNotifySound: (on: boolean) => void;
   setSearchIgnoreDirs: (dirs: string[]) => void;
+  setDefaultLayoutMode: (mode: LayoutMode) => void;
+  /** Silence or unsilence one source. */
+  setSourceMuted: (source: NotificationSource, muted: boolean) => void;
+  /** Let one source interrupt with an OS notification, or stop it. */
+  setSourceOs: (source: NotificationSource, on: boolean) => void;
+  /** Override an agent's start command, or clear the override when `command`
+   *  is blank or matches the built-in default. */
+  setAgentCommand: (id: AiCliId, command: string) => void;
   setAutoUpdateCheck: (on: boolean) => void;
   setAiModel: (model: string) => void;
   hydrateSettings: () => Promise<void>;
@@ -257,6 +285,10 @@ const DEFAULTS = {
   notifyThresholdSecs: 30,
   notifySound: false,
   searchIgnoreDirs: DEFAULT_SEARCH_IGNORE_DIRS,
+  notifyMuted: [] as NotificationSource[],
+  notifyOs: ['agent', 'command'] as NotificationSource[],
+  defaultLayoutMode: 'tiling' as LayoutMode,
+  agentCommands: {} as Partial<Record<AiCliId, string>>,
   autoUpdateCheck: true,
   aiModel: DEFAULT_AI_MODEL,
 };
@@ -335,12 +367,45 @@ export const useSettings = create<Settings>()((set, get) => ({
   setNotifyThresholdSecs: (secs) => set({ notifyThresholdSecs: clampNotifySecs(secs) }),
   setNotifySound: (on) => set({ notifySound: on }),
   setSearchIgnoreDirs: (dirs) => set({ searchIgnoreDirs: dirs }),
+  setDefaultLayoutMode: (mode) => set({ defaultLayoutMode: mode }),
+  setSourceMuted: (source, muted) =>
+    set((s) => ({
+      notifyMuted: muted
+        ? s.notifyMuted.includes(source)
+          ? s.notifyMuted
+          : [...s.notifyMuted, source]
+        : s.notifyMuted.filter((x) => x !== source),
+    })),
+  setSourceOs: (source, on) =>
+    set((s) => ({
+      notifyOs: on
+        ? s.notifyOs.includes(source)
+          ? s.notifyOs
+          : [...s.notifyOs, source]
+        : s.notifyOs.filter((x) => x !== source),
+    })),
+  setAgentCommand: (id, command) =>
+    set((s) => {
+      const trimmed = command.trim();
+      const next = { ...s.agentCommands };
+      // Storing a value equal to the default would make Reset a no-op the next
+      // time the launcher opened, so treat "same as default" as "no override".
+      if (!trimmed || trimmed === AI_CLI_COMMANDS[id]) delete next[id];
+      else next[id] = trimmed;
+      return { agentCommands: next };
+    }),
   setAutoUpdateCheck: (on) => set({ autoUpdateCheck: on }),
   setAiModel: (model) => set({ aiModel: model.trim() || DEFAULT_AI_MODEL }),
 
   hydrateSettings: async () => {
     if (get().settingsHydrated) return;
+    // Suppressed: `settingsHydrated` is not persisted, so letting this set
+    // schedule a debounced write only races the load that follows it.
+    suppressSave = true;
     set({ settingsHydrated: true });
+    queueMicrotask(() => {
+      suppressSave = false;
+    });
 
     // Register user-installed themes (Tier 1.7) before resolving, so a stored
     // themeId pointing at one applies on first paint instead of falling back.
@@ -488,6 +553,13 @@ function applyStored(
       stored.searchIgnoreDirs.every((d) => typeof d === 'string')
         ? stored.searchIgnoreDirs
         : current.searchIgnoreDirs,
+    defaultLayoutMode:
+      stored.defaultLayoutMode === 'standard' || stored.defaultLayoutMode === 'tiling'
+        ? stored.defaultLayoutMode
+        : current.defaultLayoutMode,
+    notifyMuted: coerceSources(stored.notifyMuted, current.notifyMuted),
+    notifyOs: coerceSources(stored.notifyOs, current.notifyOs),
+    agentCommands: coerceAgentCommands(stored.agentCommands, current.agentCommands),
     autoUpdateCheck:
       typeof stored.autoUpdateCheck === 'boolean'
         ? stored.autoUpdateCheck
@@ -521,23 +593,68 @@ function toPersistedSettings(s: Settings): PersistedSettings {
     notifyThresholdSecs: s.notifyThresholdSecs,
     notifySound: s.notifySound,
     searchIgnoreDirs: s.searchIgnoreDirs,
+    defaultLayoutMode: s.defaultLayoutMode,
+    notifyMuted: s.notifyMuted,
+    notifyOs: s.notifyOs,
+    agentCommands: s.agentCommands,
     autoUpdateCheck: s.autoUpdateCheck,
     aiModel: s.aiModel,
   };
+}
+
+/** Drop anything that is not a source this build knows about. The row is
+ *  user-editable on disk, and a stale name would otherwise mute nothing while
+ *  looking like it muted something. */
+function coerceSources(raw: unknown, fallback: NotificationSource[]): NotificationSource[] {
+  if (!Array.isArray(raw)) return fallback;
+  const known = new Set<string>(NOTIFICATION_SOURCES);
+  return raw.filter((v): v is NotificationSource => typeof v === 'string' && known.has(v));
+}
+
+/** Keep only overrides that name a real agent and a non-empty string. The
+ *  settings row is user-editable on disk, so an unknown key here would other-
+ *  wise ride along forever and a non-string would reach a command line. */
+function coerceAgentCommands(
+  raw: unknown,
+  fallback: Partial<Record<AiCliId, string>>,
+): Partial<Record<AiCliId, string>> {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return fallback;
+  const out: Partial<Record<AiCliId, string>> = {};
+  for (const [k, v] of Object.entries(raw as Record<string, unknown>)) {
+    if (!(k in AI_CLI_COMMANDS)) continue;
+    if (typeof v !== 'string' || !v.trim()) continue;
+    out[k as AiCliId] = v.trim();
+  }
+  return out;
 }
 
 // Suppress save during programmatic hydrate. Set true around set(), cleared
 // next microtask.
 let suppressSave = false;
 
+/** Write whatever the store holds *right now*, then tell the other window.
+ *
+ *  Reading the state here rather than closing over the snapshot that scheduled
+ *  the write is load-bearing. `hydrateSettings` sets a flag before it has
+ *  loaded anything, which queues a save carrying pristine defaults; the
+ *  stored values are then applied under `suppressSave`, which returns early
+ *  and so never cancels that pending timer. With a captured snapshot the timer
+ *  fired 500ms later and wrote defaults over the user's row — every setting
+ *  reverting on the next launch, the shell most visibly. */
+async function persistSettingsNow(): Promise<void> {
+  await sessionSettingsSave(toPersistedSettings(useSettings.getState()));
+  await settingsBroadcastChanged().catch(() => {});
+}
+
 let settingsSaveTimer: ReturnType<typeof setTimeout> | undefined;
-useSettings.subscribe((state) => {
+useSettings.subscribe(() => {
   if (!isTauri || suppressSave) return;
   clearTimeout(settingsSaveTimer);
   settingsSaveTimer = setTimeout(() => {
-    void sessionSettingsSave(toPersistedSettings(state))
-      .then(() => settingsBroadcastChanged().catch(() => {}))
-      .catch((err) => console.error('[settings] SQLite save failed:', err));
+    settingsSaveTimer = undefined;
+    void persistSettingsNow().catch((err) =>
+      console.error('[settings] SQLite save failed:', err),
+    );
   }, 500);
 });
 
@@ -549,8 +666,7 @@ export async function flushSettingsSave(): Promise<void> {
   if (!isTauri || suppressSave || settingsSaveTimer === undefined) return;
   clearTimeout(settingsSaveTimer);
   settingsSaveTimer = undefined;
-  await sessionSettingsSave(toPersistedSettings(useSettings.getState()));
-  await settingsBroadcastChanged().catch(() => {});
+  await persistSettingsNow();
 }
 
 /** Re-pull settings from SQLite without writing back. Called when the

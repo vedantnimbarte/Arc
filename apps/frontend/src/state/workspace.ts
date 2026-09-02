@@ -15,8 +15,20 @@ import {
 } from '../lib/tauri';
 import { useAgentRun } from './agentRun';
 import { useFiles } from './files';
+import { useSettings } from './settings';
 import { useReveal } from './reveal';
 import { nextGroupColor, type TabGroupColorId } from '../lib/tabGroups';
+
+/** How a workspace arranges the tabs it holds.
+ *
+ *  `tiling` — every new tab dwindle-splits the focused pane, one tab per pane,
+ *  each pane wearing a single-tab `PaneHeader`. This is the original model and
+ *  stays the default (an absent `mode` reads as tiling, so nothing migrates).
+ *
+ *  `standard` — new tabs append to the focused pane and each pane wears a
+ *  multi-tab strip, the way an ordinary editor behaves. Manual splits stay
+ *  available in both modes; only *automatic* splitting differs. */
+export type LayoutMode = 'tiling' | 'standard';
 
 /** A named container of tabs. Switching the active workspace changes which
  *  tabs the grid shows; every other workspace's tabs stay mounted (PTYs alive)
@@ -31,6 +43,11 @@ export interface WorkspaceMeta {
   /** Optional colour for the rail icon, from the shared tab-group palette.
    *  Auto-assigned on create; user-overridable via the icon picker. */
   color?: TabGroupColorId;
+  /** Layout mode for this workspace. Undefined means `tiling` — that's what
+   *  makes every pre-existing session keep its behaviour without a migration.
+   *  Persists for free: `WorkspaceMeta` already round-trips through the layout
+   *  envelope's `workspaces` array. */
+  mode?: LayoutMode;
 }
 
 export interface Tab {
@@ -57,6 +74,12 @@ export interface Tab {
   groupId?: string;
   /** PTY id for terminal tabs. Transient — stripped from persisted state. */
   ptyId?: string;
+  /** Directory this tab's shell should *start* in, overriding the file tree's
+   *  root. Set by the agent launcher when it isolates each agent in its own
+   *  git worktree. Transient: a restored tab has no worktree to return to, so
+   *  it opens at the tree root like any other. Distinct from `cwd`, which is
+   *  an observation of where the shell has since wandered. */
+  launchCwd?: string;
   /** Best-effort current working directory of a terminal tab, tracked live
    *  from OSC 7 / cd-sniffing. Powers the per-cell git-branch pill in the
    *  grid. Transient — not persisted (whitelisted out by `toTabInputs`). */
@@ -183,6 +206,15 @@ interface WorkspaceState {
    *  In-memory only (not persisted) — on reload each non-active workspace
    *  reseeds a single-leaf layout from its tabs on first switch. */
   layoutStash: Record<string, { layout: PaneNode; focusedPaneId: string }>;
+  /** Parked pane trees per (workspace, layout mode), keyed `${wsId}:${mode}`.
+   *  Toggling the mode parks the tree you're leaving and restores the one you
+   *  return to, so a round trip doesn't cost you hand-dragged pane sizes. A
+   *  stash that no longer covers the workspace's tabs is discarded and the
+   *  tree rebuilt from scratch (see `setLayoutMode`).
+   *
+   *  ponytail: in-memory only, mirroring `layoutStash` — a relaunch rebuilds
+   *  rather than restores. Persist per-mode trees in the envelope if that bites. */
+  modeStash: Record<string, PaneNode>;
   /** When set, this leaf is zoomed to fill the whole area (grid-style
    *  maximize). Transient UI state — not persisted; cleared on switch. */
   maximizedPaneId: string | null;
@@ -249,6 +281,13 @@ interface WorkspaceState {
   deleteWorkspace: (id: string) => void;
   /** Make `id` the active workspace (grid shows its tabs). */
   switchWorkspace: (id: string) => void;
+  /** Switch the ACTIVE workspace's layout mode. Entering `standard` flattens
+   *  the pane tree into one leaf holding every tab in pane order; entering
+   *  `tiling` restores the tree you left (or re-tiles when the stash is stale).
+   *  No-op when the workspace is already in `mode`. */
+  setLayoutMode: (mode: LayoutMode) => void;
+  /** Flip the active workspace between tiling and standard. */
+  toggleLayoutMode: () => void;
   /** Move a tab into another workspace. */
   moveTabToWorkspace: (tabId: string, workspaceId: string) => void;
   setTabDirty: (id: string, dirty: boolean) => void;
@@ -282,7 +321,16 @@ interface WorkspaceState {
    *  OpenCode) directly instead of the default shell. Anchors the new tab
    *  (and the file tree) at the user's home directory. `opts.args` runs the
    *  CLI with a subcommand; `opts.title` overrides the tab label. */
-  launchAiCli: (cli: AiCliInfo, opts?: { args?: string[]; title?: string }) => Promise<string>;
+  launchAiCli: (
+    cli: AiCliInfo,
+    opts?: {
+      args?: string[];
+      title?: string;
+      /** Start the agent's shell here instead of the file tree's root — used
+       *  to drop each racing agent into its own git worktree. */
+      cwd?: string;
+    },
+  ) => Promise<string>;
   /** Launch Wingman in one of its modes. `tui` opens the interactive TUI
    *  immediately; `pilot`/`headless` need an argument, so they open the
    *  Wingman prompt dialog (see `wingmanPrompt`) instead of launching now. */
@@ -404,12 +452,17 @@ export function countLayoutTabs(node: PaneNode): number {
   return allLeaves(node).reduce((n, l) => n + l.tabIds.length, 0);
 }
 
-/** Restore a workspace's layout from a stashed entry, or seed a fresh
- *  single-leaf layout from its tabs when there's no valid stash (e.g. after a
- *  reload, where only the active workspace's layout is persisted). */
+/** Restore a workspace's layout from a stashed entry, or seed a fresh one from
+ *  its tabs when there's no valid stash (e.g. after a reload, where only the
+ *  active workspace's layout is persisted).
+ *
+ *  The seed has to respect `mode`: a tiling workspace rebuilt as a single leaf
+ *  would render the one-tab `PaneHeader` over a pane holding every tab, leaving
+ *  all but the active one unreachable. */
 function restoreWorkspaceLayout(
   stashed: { layout: PaneNode; focusedPaneId: string } | undefined,
   wsTabs: Tab[],
+  mode: LayoutMode = 'tiling',
 ): { layout: PaneNode; focusedPaneId: string; activeTabId: string | null } {
   if (
     stashed &&
@@ -423,8 +476,49 @@ function restoreWorkspaceLayout(
       activeTabId: focused.activeTabId ?? wsTabs[0]?.id ?? null,
     };
   }
-  const seed = singleLeafLayout(wsTabs.map((t) => t.id), wsTabs[0]?.id ?? null);
-  return { layout: seed, focusedPaneId: seed.id, activeTabId: wsTabs[0]?.id ?? null };
+  const ids = wsTabs.map((t) => t.id);
+  const activeTabId = wsTabs[0]?.id ?? null;
+  const seed = mode === 'tiling' ? tileAll(ids, activeTabId) : singleLeafLayout(ids, activeTabId);
+  const focused = (activeTabId ? findLeafContaining(seed, activeTabId) : null) ?? allLeaves(seed)[0]!;
+  return { layout: seed, focusedPaneId: focused.id, activeTabId };
+}
+
+/** The layout mode of workspace `id`. An absent `mode` reads as `tiling`, so
+ *  sessions saved before the setting existed keep their behaviour. */
+export function layoutModeOf(workspaces: WorkspaceMeta[], id: string): LayoutMode {
+  return workspaces.find((w) => w.id === id)?.mode ?? 'tiling';
+}
+
+/** Every tab id in the tree, in pane order (depth-first, left/top first), so a
+ *  flattened tab strip reads the way the panes did. */
+export function flattenTabIds(node: PaneNode): string[] {
+  return allLeaves(node).flatMap((l) => l.tabIds);
+}
+
+/** Fold `tabIds` into a tiled tree — one tab per pane, alternating split
+ *  direction. Used when switching to tiling with no usable stash (a fresh
+ *  session, or tabs opened/closed since the tree was parked).
+ *
+ *  A single leaf is NOT an acceptable fallback here: tiling mode renders the
+ *  single-tab `PaneHeader`, so N tabs sharing one pane would leave N-1 of them
+ *  unreachable.
+ *
+ *  ponytail: alternating direction, not true dwindle — `dwindleSide` reads live
+ *  pane rects and none exist for a tree that hasn't rendered yet. Measure after
+ *  mount if the proportions ever look wrong. */
+export function tileAll(tabIds: string[], activeTabId: string | null): PaneNode {
+  const first = tabIds[0] ?? null;
+  let tree: PaneNode = singleLeafLayout(first ? [first] : [], first);
+  for (let i = 1; i < tabIds.length; i++) {
+    // Split the leaf holding the tab we placed last, so the tree dwindles
+    // into the most recent pane rather than repeatedly halving the first.
+    const target = findLeafContaining(tree, tabIds[i - 1]!);
+    if (!target) break;
+    tree = splitLeafForTab(tree, target.id, i % 2 === 1 ? 'right' : 'bottom', tabIds[i]!);
+  }
+  const active = activeTabId && tabIds.includes(activeTabId) ? activeTabId : first;
+  const leaf = active ? findLeafContaining(tree, active) : null;
+  return leaf ? setLeafActiveTab(tree, leaf.id, active!) : tree;
 }
 
 /** Depth-first search for a leaf with the given id. */
@@ -691,6 +785,7 @@ export const useWorkspace = create<WorkspaceState>()((set, get) => ({
   tabs: [],
   activeTabId: null,
   layoutStash: {},
+  modeStash: {},
   maximizedPaneId: null,
   tabDirty: {},
   tabRunning: {},
@@ -721,7 +816,11 @@ export const useWorkspace = create<WorkspaceState>()((set, get) => ({
       // Tiling model: every pane holds exactly one terminal. An empty leaf
       // (fresh workspace) takes the tab directly; an occupied one splits along
       // its longer side (dwindle) so the new tab opens as a sibling pane.
-      if (leaf.tabIds.length === 0) {
+      //
+      // Standard model: the tab joins the focused pane's strip instead. This
+      // branch is the *entire* behavioural difference between the two modes —
+      // manual splits still work either way.
+      if (leaf.tabIds.length === 0 || layoutModeOf(s.workspaces, s.activeWorkspaceId) === 'standard') {
         return {
           tabs: [...s.tabs, tab],
           activeTabId: tab.id,
@@ -744,30 +843,32 @@ export const useWorkspace = create<WorkspaceState>()((set, get) => ({
     // forget; the prune on hydrate is the backstop if this write is lost.
     if (isTauri) void sessionScrollbackDelete(id).catch(() => {});
     set((s) => {
-      // Layout-aware close. Refuse if this is the last tab in the entire
-      // workspace — the original UX was to keep at least one tab open and
-      // we honor that here. With splits, closing the last tab in a *leaf*
-      // collapses the leaf (its sibling expands to fill the parent split)
-      // but the workspace as a whole never goes empty.
-      if (s.tabs.length <= 1) return s;
+      // Layout-aware close. Every tab is closable, the last one included:
+      // closing the last tab in a *leaf* collapses the leaf (its sibling
+      // expands to fill the parent split), and emptying the workspace leaves
+      // an empty leaf, which `PaneTreeView` renders as the launcher. There is
+      // nothing left to protect the user from by refusing.
       const remaining = s.tabs.filter((t) => t.id !== id);
       const pruned = pruneLayout(s.layout, new Set([id]));
       const { [id]: _omit, ...nextDirty } = s.tabDirty;
       if (!pruned) {
-        // The active workspace's tree emptied (closed its last tab while other
-        // workspaces still hold tabs). Reseed from the active workspace's
-        // remaining tabs only — an empty result leaves an empty leaf, which
-        // PaneTreeView renders as an empty-workspace prompt.
+        // The active workspace's tree emptied — the ordinary outcome of closing
+        // its last tab. Reseed from whatever that workspace still holds, which
+        // is normally nothing: an empty result leaves an empty leaf, and
+        // `PaneTreeView` renders the launcher for it. Routed through
+        // `restoreWorkspaceLayout` so a tiling workspace that somehow still has
+        // tabs comes back tiled rather than stacked into one unreachable pane.
         const activeRemaining = remaining.filter((t) => t.workspaceId === s.activeWorkspaceId);
-        const fresh = singleLeafLayout(
-          activeRemaining.map((t) => t.id),
-          activeRemaining[0]?.id ?? null,
+        const fresh = restoreWorkspaceLayout(
+          undefined,
+          activeRemaining,
+          layoutModeOf(s.workspaces, s.activeWorkspaceId),
         );
         return {
           tabs: remaining,
-          activeTabId: activeRemaining[0]?.id ?? null,
-          layout: fresh,
-          focusedPaneId: fresh.id,
+          activeTabId: fresh.activeTabId,
+          layout: fresh.layout,
+          focusedPaneId: fresh.focusedPaneId,
           tabDirty: nextDirty,
           tabGroups: pruneEmptyGroups(s.tabGroups, remaining),
         };
@@ -952,11 +1053,18 @@ export const useWorkspace = create<WorkspaceState>()((set, get) => ({
       s.workspaces.map((w) => w.color).filter(Boolean) as TabGroupColorId[],
     );
     // Park the current workspace's layout, then switch to a fresh empty leaf.
-    // The newTerminal() below appends into that leaf (addTab targets the
-    // focused pane of the now-active workspace).
+    // The leaf stays empty on purpose: `PaneTreeView` renders `EmptyWorkspace`
+    // for a tabless workspace, so a new one opens on the launcher and the user
+    // picks what it is for. Seeding a shell here decided that for them, and
+    // dragged the file tree to the home directory as a side effect of
+    // `newTerminal` — picking Terminal from the launcher still does both.
     const empty = singleLeafLayout([], null);
+    // Stamp the mode explicitly rather than leaving it undefined: undefined
+    // means tiling, so a user whose default is `standard` would otherwise get
+    // a tiled workspace every time.
+    const mode = useSettings.getState().defaultLayoutMode;
     set({
-      workspaces: [...s.workspaces, { id, name: finalName, color }],
+      workspaces: [...s.workspaces, { id, name: finalName, color, mode }],
       activeWorkspaceId: id,
       layoutStash: {
         ...s.layoutStash,
@@ -966,7 +1074,6 @@ export const useWorkspace = create<WorkspaceState>()((set, get) => ({
       focusedPaneId: empty.id,
       activeTabId: null,
     });
-    void get().newTerminal();
     return id;
   },
 
@@ -1013,7 +1120,11 @@ export const useWorkspace = create<WorkspaceState>()((set, get) => ({
     // Deleting the active workspace: activate another and restore its layout.
     const activeWorkspaceId = workspaces[0]!.id;
     const targetTabs = remaining.filter((t) => t.workspaceId === activeWorkspaceId);
-    const restored = restoreWorkspaceLayout(stash[activeWorkspaceId], targetTabs);
+    const restored = restoreWorkspaceLayout(
+      stash[activeWorkspaceId],
+      targetTabs,
+      layoutModeOf(workspaces, activeWorkspaceId),
+    );
     delete stash[activeWorkspaceId];
     set({
       tabs: remaining,
@@ -1026,8 +1137,10 @@ export const useWorkspace = create<WorkspaceState>()((set, get) => ({
       tabDirty: nextDirty,
       tabGroups: pruneEmptyGroups(s.tabGroups, remaining),
     });
-    // Never leave the app with zero tabs — seed one in the now-active workspace.
-    if (targetTabs.length === 0) void get().newTerminal();
+    // Landing on a tabless workspace is a normal state now that a new one
+    // starts empty, and it shows the launcher rather than nothing — so this no
+    // longer seeds a shell either. Doing so would have the delete decide what
+    // the surviving workspace is for.
   },
 
   switchWorkspace: (id) =>
@@ -1039,7 +1152,7 @@ export const useWorkspace = create<WorkspaceState>()((set, get) => ({
         [s.activeWorkspaceId]: { layout: s.layout, focusedPaneId: s.focusedPaneId },
       };
       const targetTabs = s.tabs.filter((t) => t.workspaceId === id);
-      const restored = restoreWorkspaceLayout(stash[id], targetTabs);
+      const restored = restoreWorkspaceLayout(stash[id], targetTabs, layoutModeOf(s.workspaces, id));
       delete stash[id];
       return {
         activeWorkspaceId: id,
@@ -1050,6 +1163,51 @@ export const useWorkspace = create<WorkspaceState>()((set, get) => ({
         maximizedPaneId: null,
       };
     }),
+
+  setLayoutMode: (mode) =>
+    set((s) => {
+      const from = layoutModeOf(s.workspaces, s.activeWorkspaceId);
+      if (from === mode) return s;
+      const wsId = s.activeWorkspaceId;
+      const wsTabs = s.tabs.filter((t) => t.workspaceId === wsId);
+      // Park the tree we're leaving under its own mode so a round trip is
+      // non-destructive in both directions.
+      const modeStash = { ...s.modeStash, [`${wsId}:${from}`]: s.layout };
+
+      // A parked tree is only usable if it still describes exactly this
+      // workspace's tabs — same test `restoreWorkspaceLayout` applies.
+      const parked = modeStash[`${wsId}:${mode}`];
+      const usable =
+        parked && layoutCoversTabs(parked, wsTabs) && countLayoutTabs(parked) === wsTabs.length
+          ? parked
+          : null;
+
+      const tabIds = flattenTabIds(s.layout);
+      const layout =
+        usable ??
+        (mode === 'standard'
+          ? singleLeafLayout(tabIds, s.activeTabId)
+          : tileAll(tabIds, s.activeTabId));
+
+      const focusedLeaf =
+        (s.activeTabId ? findLeafContaining(layout, s.activeTabId) : null) ?? allLeaves(layout)[0]!;
+      return {
+        workspaces: s.workspaces.map((w) => (w.id === wsId ? { ...w, mode } : w)),
+        layout,
+        focusedPaneId: focusedLeaf.id,
+        activeTabId: focusedLeaf.activeTabId ?? s.activeTabId,
+        modeStash,
+        // The zoomed leaf almost certainly doesn't exist in the new tree.
+        maximizedPaneId: null,
+      };
+    }),
+
+  toggleLayoutMode: () => {
+    const s = get();
+    get().setLayoutMode(
+      layoutModeOf(s.workspaces, s.activeWorkspaceId) === 'tiling' ? 'standard' : 'tiling',
+    );
+  },
 
   moveTabToWorkspace: (tabId, workspaceId) =>
     set((s) => {
@@ -1175,7 +1333,9 @@ export const useWorkspace = create<WorkspaceState>()((set, get) => ({
     // root to home: you launch a coding agent to work on the project you have
     // open, so it inherits that cwd. That is also what makes the Source
     // Control review baseline below mean anything.
-    const root = useFiles.getState().root;
+    // Baseline (and checkpoint) the tree the agent will actually edit — for an
+    // isolated run that is its worktree, not the workspace root.
+    const root = opts?.cwd ?? useFiles.getState().root;
     void useAgentRun.getState().mark(root, cli.label);
     const id = `${cli.id}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
     const tab: Tab = {
@@ -1184,6 +1344,7 @@ export const useWorkspace = create<WorkspaceState>()((set, get) => ({
       kind: 'terminal',
       shellOverride: cli.path,
       shellArgs: opts?.args,
+      launchCwd: opts?.cwd,
     };
     get().addTab(tab);
     return id;
@@ -1663,12 +1824,16 @@ export const useWorkspace = create<WorkspaceState>()((set, get) => ({
           ? parsed.focusedPaneId
           : allLeaves(layout)[0]!.id;
       } else {
-        const leaf = singleLeafLayout(
-          activeTabs.map((t) => t.id),
-          activeTabId,
-        );
-        layout = leaf;
-        focusedPaneId = leaf.id;
+        // Same rule as `restoreWorkspaceLayout`: a tiling workspace has to come
+        // back tiled, or every tab but the active one is unreachable. Seeded
+        // here rather than via that helper so the restored `activeTabId` wins.
+        const ids = activeTabs.map((t) => t.id);
+        layout =
+          layoutModeOf(workspaces, activeWorkspaceId) === 'tiling'
+            ? tileAll(ids, activeTabId)
+            : singleLeafLayout(ids, activeTabId);
+        focusedPaneId =
+          ((activeTabId ? findLeafContaining(layout, activeTabId) : null) ?? allLeaves(layout)[0]!).id;
       }
 
       // Migration's done — never read the LS key again.
@@ -1822,7 +1987,8 @@ function workspacesEqual(a: WorkspaceMeta[], b: WorkspaceMeta[]): boolean {
       a[i]!.id !== b[i]!.id ||
       a[i]!.name !== b[i]!.name ||
       a[i]!.icon !== b[i]!.icon ||
-      a[i]!.color !== b[i]!.color
+      a[i]!.color !== b[i]!.color ||
+      a[i]!.mode !== b[i]!.mode
     ) {
       return false;
     }
@@ -1945,11 +2111,12 @@ function coerceWorkspaces(raw: unknown): WorkspaceMeta[] {
   const seen = new Set<string>();
   for (const w of raw) {
     if (!w || typeof w !== 'object') continue;
-    const { id, name, icon, color } = w as {
+    const { id, name, icon, color, mode } = w as {
       id?: unknown;
       name?: unknown;
       icon?: unknown;
       color?: unknown;
+      mode?: unknown;
     };
     if (typeof id !== 'string' || seen.has(id)) continue;
     seen.add(id);
@@ -1960,6 +2127,8 @@ function coerceWorkspaces(raw: unknown): WorkspaceMeta[] {
       ...(typeof color === 'string' && VALID_GROUP_COLORS.has(color)
         ? { color: color as TabGroupColorId }
         : {}),
+      // Anything unrecognised falls through as undefined, i.e. tiling.
+      ...(mode === 'standard' || mode === 'tiling' ? { mode: mode as LayoutMode } : {}),
     });
   }
   return out;

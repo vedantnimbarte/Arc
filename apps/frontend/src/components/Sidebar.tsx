@@ -16,8 +16,7 @@ import { OutlineView } from './OutlineView';
 import { TestExplorer } from './TestExplorer';
 import { ProblemsPanel } from './ProblemsPanel';
 import { DockerPanel } from './DockerPanel';
-import { WingmanPanel } from './wingman/WingmanPanel';
-import { ClaudePanel } from './claude/ClaudePanel';
+import { AgentsPanel } from './AgentsPanel';
 import { SshPanel } from './ssh/SshPanel';
 import { fsReveal, fsWatchStart, fsWatchStop, isTauri, settingsWindowOpen } from '../lib/tauri';
 import { useFiles, type SidebarView } from '../state/files';
@@ -127,10 +126,8 @@ export function Sidebar() {
         <TestExplorer />
       ) : view === 'docker' ? (
         <DockerPanel />
-      ) : view === 'wingman' ? (
-        <WingmanPanel />
-      ) : view === 'claude' ? (
-        <ClaudePanel />
+      ) : view === 'agents' ? (
+        <AgentsPanel />
       ) : (
         <SshPanel onClose={() => setSidebarView('files')} />
       )}

@@ -104,11 +104,40 @@ export const AI_CLIS = {
   'aider-cli': 'Aider',
   'crush-cli': 'Crush',
   'droid-cli': 'Factory Droid',
+  'grok-cli': 'Grok',
+  'pi-cli': 'Pi',
   'wingman-cli': 'Wingman',
 } as const;
 
 /** Stable id assigned to each AI CLI by the Rust detector. */
 export type AiCliId = keyof typeof AI_CLIS;
+
+/** The command each agent is launched with by default — the same binary stems
+ *  `discover_ai_clis` probes PATH for, in its preference order's first slot.
+ *  Duplicated from Rust deliberately: the agent launcher prefills its editable
+ *  "start command" field from this, and has to name a command for agents the
+ *  detector did NOT find (which return no path at all).
+ *
+ *  Not derivable from the id — `kimi-code-cli` runs `kimi`, `qwen-code-cli`
+ *  runs `qwen` — so stripping the `-cli` suffix would spawn the wrong binary
+ *  for two of the thirteen. */
+export const AI_CLI_COMMANDS: Record<AiCliId, string> = {
+  'claude-cli': 'claude',
+  'codex-cli': 'codex',
+  'opencode-cli': 'opencode',
+  'kimi-code-cli': 'kimi',
+  'gemini-cli': 'gemini',
+  'qwen-code-cli': 'qwen',
+  'cursor-agent-cli': 'cursor-agent',
+  'copilot-cli': 'copilot',
+  'amp-cli': 'amp',
+  'aider-cli': 'aider',
+  'crush-cli': 'crush',
+  'droid-cli': 'droid',
+  'grok-cli': 'grok',
+  'pi-cli': 'pi',
+  'wingman-cli': 'wingman',
+};
 
 /** One installed AI coding-agent CLI discovered on PATH. */
 export interface AiCliInfo {
@@ -906,6 +935,18 @@ export interface PersistedSettings {
   /** Folder names excluded from file search. Fully user-editable; seeded with
    *  sensible defaults (node_modules, .venv, target, …). */
   searchIgnoreDirs?: string[];
+  /** Notification sources the user silenced, and the ones allowed to raise an
+   *  OS notification. Stored as name lists so an unknown entry from a newer
+   *  build is simply dropped on load. */
+  notifyMuted?: string[];
+  notifyOs?: string[];
+  /** Layout mode stamped onto a newly created workspace: 'tiling' | 'standard'.
+   *  Existing workspaces keep whatever they were set to. */
+  defaultLayoutMode?: string;
+  /** Per-agent overrides of the launcher's start command, keyed by `AiCliId`.
+   *  Sparse — only agents whose command the user edited away from
+   *  `AI_CLI_COMMANDS` appear, so Reset is "delete the key". */
+  agentCommands?: Record<string, string>;
 }
 
 /** Returns the stored settings blob, or `null` on first launch. */
@@ -1383,6 +1424,30 @@ export async function gitStashList(path: string): Promise<GitStashEntry[]> {
 
 export async function gitStashPush(path: string, message?: string | null): Promise<void> {
   return invoke<void>('git_stash_push', { path, message: message ?? null });
+}
+
+/**
+ * Take a restore point for `path`'s working tree without disturbing it.
+ *
+ * Returns the checkpoint id, or `null` when the tree was clean and there is
+ * nothing to restore to. Tracked files only — a file created afterwards is
+ * untracked at both ends and survives a restore.
+ */
+export async function gitCheckpointCreate(
+  path: string,
+  label: string,
+): Promise<string | null> {
+  return invoke<string | null>('git_checkpoint_create', { path, label });
+}
+
+/** Put tracked files back as they were at `oid`. Leaves the index alone. */
+export async function gitCheckpointRestore(path: string, oid: string): Promise<void> {
+  return invoke<void>('git_checkpoint_restore', { path, oid });
+}
+
+/** Release a checkpoint's anchor once it is no longer offered. */
+export async function gitCheckpointForget(path: string, oid: string): Promise<void> {
+  return invoke<void>('git_checkpoint_forget', { path, oid });
 }
 
 export async function gitStashPop(path: string, index?: number | null): Promise<void> {

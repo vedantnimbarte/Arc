@@ -54,6 +54,7 @@ import { copyText } from '../lib/clipboard';
 import { ANTHROPIC_KEY_SECRET } from '../lib/ai';
 import { FontPicker } from './FontPicker';
 import { useFiles, type SidebarView } from '../state/files';
+import type { LayoutMode } from '../state/workspace';
 import { useSidebarLayout } from '../state/sidebarLayout';
 import { normalizeOrder, PINNED_VIEW, SIDEBAR_VIEW_BY_ID } from '../lib/sidebarViews';
 import {
@@ -123,6 +124,8 @@ export function SettingsPage() {
     notifySound,
     setDefaultShell,
     setAppearance,
+    defaultLayoutMode,
+    setDefaultLayoutMode,
     setThemeId,
     setFontId,
     setFontSize,
@@ -217,6 +220,8 @@ export function SettingsPage() {
                   fontSize={fontSize}
                   launchAtLogin={launchAtLogin}
                   restoreWindowState={restoreWindowState}
+                  defaultLayoutMode={defaultLayoutMode}
+                  onDefaultLayoutModeChange={setDefaultLayoutMode}
                   onAppearanceChange={setAppearance}
                   onFontChange={setFontId}
                   onFontSizeChange={setFontSize}
@@ -272,6 +277,8 @@ function AppearancePane({
   fontSize,
   launchAtLogin,
   restoreWindowState,
+  defaultLayoutMode,
+  onDefaultLayoutModeChange,
   onAppearanceChange,
   onFontChange,
   onFontSizeChange,
@@ -283,6 +290,8 @@ function AppearancePane({
   fontSize: number;
   launchAtLogin: boolean;
   restoreWindowState: boolean;
+  defaultLayoutMode: LayoutMode;
+  onDefaultLayoutModeChange: (m: LayoutMode) => void;
   onAppearanceChange: (a: Appearance) => void;
   onFontChange: (id: string) => void;
   onFontSizeChange: (size: number) => void;
@@ -355,6 +364,28 @@ function AppearancePane({
           checked={showHidden}
           onChange={toggleHidden}
         />
+      </Section>
+
+      <Section
+        title="Default Workspace Layout"
+        hint="Applies to workspaces you create from now on. Existing ones keep the layout they are set to, and the top bar switches any workspace at any time."
+      >
+        <div className="grid grid-cols-2 gap-3">
+          <LayoutModeCard
+            label="Tiles"
+            hint="Each tab gets its own pane"
+            mode="tiling"
+            active={defaultLayoutMode === 'tiling'}
+            onPick={() => onDefaultLayoutModeChange('tiling')}
+          />
+          <LayoutModeCard
+            label="Tabs"
+            hint="One pane, tabs in a strip"
+            mode="standard"
+            active={defaultLayoutMode === 'standard'}
+            onPick={() => onDefaultLayoutModeChange('standard')}
+          />
+        </div>
       </Section>
 
       <Section title="Startup & Window" hint="Window-state changes take effect on next launch.">
@@ -598,6 +629,62 @@ function Switch({
           checked ? 'translate-x-[17px]' : 'translate-x-[3px]',
         )}
       />
+    </button>
+  );
+}
+
+/** Picker card for the default workspace layout. The preview draws the same
+ *  arrangement the two modes actually produce — tiled panes versus one pane
+ *  under a tab strip — so the choice is legible without reading the label. */
+function LayoutModeCard({
+  label,
+  hint,
+  mode,
+  active,
+  onPick,
+}: {
+  label: string;
+  hint: string;
+  mode: LayoutMode;
+  active: boolean;
+  onPick: () => void;
+}) {
+  return (
+    <button
+      onClick={onPick}
+      aria-pressed={active}
+      className={cn(
+        'group flex flex-col items-stretch overflow-hidden rounded-lg border text-left transition-all duration-150 ease-apple',
+        active
+          ? 'border-accent/60 shadow-glow-sm ring-1 ring-accent/40'
+          : 'border-border-subtle hover:border-border-strong',
+      )}
+    >
+      <div className="flex h-20 items-center justify-center bg-bg-base/40">
+        <svg viewBox="0 0 48 30" className="h-[46px] w-[74px]" aria-hidden>
+          {mode === 'tiling' ? (
+            <>
+              <rect x="1" y="1" width="21.5" height="28" rx="2.5" fill="currentColor" opacity={0.5} />
+              <rect x="25.5" y="1" width="21.5" height="13" rx="2.5" fill="currentColor" opacity={0.5} />
+              <rect x="25.5" y="16" width="21.5" height="13" rx="2.5" fill="currentColor" opacity={0.5} />
+            </>
+          ) : (
+            <>
+              <rect x="1" y="1" width="15" height="6" rx="1.5" fill="currentColor" opacity={0.75} />
+              <rect x="17.5" y="1" width="15" height="6" rx="1.5" fill="currentColor" opacity={0.28} />
+              <rect x="34" y="1" width="13" height="6" rx="1.5" fill="currentColor" opacity={0.28} />
+              <rect x="1" y="9" width="46" height="20" rx="2.5" fill="currentColor" opacity={0.5} />
+            </>
+          )}
+        </svg>
+      </div>
+      <div className="flex items-center justify-between border-t border-border-subtle bg-bg-base/40 px-3 py-2">
+        <div className="min-w-0">
+          <div className="font-display text-sm font-medium tracking-tight text-fg-base">{label}</div>
+          <div className="truncate font-display text-2xs text-fg-subtle">{hint}</div>
+        </div>
+        {active && <Check size={11} className="shrink-0 text-accent" />}
+      </div>
     </button>
   );
 }

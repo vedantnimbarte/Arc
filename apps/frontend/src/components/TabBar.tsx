@@ -8,17 +8,22 @@ import {
   PanelRightClose,
   PanelRightOpen,
   Bot,
+  Columns3,
   LayoutGrid,
   Monitor,
   Send,
   Database,
   Keyboard,
+  ChevronRight,
+  type LucideIcon,
 } from 'lucide-react';
 import { getCurrentWindow } from '@tauri-apps/api/window';
-import { useWorkspace } from '../state/workspace';
+import { layoutModeOf, useWorkspace, type LayoutMode } from '../state/workspace';
 import { useFiles } from '../state/files';
 import { runCommand } from '../state/commands';
 import { Tooltip } from './Tooltip';
+import { AgentLauncher, AGENT_PANEL_H, AGENT_PANEL_W } from './AgentLauncher';
+import { NotificationCenter } from './NotificationCenter';
 import { formatBinding, getBinding } from '../state/shortcuts';
 import { cn } from '../lib/cn';
 import {
@@ -29,6 +34,9 @@ import {
 } from '../lib/tauri';
 
 const isTauri = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
+
+/** Toolbar width under which the layout switch drops its label. */
+const COMPACT_CHROME_BELOW = 720;
 
 /** Last path segment of a cwd, forward or back slashes. */
 function basename(p: string): string {
@@ -47,11 +55,16 @@ export function TabBar() {
     openDbClient,
   } = useWorkspace();
   const activeTab = useWorkspace((s) => s.tabs.find((t) => t.id === s.activeTabId) ?? null);
+  const layoutMode = useWorkspace((s) => layoutModeOf(s.workspaces, s.activeWorkspaceId));
+  const setLayoutMode = useWorkspace((s) => s.setLayoutMode);
   const sidebarCollapsed = useFiles((s) => s.collapsed);
   const toggleSidebar = useFiles((s) => s.toggleCollapsed);
   const root = useFiles((s) => s.root);
 
   const [menuOpen, setMenuOpen] = useState(false);
+  // Which face of the + popover is showing. Reset to 'root' on every open so
+  // the menu never reappears mid-flow in the agent panel.
+  const [menuView, setMenuView] = useState<'root' | 'agents'>('root');
   const [menuPos, setMenuPos] = useState<{ top: number; left: number } | null>(null);
   const [newFileOpen, setNewFileOpen] = useState(false);
   // Installed AI CLIs (Claude Code / Codex / OpenCode). Refreshed on mount.
@@ -59,6 +72,20 @@ export function TabBar() {
   const [aiClis, setAiClis] = useState<AiCliInfo[]>([]);
   const plusRef = useRef<HTMLButtonElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
+  const barRef = useRef<HTMLDivElement>(null);
+  // Below this the centered window title (max 44% wide) starts closing on the
+  // side clusters, so the layout switch sheds its label. Same ResizeObserver
+  // approach PaneHeader uses for its own overflow threshold.
+  const [compactChrome, setCompactChrome] = useState(false);
+  useEffect(() => {
+    const el = barRef.current;
+    if (!el) return;
+    const obs = new ResizeObserver(() => {
+      setCompactChrome(el.getBoundingClientRect().width < COMPACT_CHROME_BELOW);
+    });
+    obs.observe(el);
+    return () => obs.disconnect();
+  }, []);
 
   // One-shot detection. The list is cheap (PATH scan) but doesn't change
   // mid-session, so we cache it. Users who install a CLI mid-session can
@@ -77,6 +104,7 @@ export function TabBar() {
   useLayoutEffect(() => {
     if (!menuOpen) {
       setMenuPos(null);
+      setMenuView('root');
       return;
     }
     const update = () => {
@@ -100,7 +128,10 @@ export function TabBar() {
       setMenuOpen(false);
     };
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setMenuOpen(false);
+      if (e.key !== 'Escape') return;
+      // Escape steps back out of the agent panel first, then closes.
+      if (menuView === 'agents') setMenuView('root');
+      else setMenuOpen(false);
     };
     window.addEventListener('mousedown', onDown);
     window.addEventListener('keydown', onKey);
@@ -108,7 +139,7 @@ export function TabBar() {
       window.removeEventListener('mousedown', onDown);
       window.removeEventListener('keydown', onKey);
     };
-  }, [menuOpen]);
+  }, [menuOpen, menuView]);
 
   // Re-detect when the +menu opens — picks up CLIs installed mid-session.
   useEffect(() => {
@@ -141,11 +172,6 @@ export function TabBar() {
     setMenuOpen(false);
   };
 
-  const launchCli = (cli: AiCliInfo) => {
-    void launchAiCli(cli);
-    setMenuOpen(false);
-  };
-
   const launchWingmanMode = (mode: 'pilot' | 'headless') => {
     void launchWingman(mode);
     setMenuOpen(false);
@@ -154,9 +180,14 @@ export function TabBar() {
 
   return (
     <>
+    {/* z-20: `.material-toolbar`'s backdrop-filter opens a stacking context, so
+        a tooltip's own z-index is local to this bar and can't lift it over the
+        content row — a later sibling with no z-index of its own. Without this,
+        every tooltip here is painted over the moment it hangs past h-9. */}
     <div
+      ref={barRef}
       data-tauri-drag-region="deep"
-      className="material-toolbar relative flex h-9 shrink-0 items-center gap-2 pl-3"
+      className="material-toolbar relative z-20 flex h-9 shrink-0 items-center gap-2 pl-3"
     >
       {/* Focused pane's title, centered. Absolutely positioned + click-through
           so it never shifts the side clusters or eats the window-drag region. */}
@@ -191,7 +222,7 @@ export function TabBar() {
 
       {/* AI CLI launcher + keyboard shortcuts — relocated here from the old
           bottom status bar, sitting between the sidebar toggle and the +. */}
-      <AiCliMenuButton clis={aiClis} onLaunch={(cli) => void launchAiCli(cli)} />
+      <AiCliMenuButton clis={aiClis} />
       <Tooltip label="Keyboard shortcuts" kbd={formatBinding(getBinding('open-shortcuts'))}>
         <button
           onClick={() => void runCommand('shortcut.open-shortcuts')}
@@ -225,6 +256,14 @@ export function TabBar() {
         </Tooltip>
       </div>
 
+      {/* Layout mode — flips this workspace between tiled panes (one tab per
+          pane) and a tab strip. Per-workspace, so it reflects whichever
+          workspace is active. Sits in the right cluster, inboard of the
+          window controls. */}
+      <NotificationCenter />
+
+      <LayoutModeSwitch mode={layoutMode} onSelect={setLayoutMode} compact={compactChrome} />
+
       <div className="ml-0.5 pr-2" />
 
       {isTauri && <WindowControls />}
@@ -235,8 +274,19 @@ export function TabBar() {
           ref={menuRef}
           role="menu"
           style={{ position: 'fixed', top: menuPos.top, left: menuPos.left }}
-          className="material-sheet z-50 w-52 animate-popover-in overflow-hidden rounded-md bg-bg-panel shadow-sheet ring-1 ring-edge-2"
+          className={cn(
+            'material-sheet z-50 animate-popover-in overflow-hidden rounded-md bg-bg-panel shadow-sheet ring-1 ring-edge-2',
+            menuView === 'root' && 'w-52',
+          )}
         >
+          {menuView === 'agents' ? (
+            <AgentLauncher
+              detected={aiClis}
+              onBack={() => setMenuView('root')}
+              onDone={() => setMenuOpen(false)}
+            />
+          ) : (
+          <>
           <button
             role="menuitem"
             onClick={() => {
@@ -292,47 +342,44 @@ export function TabBar() {
             <Database size={12} strokeWidth={2} className="text-fg-subtle" />
             <span className="flex-1">Database</span>
           </button>
-          {aiClis.length > 0 && (
+          <div className="my-1 border-t border-edge-1" />
+          {/* One row into the launch panel, rather than a flat list of every
+              detected CLI — the panel offers all thirteen ARC supports plus
+              the instance count, which a menu row cannot carry. */}
+          <button
+            role="menuitem"
+            onClick={() => setMenuView('agents')}
+            className="flex w-full items-center gap-2 px-3 py-2 text-left font-display text-sm text-fg-base/90 transition-colors hover:bg-surface-2"
+          >
+            <Bot size={12} strokeWidth={2} className="text-fg-subtle" />
+            <span className="flex-1">Agents</span>
+            <ChevronRight size={12} strokeWidth={2} className="text-fg-subtle" />
+          </button>
+          {hasWingman && (
             <>
-              <div className="my-1 border-t border-edge-1" />
-              <div className="px-3 pb-1 pt-1.5 font-display text-2xs uppercase tracking-wider text-fg-subtle/80">
-                AI Agents
-              </div>
-              {aiClis.map((cli) => (
-                <button
-                  key={cli.id}
-                  role="menuitem"
-                  onClick={() => launchCli(cli)}
-                  className="flex w-full items-center gap-2 px-3 py-2 text-left font-display text-sm text-fg-base/90 transition-colors hover:bg-surface-2"
-                  title={cli.path}
-                >
-                  <Bot size={12} strokeWidth={2} className="text-fg-subtle" />
-                  <span className="flex-1 truncate">{cli.label}</span>
-                </button>
-              ))}
-              {hasWingman && (
-                <>
-                  <button
-                    role="menuitem"
-                    onClick={() => launchWingmanMode('pilot')}
-                    className="flex w-full items-center gap-2 px-3 py-2 text-left font-display text-sm text-fg-base/90 transition-colors hover:bg-surface-2"
-                    title="Prompt for a goal, then run Wingman pilot mode"
-                  >
-                    <Bot size={12} strokeWidth={2} className="text-fg-subtle" />
-                    <span className="flex-1 truncate">Wingman Pilot</span>
-                  </button>
-                  <button
-                    role="menuitem"
-                    onClick={() => launchWingmanMode('headless')}
-                    className="flex w-full items-center gap-2 px-3 py-2 text-left font-display text-sm text-fg-base/90 transition-colors hover:bg-surface-2"
-                    title="Prompt for a message, then run a one-shot headless response"
-                  >
-                    <Bot size={12} strokeWidth={2} className="text-fg-subtle" />
-                    <span className="flex-1 truncate">Wingman (headless)</span>
-                  </button>
-                </>
-              )}
+              {/* Pilot and headless stay here: both need a typed goal before
+                  anything spawns, so they do not fit the panel's flow. */}
+              <button
+                role="menuitem"
+                onClick={() => launchWingmanMode('pilot')}
+                className="flex w-full items-center gap-2 px-3 py-2 text-left font-display text-sm text-fg-base/90 transition-colors hover:bg-surface-2"
+                title="Prompt for a goal, then run Wingman pilot mode"
+              >
+                <Bot size={12} strokeWidth={2} className="text-fg-subtle" />
+                <span className="flex-1 truncate">Wingman Pilot</span>
+              </button>
+              <button
+                role="menuitem"
+                onClick={() => launchWingmanMode('headless')}
+                className="flex w-full items-center gap-2 px-3 py-2 text-left font-display text-sm text-fg-base/90 transition-colors hover:bg-surface-2"
+                title="Prompt for a message, then run a one-shot headless response"
+              >
+                <Bot size={12} strokeWidth={2} className="text-fg-subtle" />
+                <span className="flex-1 truncate">Wingman (headless)</span>
+              </button>
             </>
+          )}
+          </>
           )}
         </div>,
         document.body,
@@ -356,13 +403,73 @@ export function TabBar() {
  * the old bottom status bar. Portaled to body so the toolbar's backdrop-filter
  * doesn't trap the menu.
  */
-function AiCliMenuButton({
-  clis,
-  onLaunch,
+/** The two layout modes, in the order the switch renders them. */
+const LAYOUT_SEGMENTS: { mode: LayoutMode; label: string; Icon: LucideIcon; hint: string }[] = [
+  { mode: 'tiling', label: 'Tiles', Icon: LayoutGrid, hint: 'One pane per tab, split automatically' },
+  { mode: 'standard', label: 'Tabs', Icon: Columns3, hint: 'One pane, tabs in a strip' },
+];
+
+/**
+ * Segmented switch for the active workspace's layout mode. The selected
+ * segment is a filled pill carrying icon + name; the other is icon-only, so
+ * the control states the current mode rather than making you decode an icon.
+ *
+ * `compact` drops both labels — the toolbar's centered title is only 44% wide,
+ * and on a narrow window the two would otherwise meet.
+ */
+function LayoutModeSwitch({
+  mode,
+  onSelect,
+  compact,
 }: {
-  clis: AiCliInfo[];
-  onLaunch: (cli: AiCliInfo) => void;
+  mode: LayoutMode;
+  onSelect: (mode: LayoutMode) => void;
+  compact: boolean;
 }) {
+  const kbd = formatBinding(getBinding('toggle-layout-mode'));
+  return (
+    <div
+      role="group"
+      aria-label="Layout mode"
+      className="flex h-8 shrink-0 items-center gap-0.5"
+    >
+      {LAYOUT_SEGMENTS.map(({ mode: m, label, Icon, hint }) => {
+        const active = m === mode;
+        return (
+          // End-aligned: the switch sits inboard of the window controls, so a
+          // centred bubble would hang off the window's right edge.
+          <Tooltip
+            key={m}
+            align="end"
+            label={active ? hint : `Switch to ${label.toLowerCase()}`}
+            kbd={kbd}
+          >
+            <button
+              onClick={() => onSelect(m)}
+              aria-pressed={active}
+              aria-label={label}
+              className={cn(
+                'flex h-[26px] shrink-0 items-center gap-1.5 rounded-[7px]',
+                'font-display text-xs font-medium tracking-tight',
+                'transition-all duration-200 ease-apple',
+                compact ? 'w-[26px] justify-center' : active ? 'pl-2 pr-2.5' : 'w-[26px] justify-center',
+                active
+                  ? 'bg-accent/15 text-accent shadow-[inset_0_1px_0_0_rgba(255,255,255,0.06)] ring-1 ring-inset ring-accent/30'
+                  : 'text-fg-muted hover:bg-surface-3 hover:text-fg-base',
+              )}
+            >
+              <Icon size={14} strokeWidth={1.9} className="shrink-0" />
+              {/* Only the active segment is named, and only when there's room. */}
+              {active && !compact && <span>{label}</span>}
+            </button>
+          </Tooltip>
+        );
+      })}
+    </div>
+  );
+}
+
+function AiCliMenuButton({ clis }: { clis: AiCliInfo[] }) {
   const [open, setOpen] = useState(false);
   const [pos, setPos] = useState<{ top: number; left: number } | null>(null);
   const btnRef = useRef<HTMLButtonElement>(null);
@@ -376,7 +483,13 @@ function AiCliMenuButton({
     const update = () => {
       const r = btnRef.current?.getBoundingClientRect();
       if (!r) return;
-      setPos({ top: r.bottom + 4, left: r.left });
+      // The panel is far taller than the old menu, so a short window would push
+      // its command field and Launch button off the bottom with nothing to
+      // scroll. Clamp both axes; `max-h` on the sheet is the backstop.
+      setPos({
+        top: Math.max(8, Math.min(r.bottom + 4, window.innerHeight - AGENT_PANEL_H - 8)),
+        left: Math.max(8, Math.min(r.left, window.innerWidth - AGENT_PANEL_W - 8)),
+      });
     };
     update();
     window.addEventListener('resize', update);
@@ -431,41 +544,17 @@ function AiCliMenuButton({
         <Bot size={14} strokeWidth={1.9} />
       </button>
 
+      {/* The same panel the new-tab menu's Agents row opens: this button used
+          to list the detected CLIs and launch one with no options, which could
+          not say what else ARC supports or start more than one. */}
       {open && pos && typeof document !== 'undefined' &&
         createPortal(
           <div
             ref={menuRef}
-            role="menu"
             style={{ position: 'fixed', top: pos.top, left: pos.left }}
-            className="material-sheet z-50 w-48 animate-popover-in overflow-hidden rounded-md shadow-sheet ring-1 ring-edge-2"
+            className="material-sheet z-50 max-h-[calc(100vh-16px)] animate-popover-in overflow-y-auto rounded-lg bg-bg-panel shadow-sheet ring-1 ring-edge-2"
           >
-            {clis.length === 0 ? (
-              <div className="px-3 py-3 font-display text-xs leading-snug text-fg-muted">
-                <div className="mb-1 font-medium text-fg-base">No AI CLIs found</div>
-                <div className="text-fg-subtle">
-                  Install <code className="font-mono">claude</code>,{' '}
-                  <code className="font-mono">codex</code>, or{' '}
-                  <code className="font-mono">opencode</code> on your{' '}
-                  <code className="font-mono">PATH</code>.
-                </div>
-              </div>
-            ) : (
-              clis.map((cli) => (
-                <button
-                  key={cli.id}
-                  role="menuitem"
-                  onClick={() => {
-                    onLaunch(cli);
-                    setOpen(false);
-                  }}
-                  className="flex w-full items-center gap-2 px-3 py-2 text-left font-display text-sm text-fg-base/90 transition-colors hover:bg-surface-2"
-                  title={cli.path}
-                >
-                  <Bot size={12} strokeWidth={2} className="text-fg-subtle" />
-                  <span className="flex-1 truncate">{cli.label}</span>
-                </button>
-              ))
-            )}
+            <AgentLauncher detected={clis} onDone={() => setOpen(false)} />
           </div>,
           document.body,
         )}

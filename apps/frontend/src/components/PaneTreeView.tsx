@@ -1,9 +1,24 @@
 import { Group, Panel, Separator, type Layout } from 'react-resizable-panels';
-import { findLeaf, useWorkspace, type PaneNode, type PaneSplit } from '../state/workspace';
+import {
+  findLeaf,
+  layoutModeOf,
+  useWorkspace,
+  type PaneNode,
+  type PaneSplit,
+} from '../state/workspace';
 import { PaneLeafView } from './PaneLeafView';
 import { PaneHeader } from './PaneHeader';
+import { PaneTabStrip } from './PaneTabStrip';
 import { EmptyWorkspace } from './EmptyWorkspace';
 import { cn } from '../lib/cn';
+
+/** The per-leaf header, chosen by the active workspace's layout mode: the
+ *  single-tab `PaneHeader` when tiling, the multi-tab strip when standard.
+ *  This and `addTab`'s split-vs-append branch are the whole feature. */
+function LeafHeader({ paneId }: { paneId: string }) {
+  const mode = useWorkspace((s) => layoutModeOf(s.workspaces, s.activeWorkspaceId));
+  return mode === 'standard' ? <PaneTabStrip paneId={paneId} /> : <PaneHeader paneId={paneId} />;
+}
 
 interface Props {
   /** Shared host-div registry held by App.tsx so this tree can hand each
@@ -38,7 +53,7 @@ export function PaneTreeView({ hostsRef, stageRef, onOpenCommandPalette }: Props
         paneId={maxLeaf.id}
         hostsRef={hostsRef}
         stageRef={stageRef}
-        header={<PaneHeader paneId={maxLeaf.id} />}
+        header={<LeafHeader paneId={maxLeaf.id} />}
       />
     );
   }
@@ -67,7 +82,7 @@ function PaneNodeView({
         paneId={node.id}
         hostsRef={hostsRef}
         stageRef={stageRef}
-        header={showHeader ? <PaneHeader paneId={node.id} /> : null}
+        header={showHeader ? <LeafHeader paneId={node.id} /> : null}
       />
     );
   }

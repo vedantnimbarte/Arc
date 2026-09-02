@@ -21,8 +21,13 @@ export type SidebarView =
   | 'tests'
   | 'docker'
   | 'ssh'
-  | 'wingman'
-  | 'claude';
+  | 'agents';
+
+/** Which agent the Agents panel is showing. The two that ARC can drive
+ *  headlessly get a chat surface; everything else launches in a terminal from
+ *  the same panel. Lives here rather than in the panel so the command palette
+ *  can open the sidebar straight onto one of them. */
+export type AgentPanelTab = 'claude' | 'wingman';
 
 interface FilesState {
   /**
@@ -41,6 +46,8 @@ interface FilesState {
   widthByView: Record<string, number>;
   /** Which panel is mounted in the left sidebar. Persisted. */
   sidebarView: SidebarView;
+  /** Selected agent inside the Agents panel. */
+  agentPanelTab: AgentPanelTab;
   /** Last sidebar view per workspace root, so each project reopens on the
    *  view you left it on. Keyed by absolute root path. Persisted. */
   viewByRoot: Record<string, SidebarView>;
@@ -58,6 +65,7 @@ interface FilesState {
   toggleCollapsed: () => void;
   setSidebarWidth: (w: number) => void;
   setSidebarView: (view: SidebarView) => void;
+  setAgentPanelTab: (tab: AgentPanelTab) => void;
   /** Reveal a view: un-collapse the sidebar and switch to it. */
   showSidebarView: (view: SidebarView) => void;
   /** Toggle a view: if it's already the visible view, fall back to the
@@ -110,6 +118,7 @@ export const useFiles = create<FilesState>()(
       sidebarWidth: SIDEBAR_DEFAULT,
       widthByView: {},
       sidebarView: 'files',
+      agentPanelTab: 'claude',
       viewByRoot: {},
       recentFiles: [],
       railLabels: false,
@@ -140,6 +149,7 @@ export const useFiles = create<FilesState>()(
             widthByView: { ...s.widthByView, [s.sidebarView]: width },
           };
         }),
+      setAgentPanelTab: (tab) => set({ agentPanelTab: tab }),
       setSidebarView: (view) =>
         set((s) => ({
           sidebarView: view,
@@ -167,7 +177,7 @@ export const useFiles = create<FilesState>()(
     }),
     {
       name: STORAGE_KEY,
-      version: 4,
+      version: 5,
       // v2 stored the source-control view under the old 'source-control'
       // key; the activity rail renamed it to 'git'.
       migrate: (persisted, version) => {
@@ -178,6 +188,25 @@ export const useFiles = create<FilesState>()(
         // v4 made the rail icon-only; drop the old stored preference so the
         // new default applies.
         if (state && version < 4) delete state.railLabels;
+        // v5 merged the Wingman and Claude Code views into one Agents panel.
+        // Carry the old selection across so someone parked on either lands on
+        // the merged panel showing that same agent, not back on Explorer.
+        if (state && version < 5) {
+          const old = state.sidebarView as string | undefined;
+          if (old === 'wingman' || old === 'claude') {
+            state.agentPanelTab = old;
+            state.sidebarView = 'agents';
+          }
+          if (state.viewByRoot) {
+            for (const [root, v] of Object.entries(state.viewByRoot)) {
+              // Compared as strings: these ids predate the merge and are no
+              // longer in `SidebarView`.
+              if ((v as string) === 'wingman' || (v as string) === 'claude') {
+                state.viewByRoot[root] = 'agents';
+              }
+            }
+          }
+        }
         return state as FilesState;
       },
     },
