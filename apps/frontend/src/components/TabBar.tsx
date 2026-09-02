@@ -8,14 +8,16 @@ import {
   PanelRightClose,
   PanelRightOpen,
   Bot,
+  Columns3,
   LayoutGrid,
   Monitor,
   Send,
   Database,
   Keyboard,
+  type LucideIcon,
 } from 'lucide-react';
 import { getCurrentWindow } from '@tauri-apps/api/window';
-import { useWorkspace } from '../state/workspace';
+import { layoutModeOf, useWorkspace, type LayoutMode } from '../state/workspace';
 import { useFiles } from '../state/files';
 import { runCommand } from '../state/commands';
 import { Tooltip } from './Tooltip';
@@ -29,6 +31,9 @@ import {
 } from '../lib/tauri';
 
 const isTauri = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
+
+/** Toolbar width under which the layout switch drops its label. */
+const COMPACT_CHROME_BELOW = 720;
 
 /** Last path segment of a cwd, forward or back slashes. */
 function basename(p: string): string {
@@ -47,6 +52,8 @@ export function TabBar() {
     openDbClient,
   } = useWorkspace();
   const activeTab = useWorkspace((s) => s.tabs.find((t) => t.id === s.activeTabId) ?? null);
+  const layoutMode = useWorkspace((s) => layoutModeOf(s.workspaces, s.activeWorkspaceId));
+  const setLayoutMode = useWorkspace((s) => s.setLayoutMode);
   const sidebarCollapsed = useFiles((s) => s.collapsed);
   const toggleSidebar = useFiles((s) => s.toggleCollapsed);
   const root = useFiles((s) => s.root);
@@ -59,6 +66,20 @@ export function TabBar() {
   const [aiClis, setAiClis] = useState<AiCliInfo[]>([]);
   const plusRef = useRef<HTMLButtonElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
+  const barRef = useRef<HTMLDivElement>(null);
+  // Below this the centered window title (max 44% wide) starts closing on the
+  // side clusters, so the layout switch sheds its label. Same ResizeObserver
+  // approach PaneHeader uses for its own overflow threshold.
+  const [compactChrome, setCompactChrome] = useState(false);
+  useEffect(() => {
+    const el = barRef.current;
+    if (!el) return;
+    const obs = new ResizeObserver(() => {
+      setCompactChrome(el.getBoundingClientRect().width < COMPACT_CHROME_BELOW);
+    });
+    obs.observe(el);
+    return () => obs.disconnect();
+  }, []);
 
   // One-shot detection. The list is cheap (PATH scan) but doesn't change
   // mid-session, so we cache it. Users who install a CLI mid-session can
@@ -154,9 +175,14 @@ export function TabBar() {
 
   return (
     <>
+    {/* z-20: `.material-toolbar`'s backdrop-filter opens a stacking context, so
+        a tooltip's own z-index is local to this bar and can't lift it over the
+        content row — a later sibling with no z-index of its own. Without this,
+        every tooltip here is painted over the moment it hangs past h-9. */}
     <div
+      ref={barRef}
       data-tauri-drag-region="deep"
-      className="material-toolbar relative flex h-9 shrink-0 items-center gap-2 pl-3"
+      className="material-toolbar relative z-20 flex h-9 shrink-0 items-center gap-2 pl-3"
     >
       {/* Focused pane's title, centered. Absolutely positioned + click-through
           so it never shifts the side clusters or eats the window-drag region. */}
@@ -224,6 +250,12 @@ export function TabBar() {
           </button>
         </Tooltip>
       </div>
+
+      {/* Layout mode — flips this workspace between tiled panes (one tab per
+          pane) and a tab strip. Per-workspace, so it reflects whichever
+          workspace is active. Sits in the right cluster, inboard of the
+          window controls. */}
+      <LayoutModeSwitch mode={layoutMode} onSelect={setLayoutMode} compact={compactChrome} />
 
       <div className="ml-0.5 pr-2" />
 
@@ -356,6 +388,72 @@ export function TabBar() {
  * the old bottom status bar. Portaled to body so the toolbar's backdrop-filter
  * doesn't trap the menu.
  */
+/** The two layout modes, in the order the switch renders them. */
+const LAYOUT_SEGMENTS: { mode: LayoutMode; label: string; Icon: LucideIcon; hint: string }[] = [
+  { mode: 'tiling', label: 'Tiles', Icon: LayoutGrid, hint: 'One pane per tab, split automatically' },
+  { mode: 'standard', label: 'Tabs', Icon: Columns3, hint: 'One pane, tabs in a strip' },
+];
+
+/**
+ * Segmented switch for the active workspace's layout mode. The selected
+ * segment is a filled pill carrying icon + name; the other is icon-only, so
+ * the control states the current mode rather than making you decode an icon.
+ *
+ * `compact` drops both labels — the toolbar's centered title is only 44% wide,
+ * and on a narrow window the two would otherwise meet.
+ */
+function LayoutModeSwitch({
+  mode,
+  onSelect,
+  compact,
+}: {
+  mode: LayoutMode;
+  onSelect: (mode: LayoutMode) => void;
+  compact: boolean;
+}) {
+  const kbd = formatBinding(getBinding('toggle-layout-mode'));
+  return (
+    <div
+      role="group"
+      aria-label="Layout mode"
+      className="flex h-8 shrink-0 items-center gap-0.5"
+    >
+      {LAYOUT_SEGMENTS.map(({ mode: m, label, Icon, hint }) => {
+        const active = m === mode;
+        return (
+          // End-aligned: the switch sits inboard of the window controls, so a
+          // centred bubble would hang off the window's right edge.
+          <Tooltip
+            key={m}
+            align="end"
+            label={active ? hint : `Switch to ${label.toLowerCase()}`}
+            kbd={kbd}
+          >
+            <button
+              onClick={() => onSelect(m)}
+              aria-pressed={active}
+              aria-label={label}
+              className={cn(
+                'flex h-[26px] shrink-0 items-center gap-1.5 rounded-[7px]',
+                'font-display text-xs font-medium tracking-tight',
+                'transition-all duration-200 ease-apple',
+                compact ? 'w-[26px] justify-center' : active ? 'pl-2 pr-2.5' : 'w-[26px] justify-center',
+                active
+                  ? 'bg-accent/15 text-accent shadow-[inset_0_1px_0_0_rgba(255,255,255,0.06)] ring-1 ring-inset ring-accent/30'
+                  : 'text-fg-muted hover:bg-surface-3 hover:text-fg-base',
+              )}
+            >
+              <Icon size={14} strokeWidth={1.9} className="shrink-0" />
+              {/* Only the active segment is named, and only when there's room. */}
+              {active && !compact && <span>{label}</span>}
+            </button>
+          </Tooltip>
+        );
+      })}
+    </div>
+  );
+}
+
 function AiCliMenuButton({
   clis,
   onLaunch,

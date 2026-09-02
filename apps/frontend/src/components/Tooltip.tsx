@@ -9,6 +9,14 @@ const PLACEMENT: Record<Side, string> = {
   right: 'left-full top-1/2 ml-1.5 -translate-y-1/2',
 };
 
+/** `align="end"` variants for the vertical sides: the bubble's right edge
+ *  lines up with the control's instead of centring on it. For a control near
+ *  the window's right edge, centring is what pushes the bubble off-screen. */
+const PLACEMENT_END: Partial<Record<Side, string>> = {
+  top: 'bottom-full right-0 mb-1.5',
+  bottom: 'top-full right-0 mt-1.5',
+};
+
 interface Props {
   /** What the wrapped control does. Keep it to a couple of words. */
   label: string;
@@ -16,6 +24,9 @@ interface Props {
   kbd?: string;
   /** Which way the bubble opens. Pick one that stays inside the window. */
   side?: Side;
+  /** Cross-axis alignment for `top`/`bottom`. Use `end` on controls close to
+   *  the window's right edge, where a centred bubble would overflow. */
+  align?: 'center' | 'end';
   children: React.ReactNode;
   className?: string;
 }
@@ -36,7 +47,15 @@ interface Props {
  * `overflow-hidden` ancestor. Fine for the chrome it's used on; anything
  * inside a scroll container needs positioning logic this deliberately skips.
  */
-export function Tooltip({ label, kbd, side = 'bottom', children, className }: Props) {
+export function Tooltip({
+  label,
+  kbd,
+  side = 'bottom',
+  align = 'center',
+  children,
+  className,
+}: Props) {
+  const placement = (align === 'end' && PLACEMENT_END[side]) || PLACEMENT[side];
   return (
     <span className={cn('group/tip relative inline-flex', className)}>
       {children}
@@ -51,7 +70,7 @@ export function Tooltip({ label, kbd, side = 'bottom', children, className }: Pr
           'group-hover/tip:opacity-100',
           'group-focus-within/tip:opacity-100 group-focus-within/tip:delay-0',
           'motion-reduce:transition-none',
-          PLACEMENT[side],
+          placement,
         )}
       >
         {label}

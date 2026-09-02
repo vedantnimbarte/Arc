@@ -394,6 +394,9 @@ export default function App() {
       case 'toggle-ssh-panel':
         useFiles.getState().toggleSidebarView('ssh');
         return;
+      case 'toggle-layout-mode':
+        useWorkspace.getState().toggleLayoutMode();
+        return;
       case 'launch-wingman-pilot':
         void launchWingman('pilot');
         return;
