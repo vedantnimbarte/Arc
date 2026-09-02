@@ -369,7 +369,13 @@ export const useSettings = create<Settings>()((set, get) => ({
 
   hydrateSettings: async () => {
     if (get().settingsHydrated) return;
+    // Suppressed: `settingsHydrated` is not persisted, so letting this set
+    // schedule a debounced write only races the load that follows it.
+    suppressSave = true;
     set({ settingsHydrated: true });
+    queueMicrotask(() => {
+      suppressSave = false;
+    });
 
     // Register user-installed themes (Tier 1.7) before resolving, so a stored
     // themeId pointing at one applies on first paint instead of falling back.
@@ -583,14 +589,29 @@ function coerceAgentCommands(
 // next microtask.
 let suppressSave = false;
 
+/** Write whatever the store holds *right now*, then tell the other window.
+ *
+ *  Reading the state here rather than closing over the snapshot that scheduled
+ *  the write is load-bearing. `hydrateSettings` sets a flag before it has
+ *  loaded anything, which queues a save carrying pristine defaults; the
+ *  stored values are then applied under `suppressSave`, which returns early
+ *  and so never cancels that pending timer. With a captured snapshot the timer
+ *  fired 500ms later and wrote defaults over the user's row — every setting
+ *  reverting on the next launch, the shell most visibly. */
+async function persistSettingsNow(): Promise<void> {
+  await sessionSettingsSave(toPersistedSettings(useSettings.getState()));
+  await settingsBroadcastChanged().catch(() => {});
+}
+
 let settingsSaveTimer: ReturnType<typeof setTimeout> | undefined;
-useSettings.subscribe((state) => {
+useSettings.subscribe(() => {
   if (!isTauri || suppressSave) return;
   clearTimeout(settingsSaveTimer);
   settingsSaveTimer = setTimeout(() => {
-    void sessionSettingsSave(toPersistedSettings(state))
-      .then(() => settingsBroadcastChanged().catch(() => {}))
-      .catch((err) => console.error('[settings] SQLite save failed:', err));
+    settingsSaveTimer = undefined;
+    void persistSettingsNow().catch((err) =>
+      console.error('[settings] SQLite save failed:', err),
+    );
   }, 500);
 });
 
@@ -602,8 +623,7 @@ export async function flushSettingsSave(): Promise<void> {
   if (!isTauri || suppressSave || settingsSaveTimer === undefined) return;
   clearTimeout(settingsSaveTimer);
   settingsSaveTimer = undefined;
-  await sessionSettingsSave(toPersistedSettings(useSettings.getState()));
-  await settingsBroadcastChanged().catch(() => {});
+  await persistSettingsNow();
 }
 
 /** Re-pull settings from SQLite without writing back. Called when the
