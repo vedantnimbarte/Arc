@@ -935,6 +935,11 @@ export interface PersistedSettings {
   /** Folder names excluded from file search. Fully user-editable; seeded with
    *  sensible defaults (node_modules, .venv, target, …). */
   searchIgnoreDirs?: string[];
+  /** Notification sources the user silenced, and the ones allowed to raise an
+   *  OS notification. Stored as name lists so an unknown entry from a newer
+   *  build is simply dropped on load. */
+  notifyMuted?: string[];
+  notifyOs?: string[];
   /** Layout mode stamped onto a newly created workspace: 'tiling' | 'standard'.
    *  Existing workspaces keep whatever they were set to. */
   defaultLayoutMode?: string;

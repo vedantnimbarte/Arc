@@ -24,6 +24,7 @@ import { loadInstalledThemes } from '../lib/themeMarketplace';
 // Type-only: `workspace.ts` imports this store at runtime, so a value import
 // here would close the cycle. `import type` is erased, leaving one direction.
 import type { LayoutMode } from './workspace';
+import { NOTIFICATION_SOURCES, type NotificationSource } from './notifications';
 
 /** Folder names excluded from file search by default. Mirrors the Rust
  *  crate's built-in skip list; the setting is fully editable, so the frontend
@@ -199,6 +200,13 @@ export interface Settings {
   notifySound: boolean;
   /** Folder names excluded from file search (Ctrl+P). Fully editable. */
   searchIgnoreDirs: string[];
+  /** Notification sources the user has silenced. Absent means everything is
+   *  delivered — the panel is only useful if it starts out complete. */
+  notifyMuted: NotificationSource[];
+  /** Sources that also raise an OS notification while the window is
+   *  unfocused. Everything lands in the panel regardless; this is only about
+   *  interrupting. Defaults to the two worth interrupting for. */
+  notifyOs: NotificationSource[];
   /** Layout mode a newly created workspace starts in. Existing workspaces are
    *  untouched — each already carries its own `mode`. */
   defaultLayoutMode: LayoutMode;
@@ -244,6 +252,10 @@ export interface Settings {
   setNotifySound: (on: boolean) => void;
   setSearchIgnoreDirs: (dirs: string[]) => void;
   setDefaultLayoutMode: (mode: LayoutMode) => void;
+  /** Silence or unsilence one source. */
+  setSourceMuted: (source: NotificationSource, muted: boolean) => void;
+  /** Let one source interrupt with an OS notification, or stop it. */
+  setSourceOs: (source: NotificationSource, on: boolean) => void;
   /** Override an agent's start command, or clear the override when `command`
    *  is blank or matches the built-in default. */
   setAgentCommand: (id: AiCliId, command: string) => void;
@@ -273,6 +285,8 @@ const DEFAULTS = {
   notifyThresholdSecs: 30,
   notifySound: false,
   searchIgnoreDirs: DEFAULT_SEARCH_IGNORE_DIRS,
+  notifyMuted: [] as NotificationSource[],
+  notifyOs: ['agent', 'command'] as NotificationSource[],
   defaultLayoutMode: 'tiling' as LayoutMode,
   agentCommands: {} as Partial<Record<AiCliId, string>>,
   autoUpdateCheck: true,
@@ -354,6 +368,22 @@ export const useSettings = create<Settings>()((set, get) => ({
   setNotifySound: (on) => set({ notifySound: on }),
   setSearchIgnoreDirs: (dirs) => set({ searchIgnoreDirs: dirs }),
   setDefaultLayoutMode: (mode) => set({ defaultLayoutMode: mode }),
+  setSourceMuted: (source, muted) =>
+    set((s) => ({
+      notifyMuted: muted
+        ? s.notifyMuted.includes(source)
+          ? s.notifyMuted
+          : [...s.notifyMuted, source]
+        : s.notifyMuted.filter((x) => x !== source),
+    })),
+  setSourceOs: (source, on) =>
+    set((s) => ({
+      notifyOs: on
+        ? s.notifyOs.includes(source)
+          ? s.notifyOs
+          : [...s.notifyOs, source]
+        : s.notifyOs.filter((x) => x !== source),
+    })),
   setAgentCommand: (id, command) =>
     set((s) => {
       const trimmed = command.trim();
@@ -527,6 +557,8 @@ function applyStored(
       stored.defaultLayoutMode === 'standard' || stored.defaultLayoutMode === 'tiling'
         ? stored.defaultLayoutMode
         : current.defaultLayoutMode,
+    notifyMuted: coerceSources(stored.notifyMuted, current.notifyMuted),
+    notifyOs: coerceSources(stored.notifyOs, current.notifyOs),
     agentCommands: coerceAgentCommands(stored.agentCommands, current.agentCommands),
     autoUpdateCheck:
       typeof stored.autoUpdateCheck === 'boolean'
@@ -562,10 +594,21 @@ function toPersistedSettings(s: Settings): PersistedSettings {
     notifySound: s.notifySound,
     searchIgnoreDirs: s.searchIgnoreDirs,
     defaultLayoutMode: s.defaultLayoutMode,
+    notifyMuted: s.notifyMuted,
+    notifyOs: s.notifyOs,
     agentCommands: s.agentCommands,
     autoUpdateCheck: s.autoUpdateCheck,
     aiModel: s.aiModel,
   };
+}
+
+/** Drop anything that is not a source this build knows about. The row is
+ *  user-editable on disk, and a stale name would otherwise mute nothing while
+ *  looking like it muted something. */
+function coerceSources(raw: unknown, fallback: NotificationSource[]): NotificationSource[] {
+  if (!Array.isArray(raw)) return fallback;
+  const known = new Set<string>(NOTIFICATION_SOURCES);
+  return raw.filter((v): v is NotificationSource => typeof v === 'string' && known.has(v));
 }
 
 /** Keep only overrides that name a real agent and a non-empty string. The

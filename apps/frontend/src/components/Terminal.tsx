@@ -24,7 +24,7 @@ import {
 } from '../lib/tauri';
 import { createPathLinkProvider } from '../lib/links';
 import { isRemotePath } from '../lib/remote';
-import { notifyCommandFinished } from '../lib/notify';
+import { formatDuration } from '../lib/notify';
 import { NewTabSplash } from './NewTabSplash';
 import { TerminalSearchBar } from './TerminalSearchBar';
 import { useFiles } from '../state/files';
@@ -33,6 +33,7 @@ import { detectRiskyPaste, usePaste } from '../state/paste';
 import { resolveTerminalProfile, useSettings } from '../state/settings';
 import { useWorkspace } from '../state/workspace';
 import { useAi } from '../state/ai';
+import { notifyEvent } from '../lib/notifyEvent';
 import { AiCommandBar } from './AiCommandBar';
 import { getFont, resolveActiveTheme } from '../themes';
 
@@ -63,6 +64,21 @@ const SCROLLBACK_SAVE_LINES = 1000;
  *  ponytail: fixed interval, dirty-gated. Worst case loses the last 15s of
  *  scrollback — drop it if that ever matters. */
 const SCROLLBACK_SAVE_MS = 15_000;
+
+/** How long an agent must print nothing before ARC calls the turn over.
+ *  Long on purpose: a model thinking mid-turn also goes quiet, and announcing
+ *  "finished" early is worse than announcing it late. The bell and the OSC
+ *  notify escapes are the precise signals; this only catches agents that emit
+ *  neither. */
+const AGENT_IDLE_MS = 20_000;
+/** How often the idle check runs. Cheap — it reads two numbers. */
+const AGENT_IDLE_TICK_MS = 5_000;
+
+/** Divider marking where a restored buffer ends and this session begins. */
+const RESTORE_MARKER = '\x1b[2m── session restored ──\x1b[0m';
+/** Matches the marker with any newline in front, so removing one leaves no
+ *  blank line behind. */
+const RESTORE_MARKER_RE = /\r?\n?\x1b\[2m── session restored ──\x1b\[0m/g;
 
 export function Terminal({ sessionKey }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -117,6 +133,7 @@ export function Terminal({ sessionKey }: Props) {
     // terminal doesn't re-serialize its buffer every tick.
     let scrollbackDirty = false;
     let scrollbackTimer: ReturnType<typeof setInterval> | null = null;
+    let agentIdleTimer: ReturnType<typeof setInterval> | null = null;
 
     const initialSettings = useSettings.getState();
     const initialFont = getFont(initialSettings.fontId);
@@ -381,6 +398,10 @@ export function Terminal({ sessionKey }: Props) {
       //   C — pre-execution (output begins)
       //   D[;<exit>] — command finished, optional decimal exit code
       const OSC_133 = /\x1b\]133;([^\x07\x1b]*)(?:\x07|\x1b\\)/g;
+      // OSC 9 (`\e]9;message`) and OSC 777 (`\e]777;notify;title;body`) are the
+      // two desktop-notification escapes in the wild. A CLI that emits either
+      // is telling us exactly what to say, which beats every heuristic below.
+      const OSC_NOTIFY = /\x1b\](9|777);([^\x07\x1b]*)(?:\x07|\x1b\\)/g;
       const OUTPUT_CAP = 4 * 1024;
       const osc = { capturing: false, buf: '' };
       // Hoisted here so both the OSC chunk parser (which finalizes the
@@ -391,7 +412,53 @@ export function Terminal({ sessionKey }: Props) {
       // set on Enter, the start time on the `C` (execution begins) marker.
       let lastCommandText: string | null = null;
       let cmdStartMs: number | null = null;
+
+      // ─── Agent turn detection ──────────────────────────────────────────
+      // Only for tabs running an agent rather than a shell: a plain terminal
+      // already reports through OSC 133, and a bell there usually means
+      // readline rejected a keystroke, which is not news.
+      let lastOutputMs = Date.now();
+      // Set when a signal fires, cleared by the next output. Without it a
+      // silent agent would re-notify on every idle tick.
+      let announced = false;
+
+      const agentTab = () => {
+        const t = useWorkspace.getState().tabs.find((x) => x.id === sessionKey);
+        return t?.shellOverride ? t : null;
+      };
+
+      /** One turn-ended signal, whatever spotted it. */
+      const agentSignal = (title: string, body?: string) => {
+        const tab = agentTab();
+        if (!tab || announced) return;
+        announced = true;
+        notifyEvent({
+          source: 'agent',
+          title,
+          body,
+          target: { kind: 'tab', tabId: sessionKey },
+        });
+      };
       const handleChunkText = (text: string) => {
+        // An agent replaces the shell, so its tab never emits OSC 133 and the
+        // command tracking below never runs for it. An explicit notify escape,
+        // the bell, and going quiet are what is left to tell us a turn ended.
+        if (text.includes('\x1b]9;') || text.includes('\x1b]777;')) {
+          OSC_NOTIFY.lastIndex = 0;
+          let n: RegExpExecArray | null;
+          while ((n = OSC_NOTIFY.exec(text)) !== null) {
+            const fields = (n[2] ?? '').split(';');
+            // OSC 777 carries `notify;title;body`; OSC 9 is the message itself.
+            const [title, body] =
+              n[1] === '777' ? [fields[1] ?? '', fields.slice(2).join(';')] : [n[2] ?? '', ''];
+            if (title.trim()) agentSignal(title.trim(), body.trim() || undefined);
+          }
+        }
+        if (text.trim().length > 0) {
+          lastOutputMs = Date.now();
+          // Fresh output means the turn resumed — re-arm the signal.
+          announced = false;
+        }
         if (!text.includes('\x1b]133;')) {
           if (osc.capturing) {
             osc.buf += text;
@@ -444,18 +511,24 @@ export function Terminal({ sessionKey }: Props) {
             } else if (code === 0) {
               useAi.getState().clearFailure(sessionKey);
             }
-            // Notify on slow commands that finished while we weren't looking.
+            // A slow command that finished is worth recording whether or not
+            // the window was focused: the panel is where you look afterwards.
+            // `notifyEvent` still decides on its own whether to interrupt.
             const startedAt = cmdStartMs;
             cmdStartMs = null;
             const s = useSettings.getState();
             if (s.notifyLongCommands && startedAt !== null) {
               const elapsed = Date.now() - startedAt;
-              if (elapsed >= s.notifyThresholdSecs * 1000 && !document.hasFocus()) {
-                void notifyCommandFinished({
-                  command: lastCommandText ?? '(command)',
-                  exitCode: code,
-                  durationMs: elapsed,
-                  sound: s.notifySound,
+              if (elapsed >= s.notifyThresholdSecs * 1000) {
+                const ok = code === 0 || code === null;
+                notifyEvent({
+                  source: 'command',
+                  title: ok
+                    ? `Command finished in ${formatDuration(Math.round(elapsed / 1000))}`
+                    : `Command failed — exit ${code}`,
+                  body: lastCommandText ?? undefined,
+                  tone: ok ? undefined : 'error',
+                  target: { kind: 'tab', tabId: sessionKey },
                 });
               }
             }
@@ -486,7 +559,16 @@ export function Terminal({ sessionKey }: Props) {
         sawAnyData = true;
         scrollbackDirty = true;
         const text = decoder.decode(chunk, { stream: true });
-        handleChunkText(text);
+        // Observation must never stand between the shell and the screen. This
+        // parses OSC markers for command tracking and agent notifications —
+        // all of it optional — and it runs *before* the write. A throw in here
+        // used to blackhole the chunk, so the terminal rendered nothing and
+        // read as dead even though the PTY was alive and taking input.
+        try {
+          handleChunkText(text);
+        } catch (err) {
+          console.error('[terminal] chunk parse failed:', err);
+        }
         write(text);
         if (pendingRunCommand && !ranPending) {
           ranPending = true;
@@ -504,8 +586,12 @@ export function Terminal({ sessionKey }: Props) {
       try {
         const saved = await sessionScrollbackLoad(sessionKey);
         if (saved && !disposed) {
-          write(saved);
-          writeln('\r\n\x1b[2m── session restored ──\x1b[0m');
+          // Strip markers baked in by earlier restores. The marker is written
+          // into the terminal, so the next save serialises it along with
+          // everything else — without this they stack up, one per relaunch,
+          // and the buffer fills with its own restore history.
+          write(saved.replace(RESTORE_MARKER_RE, ''));
+          writeln(`\r\n${RESTORE_MARKER}`);
         }
       } catch {
         /* nothing stored, or the read failed — start clean */
@@ -523,6 +609,7 @@ export function Terminal({ sessionKey }: Props) {
           /* buffer torn down mid-serialize */
         }
       }, SCROLLBACK_SAVE_MS);
+
 
       try {
         // Snapshot the picker choice at spawn time. `null` = let Rust
@@ -583,6 +670,10 @@ export function Terminal({ sessionKey }: Props) {
           onPtyChunk,
         );
         if (disposed) {
+          // Cleanup already ran, so nothing will clear the timers this boot
+          // started — clear them here or every discarded mount leaks two.
+          if (scrollbackTimer) clearInterval(scrollbackTimer);
+          if (agentIdleTimer) clearInterval(agentIdleTimer);
           if (ptyId) await ptyKill(ptyId).catch(() => {});
           return;
         }
@@ -610,6 +701,28 @@ export function Terminal({ sessionKey }: Props) {
         // Publish the PTY id so other components (file tree, chat) can write
         // into this terminal.
         useWorkspace.getState().setTabPtyId(sessionKey, ptyId);
+
+        // The bell. Most agent CLIs ring it when a turn ends or they want input,
+        // which makes it the widest-coverage signal available — and unlike the
+        // idle check it fires the moment the agent is actually done.
+        unlistens.push(
+          term.onBell(() => {
+            const tab = agentTab();
+            if (tab) agentSignal(`${tab.title} is waiting`, 'Rang the terminal bell.');
+          }).dispose,
+        );
+
+        // Backstop for agents that ring nothing: a turn that has printed and then
+        // gone quiet for a while is almost certainly over. Deliberately a long
+        // window — a model thinking mid-turn goes quiet too, and a premature
+        // "finished" is worse than a late one.
+        agentIdleTimer = setInterval(() => {
+          if (disposed || announced) return;
+          if (!agentTab()) return;
+          if (Date.now() - lastOutputMs < AGENT_IDLE_MS) return;
+          const tab = agentTab()!;
+          agentSignal(`${tab.title} has gone quiet`, `No output for ${AGENT_IDLE_MS / 1000}s.`);
+        }, AGENT_IDLE_TICK_MS);
 
         // Our best-effort view of the shell's CWD, used to resolve relative
         // `cd` targets when the shell doesn't emit OSC 7. OSC 7 (below) is
@@ -804,7 +917,16 @@ export function Terminal({ sessionKey }: Props) {
       }
     };
 
-    void boot();
+    // `boot` is async and everything the terminal needs happens inside it —
+    // the scrollback replay, the spawn, and the keystroke wiring. Firing it
+    // with a bare `void` meant any throw before the spawn rejected silently
+    // and left a terminal that rendered its restored buffer and then sat
+    // there, taking no input, with nothing said about why. Say why.
+    void boot().catch((err) => {
+      console.error('[terminal] boot failed:', err);
+      writeln(`\r\n\x1b[38;2;255;69;58m  terminal failed to start: ${err}\x1b[0m`);
+      writeln('\x1b[2m  Press ⌘T for a fresh tab.\x1b[0m');
+    });
 
     const ro = new ResizeObserver(() => {
       ensureOpen();
@@ -840,6 +962,7 @@ export function Terminal({ sessionKey }: Props) {
       // the last tick still has the content worth keeping. Tab closes are
       // handled separately — `closeTab` deletes the row outright.
       if (scrollbackTimer) clearInterval(scrollbackTimer);
+      if (agentIdleTimer) clearInterval(agentIdleTimer);
       if (opened) {
         try {
           const data = serialize.serialize({ scrollback: SCROLLBACK_SAVE_LINES });

@@ -98,6 +98,7 @@ import { cn } from '../lib/cn';
 import { askConfirm, askText } from '../state/confirm';
 import { copyText } from '../lib/clipboard';
 import { toast, toastError } from '../state/toast';
+import { notifyEvent } from '../lib/notifyEvent';
 
 // ~800 lines of worktree + rebase UI, only pulled in when one is opened.
 const WorktreePanel = lazy(() =>
@@ -385,7 +386,22 @@ export function SourceControl() {
     }
   }, [root, baseline, refresh]);
 
-  // ── Remote ops ──────────────────────────────────────────────────────────────
+  /** Remote ops flash their result inline, so only a failure is worth a
+ *  notification: it is the outcome you want to find later, having switched
+ *  away while the push ran. */
+function notifyGitFailure(title: string, err: unknown): void {
+  const msg = err instanceof Error ? err.message : String(err);
+  notifyEvent({
+    source: 'git',
+    title,
+    // git's first line names the failure; the rest is usually a hint block.
+    body: msg.split('\n')[0]?.slice(0, 160),
+    tone: 'error',
+    target: { kind: 'sidebar', view: 'git' },
+  });
+}
+
+// ── Remote ops ──────────────────────────────────────────────────────────────
 
   const handleFetch = useCallback(async () => {
     if (!root || remoteOp) return;
@@ -398,6 +414,7 @@ export function SourceControl() {
       await refreshStore(root);
     } catch (e) {
       setOpError(String(e));
+      notifyGitFailure('Fetch failed', e);
     } finally {
       setRemoteOp(null);
     }
@@ -414,6 +431,7 @@ export function SourceControl() {
       await refreshStore(root);
     } catch (e) {
       setOpError(String(e));
+      notifyGitFailure('Pull failed', e);
     } finally {
       setRemoteOp(null);
     }
@@ -436,7 +454,9 @@ export function SourceControl() {
         setOpError(msg);
         // A rebase or amend leaves the remote ahead of a history that no
         // longer contains it; that's the one case force-with-lease is for.
-        setPushRejected(/rejected|non-fast-forward|fetch first/i.test(msg));
+        const rejected = /rejected|non-fast-forward|fetch first/i.test(msg);
+        setPushRejected(rejected);
+        notifyGitFailure(rejected ? 'Push rejected' : 'Push failed', e);
       } finally {
         setRemoteOp(null);
       }

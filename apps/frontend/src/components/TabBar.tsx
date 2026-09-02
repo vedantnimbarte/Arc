@@ -23,6 +23,7 @@ import { useFiles } from '../state/files';
 import { runCommand } from '../state/commands';
 import { Tooltip } from './Tooltip';
 import { AgentLauncher, AGENT_PANEL_H, AGENT_PANEL_W } from './AgentLauncher';
+import { NotificationCenter } from './NotificationCenter';
 import { formatBinding, getBinding } from '../state/shortcuts';
 import { cn } from '../lib/cn';
 import {
@@ -259,6 +260,8 @@ export function TabBar() {
           pane) and a tab strip. Per-workspace, so it reflects whichever
           workspace is active. Sits in the right cluster, inboard of the
           window controls. */}
+      <NotificationCenter />
+
       <LayoutModeSwitch mode={layoutMode} onSelect={setLayoutMode} compact={compactChrome} />
 
       <div className="ml-0.5 pr-2" />
