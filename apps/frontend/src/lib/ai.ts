@@ -62,7 +62,24 @@ export async function suggestCommand(
   ctx: CommandContext,
 ): Promise<string> {
   if (!isTauri) throw new AiError('Command suggestions need the desktop app.');
+  const key = await requireKey();
 
+  const [status, bodyText] = await ask(
+    key,
+    SYSTEM_PROMPT,
+    [
+      `Shell: ${ctx.shell ?? 'unknown'}`,
+      `OS: ${platformName()}`,
+      `Working directory: ${ctx.cwd ?? 'unknown'}`,
+      '',
+      `Request: ${request}`,
+    ].join('\n'),
+  );
+  return parseCommand(status, bodyText);
+}
+
+/** Read the user's key, or say why there isn't one. */
+async function requireKey(): Promise<string> {
   let key: string | null = null;
   try {
     key = await secretGet(ANTHROPIC_KEY_SECRET);
@@ -72,27 +89,25 @@ export async function suggestCommand(
   if (!key) {
     throw new AiError('No API key yet — add one in Settings → Terminal.');
   }
+  return key;
+}
 
+/** One Messages API round trip, returning `[status, bodyText]`. The two
+ *  prompts want different shapes out, so each keeps its own parser. */
+async function ask(
+  key: string,
+  system: string,
+  userText: string,
+): Promise<[number, string | null]> {
   const model = await resolveModel();
   const body = {
     model,
     max_tokens: MAX_TOKENS,
-    system: SYSTEM_PROMPT,
-    // Command translation is not a reasoning-heavy task, and this bar sits in
-    // front of someone waiting to type. Low effort keeps thinking short.
+    system,
+    // Neither prompt is reasoning-heavy, and both sit in front of someone
+    // waiting to type. Low effort keeps thinking short.
     output_config: { effort: 'low' },
-    messages: [
-      {
-        role: 'user',
-        content: [
-          `Shell: ${ctx.shell ?? 'unknown'}`,
-          `OS: ${platformName()}`,
-          `Working directory: ${ctx.cwd ?? 'unknown'}`,
-          '',
-          `Request: ${request}`,
-        ].join('\n'),
-      },
-    ],
+    messages: [{ role: 'user', content: userText }],
   };
 
   const res = await httpRequest({
@@ -106,8 +121,66 @@ export async function suggestCommand(
     body: { kind: 'raw', text: JSON.stringify(body), content_type: 'application/json' },
     timeout_ms: TIMEOUT_MS,
   });
+  return [res.status, res.body_text];
+}
 
-  return parseCommand(res.status, res.body_text);
+const EXPLAIN_PROMPT = [
+  'A command the user ran in their terminal failed. Explain why, briefly.',
+  '',
+  'Answer in at most three short sentences, in plain language, naming the',
+  'cause visible in the output rather than listing everything it could be.',
+  'Do not restate the command or the error text back to the user.',
+  '',
+  'If one command would plausibly fix it, add a final line of exactly',
+  '`FIX: <command>` and nothing else on that line. Omit that line when there',
+  'is no such command, when the fix needs the user to choose between options,',
+  'or when it would destroy work. Never invent a flag you are unsure exists.',
+].join('\n');
+
+/** One failed command, as the terminal's OSC 133 markers captured it. */
+export interface CommandFailure {
+  command: string;
+  exitCode: number;
+  /** Tail of what the command printed; already capped by the caller. */
+  output: string;
+}
+
+/** Why a command failed, and a command that might fix it. */
+export interface FailureExplanation {
+  explanation: string;
+  /** Goes on the shell's input line, like a suggestion — never auto-run. */
+  fix: string | null;
+}
+
+/**
+ * Ask Claude why `failure` happened.
+ *
+ * Everything passed here was captured from the shell's own shell-integration
+ * markers, so the user neither retypes the command nor pastes the error.
+ */
+export async function explainFailure(
+  failure: CommandFailure,
+  ctx: CommandContext,
+): Promise<FailureExplanation> {
+  if (!isTauri) throw new AiError('Explanations need the desktop app.');
+  const key = await requireKey();
+
+  const [status, bodyText] = await ask(
+    key,
+    EXPLAIN_PROMPT,
+    [
+      `Shell: ${ctx.shell ?? 'unknown'}`,
+      `OS: ${platformName()}`,
+      `Working directory: ${ctx.cwd ?? 'unknown'}`,
+      '',
+      `Command: ${failure.command}`,
+      `Exit code: ${failure.exitCode}`,
+      '',
+      'Output:',
+      failure.output || '(the command printed nothing)',
+    ].join('\n'),
+  );
+  return parseExplanation(status, bodyText);
 }
 
 /** Read the configured model without importing the settings store at module
@@ -127,6 +200,19 @@ async function resolveModel(): Promise<string> {
  * answer despite being told not to.
  */
 export function parseCommand(status: number, bodyText: string | null): string {
+  const command = stripFence(responseText(status, bodyText));
+  if (!command) throw new AiError('No command came back — try rephrasing.');
+  return command;
+}
+
+/**
+ * Reduce a Messages API response to its text, or throw the reason it has none.
+ *
+ * Shared by both parsers. Handles the shapes that actually reach users: an
+ * error status with a JSON `error.message`, a refusal, and thinking blocks
+ * preceding the text (adaptive thinking is on by default).
+ */
+function responseText(status: number, bodyText: string | null): string {
   const parsed = safeJson(bodyText);
 
   if (status !== 200) {
@@ -142,21 +228,52 @@ export function parseCommand(status: number, bodyText: string | null): string {
   }
 
   const blocks = Array.isArray(parsed.content) ? parsed.content : [];
-  const text = blocks
+  return blocks
     .filter((b): b is { type: 'text'; text: string } => b?.type === 'text')
     .map((b) => b.text)
     .join('')
     .trim();
-
-  const command = stripFence(text);
-  if (!command) throw new AiError('No command came back — try rephrasing.');
-  return command;
 }
 
-/** Unwrap a ```fenced``` block, keeping the command inside it. */
+/**
+ * Split an explanation from its optional trailing `FIX:` line.
+ *
+ * Exported for tests. The model is told to emit at most one such line, but a
+ * parser that only looked at the last line would mistake an explanation that
+ * merely mentions `FIX:` mid-sentence, so the marker has to start its line.
+ */
+export function parseExplanation(
+  status: number,
+  bodyText: string | null,
+): FailureExplanation {
+  const text = responseText(status, bodyText);
+  if (!text) throw new AiError('No explanation came back — try again.');
+
+  const lines = text.split('\n');
+  const idx = lines.findIndex((l) => /^\s*FIX:/i.test(l));
+  if (idx === -1) return { explanation: text, fix: null };
+
+  const fix = stripFence(lines[idx]!.replace(/^\s*FIX:\s*/i, '').trim());
+  const explanation = lines.slice(0, idx).join('\n').trim();
+  return {
+    // A reply that is only a FIX line still tells the user something.
+    explanation: explanation || 'Suggested fix:',
+    fix: fix || null,
+  };
+}
+
+/** Unwrap a fenced block, keeping the command inside it.
+ *
+ *  Handles both shapes the model reaches for despite being told not to: a
+ *  multi-line ```fence``` and, on a single line such as a `FIX:` answer,
+ *  inline backticks. A command that merely *contains* a backtick is untouched,
+ *  since the pattern has to start with one. */
 function stripFence(text: string): string {
-  const fenced = /^```[^\n]*\n([\s\S]*?)\n?```$/.exec(text.trim());
-  return (fenced?.[1] ?? text).trim();
+  const trimmed = text.trim();
+  const block = /^```[^\n]*\n([\s\S]*?)\n?```$/.exec(trimmed);
+  if (block) return block[1]!.trim();
+  const inline = /^`{1,3}([^`][\s\S]*?)`{1,3}$/.exec(trimmed);
+  return (inline?.[1] ?? trimmed).trim();
 }
 
 function safeJson(text: string | null): Record<string, unknown> | null {

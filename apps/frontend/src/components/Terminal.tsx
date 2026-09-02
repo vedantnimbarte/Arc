@@ -431,6 +431,19 @@ export function Terminal({ sessionKey }: Props) {
                 () => {},
               );
             }
+            // Remember a failure so ⌘K can offer to explain it. Everything it
+            // needs is already here — the command, its exit code, and what it
+            // printed — so the user never retypes any of it. A success clears
+            // the tab's failure: the thing that went wrong has been dealt with.
+            if (code !== null && code !== 0 && lastCommandText) {
+              useAi.getState().recordFailure(sessionKey, {
+                command: lastCommandText,
+                exitCode: code,
+                output: excerpt,
+              });
+            } else if (code === 0) {
+              useAi.getState().clearFailure(sessionKey);
+            }
             // Notify on slow commands that finished while we weren't looking.
             const startedAt = cmdStartMs;
             cmdStartMs = null;
