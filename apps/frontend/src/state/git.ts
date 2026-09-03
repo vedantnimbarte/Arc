@@ -42,9 +42,13 @@ interface GitStoreState {
   diffStat: GitDiffStat | null;
   /** Per-file decorations keyed by normalized absolute path (file tree). */
   statusByPath: Map<string, GitDecoration>;
-  /** Normalized absolute paths of directories containing a change, so the
-   *  tree can flag collapsed folders that hide dirty files. */
-  dirtyDirs: Set<string>;
+  /** Directories containing a change, keyed by normalized absolute path. The
+   *  value is the most severe decoration found beneath, so the tree can tint a
+   *  folder the way VS Code does (and dot it while collapsed). */
+  dirtyDirs: Map<string, GitDecoration>;
+  /** Normalized absolute paths git reported as ignored. Directories arrive
+   *  collapsed, so membership is a prefix test — see `isIgnoredPath`. */
+  ignoredPaths: Set<string>;
   loading: boolean;
   error: string | null;
   /** `background: true` for watcher/poll-driven refreshes — they must not
@@ -54,28 +58,65 @@ interface GitStoreState {
   reset: () => void;
 }
 
-/** Build the absolute-path decoration map + dirty-folder set from repo-relative
- *  change entries. `repoRoot` is the `git rev-parse --show-toplevel` path. */
+/** How loudly a change should shout when it's rolled up onto an ancestor
+ *  folder: a conflict outranks a tracked edit, which outranks an untracked
+ *  file. Mirrors VS Code, where a folder holding only new files reads green. */
+function severity(d: GitDecoration): number {
+  if (d.kind === 'conflict') return 3;
+  return d.kind === 'untracked' ? 1 : 2;
+}
+
+/** Build the absolute-path decoration map, dirty-folder rollup, and ignored-path
+ *  set from repo-relative change entries. `repoRoot` is the
+ *  `git rev-parse --show-toplevel` path. */
 function buildDecorations(
   repoRoot: string | null,
   entries: GitChangeEntry[],
-): { statusByPath: Map<string, GitDecoration>; dirtyDirs: Set<string> } {
+): {
+  statusByPath: Map<string, GitDecoration>;
+  dirtyDirs: Map<string, GitDecoration>;
+  ignoredPaths: Set<string>;
+} {
   const statusByPath = new Map<string, GitDecoration>();
-  const dirtyDirs = new Set<string>();
-  if (!repoRoot) return { statusByPath, dirtyDirs };
+  const dirtyDirs = new Map<string, GitDecoration>();
+  const ignoredPaths = new Set<string>();
+  if (!repoRoot) return { statusByPath, dirtyDirs, ignoredPaths };
   const rootKey = normPathKey(repoRoot);
   for (const e of entries) {
     const absKey = normPathKey(`${repoRoot}/${e.path}`);
-    statusByPath.set(absKey, { status: e.status, kind: e.kind });
-    // Mark every ancestor directory up to (and including) the repo root.
+    if (e.kind === 'ignored') {
+      ignoredPaths.add(absKey);
+      continue;
+    }
+    const deco: GitDecoration = { status: e.status, kind: e.kind };
+    statusByPath.set(absKey, deco);
+    // Roll the change up every ancestor directory to (and including) the repo
+    // root, keeping the loudest one seen so far.
     let dir = absKey.slice(0, absKey.lastIndexOf('/'));
     while (dir.length >= rootKey.length && dir.includes('/')) {
-      dirtyDirs.add(dir);
+      const cur = dirtyDirs.get(dir);
+      if (!cur || severity(deco) > severity(cur)) dirtyDirs.set(dir, deco);
       if (dir === rootKey) break;
       dir = dir.slice(0, dir.lastIndexOf('/'));
     }
   }
-  return { statusByPath, dirtyDirs };
+  return { statusByPath, dirtyDirs, ignoredPaths };
+}
+
+/**
+ * Is `key` (a normalized absolute path) ignored? Git collapses an ignored
+ * directory into one record, so a hit on any ancestor counts — that's what
+ * dims every file under `node_modules/` from a single entry.
+ */
+export function isIgnoredPath(key: string, ignoredPaths: Set<string>): boolean {
+  if (ignoredPaths.size === 0) return false;
+  let cur = key;
+  for (;;) {
+    if (ignoredPaths.has(cur)) return true;
+    const cut = cur.lastIndexOf('/');
+    if (cut <= 0) return false;
+    cur = cur.slice(0, cut);
+  }
 }
 
 // Monotonic token so a slow refresh (e.g. for a root the user just navigated
@@ -94,7 +135,8 @@ export const useGit = create<GitStoreState>((set) => ({
   entries: [],
   diffStat: null,
   statusByPath: new Map(),
-  dirtyDirs: new Set(),
+  dirtyDirs: new Map(),
+  ignoredPaths: new Set(),
   loading: false,
   error: null,
   refresh: async (root: string, opts?: { background?: boolean }) => {
@@ -108,7 +150,8 @@ export const useGit = create<GitStoreState>((set) => ({
         entries: [],
         diffStat: null,
         statusByPath: new Map(),
-        dirtyDirs: new Set(),
+        dirtyDirs: new Map(),
+        ignoredPaths: new Set(),
         loading: false,
         error: null,
       });
@@ -130,8 +173,19 @@ export const useGit = create<GitStoreState>((set) => ({
         return;
       }
       lastSnapshot = snapshot;
-      const { statusByPath, dirtyDirs } = buildDecorations(repoRoot, entries);
-      set({ info, entries, diffStat, statusByPath, dirtyDirs, loading: false, error: null });
+      const { statusByPath, dirtyDirs, ignoredPaths } = buildDecorations(repoRoot, entries);
+      set({
+        info,
+        // Ignored paths ride along on the same `git status` call but aren't
+        // changes — keep them out of the list SourceControl renders and counts.
+        entries: ignoredPaths.size > 0 ? entries.filter((e) => e.kind !== 'ignored') : entries,
+        diffStat,
+        statusByPath,
+        dirtyDirs,
+        ignoredPaths,
+        loading: false,
+        error: null,
+      });
     } catch (e) {
       if (seq !== refreshSeq) return;
       lastSnapshot = null;
@@ -139,7 +193,8 @@ export const useGit = create<GitStoreState>((set) => ({
         entries: [],
         diffStat: null,
         statusByPath: new Map(),
-        dirtyDirs: new Set(),
+        dirtyDirs: new Map(),
+        ignoredPaths: new Set(),
         loading: false,
         error: String(e),
       });
@@ -152,7 +207,8 @@ export const useGit = create<GitStoreState>((set) => ({
       entries: [],
       diffStat: null,
       statusByPath: new Map(),
-      dirtyDirs: new Set(),
+      dirtyDirs: new Map(),
+      ignoredPaths: new Set(),
       loading: false,
       error: null,
     });
