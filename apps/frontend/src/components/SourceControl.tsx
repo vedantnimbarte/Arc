@@ -147,6 +147,10 @@ function sectionFor(entry: GitChangeEntry): Section {
       return 'untracked';
     case 'conflict':
       return 'conflict';
+    // Unreachable: the git store strips ignored entries before they get here.
+    // Spelled out anyway so the switch stays exhaustive over the union.
+    case 'ignored':
+      return 'changes';
   }
 }
 

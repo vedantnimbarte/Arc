@@ -13,7 +13,7 @@ vi.mock('../../lib/tauri', () => ({
   gitRoot: async () => '/repo',
 }));
 
-const { useGit, __resetGitSnapshotForTests } = await import('../git');
+const { useGit, isIgnoredPath, __resetGitSnapshotForTests } = await import('../git');
 
 describe('git store refresh', () => {
   beforeEach(() => {
@@ -44,6 +44,33 @@ describe('git store refresh', () => {
 
     expect(useGit.getState().entries).not.toBe(first);
     expect(useGit.getState().entries[0]?.path).toBe('b.ts');
+  });
+
+  it('keeps ignored paths out of entries and dims everything beneath them', async () => {
+    fixture.entries = [
+      { path: 'src/a.ts', kind: 'unstaged', status: 'M' },
+      { path: 'node_modules/', kind: 'ignored', status: '!' },
+    ];
+    await useGit.getState().refresh('/repo');
+    const s = useGit.getState();
+
+    // SourceControl must not see a "change" it can't stage.
+    expect(s.entries.map((e) => e.path)).toEqual(['src/a.ts']);
+    // One collapsed record dims the whole subtree.
+    expect(isIgnoredPath('/repo/node_modules/pkg/index.js', s.ignoredPaths)).toBe(true);
+    expect(isIgnoredPath('/repo/src/a.ts', s.ignoredPaths)).toBe(false);
+  });
+
+  it('rolls the loudest change up onto the folder', async () => {
+    fixture.entries = [
+      { path: 'src/new.ts', kind: 'untracked', status: '?' },
+      { path: 'src/old.ts', kind: 'unstaged', status: 'M' },
+    ];
+    await useGit.getState().refresh('/repo');
+
+    // Untracked comes first but a tracked edit outranks it, so the folder
+    // reads as modified rather than new.
+    expect(useGit.getState().dirtyDirs.get('/repo/src')?.status).toBe('M');
   });
 
   it('does not flip loading for a background refresh', async () => {

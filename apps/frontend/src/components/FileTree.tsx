@@ -27,7 +27,7 @@ import {
 } from '../lib/tauri';
 import { fileIcon, folderIcon, MOCHA } from '../lib/fileIcons';
 import { useFiles } from '../state/files';
-import { useGit, normPathKey, type GitDecoration } from '../state/git';
+import { useGit, normPathKey, isIgnoredPath, type GitDecoration } from '../state/git';
 import { useWorkspace } from '../state/workspace';
 import { cn } from '../lib/cn';
 import { copyText } from '../lib/clipboard';
@@ -1061,12 +1061,16 @@ function TreeNode({
   const state = nodes[entry.path];
   const expanded = !!state?.expanded;
 
-  // Git decorations (Tier 1.3): a status letter on changed files, and a dot on
-  // collapsed folders that hide changes. Keyed by normalized absolute path.
+  // Git decorations (Tier 1.3): a status letter on changed files, a tinted name
+  // on both files and folders holding changes, a dot on collapsed folders that
+  // hide them, and a dimmed row for anything `.gitignore` matches. All keyed by
+  // normalized absolute path.
   const pathKey = normPathKey(entry.path);
   const decoration = useGit((s) => (isDir ? undefined : s.statusByPath.get(pathKey)));
-  const dirDirty = useGit((s) => isDir && !expanded && s.dirtyDirs.has(pathKey));
-  const decoColor = decoration ? gitDecoColor(decoration) : '';
+  const dirDeco = useGit((s) => (isDir ? s.dirtyDirs.get(pathKey) : undefined));
+  const ignored = useGit((s) => isIgnoredPath(pathKey, s.ignoredPaths));
+  const rollup = decoration ?? dirDeco;
+  const decoColor = rollup ? gitDecoColor(rollup) : '';
 
   const { Icon, color } = isDir
     ? folderIcon(entry.name, expanded)
@@ -1096,9 +1100,11 @@ function TreeNode({
     onContextMenu(entry, e);
   };
 
-  const tooltip = isDir
-    ? `${entry.path} · click to expand · double-click to cd`
-    : `${entry.path} · click to open · ⌥/alt+click to paste path`;
+  const tooltip =
+    (isDir
+      ? `${entry.path} · click to expand · double-click to cd`
+      : `${entry.path} · click to open · ⌥/alt+click to paste path`) +
+    (ignored ? ' · git-ignored' : '');
 
   return (
     <li>
@@ -1110,6 +1116,9 @@ function TreeNode({
           'group relative flex h-[26px] w-full items-center gap-1.5 rounded-md pr-2 font-display text-sm tracking-tight transition-colors duration-100',
           'hover:bg-surface-1',
           entry.hidden && 'opacity-65',
+          // Ignored rows stay clickable — just recede, the way VS Code greys
+          // out `node_modules` and build output.
+          ignored && 'opacity-40',
         )}
         style={{ paddingLeft: indent + 6 }}
         aria-expanded={isDir ? expanded : undefined}
@@ -1177,10 +1186,13 @@ function TreeNode({
             {decoration.status}
           </span>
         )}
-        {dirDirty && (
+        {dirDeco && !expanded && (
           <span
-            className="ml-auto mr-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-amber-400/80"
-            title="contains changes"
+            className={cn(
+              'ml-auto mr-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-current opacity-80',
+              decoColor,
+            )}
+            title={`contains changes: ${gitDecoLabel(dirDeco)}`}
             aria-hidden
           />
         )}

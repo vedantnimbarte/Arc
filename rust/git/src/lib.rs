@@ -248,6 +248,9 @@ pub enum ChangeKind {
     Untracked,
     /// Unmerged / conflicted (`u`).
     Conflict,
+    /// Matched by a `.gitignore` rule (`!`). Directories come back collapsed,
+    /// so `node_modules/` stands in for everything beneath it.
+    Ignored,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -274,6 +277,10 @@ pub async fn changes<P: AsRef<Path>>(path: P) -> Result<Vec<ChangeEntry>> {
             "status",
             "--porcelain=v2",
             "--untracked-files=normal",
+            // Ignored paths drive the file tree's dimming. The default
+            // (traditional) mode collapses an ignored directory into a single
+            // record instead of listing every file under `node_modules/`.
+            "--ignored",
             "-z",
         ])
         .output()
@@ -342,6 +349,13 @@ pub async fn changes<P: AsRef<Path>>(path: P) -> Result<Vec<ChangeEntry>> {
                 orig_path: None,
                 kind: ChangeKind::Untracked,
                 status: "?".into(),
+            });
+        } else if let Some(rest) = line.strip_prefix("! ") {
+            out.push(ChangeEntry {
+                path: rest.to_string(),
+                orig_path: None,
+                kind: ChangeKind::Ignored,
+                status: "!".into(),
             });
         }
     }

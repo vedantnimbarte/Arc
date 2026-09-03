@@ -1135,7 +1135,15 @@ export async function gitDiffStat(path: string): Promise<GitDiffStat | null> {
   return invoke<GitDiffStat | null>('git_diff_stat', { path });
 }
 
-export type GitChangeKind = 'staged' | 'unstaged' | 'both' | 'untracked' | 'conflict';
+export type GitChangeKind =
+  | 'staged'
+  | 'unstaged'
+  | 'both'
+  | 'untracked'
+  | 'conflict'
+  /** Matched by `.gitignore`; directories arrive collapsed. Not a change —
+   *  the git store strips these out of `entries` before anyone sees them. */
+  | 'ignored';
 
 export interface GitChangeEntry {
   /** Repository-relative path. */
