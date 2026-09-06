@@ -65,7 +65,12 @@ const USER_AGENT: &str = "arc-terminal/0.1 (+https://github.com/vedantnimbarte/a
 /// Empty means this build can't offer device login — [`device_code_start`]
 /// returns [`Error::DeviceLoginUnavailable`] and the sign-in screen shows only
 /// the token field. That is a degraded state, not a broken one.
-const BUNDLED_CLIENT_ID: &str = "";
+///
+/// Registered as the OAuth App "ARC" under the `vedantnimbarte` personal
+/// account, with Device Flow enabled and deliberately no client secret. To
+/// rotate it, that's where it lives — and note that a new id makes every
+/// existing user re-authorize.
+const BUNDLED_CLIENT_ID: &str = "Ov23lioXgYqjXOArXh4L";
 
 /// The client id device login actually runs against.
 ///
