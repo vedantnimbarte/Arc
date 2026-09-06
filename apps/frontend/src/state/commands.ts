@@ -14,6 +14,7 @@ export type CommandGroup =
   | 'Tasks'
   | 'Editor'
   | 'Git'
+  | 'GitHub'
   | 'SSH'
   | 'AI CLIs'
   | 'Wingman'

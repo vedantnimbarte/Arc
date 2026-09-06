@@ -4,6 +4,7 @@ import {
   FileCode,
   GitBranch,
   GitCompare,
+  Github,
   Maximize2,
   Minimize2,
   MoreHorizontal,
@@ -48,6 +49,8 @@ function iconForKind(kind: Tab['kind']): LucideIcon {
       return Server;
     case 'diff':
       return GitCompare;
+    case 'github':
+      return Github;
     default:
       return FileCode;
   }

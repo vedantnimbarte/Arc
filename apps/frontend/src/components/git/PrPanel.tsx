@@ -18,7 +18,6 @@ import {
   gitHostDetect,
   gitHostPrCreate,
   gitHostPrGet,
-  gitHostPrList,
   gitHostTokenGet,
   gitHostTokenSet,
   isTauri,
@@ -31,6 +30,7 @@ import {
 } from '../../lib/tauri';
 import { useFiles } from '../../state/files';
 import { useGitUi } from '../../state/gitUi';
+import { useGitHub } from '../../state/github';
 import { cn } from '../../lib/cn';
 
 /**
@@ -110,7 +110,7 @@ export function PrPanel() {
         )}
 
         {root && isGitHubRepo && hasToken === true && view.kind === 'list' && (
-          <ListView root={root} onPick={openDetail} />
+          <ListView slug={slug} onPick={openDetail} />
         )}
 
         {root && isGitHubRepo && hasToken === true && view.kind === 'detail' && (
@@ -244,19 +244,21 @@ function TokenPane({ onSaved }: { onSaved: () => void }) {
   );
 }
 
-function ListView({ root, onPick }: { root: string; onPick: (n: number) => void }) {
+function ListView({ slug, onPick }: { slug: GitHostRepoSlug; onPick: (n: number) => void }) {
   const [filter, setFilter] = useState<GitHostPrListFilter>('open');
   const [prs, setPrs] = useState<GitHostPrSummary[]>([]);
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [search, setSearch] = useState('');
 
-  const load = async () => {
+  // Same cache the GitHub tab's Pull requests section reads, so a PR merged
+  // there is gone from here without either surface refetching. The refresh
+  // button forces past the cache.
+  const load = async (force = false) => {
     setLoading(true);
     setErr(null);
     try {
-      const list = await gitHostPrList(root, filter);
-      setPrs(list);
+      setPrs(await useGitHub.getState().loadPrs(slug.owner, slug.name, filter, force));
     } catch (e) {
       setErr(e instanceof Error ? e.message : String(e));
     } finally {
@@ -267,7 +269,7 @@ function ListView({ root, onPick }: { root: string; onPick: (n: number) => void 
   useEffect(() => {
     void load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [root, filter]);
+  }, [slug.owner, slug.name, filter]);
 
   const visible = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -295,7 +297,7 @@ function ListView({ root, onPick }: { root: string; onPick: (n: number) => void 
           />
         </div>
         <button
-          onClick={() => void load()}
+          onClick={() => void load(true)}
           disabled={loading}
           className="rounded p-1 text-fg-subtle transition-colors hover:bg-surface-2 hover:text-fg-base disabled:opacity-50"
           title="Refresh"

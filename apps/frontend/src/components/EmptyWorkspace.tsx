@@ -6,6 +6,7 @@ import {
   MonitorPlay,
   Send,
   Database,
+  Github,
   Bot,
   FolderOpen,
   ServerIcon,
@@ -59,6 +60,7 @@ export function EmptyWorkspace({ onOpenCommandPalette }: Props) {
   const openPreview = useWorkspace((s) => s.openPreview);
   const openApiClient = useWorkspace((s) => s.openApiClient);
   const openDbClient = useWorkspace((s) => s.openDbClient);
+  const openGitHub = useWorkspace((s) => s.openGitHub);
   const openFile = useWorkspace((s) => s.openFile);
   const launchAiCli = useWorkspace((s) => s.launchAiCli);
   const recentFiles = useFiles((s) => s.recentFiles).slice(0, 5);
@@ -136,6 +138,7 @@ export function EmptyWorkspace({ onOpenCommandPalette }: Props) {
     { title: 'Preview', hint: 'Render a URL', icon: MonitorPlay, color: 'green', run: () => openPreview() },
     { title: 'API Client', hint: 'Send a request', icon: Send, color: 'violet', run: () => openApiClient() },
     { title: 'Database', hint: 'Run a query', icon: Database, color: 'amber', run: () => openDbClient() },
+    { title: 'GitHub', hint: 'Browse and clone', icon: Github, color: 'slate', run: () => openGitHub() },
   ];
 
   const connectSsh = () => useFiles.getState().showSidebarView('ssh');

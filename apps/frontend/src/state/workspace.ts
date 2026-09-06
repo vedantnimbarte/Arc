@@ -61,6 +61,7 @@ export interface Tab {
     | 'ssh'
     | 'diff'
     | 'db'
+    | 'github'
     | 'merge'
     | 'wingman-board'
     | 'wingman-review';
@@ -357,6 +358,9 @@ interface WorkspaceState {
   setPreviewUrl: (id: string, url: string) => void;
   /** Open a new API Client tab. */
   openApiClient: () => string;
+  /** Open (or focus) the GitHub tab. Only one is useful — it carries its own
+   *  repo picker, so a second tab would just duplicate the same account. */
+  openGitHub: () => string;
   /** Open (or focus) the Wingman pilot board tab. Only one is useful — the
    *  board is global, not per-project. */
   openWingmanBoard: () => string;
@@ -1444,6 +1448,18 @@ export const useWorkspace = create<WorkspaceState>()((set, get) => ({
     get().addTab(tab);
     return id;
   },
+  openGitHub: () => {
+    // Scoped to the signed-in account, not the workspace — a second tab would
+    // show the same repos. Focus the existing one instead.
+    const existing = get().tabs.find((t) => t.kind === 'github');
+    if (existing) {
+      get().setActive(existing.id);
+      return existing.id;
+    }
+    const id = `github-${Date.now()}`;
+    get().addTab({ id, title: 'GitHub', kind: 'github' });
+    return id;
+  },
   openWingmanReview: () => {
     // Like the board, the queue spans every project the daemon serves, so a
     // second tab would duplicate it.
@@ -1912,31 +1928,49 @@ useWorkspace.subscribe((state, prev) => {
   }, DEBOUNCE_MS);
 });
 
+/** Kinds the Rust `TabKind` enum and the `tabs.kind` CHECK constraint accept.
+ *  Anything else is dropped by `toTabInputs` rather than sent: serde rejects
+ *  an unknown variant at the IPC boundary, which fails the *whole* batch —
+ *  so one Wingman tab used to silently stop the entire session from saving. */
+const PERSISTED_KINDS = new Set<Tab['kind']>([
+  'terminal',
+  'editor',
+  'preview',
+  'apiclient',
+  'ssh',
+  'diff',
+  'db',
+  'github',
+  'merge',
+]);
+
 function toTabInputs(tabs: Tab[]): TabInput[] {
-  return tabs.map((t) => ({
-    id: t.id,
-    title: t.title,
-    kind: t.kind,
-    file_path: t.filePath ?? null,
-    preview_url: t.previewUrl ?? null,
-    // The opaque JSON column is shared between API Client, SSH, and diff
-    // tabs; each kind stores its own shape. PTY/editor/preview tabs leave
-    // it null.
-    apiclient_state_json:
-      t.kind === 'apiclient'
-        ? t.apiClientState ?? null
-        : t.kind === 'ssh' && t.sshHostId
-          ? JSON.stringify({ sshHostId: t.sshHostId })
-          : t.kind === 'diff' && t.diffRoot
-            ? JSON.stringify({ diffRoot: t.diffRoot, diffScope: t.diffScope ?? 'worktree' })
-            : t.kind === 'merge' && t.mergeRoot
-              ? JSON.stringify({ mergeRoot: t.mergeRoot })
-              : t.kind === 'db' && t.dbConnectionId
-                ? JSON.stringify({ dbConnectionId: t.dbConnectionId })
-                : t.kind === 'terminal' && t.profileId
-                  ? JSON.stringify({ profileId: t.profileId })
-                  : null,
-  }));
+  return tabs
+    .filter((t) => PERSISTED_KINDS.has(t.kind))
+    .map((t) => ({
+      id: t.id,
+      title: t.title,
+      kind: t.kind,
+      file_path: t.filePath ?? null,
+      preview_url: t.previewUrl ?? null,
+      // The opaque JSON column is shared between API Client, SSH, and diff
+      // tabs; each kind stores its own shape. PTY/editor/preview tabs leave
+      // it null.
+      apiclient_state_json:
+        t.kind === 'apiclient'
+          ? t.apiClientState ?? null
+          : t.kind === 'ssh' && t.sshHostId
+            ? JSON.stringify({ sshHostId: t.sshHostId })
+            : t.kind === 'diff' && t.diffRoot
+              ? JSON.stringify({ diffRoot: t.diffRoot, diffScope: t.diffScope ?? 'worktree' })
+              : t.kind === 'merge' && t.mergeRoot
+                ? JSON.stringify({ mergeRoot: t.mergeRoot })
+                : t.kind === 'db' && t.dbConnectionId
+                  ? JSON.stringify({ dbConnectionId: t.dbConnectionId })
+                  : t.kind === 'terminal' && t.profileId
+                    ? JSON.stringify({ profileId: t.profileId })
+                    : null,
+    }));
 }
 
 async function persistTabs(

@@ -119,6 +119,27 @@ pnpm dev                     # Open http://127.0.0.1:5173
 
 PTY and filesystem features are stubbed in the browser-only build.
 
+### GitHub sign-in (optional, for forks)
+
+The GitHub tab signs in either by OAuth device flow — a short code you type into
+github.com — or by pasting a personal access token. Device flow needs an OAuth App
+client id compiled in; official builds carry one, so nothing is needed to use it.
+
+A fork that wants sign-in to appear under its own name registers its own app at
+**Settings → Developer settings → OAuth Apps → New OAuth App**, ticks **Enable Device
+Flow** (easy to miss, and device login fails without it), and builds with:
+
+```bash
+ARC_GITHUB_CLIENT_ID=Ov23li… pnpm tauri:build
+```
+
+Don't generate a client secret — device flow doesn't use one, and a secret that
+exists is a secret that can leak. The client id is public by design and lives in
+`rust/git-host/src/lib.rs` as `BUNDLED_CLIENT_ID`; committing it is correct.
+
+Leave it unset and the tab simply offers the token field instead. Nothing else in
+the GitHub tab depends on it.
+
 ### Connecting Wingman (optional)
 
 ```bash

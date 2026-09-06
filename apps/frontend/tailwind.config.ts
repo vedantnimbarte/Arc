@@ -103,6 +103,10 @@ export default {
           warn: '#f0a958', // tempered amber
           err: '#ff5252',  // signal red
           info: '#c8cad0', // matches accent — neutral info pings
+          // A merged PR is a fourth state, not a success or a failure, and
+          // GitHub users already read it as violet. Desaturated toward the
+          // silver accent so it doesn't shout next to status-ok.
+          merged: '#9f8cf2',
         },
       },
       boxShadow: {
