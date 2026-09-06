@@ -54,16 +54,28 @@ const USER_AGENT: &str = "arc-terminal/0.1 (+https://github.com/vedantnimbarte/a
 // server and no secret to keep: we ask GitHub for a short code, the user types
 // it into github.com in their browser, and we poll until they approve.
 //
-// The client id belongs to a GitHub OAuth App with "Device flow" enabled. It
-// is public by design — device flow has no client secret — so committing it is
-// correct, not a leak. Override at build time with ARC_GITHUB_CLIENT_ID.
-// Empty means this build can't offer device login and the UI falls back to
-// pasting a personal access token.
+// The client id belongs to a GitHub OAuth App with "Device flow" enabled.
 
-/// OAuth App client id for the device flow. Public; see the note above.
+/// Client id baked into the build.
+///
+/// Public by design: device flow has no client secret, so this is committed
+/// rather than injected, and a plain `git clone` gets working sign-in with no
+/// setup. This is how `gh` and every other OSS desktop client ships one.
+///
+/// Empty means this build can't offer device login — [`device_code_start`]
+/// returns [`Error::DeviceLoginUnavailable`] and the sign-in screen shows only
+/// the token field. That is a degraded state, not a broken one.
+const BUNDLED_CLIENT_ID: &str = "";
+
+/// The client id device login actually runs against.
+///
+/// Forks wanting their own OAuth App override [`BUNDLED_CLIENT_ID`] at build
+/// time with `ARC_GITHUB_CLIENT_ID`. `build.rs` tells Cargo to rebuild when
+/// that variable changes; without it an override silently keeps whatever the
+/// previous build baked in.
 pub const DEVICE_CLIENT_ID: &str = match option_env!("ARC_GITHUB_CLIENT_ID") {
     Some(id) => id,
-    None => "",
+    None => BUNDLED_CLIENT_ID,
 };
 
 /// Scopes requested at sign-in, covering every surface the GitHub tab shows:
