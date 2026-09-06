@@ -1,16 +1,27 @@
-//! arc-git-host — code-forge integrations (PRs, issues, …).
+//! arc-git-host — GitHub, as far as ARC's GitHub tab needs it.
 //!
-//! V1 ships a single backend: GitHub. The [`GitHost`] trait keeps room for
-//! a future GitLab implementation behind the same surface.
+//! Scope: repositories (list, search, orgs); issues (list, read with the
+//! comment thread, create, comment, open/close, labels); pull requests (list,
+//! detail with commits and file patches, create, review list, merge, check
+//! runs); Actions (runs, jobs and steps, re-run, cancel); releases; and the
+//! notification inbox. Line-level review threads are the notable omission —
+//! they need a diff surface this crate doesn't own.
 //!
-//! Scope: list pull requests, fetch a single PR with its commits + file diff,
-//! create a new PR. Comments, reviews, line-level threads, and one-click
-//! merge are intentionally deferred — each is a significant sub-feature.
+//! Auth: either a Personal Access Token the user pastes, or an OAuth device
+//! login ([`device_code_start`] / [`device_code_poll`]) that produces one.
+//! Either way the token is stored in the OS keychain by the desktop crate
+//! (service `dev.arc.terminal.git-host`) and handed to [`GitHubHost::new`];
+//! credentials are not managed in here.
 //!
-//! Auth: Personal Access Token. The PAT is stored in the OS keychain by the
-//! desktop crate (under the `dev.arc.terminal.git-host` service) and passed
-//! into the host's constructor. We don't manage credentials inside this
-//! crate.
+//! **This crate is GitHub-shaped, not forge-agnostic.** The [`GitHost`] trait
+//! covers three of its two dozen methods — the original PR trio — and the rest
+//! sit on [`GitHubHost`] directly, because a trait with one implementation
+//! costs a second signature per endpoint and buys nothing until there is a
+//! second forge. Anyone adding GitLab should budget for more than an `impl`
+//! block: the vocabulary differs (merge requests, pipelines, todos), a project
+//! is `group/subgroup/project` rather than `owner/name`, and the frontend
+//! reads GitHub's nouns throughout. The trait is a starting point, not a seam
+//! that already fits.
 
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
@@ -285,6 +296,12 @@ pub struct RepoSlug {
     pub name: String,
 }
 
+/// The original pull-request trio, kept behind a trait.
+///
+/// Everything added since — repositories, issues, Actions, releases, the
+/// inbox, and the rest of the PR surface — lives on [`GitHubHost`] instead.
+/// Don't read this as the crate's interface: it is three of two dozen methods.
+/// See the module docs before assuming a second forge slots in behind it.
 #[async_trait]
 pub trait GitHost: Send + Sync {
     async fn list_prs(&self, repo: &RepoSlug, filter: PrListFilter) -> Result<Vec<PrSummary>>;
@@ -465,7 +482,7 @@ impl GitHubHost {
         Ok(raw.into_iter().map(Into::into).collect())
     }
 
-    /// Search every repository on GitHub. Unlike [`list_repos`] this is a
+    /// Search every repository on GitHub. Unlike [`GitHubHost::list_repos`] this is a
     /// single page — search results are ranked, so page two is rarely what
     /// someone typing in a box wants.
     pub async fn search_repos(&self, query: &str) -> Result<Vec<RepoSummary>> {
