@@ -13,6 +13,7 @@ import {
   Monitor,
   Send,
   Database,
+  Github,
   Keyboard,
   ChevronRight,
   type LucideIcon,
@@ -53,6 +54,7 @@ export function TabBar() {
     openPreview,
     openApiClient,
     openDbClient,
+    openGitHub,
   } = useWorkspace();
   const activeTab = useWorkspace((s) => s.tabs.find((t) => t.id === s.activeTabId) ?? null);
   const layoutMode = useWorkspace((s) => layoutModeOf(s.workspaces, s.activeWorkspaceId));
@@ -169,6 +171,11 @@ export function TabBar() {
 
   const handleNewDbClient = () => {
     openDbClient();
+    setMenuOpen(false);
+  };
+
+  const handleNewGitHub = () => {
+    openGitHub();
     setMenuOpen(false);
   };
 
@@ -341,6 +348,14 @@ export function TabBar() {
           >
             <Database size={12} strokeWidth={2} className="text-fg-subtle" />
             <span className="flex-1">Database</span>
+          </button>
+          <button
+            role="menuitem"
+            onClick={handleNewGitHub}
+            className="flex w-full items-center gap-2 px-3 py-2 text-left font-display text-sm text-fg-base/90 transition-colors hover:bg-surface-2"
+          >
+            <Github size={12} strokeWidth={2} className="text-fg-subtle" />
+            <span className="flex-1">GitHub</span>
           </button>
           <div className="my-1 border-t border-edge-1" />
           {/* One row into the launch panel, rather than a flat list of every

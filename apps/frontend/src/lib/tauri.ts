@@ -796,6 +796,7 @@ export type TabKind =
   | 'ssh'
   | 'diff'
   | 'db'
+  | 'github'
   | 'merge'
   | 'wingman-board'
   | 'wingman-review';
@@ -1703,6 +1704,392 @@ export async function gitHostTokenDelete(provider: string): Promise<void> {
   await invoke('git_host_token_delete', { provider });
 }
 
+// ─── GitHub sign-in ──────────────────────────────────────────────────────
+
+export interface GitHostViewer {
+  login: string;
+  avatar_url: string;
+  name: string | null;
+}
+
+/** Events emitted on the topic `gitHostDeviceLogin` returns. Exactly one of
+ *  `done` / `error` always arrives, so a listener can always tear itself down. */
+export type GitHostDeviceLoginEvent =
+  | { kind: 'code'; payload: { user_code: string; verification_uri: string; expires_in: number } }
+  | { kind: 'done'; payload: { login: string } }
+  | { kind: 'error'; payload: { message: string } };
+
+/** False when no OAuth App client id was compiled in — the sign-in screen then
+ *  offers only the personal-access-token field. */
+export async function gitHostDeviceLoginAvailable(): Promise<boolean> {
+  if (!isTauri) return false;
+  return invoke<boolean>('git_host_device_login_available');
+}
+
+/** Start an OAuth device login. Returns a topic to listen on; the flow runs to
+ *  completion in the background and writes the token to the OS keychain. */
+export async function gitHostDeviceLogin(): Promise<string> {
+  return invoke<string>('git_host_device_login');
+}
+
+export async function onGitHostDeviceLogin(
+  topic: string,
+  handler: (ev: GitHostDeviceLoginEvent) => void,
+): Promise<UnlistenFn> {
+  return listen<GitHostDeviceLoginEvent>(topic, (e) => handler(e.payload));
+}
+
+/** The account the stored token belongs to. Throws when no token is saved. */
+export async function gitHostViewer(): Promise<GitHostViewer> {
+  return invoke<GitHostViewer>('git_host_viewer');
+}
+
+// ─── GitHub repositories ─────────────────────────────────────────────────
+
+/** Matches the Rust `RepoScope` enum's serde shape (`tag`/`content`). */
+export type GitHostRepoScope =
+  | { kind: 'mine' }
+  | { kind: 'starred' }
+  | { kind: 'org'; name: string };
+
+export interface GitHostRepoSummary {
+  owner: string;
+  name: string;
+  full_name: string;
+  description: string;
+  private: boolean;
+  fork: boolean;
+  archived: boolean;
+  language: string;
+  stars: number;
+  open_issues: number;
+  default_branch: string;
+  html_url: string;
+  clone_url: string;
+  pushed_at: string;
+}
+
+export interface GitHostOrg {
+  login: string;
+  avatar_url: string;
+}
+
+export async function gitHostRepoList(
+  scope: GitHostRepoScope,
+): Promise<GitHostRepoSummary[]> {
+  return invoke<GitHostRepoSummary[]>('git_host_repo_list', { scope });
+}
+
+export async function gitHostRepoSearch(query: string): Promise<GitHostRepoSummary[]> {
+  return invoke<GitHostRepoSummary[]>('git_host_repo_search', { query });
+}
+
+export async function gitHostOrgList(): Promise<GitHostOrg[]> {
+  return invoke<GitHostOrg[]>('git_host_org_list');
+}
+
+export type GitHostCloneEvent =
+  | { kind: 'progress'; payload: { line: string } }
+  | { kind: 'done'; payload: { path: string } }
+  | { kind: 'error'; payload: { message: string } };
+
+/** Start a clone. Returns a topic to listen on; exactly one `done` or `error`
+ *  always arrives, so the listener can always tear itself down. */
+export async function gitHostClone(url: string, dest: string): Promise<string> {
+  return invoke<string>('git_host_clone', { url, dest });
+}
+
+export async function onGitHostClone(
+  topic: string,
+  handler: (ev: GitHostCloneEvent) => void,
+): Promise<UnlistenFn> {
+  return listen<GitHostCloneEvent>(topic, (e) => handler(e.payload));
+}
+
+// ─── GitHub issues ───────────────────────────────────────────────────────
+//
+// These take `owner` + `name` rather than a workspace path: the GitHub tab
+// browses repositories that may not be checked out, so there's nothing on disk
+// to detect a slug from. The path-based `gitHostPr*` functions above stay for
+// the Source Control sidebar, which always looks at the open repo.
+
+export type GitHostIssueState = 'open' | 'closed' | 'all';
+
+export interface GitHostIssueFilter {
+  state: GitHostIssueState;
+  labels: string[];
+  assignee: string | null;
+  author: string | null;
+}
+
+export interface GitHostLabel {
+  name: string;
+  /** Six hex digits, no leading `#`. */
+  color: string;
+}
+
+export interface GitHostIssueSummary {
+  number: number;
+  title: string;
+  /** Never 'all' — that's a filter value, not a state. */
+  state: 'open' | 'closed';
+  author: string;
+  author_avatar: string;
+  labels: GitHostLabel[];
+  assignees: string[];
+  comments: number;
+  html_url: string;
+  updated_at: string;
+}
+
+export interface GitHostComment {
+  id: number;
+  author: string;
+  author_avatar: string;
+  body: string;
+  created_at: string;
+}
+
+/** The summary is `#[serde(flatten)]`ed in Rust, so its fields sit at the top
+ *  level. `comments` stays the count; the actual thread is `thread`. */
+export interface GitHostIssueDetail extends GitHostIssueSummary {
+  body: string;
+  thread: GitHostComment[];
+}
+
+export async function gitHostIssueList(
+  owner: string,
+  name: string,
+  filter: GitHostIssueFilter,
+): Promise<GitHostIssueSummary[]> {
+  return invoke<GitHostIssueSummary[]>('git_host_issue_list', { owner, name, filter });
+}
+
+export async function gitHostIssueGet(
+  owner: string,
+  name: string,
+  number: number,
+): Promise<GitHostIssueDetail> {
+  return invoke<GitHostIssueDetail>('git_host_issue_get', { owner, name, number });
+}
+
+export async function gitHostIssueCreate(
+  owner: string,
+  name: string,
+  req: { title: string; body: string; labels: string[] },
+): Promise<GitHostIssueSummary> {
+  return invoke<GitHostIssueSummary>('git_host_issue_create', { owner, name, req });
+}
+
+/** Also posts pull request conversation comments — GitHub files those under
+ *  the issues endpoint. */
+export async function gitHostIssueComment(
+  owner: string,
+  name: string,
+  number: number,
+  body: string,
+): Promise<GitHostComment> {
+  return invoke<GitHostComment>('git_host_issue_comment', { owner, name, number, body });
+}
+
+export async function gitHostIssueSetState(
+  owner: string,
+  name: string,
+  number: number,
+  open: boolean,
+): Promise<GitHostIssueSummary> {
+  return invoke<GitHostIssueSummary>('git_host_issue_set_state', { owner, name, number, open });
+}
+
+export async function gitHostLabelList(
+  owner: string,
+  name: string,
+): Promise<GitHostLabel[]> {
+  return invoke<GitHostLabel[]>('git_host_label_list', { owner, name });
+}
+
+// ─── GitHub pull requests (repo-addressed) ───────────────────────────────
+
+export type GitHostMergeMethod = 'merge' | 'squash' | 'rebase';
+
+export interface GitHostReview {
+  author: string;
+  author_avatar: string;
+  /** approved / changes_requested / commented / dismissed / pending */
+  state: string;
+  body: string;
+  submitted_at: string;
+}
+
+export interface GitHostCheckRun {
+  name: string;
+  /** queued / in_progress / completed */
+  status: string;
+  /** success / failure / neutral / cancelled / … Empty while running. */
+  conclusion: string;
+  html_url: string;
+}
+
+export async function gitHostPrListFor(
+  owner: string,
+  name: string,
+  filter: GitHostPrListFilter,
+): Promise<GitHostPrSummary[]> {
+  return invoke<GitHostPrSummary[]>('git_host_pr_list_for', { owner, name, filter });
+}
+
+export async function gitHostPrGetFor(
+  owner: string,
+  name: string,
+  number: number,
+): Promise<GitHostPrDetail> {
+  return invoke<GitHostPrDetail>('git_host_pr_get_for', { owner, name, number });
+}
+
+export async function gitHostPrMerge(
+  owner: string,
+  name: string,
+  number: number,
+  method: GitHostMergeMethod,
+): Promise<string> {
+  return invoke<string>('git_host_pr_merge', { owner, name, number, method });
+}
+
+export async function gitHostPrReviews(
+  owner: string,
+  name: string,
+  number: number,
+): Promise<GitHostReview[]> {
+  return invoke<GitHostReview[]>('git_host_pr_reviews', { owner, name, number });
+}
+
+export async function gitHostCheckRuns(
+  owner: string,
+  name: string,
+  sha: string,
+): Promise<GitHostCheckRun[]> {
+  return invoke<GitHostCheckRun[]>('git_host_check_runs', { owner, name, sha });
+}
+
+// ─── GitHub actions, releases, inbox ─────────────────────────────────────
+
+export interface GitHostWorkflowRun {
+  id: number;
+  name: string;
+  title: string;
+  status: string;
+  conclusion: string;
+  branch: string;
+  event: string;
+  run_number: number;
+  actor: string;
+  html_url: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface GitHostStep {
+  name: string;
+  status: string;
+  conclusion: string;
+  number: number;
+}
+
+export interface GitHostJob {
+  id: number;
+  name: string;
+  status: string;
+  conclusion: string;
+  html_url: string;
+  steps: GitHostStep[];
+}
+
+export interface GitHostRelease {
+  tag: string;
+  name: string;
+  body: string;
+  draft: boolean;
+  prerelease: boolean;
+  author: string;
+  html_url: string;
+  published_at: string;
+}
+
+export interface GitHostNotification {
+  id: string;
+  title: string;
+  /** Issue / PullRequest / Commit / Release / Discussion / … */
+  subject_type: string;
+  /** assign / author / mention / review_requested / subscribed / … */
+  reason: string;
+  /** `owner/name`. */
+  repo: string;
+  unread: boolean;
+  updated_at: string;
+  /** Issue or PR number, when the subject has one. */
+  number: number | null;
+}
+
+export async function gitHostRunList(
+  owner: string,
+  name: string,
+  branch?: string | null,
+): Promise<GitHostWorkflowRun[]> {
+  return invoke<GitHostWorkflowRun[]>('git_host_run_list', {
+    owner,
+    name,
+    branch: branch ?? null,
+  });
+}
+
+export async function gitHostRunJobs(
+  owner: string,
+  name: string,
+  runId: number,
+): Promise<GitHostJob[]> {
+  return invoke<GitHostJob[]>('git_host_run_jobs', { owner, name, runId });
+}
+
+export async function gitHostRunRerun(
+  owner: string,
+  name: string,
+  runId: number,
+  failedOnly: boolean,
+): Promise<void> {
+  await invoke('git_host_run_rerun', { owner, name, runId, failedOnly });
+}
+
+export async function gitHostRunCancel(
+  owner: string,
+  name: string,
+  runId: number,
+): Promise<void> {
+  await invoke('git_host_run_cancel', { owner, name, runId });
+}
+
+export async function gitHostReleaseList(
+  owner: string,
+  name: string,
+): Promise<GitHostRelease[]> {
+  return invoke<GitHostRelease[]>('git_host_release_list', { owner, name });
+}
+
+export async function gitHostNotificationList(
+  all: boolean,
+): Promise<GitHostNotification[]> {
+  return invoke<GitHostNotification[]>('git_host_notification_list', { all });
+}
+
+export async function gitHostNotificationRead(threadId: string): Promise<void> {
+  await invoke('git_host_notification_read', { threadId });
+}
+
+/** Requests left in the current hour. Free — `/rate_limit` doesn't count
+ *  against the limit it reports. */
+export async function gitHostRateRemaining(): Promise<number> {
+  return invoke<number>('git_host_rate_remaining');
+}
+
 // ─── Secrets vault (OS keychain) ─────────────────────────────────────────
 // Values are stored in the OS credential vault; only names are enumerable.
 
@@ -1726,13 +2113,6 @@ export async function secretGet(name: string): Promise<string | null> {
 /** Remove a secret from the vault. */
 export async function secretDelete(name: string): Promise<void> {
   await invoke('secret_delete', { name });
-}
-
-export async function gitHostPrList(
-  path: string,
-  filter: GitHostPrListFilter,
-): Promise<GitHostPrSummary[]> {
-  return invoke<GitHostPrSummary[]>('git_host_pr_list', { path, filter });
 }
 
 export async function gitHostPrGet(path: string, number: number): Promise<GitHostPrDetail> {

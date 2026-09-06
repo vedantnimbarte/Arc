@@ -20,6 +20,7 @@ pub enum TabKind {
     Diff,
     Db,
     Merge,
+    Github,
 }
 
 impl TabKind {
@@ -33,6 +34,7 @@ impl TabKind {
             TabKind::Diff => "diff",
             TabKind::Db => "db",
             TabKind::Merge => "merge",
+            TabKind::Github => "github",
         }
     }
 
@@ -45,6 +47,7 @@ impl TabKind {
             "diff" => TabKind::Diff,
             "db" => TabKind::Db,
             "merge" => TabKind::Merge,
+            "github" => TabKind::Github,
             // Anything else (including stray data) defaults to terminal —
             // the schema CHECK prevents storage of other values, so this
             // branch only runs if the DB has been hand-edited.

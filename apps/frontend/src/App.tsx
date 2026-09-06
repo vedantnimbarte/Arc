@@ -56,6 +56,7 @@ import {
   FolderOpen,
   FolderTree,
   GitPullRequest,
+  Github,
   History,
   Inbox,
   LayoutGrid,
@@ -115,6 +116,9 @@ const WingmanBoard = lazy(() =>
 );
 const WingmanReview = lazy(() =>
   import('./components/wingman/WingmanReview').then((m) => ({ default: m.WingmanReview })),
+);
+const GitHubView = lazy(() =>
+  import('./components/github/GitHubView').then((m) => ({ default: m.GitHubView })),
 );
 
 export default function App() {
@@ -218,6 +222,10 @@ export default function App() {
       ) : tab.kind === 'db' ? (
         <Suspense fallback={<EditorFallback />}>
           <DbClient tabId={tab.id} />
+        </Suspense>
+      ) : tab.kind === 'github' ? (
+        <Suspense fallback={<EditorFallback />}>
+          <GitHubView />
         </Suspense>
       ) : tab.kind === 'merge' && tab.filePath && tab.mergeRoot ? (
         <Suspense fallback={<EditorFallback />}>
@@ -548,6 +556,16 @@ export default function App() {
         run: () => {
           useFiles.getState().setAgentPanelTab('wingman');
           useFiles.getState().showSidebarView('agents');
+        },
+      },
+      {
+        id: 'github.open',
+        title: 'GitHub: Open',
+        group: 'GitHub',
+        keywords: ['github', 'repo', 'issue', 'pull request', 'pr', 'clone', 'actions'],
+        icon: Github,
+        run: () => {
+          useWorkspace.getState().openGitHub();
         },
       },
       {

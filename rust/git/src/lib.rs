@@ -1413,6 +1413,136 @@ pub struct RemoteOpResult {
     pub message: String,
 }
 
+// ----- clone -----------------------------------------------------------------
+
+/// Clone `url` into `dest`, reporting progress as git prints it.
+///
+/// Unlike every other function here this streams instead of returning at the
+/// end: a clone of a real repository runs for minutes, and a progress bar that
+/// only appears once the work is done is not a progress bar. `on_progress` is
+/// called with each line git writes to stderr — `--progress` forces those even
+/// though stderr isn't a terminal.
+///
+/// `token`, when given, is spliced into the URL for the duration of the clone
+/// and scrubbed from `origin` immediately afterwards. It has to be: [`git_cmd`]
+/// sets `GIT_TERMINAL_PROMPT=0`, so git cannot ask for credentials, and a
+/// private repo would otherwise just fail. Writing it into the URL leaves it in
+/// `.git/config` until the rewrite below, which is why that rewrite is not
+/// conditional on success of anything else.
+pub async fn clone_repo<P: AsRef<Path>>(
+    url: &str,
+    dest: P,
+    token: Option<&str>,
+    mut on_progress: impl FnMut(&str),
+) -> Result<()> {
+    use tokio::io::{AsyncBufReadExt, BufReader};
+
+    let dest = dest.as_ref();
+    let authed = match token {
+        Some(t) if !t.is_empty() => with_token(url, t),
+        _ => url.to_string(),
+    };
+
+    let mut child = git_cmd()
+        .args(["clone", "--progress", &authed])
+        .arg(dest)
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .map_err(|e| Error::Spawn(e.to_string()))?;
+
+    let stderr = child
+        .stderr
+        .take()
+        .ok_or_else(|| Error::Spawn("git clone produced no stderr pipe".into()))?;
+
+    // Git writes progress with \r, not \n, so `lines()` would buffer the whole
+    // clone into one line. Split on either.
+    let mut reader = BufReader::new(stderr);
+    let mut buf = Vec::new();
+    let mut last = String::new();
+    loop {
+        buf.clear();
+        let n = reader
+            .read_until(b'\r', &mut buf)
+            .await
+            .map_err(|e| Error::Spawn(e.to_string()))?;
+        if n == 0 {
+            break;
+        }
+        for line in String::from_utf8_lossy(&buf).split(['\r', '\n']) {
+            let line = line.trim();
+            if !line.is_empty() {
+                last = line.to_string();
+                on_progress(line);
+            }
+        }
+    }
+
+    let status = child.wait().await.map_err(|e| Error::Spawn(e.to_string()))?;
+    if !status.success() {
+        // Never echo the authed URL back — it carries the token.
+        return Err(Error::Failed(scrub_token(&last)));
+    }
+
+    if token.is_some() {
+        // Point origin at the clean URL. A failure here isn't fatal to the
+        // clone, but it does mean a token is sitting in .git/config, so it is
+        // reported rather than swallowed.
+        let out = git_cmd()
+            .arg("-C")
+            .arg(dest)
+            .args(["remote", "set-url", "origin", url])
+            .output()
+            .await
+            .map_err(|e| Error::Spawn(e.to_string()))?;
+        if !out.status.success() {
+            return Err(Error::Failed(format!(
+                "cloned, but couldn't reset the origin URL — a credential may remain in {}: {}",
+                dest.join(".git").join("config").display(),
+                scrub_token(&String::from_utf8_lossy(&out.stderr))
+            )));
+        }
+    }
+
+    Ok(())
+}
+
+/// Splice a token into an HTTPS git URL as the userinfo component.
+/// Non-HTTPS URLs (ssh, git://) are returned untouched — they authenticate
+/// with a key, not a token.
+fn with_token(url: &str, token: &str) -> String {
+    match url.strip_prefix("https://") {
+        // Already carries userinfo; leave whatever the caller built.
+        Some(rest) if rest.contains('@') => url.to_string(),
+        Some(rest) => format!("https://x-access-token:{token}@{rest}"),
+        None => url.to_string(),
+    }
+}
+
+/// Replace any `user:secret@` userinfo in git's output with `***@`, so a
+/// failure message can be shown to the user or written to a log.
+fn scrub_token(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut rest = text;
+    while let Some(start) = rest.find("https://") {
+        let (before, after) = rest.split_at(start + "https://".len());
+        out.push_str(before);
+        // Userinfo ends at '@', but only if the '@' comes before the path.
+        let end = after.find(['/', ' ', '\'', '"']).unwrap_or(after.len());
+        match after[..end].rfind('@') {
+            Some(at) => {
+                out.push_str("***@");
+                out.push_str(&after[at + 1..end]);
+            }
+            None => out.push_str(&after[..end]),
+        }
+        rest = &after[end..];
+    }
+    out.push_str(rest);
+    out
+}
+
 pub async fn fetch<P: AsRef<Path>>(path: P, remote: Option<&str>) -> Result<RemoteOpResult> {
     let path = path.as_ref();
     let mut cmd = git_cmd();
@@ -3305,6 +3435,87 @@ git bisect skip eeeeeeeeeeeeeeeeeeee
         assert_eq!(rev("HEAD"), oids[9], "reset puts HEAD back on commit 10");
 
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn splices_a_token_into_an_https_url() {
+        assert_eq!(
+            with_token("https://github.com/octocat/Hello-World.git", "ghp_abc"),
+            "https://x-access-token:ghp_abc@github.com/octocat/Hello-World.git"
+        );
+    }
+
+    #[test]
+    fn leaves_non_https_and_already_authed_urls_alone() {
+        // SSH authenticates with a key; splicing a token would corrupt the URL.
+        assert_eq!(
+            with_token("git@github.com:octocat/Hello-World.git", "ghp_abc"),
+            "git@github.com:octocat/Hello-World.git"
+        );
+        assert_eq!(
+            with_token("https://someone:pw@github.com/o/n.git", "ghp_abc"),
+            "https://someone:pw@github.com/o/n.git"
+        );
+    }
+
+    #[test]
+    fn scrubs_credentials_out_of_git_output() {
+        // This is what stops a failed clone from printing the token into the
+        // UI and the log.
+        assert_eq!(
+            scrub_token("fatal: could not read https://x-access-token:ghp_secret@github.com/o/n.git/info"),
+            "fatal: could not read https://***@github.com/o/n.git/info"
+        );
+        assert_eq!(
+            scrub_token("remote: https://github.com/o/n has moved"),
+            "remote: https://github.com/o/n has moved"
+        );
+        assert_eq!(scrub_token("plain failure"), "plain failure");
+    }
+
+    #[tokio::test]
+    async fn clones_a_repo_and_reports_progress() {
+        use std::process::Command as Sync;
+
+        let stamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0);
+        let src = std::env::temp_dir().join(format!("arc-git-clone-src-{stamp}"));
+        let dest = std::env::temp_dir().join(format!("arc-git-clone-dest-{stamp}"));
+        std::fs::create_dir_all(&src).expect("tempdir");
+
+        let git = |args: &[&str]| {
+            let out = Sync::new("git")
+                .arg("-C")
+                .arg(&src)
+                .args(args)
+                .output()
+                .expect("git runs");
+            assert!(
+                out.status.success(),
+                "git {args:?} failed: {}",
+                String::from_utf8_lossy(&out.stderr)
+            );
+        };
+        git(&["init", "--quiet"]);
+        git(&["config", "user.email", "test@example.com"]);
+        git(&["config", "user.name", "Test"]);
+        git(&["config", "commit.gpgsign", "false"]);
+        std::fs::write(src.join("a.txt"), "hi").expect("write");
+        git(&["add", "."]);
+        git(&["commit", "--quiet", "-m", "one"]);
+
+        let mut lines = 0usize;
+        clone_repo(&src.to_string_lossy(), &dest, None, |_| lines += 1)
+            .await
+            .expect("clone succeeded");
+
+        assert!(dest.join("a.txt").exists(), "the working tree came across");
+        assert!(lines > 0, "git reported at least one line of progress");
+
+        let _ = std::fs::remove_dir_all(&src);
+        let _ = std::fs::remove_dir_all(&dest);
     }
 
     #[tokio::test]
