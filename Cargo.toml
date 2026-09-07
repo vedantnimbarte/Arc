@@ -49,7 +49,7 @@ bytes = "1.7"
 
 # SSH client (pure-Rust) + key generation. russh handles the wire protocol;
 # ssh-key gives us a stable API for generating + serialising OpenSSH keys.
-russh = "0.45"
+russh = "0.62"
 russh-keys = "0.45"
 # SFTP client for remote workspaces, layered over a russh channel stream.
 russh-sftp = "2.4"
