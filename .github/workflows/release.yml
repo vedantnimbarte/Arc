@@ -9,9 +9,13 @@ name: release
 # https://github.com/vedantnimbarte/Arc/releases/latest/download/latest.json.
 # Two repo secrets must exist for that to work — TAURI_SIGNING_PRIVATE_KEY
 # (contents of the private key from `pnpm tauri signer generate`) and
-# TAURI_SIGNING_PRIVATE_KEY_PASSWORD. Note the release is created as a DRAFT:
-# `/releases/latest/` skips drafts, so no client sees the update until you
-# publish it.
+# TAURI_SIGNING_PRIVATE_KEY_PASSWORD.
+#
+# The release ends up a DRAFT, so `/releases/latest/` skips it and no client is
+# offered the update until you publish it by hand. That is enforced by the
+# `draft` job below rather than by `releaseDraft: true` — the flag is set, but
+# it does not survive a build matrix, and both v0.4.0 and v0.5.0 published
+# themselves the moment their last platform finished.
 #
 # Code signing (a separate thing) is not wired up yet — the produced installers are UNSIGNED, so macOS
 # Gatekeeper and Windows SmartScreen will warn on first run (see INSTALLATION.md
@@ -89,3 +93,31 @@ jobs:
           releaseDraft: true
           prerelease: false
           args: ${{ matrix.args }}
+
+  # Put the release back into draft once every platform has uploaded.
+  #
+  # `releaseDraft: true` above is not enough on its own: with a build matrix the
+  # three jobs race to create-or-reuse one release, and it comes out published —
+  # which is how v0.4.0 and v0.5.0 both reached users unreviewed. Asserting the
+  # state here is the only version that holds, because it runs once and last.
+  #
+  # `if: always()` is deliberate. A partly-failed build is exactly when a
+  # half-populated release must not be live, so this still runs when a platform
+  # fails; it just can't run before the others have finished uploading.
+  draft:
+    needs: build
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.ref_name }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          if ! gh release view "$TAG" --repo "$REPO" >/dev/null 2>&1; then
+            echo "No release for $TAG — every build job must have failed."
+            exit 0
+          fi
+          gh release edit "$TAG" --repo "$REPO" --draft
+          echo "$TAG is a draft. Publish it once you've installed it and looked."
