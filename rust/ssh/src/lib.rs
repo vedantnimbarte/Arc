@@ -20,14 +20,14 @@ use std::path::Path;
 use std::sync::Arc;
 
 use anyhow::{anyhow, Context, Result};
-use async_trait::async_trait;
 use dashmap::DashMap;
+use getrandom::SysRng;
+use rand_core::UnwrapErr;
 use russh::client::{self, Handle, Msg};
+use russh::keys::ssh_key::{Algorithm, HashAlg, LineEnding, PrivateKey};
+use russh::keys::{PrivateKeyWithHashAlg, PublicKeyOrCertificate};
 use russh::{Channel, ChannelMsg};
-use russh_keys::key::{KeyPair, PublicKey};
 use serde::{Deserialize, Serialize};
-use ssh_key::rand_core::OsRng;
-use ssh_key::{Algorithm, HashAlg, LineEnding, PrivateKey};
 use tokio::sync::{mpsc, oneshot};
 use uuid::Uuid;
 
@@ -179,12 +179,23 @@ impl SshManager {
         log(&log_tx, "tcp", "connected").await;
         log(&log_tx, "kex", "key exchange complete").await;
 
+        // russh now wants the key paired with the signature hash. SHA-512 is
+        // not a preference here — passing `None` makes russh sign RSA with
+        // SHA-1 (`ssh-rsa`), which OpenSSH 8.8+ refuses by default, so an RSA
+        // identity would simply stop working. russh ignores the hash for
+        // Ed25519, so this is correct for every key type ARC can generate.
         let key_arc = Arc::new(key_pair);
         let authed = handle
-            .authenticate_publickey(&opts.username, key_arc)
+            .authenticate_publickey(
+                &opts.username,
+                PrivateKeyWithHashAlg::new(key_arc, Some(HashAlg::Sha512)),
+            )
             .await
             .context("publickey auth")?;
-        if !authed {
+        // No longer a bool: partial success is representable now. Anything
+        // that isn't outright success is a failure for a publickey-only
+        // client, since there is no second method to fall through to.
+        if !authed.success() {
             log_blocking(&log_tx, "error", "publickey rejected").await;
             return Err(anyhow!("authentication failed: publickey rejected"));
         }
@@ -395,15 +406,29 @@ impl ClientHandler {
     }
 }
 
-#[async_trait]
+// No `#[async_trait]`: russh 0.5x moved `Handler` to native async-in-trait,
+// and the attribute's rewritten lifetimes no longer match the declaration.
 impl client::Handler for ClientHandler {
     type Error = russh::Error;
 
+    // SECURITY: this accepts every host key it is offered. That predates the
+    // russh upgrade — see the "V1 caveats" note at the top of this file — and
+    // it means a session can be MITM'd by anything that can answer on the
+    // host:port. russh ships `russh::keys::known_hosts` for the real fix; it
+    // needs a first-use prompt and a mismatch path in the UI, which is its own
+    // piece of work rather than something to smuggle into a version bump.
     async fn check_server_key(
         &mut self,
-        server_public_key: &PublicKey,
+        server_public_key: &PublicKeyOrCertificate,
     ) -> Result<bool, Self::Error> {
-        let fp = server_public_key.fingerprint();
+        let fp = match server_public_key {
+            PublicKeyOrCertificate::PublicKey { key, .. } => {
+                key.fingerprint(HashAlg::Sha256).to_string()
+            }
+            PublicKeyOrCertificate::Certificate(c) => {
+                format!("certificate for {:?}", c.valid_principals())
+            }
+        };
         if let Some(tx) = &self.log_tx {
             log(tx, "ssh", &format!("server fingerprint {fp}")).await;
         }
@@ -411,10 +436,21 @@ impl client::Handler for ClientHandler {
     }
 }
 
+/// The OS entropy source, adapted to the infallible RNG trait.
+///
+/// ssh-key 0.7 split fallible RNGs (`TryCryptoRng`) from infallible ones
+/// (`CryptoRng`), and key generation wants the latter. `UnwrapErr` bridges
+/// them by panicking if the OS generator fails — which is not a condition
+/// worth threading a `Result` for, since there is no sensible way to finish
+/// generating a key without entropy.
+fn os_rng() -> UnwrapErr<SysRng> {
+    UnwrapErr(SysRng)
+}
+
 /// Read a private key from disk, optionally decrypting with `passphrase`.
 /// Accepts both encrypted and unencrypted OpenSSH-format keys.
-pub fn load_key(path: &Path, passphrase: Option<&str>) -> Result<KeyPair> {
-    let kp = russh_keys::load_secret_key(path, passphrase).with_context(|| {
+pub fn load_key(path: &Path, passphrase: Option<&str>) -> Result<PrivateKey> {
+    let kp = russh::keys::load_secret_key(path, passphrase).with_context(|| {
         format!(
             "load private key at {} (wrong passphrase?)",
             path.display()
@@ -467,12 +503,12 @@ pub fn generate_key(
     };
 
     let mut priv_key = match alg {
-        Algorithm::Ed25519 => PrivateKey::random(&mut OsRng, Algorithm::Ed25519)
+        Algorithm::Ed25519 => PrivateKey::random(&mut os_rng(), Algorithm::Ed25519)
             .map_err(|e| anyhow!("ed25519 generate: {e}"))?,
         Algorithm::Rsa { .. } => {
             // ssh-key's `random` for RSA picks 3072; for stronger keys use
             // its `from_components` path. 3072 bits is acceptable for V1.
-            PrivateKey::random(&mut OsRng, Algorithm::Rsa { hash: None })
+            PrivateKey::random(&mut os_rng(), Algorithm::Rsa { hash: None })
                 .map_err(|e| anyhow!("rsa generate: {e}"))?
         }
         _ => unreachable!(),
@@ -483,7 +519,7 @@ pub fn generate_key(
     // Encrypt before writing, if a passphrase was supplied.
     let to_write = if let Some(pp) = passphrase.filter(|p| !p.is_empty()) {
         priv_key
-            .encrypt(&mut OsRng, pp.as_bytes())
+            .encrypt(&mut os_rng(), pp.as_bytes())
             .map_err(|e| anyhow!("encrypt: {e}"))?
     } else {
         priv_key.clone()
@@ -549,5 +585,81 @@ mod dirs {
     pub fn home_dir() -> Option<std::path::PathBuf> {
         std::env::var_os(if cfg!(windows) { "USERPROFILE" } else { "HOME" })
             .map(std::path::PathBuf::from)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn tmp(name: &str) -> std::path::PathBuf {
+        let stamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0);
+        std::env::temp_dir().join(format!("arc-ssh-{name}-{stamp}"))
+    }
+
+    /// Generate, then read back, and check it is the same key.
+    ///
+    /// This exercises `os_rng()` — the one piece of the russh 0.63 upgrade
+    /// with no other coverage. `OsRng` moved out of rand_core into getrandom
+    /// between versions, and a wrong RNG here does not fail to compile: it
+    /// panics at generation, or worse, produces a key that doesn't round-trip.
+    #[test]
+    fn generated_key_loads_back_identically() {
+        let path = tmp("ed25519");
+        let made = generate_key(&path, "ed25519", "arc-test", None).expect("generate");
+
+        assert!(made.fingerprint.starts_with("SHA256:"), "{}", made.fingerprint);
+        assert_eq!(made.kind, "ssh-ed25519");
+        assert_eq!(made.bits, 256);
+        assert!(path.with_extension("pub").exists() || path.exists());
+
+        let loaded = load_key(&path, None).expect("load back");
+        assert_eq!(
+            loaded.public_key().fingerprint(HashAlg::Sha256).to_string(),
+            made.fingerprint,
+            "the key read back is not the key written",
+        );
+
+        let _ = std::fs::remove_file(&path);
+        let _ = std::fs::remove_file(path.with_extension("pub"));
+    }
+
+    /// The encrypted path runs the RNG a second time, for the KDF salt, and
+    /// is the one that breaks if a passphrase is mishandled — an unopenable
+    /// private key is unrecoverable, not merely inconvenient.
+    #[test]
+    fn encrypted_key_needs_its_passphrase() {
+        let path = tmp("enc");
+        let made = generate_key(&path, "ed25519", "arc-test", Some("hunter2")).expect("generate");
+
+        assert!(
+            load_key(&path, None).is_err(),
+            "an encrypted key must not load without its passphrase",
+        );
+        assert!(load_key(&path, Some("wrong")).is_err(), "wrong passphrase must fail");
+
+        let loaded = load_key(&path, Some("hunter2")).expect("correct passphrase");
+        assert_eq!(
+            loaded.public_key().fingerprint(HashAlg::Sha256).to_string(),
+            made.fingerprint,
+        );
+
+        let _ = std::fs::remove_file(&path);
+        let _ = std::fs::remove_file(path.with_extension("pub"));
+    }
+
+    #[test]
+    fn refuses_to_overwrite_an_existing_key() {
+        let path = tmp("dup");
+        generate_key(&path, "ed25519", "first", None).expect("generate");
+        assert!(
+            generate_key(&path, "ed25519", "second", None).is_err(),
+            "silently replacing a private key would destroy the only copy",
+        );
+        let _ = std::fs::remove_file(&path);
+        let _ = std::fs::remove_file(path.with_extension("pub"));
     }
 }

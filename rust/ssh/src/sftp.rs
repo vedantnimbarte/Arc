@@ -29,6 +29,8 @@ use std::sync::Arc;
 use anyhow::{anyhow, Context, Result};
 use dashmap::DashMap;
 use russh::client::{self, Handle};
+use russh::keys::ssh_key::HashAlg;
+use russh::keys::PrivateKeyWithHashAlg;
 use russh_sftp::client::SftpSession;
 use serde::{Deserialize, Serialize};
 use tokio::sync::Mutex;
@@ -116,11 +118,17 @@ impl SftpManager {
         .map_err(|_| anyhow!("connect timeout after {HANDSHAKE_TIMEOUT_SECS}s"))?
         .with_context(|| format!("connect {}:{}", opts.host, opts.port))?;
 
+        // SHA-512 for the same reason as the shell path in lib.rs: `None`
+        // signs RSA with SHA-1, which OpenSSH 8.8+ rejects. Ignored for
+        // Ed25519.
         let authed = handle
-            .authenticate_publickey(&opts.username, Arc::new(key_pair))
+            .authenticate_publickey(
+                &opts.username,
+                PrivateKeyWithHashAlg::new(Arc::new(key_pair), Some(HashAlg::Sha512)),
+            )
             .await
             .context("publickey auth")?;
-        if !authed {
+        if !authed.success() {
             return Err(anyhow!("authentication failed: publickey rejected"));
         }
 
