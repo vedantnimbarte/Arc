@@ -32,6 +32,15 @@ it.
 - **File Tree & Search** — Browse, open, and manage files with git status decorations, plus
   BM25 full-text search backed by a tantivy index and a literal find-and-replace across
   the workspace (previewed per file before anything is written).
+- **GitHub** — A tab for the half of GitHub you'd otherwise open a browser for. Browse
+  your repositories, an org's, or search all of GitHub, and clone one straight into a
+  workspace with live progress. Read and write issues — filter by state and label, follow
+  the comment thread, comment, open, close, create. Review pull requests with their
+  commits and per-file diffs, then merge (merge, squash, or rebase) or close. Watch
+  Actions runs down to which step of which job went red, and re-run just the failed jobs.
+  Read releases, and work the notification inbox — clicking a notification points the tab
+  at that repository and section. Sign in once with a short code in your browser, or paste
+  a token; either way it lands in your OS credential vault.
 - **Git Integration** — Branch status, diffs, logs, blame, staging/commit, tags, remotes,
   stashes, worktrees, interactive rebase, cherry-pick, submodule status, and GitHub pull
   requests, all from the UI. Commits can be signed (`-S`) or signed-off (`-s`); a rejected
@@ -160,7 +169,8 @@ Tailwind CSS · Vitest.
 **Backend (Rust 1.80+):**
 - `arc-pty` — PTY spawn/resize/kill (portable-pty, tokio)
 - `arc-filesystem` — file ops, watching, BM25 search/indexing (notify, tantivy)
-- `arc-git` / `arc-git-host` — git introspection and GitHub PRs
+- `arc-git` / `arc-git-host` — git introspection; GitHub repos, issues, PRs, Actions,
+  releases and notifications
 - `arc-session-manager` — SQLite persistence (sqlx): workspaces, tabs, command history
 - `arc-ssh` — pure-Rust SSH client (russh) + SFTP remote workspaces (russh-sftp)
 - `arc-lsp` — language-server client (stdio JSON-RPC)
@@ -188,9 +198,17 @@ rust/                 Cargo workspace (pty, filesystem, git, ssh, lsp, ...)
 git tag v0.2.0 && git push origin v0.2.0
 ```
 
-That builds installers for all three platforms into a **draft** GitHub Release. The
-updater manifest lives at `releases/latest/download/latest.json`, and `/latest/` skips
-drafts — nobody is offered the update until you publish the release.
+That builds installers for all three platforms and attaches them to a GitHub Release,
+which a final workflow step then forces back to **draft**. That step is not belt-and-
+braces: `tauri-action`'s own `releaseDraft: true` does not hold across a build matrix,
+and v0.4.0 and v0.5.0 both went live the moment their builds finished. With the step in
+place, nothing reaches users until you publish the draft yourself — the updater manifest
+lives at `releases/latest/download/latest.json`, and `/latest/` skips drafts.
+
+One wrinkle when you do publish: `latest.json` bakes in the release notes at build time,
+so editing the GitHub release body afterwards does **not** change what the in-app update
+card shows. To correct notes on a release that already shipped, edit `latest.json` and
+re-upload it with `gh release upload <tag> latest.json --clobber`.
 
 Signing the update artifacts needs two repo secrets, generated once with
 `pnpm --filter @arc/desktop exec tauri signer generate`:
