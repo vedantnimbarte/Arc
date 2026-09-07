@@ -14,6 +14,7 @@
 //!   invoke("ssh_key_import",    { opts: ImportKeyOpts })              -> SshKey
 //!   invoke("ssh_key_delete",    { id, deleteFiles? })                 -> ()
 //!   invoke("ssh_session_logs",  { hostId, limit? })                   -> Vec<SshSessionLogEntry>
+//!   invoke("ssh_host_key_respond", { promptId, accept })              -> ()
 //!
 //! Shell output streams to the frontend over a per-connect `tauri::ipc::Channel`
 //! carrying raw bytes (point-to-point, no JSON-number-array bloat, no fan-out to
@@ -21,6 +22,8 @@
 //! global bus:
 //!   "ssh://log/<id>"   -> { id, entry: SshLogEvent }
 //!   "ssh://exit/<id>"  -> { id, code: number | null }
+//!   "ssh://host-key"   -> HostKeyPromptDto — an unknown host key is blocking a
+//!                         handshake; answer with `ssh_host_key_respond`.
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -40,6 +43,71 @@ const SSH_KEYRING_SERVICE: &str = "dev.arc.terminal.ssh";
 #[derive(Default)]
 pub struct SshState {
     pub manager: Arc<SshManager>,
+    /// Host-key prompts waiting on a human, keyed by prompt id.
+    ///
+    /// The handshake is parked on the other end of each sender, so an entry
+    /// left here is a stalled connection. `ssh_host_key_respond` removes the
+    /// one it answers, and the arc-ssh side gives up after its own timeout, so
+    /// a prompt the user simply closes doesn't leak either.
+    pub host_key_prompts: Arc<dashmap::DashMap<String, tokio::sync::oneshot::Sender<bool>>>,
+}
+
+/// A host key nobody has vouched for yet, on its way to the UI.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HostKeyPromptDto {
+    /// Answer with this via `ssh_host_key_respond`.
+    pub prompt_id: String,
+    pub host: String,
+    pub port: u16,
+    /// `SHA256:…` — the string to compare against what the server's admin
+    /// published, which is the only thing that makes this prompt meaningful.
+    pub fingerprint: String,
+    pub algorithm: String,
+}
+
+/// Bridge one connection's host-key questions to the frontend.
+///
+/// Returns the sender to hand to arc-ssh. The spawned pump ends when that
+/// sender is dropped, i.e. when the handshake is over either way.
+fn host_key_bridge(app: AppHandle, state: &SshState) -> arc_ssh::HostKeyAsker {
+    let (tx, mut rx) = tokio::sync::mpsc::channel::<arc_ssh::HostKeyPrompt>(1);
+    let prompts = state.host_key_prompts.clone();
+    tauri::async_runtime::spawn(async move {
+        while let Some(p) = rx.recv().await {
+            let prompt_id = uuid::Uuid::new_v4().to_string();
+            prompts.insert(prompt_id.clone(), p.reply);
+            let dto = HostKeyPromptDto {
+                prompt_id: prompt_id.clone(),
+                host: p.host,
+                port: p.port,
+                fingerprint: p.fingerprint,
+                algorithm: p.algorithm,
+            };
+            // If the event can't be delivered there is no one to answer, so
+            // drop the reply sender immediately rather than leaving the
+            // handshake to sit out its full timeout. A dropped sender reads
+            // as a refusal on the arc-ssh side.
+            if app.emit("ssh://host-key", &dto).is_err() {
+                prompts.remove(&prompt_id);
+            }
+        }
+    });
+    tx
+}
+
+/// Answer a host-key prompt. Unknown ids are a no-op — the connection may have
+/// already given up, or the user may have answered twice.
+#[tauri::command]
+pub async fn ssh_host_key_respond(
+    state: State<'_, SshState>,
+    prompt_id: String,
+    accept: bool,
+) -> Result<(), String> {
+    if let Some((_, reply)) = state.host_key_prompts.remove(&prompt_id) {
+        let _ = reply.send(accept);
+    }
+    Ok(())
 }
 
 // ---------- connection ----------------------------------------------------
@@ -111,9 +179,11 @@ pub async fn ssh_connect(
         keepalive_secs: host.keepalive_secs.max(0) as u32,
     };
 
+    // Interactive session: there is a window to put a host-key prompt in.
+    let asker = host_key_bridge(app.clone(), &state);
     let result = state
         .manager
-        .connect(opts)
+        .connect(opts, Some(asker))
         .await
         .map_err(|e| format!("{e:#}"))?;
 
@@ -512,15 +582,22 @@ async fn remote_fs_opts(
 /// absolute root to open. `path` defaults to the login directory.
 #[tauri::command]
 pub async fn ssh_fs_connect(
+    app: AppHandle,
     state: State<'_, SftpState>,
+    ssh: State<'_, SshState>,
     store: State<'_, SessionStore>,
     host_id: String,
     path: Option<String>,
 ) -> Result<String, String> {
     let opts = remote_fs_opts(&store, &host_id).await?;
+    // A remote workspace can be mounted without ever opening a terminal to
+    // that host, so it needs to be able to ask about an unknown key too —
+    // otherwise mounting a new host would just fail with no way forward.
+    // Shares SshState's prompt map so one `ssh_host_key_respond` answers both.
+    let asker = host_key_bridge(app.clone(), &ssh);
     state
         .manager
-        .connect(&host_id, opts)
+        .connect(&host_id, opts, Some(asker))
         .await
         .map_err(|e| format!("{e:#}"))?;
     // "." resolves to the login directory, which is the right default root

@@ -12,22 +12,30 @@
 //! Key management lives alongside the session manager — [`generate_key`] and
 //! [`load_key`] produce/consume on-disk OpenSSH-format keypairs.
 //!
+//! Host keys are verified against `~/.ssh/known_hosts` — the standard file, so
+//! trust is shared with the user's own `ssh` rather than kept in a private
+//! store that could disagree with it. A *changed* key aborts the connection
+//! outright with no override; an *unknown* one is put to the user as a
+//! [`HostKeyPrompt`] and only written down once they accept.
+//!
 //! V1 caveats:
-//!   * Server keys are accepted on first use (no known_hosts persistence yet).
 //!   * Authentication is publickey-only.
+//!   * Certificate host keys are refused rather than verified — there is no
+//!     way to pin a CA yet, and accepting one unchecked would bypass all of
+//!     the above.
 
 use std::path::Path;
 use std::sync::Arc;
 
 use anyhow::{anyhow, Context, Result};
-use async_trait::async_trait;
 use dashmap::DashMap;
+use getrandom::SysRng;
+use rand_core::UnwrapErr;
 use russh::client::{self, Handle, Msg};
+use russh::keys::ssh_key::{Algorithm, HashAlg, LineEnding, PrivateKey};
+use russh::keys::{known_hosts, PrivateKeyWithHashAlg, PublicKeyOrCertificate};
 use russh::{Channel, ChannelMsg};
-use russh_keys::key::{KeyPair, PublicKey};
 use serde::{Deserialize, Serialize};
-use ssh_key::rand_core::OsRng;
-use ssh_key::{Algorithm, HashAlg, LineEnding, PrivateKey};
 use tokio::sync::{mpsc, oneshot};
 use uuid::Uuid;
 
@@ -40,6 +48,10 @@ pub use sftp::{
 const DATA_CHANNEL_CAP: usize = 256;
 const LOG_CHANNEL_CAP: usize = 64;
 pub(crate) const HANDSHAKE_TIMEOUT_SECS: u64 = 25;
+/// How long an unknown-host-key prompt waits for a human before giving up and
+/// refusing. Generous, because reading a fingerprint off another screen is
+/// slow, but finite so an unanswered prompt cannot pin a socket forever.
+pub(crate) const HOST_KEY_PROMPT_TIMEOUT_SECS: u64 = 120;
 
 /// Connection request handed to [`SshManager::connect`]. Sensitive material
 /// (the private-key passphrase) is resolved by the caller before this hits
@@ -133,7 +145,15 @@ impl SshManager {
     /// is being requested. Handshake-step logs flow to `log_rx` so the UI
     /// can render its 6-dot progress; data flows to `data_rx`; the channel's
     /// final exit code goes to `exit_rx`.
-    pub async fn connect(&self, opts: SshConnectOpts) -> Result<SshConnectResult> {
+    ///
+    /// `asker` receives a [`HostKeyPrompt`] if the server presents a key that
+    /// isn't in `~/.ssh/known_hosts`. Pass `None` only where no one can
+    /// answer — an unknown key is then refused rather than trusted.
+    pub async fn connect(
+        &self,
+        opts: SshConnectOpts,
+        asker: Option<HostKeyAsker>,
+    ) -> Result<SshConnectResult> {
         let (data_tx, data_rx) = mpsc::channel::<Vec<u8>>(DATA_CHANNEL_CAP);
         let (log_tx, log_rx) = mpsc::channel::<SshLogEvent>(LOG_CHANNEL_CAP);
         let (exit_tx, exit_rx) = oneshot::channel::<Option<i32>>();
@@ -163,28 +183,53 @@ impl SshManager {
         };
         let config = Arc::new(config);
 
-        let handler = ClientHandler::new(log_tx.clone());
+        let can_prompt = asker.is_some();
+        let handler = ClientHandler::new(
+            log_tx.clone(),
+            opts.host.clone(),
+            opts.port,
+            asker,
+        );
 
         let addr = (opts.host.as_str(), opts.port);
         log(&log_tx, "tcp", "connecting").await;
 
+        // The handshake budget has to cover a human reading a fingerprint when
+        // a prompt is possible, because `check_server_key` runs inside this
+        // future. Without the extra allowance the connection would time out
+        // underneath anyone who paused to actually check the key — training
+        // them to click through it next time.
+        let budget = if can_prompt {
+            HANDSHAKE_TIMEOUT_SECS + HOST_KEY_PROMPT_TIMEOUT_SECS
+        } else {
+            HANDSHAKE_TIMEOUT_SECS
+        };
         let connect_fut = client::connect(config, addr, handler);
-        let mut handle: Handle<ClientHandler> = tokio::time::timeout(
-            std::time::Duration::from_secs(HANDSHAKE_TIMEOUT_SECS),
-            connect_fut,
-        )
-        .await
-        .map_err(|_| anyhow!("connect timeout after {HANDSHAKE_TIMEOUT_SECS}s"))?
-        .with_context(|| format!("connect {}:{}", opts.host, opts.port))?;
+        let mut handle: Handle<ClientHandler> =
+            tokio::time::timeout(std::time::Duration::from_secs(budget), connect_fut)
+                .await
+                .map_err(|_| anyhow!("connect timeout after {budget}s"))?
+                .with_context(|| format!("connect {}:{}", opts.host, opts.port))?;
         log(&log_tx, "tcp", "connected").await;
         log(&log_tx, "kex", "key exchange complete").await;
 
+        // russh now wants the key paired with the signature hash. SHA-512 is
+        // not a preference here — passing `None` makes russh sign RSA with
+        // SHA-1 (`ssh-rsa`), which OpenSSH 8.8+ refuses by default, so an RSA
+        // identity would simply stop working. russh ignores the hash for
+        // Ed25519, so this is correct for every key type ARC can generate.
         let key_arc = Arc::new(key_pair);
         let authed = handle
-            .authenticate_publickey(&opts.username, key_arc)
+            .authenticate_publickey(
+                &opts.username,
+                PrivateKeyWithHashAlg::new(key_arc, Some(HashAlg::Sha512)),
+            )
             .await
             .context("publickey auth")?;
-        if !authed {
+        // No longer a bool: partial success is representable now. Anything
+        // that isn't outright success is a failure for a publickey-only
+        // client, since there is no second method to fall through to.
+        if !authed.success() {
             log_blocking(&log_tx, "error", "publickey rejected").await;
             return Err(anyhow!("authentication failed: publickey rejected"));
         }
@@ -374,47 +419,231 @@ async fn log_blocking(tx: &mpsc::Sender<SshLogEvent>, level: &str, msg: &str) {
     log(tx, level, msg).await;
 }
 
-/// Server-key-acceptance hook. V1 trusts on first connect (logs the
-/// fingerprint so the user can verify it manually); V2 will persist a
-/// `known_hosts` table.
+/// A host key ARC has never seen, handed out for a human to accept or refuse.
+///
+/// This is the OpenSSH "authenticity of host … can't be established" moment.
+/// The connection is parked on `reply` until someone answers, so whoever
+/// receives this must always send exactly one answer — dropping the sender
+/// counts as a refusal, which is the safe way to fail.
+#[derive(Debug)]
+pub struct HostKeyPrompt {
+    pub host: String,
+    pub port: u16,
+    /// `SHA256:…`, the form OpenSSH prints and users actually compare.
+    pub fingerprint: String,
+    /// e.g. `ssh-ed25519`.
+    pub algorithm: String,
+    pub reply: oneshot::Sender<bool>,
+}
+
+/// Where unknown-host-key questions go. `None` means nobody is listening, and
+/// an unknown key is refused rather than silently trusted.
+pub type HostKeyAsker = mpsc::Sender<HostKeyPrompt>;
+
+/// Verifies the server's key against `~/.ssh/known_hosts` before the session
+/// is allowed to proceed.
+///
+/// The standard file on purpose: a host trusted from a terminal works in ARC
+/// straight away, and one ARC learns works in the terminal. A private store
+/// would make ARC disagree with `ssh` about the same machine, which is the
+/// worst possible time to be confusing.
 #[derive(Clone)]
 pub(crate) struct ClientHandler {
     /// `None` for connections with no UI attached (the SFTP transport), where
     /// there is no handshake progress list to feed.
     log_tx: Option<mpsc::Sender<SshLogEvent>>,
+    /// Needed to look the key up: known_hosts is keyed by host and port.
+    host: String,
+    port: u16,
+    /// `None` when there is no one to ask, e.g. a headless reconnect.
+    asker: Option<HostKeyAsker>,
 }
 
 impl ClientHandler {
-    fn new(log_tx: mpsc::Sender<SshLogEvent>) -> Self {
-        Self { log_tx: Some(log_tx) }
+    fn new(
+        log_tx: mpsc::Sender<SshLogEvent>,
+        host: String,
+        port: u16,
+        asker: Option<HostKeyAsker>,
+    ) -> Self {
+        Self {
+            log_tx: Some(log_tx),
+            host,
+            port,
+            asker,
+        }
     }
 
     /// A handler for connections nobody is watching.
-    pub(crate) fn silent() -> Self {
-        Self { log_tx: None }
+    pub(crate) fn silent(host: String, port: u16, asker: Option<HostKeyAsker>) -> Self {
+        Self {
+            log_tx: None,
+            host,
+            port,
+            asker,
+        }
+    }
+
+    async fn say(&self, level: &str, msg: &str) {
+        if let Some(tx) = &self.log_tx {
+            log(tx, level, msg).await;
+        }
     }
 }
 
-#[async_trait]
+// No `#[async_trait]`: russh 0.5x moved `Handler` to native async-in-trait,
+// and the attribute's rewritten lifetimes no longer match the declaration.
 impl client::Handler for ClientHandler {
     type Error = russh::Error;
 
+    // SECURITY: this accepts every host key it is offered. That predates the
+    // russh upgrade — see the "V1 caveats" note at the top of this file — and
+    // it means a session can be MITM'd by anything that can answer on the
+    // host:port. russh ships `russh::keys::known_hosts` for the real fix; it
+    // needs a first-use prompt and a mismatch path in the UI, which is its own
+    // piece of work rather than something to smuggle into a version bump.
+    /// Three outcomes, and the middle one is the whole point:
+    ///
+    ///   * known and matching — proceed silently, like every other SSH client
+    ///   * known and **different** — refuse, no prompt, no override. This is
+    ///     what an interception looks like, and offering a button here would
+    ///     defeat the check for exactly the users least able to judge it.
+    ///     Recovering means editing known_hosts by hand, deliberately.
+    ///   * unknown — ask, and remember the answer
+    ///
+    /// Returning `Ok(false)` aborts the handshake; `Err` is reserved for the
+    /// check itself failing.
     async fn check_server_key(
         &mut self,
-        server_public_key: &PublicKey,
+        server_public_key: &PublicKeyOrCertificate,
     ) -> Result<bool, Self::Error> {
-        let fp = server_public_key.fingerprint();
-        if let Some(tx) = &self.log_tx {
-            log(tx, "ssh", &format!("server fingerprint {fp}")).await;
+        // Certificate-authority host keys are a different trust model — the
+        // CA vouches, so known_hosts has nothing to say. ARC has no way to
+        // pin a CA yet, and silently accepting one would be a hole straight
+        // through everything below.
+        let key = match server_public_key {
+            PublicKeyOrCertificate::PublicKey { key, .. } => key,
+            PublicKeyOrCertificate::Certificate(_) => {
+                self.say(
+                    "error",
+                    "server offered a certificate host key, which ARC can't verify yet",
+                )
+                .await;
+                return Ok(false);
+            }
+        };
+
+        let fp = key.fingerprint(HashAlg::Sha256).to_string();
+        let alg = key.algorithm().as_str().to_string();
+
+        match known_hosts::check_known_hosts(&self.host, self.port, key) {
+            Ok(true) => {
+                self.say("ssh", &format!("host key {fp} matches known_hosts")).await;
+                Ok(true)
+            }
+            Err(russh::keys::Error::KeyChanged { line }) => {
+                self.say(
+                    "error",
+                    &format!(
+                        "HOST KEY CHANGED for {}:{} — known_hosts line {} expects a different \
+                         key, server offered {fp}. Refusing to connect. If this host was \
+                         genuinely rebuilt, remove that line yourself.",
+                        self.host, self.port, line,
+                    ),
+                )
+                .await;
+                Ok(false)
+            }
+            Err(e) => {
+                // Could not read known_hosts at all. Failing open here would
+                // silently disable verification for anyone with an unreadable
+                // or missing-permission ~/.ssh, which is precisely backwards.
+                self.say("error", &format!("cannot verify host key: {e}")).await;
+                Ok(false)
+            }
+            Ok(false) => {
+                let Some(asker) = self.asker.clone() else {
+                    self.say(
+                        "error",
+                        &format!(
+                            "unknown host key {fp} for {}:{} and nothing available to ask. \
+                             Connect this host in a terminal tab first.",
+                            self.host, self.port,
+                        ),
+                    )
+                    .await;
+                    return Ok(false);
+                };
+
+                self.say("ssh", &format!("unknown host key {fp} — waiting for you"))
+                    .await;
+
+                let (reply, answer) = oneshot::channel();
+                let prompt = HostKeyPrompt {
+                    host: self.host.clone(),
+                    port: self.port,
+                    fingerprint: fp.clone(),
+                    algorithm: alg,
+                    reply,
+                };
+                if asker.send(prompt).await.is_err() {
+                    self.say("error", "nothing answered the host key prompt").await;
+                    return Ok(false);
+                }
+
+                // Bounded: a prompt nobody ever answers must not pin an open
+                // socket and a driver task forever. A dropped sender lands
+                // here too, and both mean "not trusted".
+                let accepted = match tokio::time::timeout(
+                    std::time::Duration::from_secs(HOST_KEY_PROMPT_TIMEOUT_SECS),
+                    answer,
+                )
+                .await
+                {
+                    Ok(Ok(v)) => v,
+                    _ => false,
+                };
+
+                if !accepted {
+                    self.say("error", "host key rejected").await;
+                    return Ok(false);
+                }
+
+                // Only written once the human said yes, so a refused key is
+                // never remembered as trusted.
+                if let Err(e) = known_hosts::learn_known_hosts(&self.host, self.port, key) {
+                    // The user accepted, so let the session continue — but say
+                    // clearly that it will ask again, rather than leaving them
+                    // wondering why.
+                    self.say(
+                        "error",
+                        &format!("accepted, but couldn't write known_hosts ({e}) — will ask again"),
+                    )
+                    .await;
+                } else {
+                    self.say("ssh", &format!("host key {fp} added to known_hosts")).await;
+                }
+                Ok(true)
+            }
         }
-        Ok(true)
     }
+}
+
+/// The OS entropy source, adapted to the infallible RNG trait.
+///
+/// ssh-key 0.7 split fallible RNGs (`TryCryptoRng`) from infallible ones
+/// (`CryptoRng`), and key generation wants the latter. `UnwrapErr` bridges
+/// them by panicking if the OS generator fails — which is not a condition
+/// worth threading a `Result` for, since there is no sensible way to finish
+/// generating a key without entropy.
+fn os_rng() -> UnwrapErr<SysRng> {
+    UnwrapErr(SysRng)
 }
 
 /// Read a private key from disk, optionally decrypting with `passphrase`.
 /// Accepts both encrypted and unencrypted OpenSSH-format keys.
-pub fn load_key(path: &Path, passphrase: Option<&str>) -> Result<KeyPair> {
-    let kp = russh_keys::load_secret_key(path, passphrase).with_context(|| {
+pub fn load_key(path: &Path, passphrase: Option<&str>) -> Result<PrivateKey> {
+    let kp = russh::keys::load_secret_key(path, passphrase).with_context(|| {
         format!(
             "load private key at {} (wrong passphrase?)",
             path.display()
@@ -467,12 +696,12 @@ pub fn generate_key(
     };
 
     let mut priv_key = match alg {
-        Algorithm::Ed25519 => PrivateKey::random(&mut OsRng, Algorithm::Ed25519)
+        Algorithm::Ed25519 => PrivateKey::random(&mut os_rng(), Algorithm::Ed25519)
             .map_err(|e| anyhow!("ed25519 generate: {e}"))?,
         Algorithm::Rsa { .. } => {
             // ssh-key's `random` for RSA picks 3072; for stronger keys use
             // its `from_components` path. 3072 bits is acceptable for V1.
-            PrivateKey::random(&mut OsRng, Algorithm::Rsa { hash: None })
+            PrivateKey::random(&mut os_rng(), Algorithm::Rsa { hash: None })
                 .map_err(|e| anyhow!("rsa generate: {e}"))?
         }
         _ => unreachable!(),
@@ -483,7 +712,7 @@ pub fn generate_key(
     // Encrypt before writing, if a passphrase was supplied.
     let to_write = if let Some(pp) = passphrase.filter(|p| !p.is_empty()) {
         priv_key
-            .encrypt(&mut OsRng, pp.as_bytes())
+            .encrypt(&mut os_rng(), pp.as_bytes())
             .map_err(|e| anyhow!("encrypt: {e}"))?
     } else {
         priv_key.clone()
@@ -549,5 +778,151 @@ mod dirs {
     pub fn home_dir() -> Option<std::path::PathBuf> {
         std::env::var_os(if cfg!(windows) { "USERPROFILE" } else { "HOME" })
             .map(std::path::PathBuf::from)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn tmp(name: &str) -> std::path::PathBuf {
+        let stamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0);
+        std::env::temp_dir().join(format!("arc-ssh-{name}-{stamp}"))
+    }
+
+    /// Generate, then read back, and check it is the same key.
+    ///
+    /// This exercises `os_rng()` — the one piece of the russh 0.63 upgrade
+    /// with no other coverage. `OsRng` moved out of rand_core into getrandom
+    /// between versions, and a wrong RNG here does not fail to compile: it
+    /// panics at generation, or worse, produces a key that doesn't round-trip.
+    #[test]
+    fn generated_key_loads_back_identically() {
+        let path = tmp("ed25519");
+        let made = generate_key(&path, "ed25519", "arc-test", None).expect("generate");
+
+        assert!(made.fingerprint.starts_with("SHA256:"), "{}", made.fingerprint);
+        assert_eq!(made.kind, "ssh-ed25519");
+        assert_eq!(made.bits, 256);
+        assert!(path.with_extension("pub").exists() || path.exists());
+
+        let loaded = load_key(&path, None).expect("load back");
+        assert_eq!(
+            loaded.public_key().fingerprint(HashAlg::Sha256).to_string(),
+            made.fingerprint,
+            "the key read back is not the key written",
+        );
+
+        let _ = std::fs::remove_file(&path);
+        let _ = std::fs::remove_file(path.with_extension("pub"));
+    }
+
+    /// The encrypted path runs the RNG a second time, for the KDF salt, and
+    /// is the one that breaks if a passphrase is mishandled — an unopenable
+    /// private key is unrecoverable, not merely inconvenient.
+    #[test]
+    fn encrypted_key_needs_its_passphrase() {
+        let path = tmp("enc");
+        let made = generate_key(&path, "ed25519", "arc-test", Some("hunter2")).expect("generate");
+
+        assert!(
+            load_key(&path, None).is_err(),
+            "an encrypted key must not load without its passphrase",
+        );
+        assert!(load_key(&path, Some("wrong")).is_err(), "wrong passphrase must fail");
+
+        let loaded = load_key(&path, Some("hunter2")).expect("correct passphrase");
+        assert_eq!(
+            loaded.public_key().fingerprint(HashAlg::Sha256).to_string(),
+            made.fingerprint,
+        );
+
+        let _ = std::fs::remove_file(&path);
+        let _ = std::fs::remove_file(path.with_extension("pub"));
+    }
+
+    #[test]
+    fn refuses_to_overwrite_an_existing_key() {
+        let path = tmp("dup");
+        generate_key(&path, "ed25519", "first", None).expect("generate");
+        assert!(
+            generate_key(&path, "ed25519", "second", None).is_err(),
+            "silently replacing a private key would destroy the only copy",
+        );
+        let _ = std::fs::remove_file(&path);
+        let _ = std::fs::remove_file(path.with_extension("pub"));
+    }
+    /// The contract `check_server_key` is built on, verified against russh
+    /// rather than assumed from reading it.
+    ///
+    /// The three outcomes must stay distinguishable: unknown and changed both
+    /// mean "do not proceed silently", but they are *different* — one asks the
+    /// user, the other must never ask. If `KeyChanged` ever collapsed into
+    /// `Ok(false)`, a changed key would quietly become a prompt, and a prompt
+    /// is something people click through.
+    #[test]
+    fn known_hosts_tells_unknown_from_changed() {
+        use russh::keys::known_hosts::{check_known_hosts_path, learn_known_hosts_path};
+
+        let dir = tmp("kh");
+        std::fs::create_dir_all(&dir).expect("tempdir");
+        let file = dir.join("known_hosts");
+
+        let key_a = generate_key(&dir.join("a"), "ed25519", "a", None).expect("key a");
+        let key_b = generate_key(&dir.join("b"), "ed25519", "b", None).expect("key b");
+        assert_ne!(key_a.fingerprint, key_b.fingerprint, "two distinct keys");
+
+        // Comments are cleared deliberately. `ssh_key::PublicKey` derives
+        // PartialEq over every field, comment included, and known_hosts lines
+        // round-trip without one — so a key carrying a comment compares
+        // unequal to its own recorded form and reads as CHANGED. Host keys off
+        // the wire never have a comment (the protocol has no such field), so
+        // clearing it here is what makes this test model reality rather than
+        // an artefact of generate_key writing one.
+        let strip = |p: &std::path::Path| {
+            let mut k = load_key(p, None).unwrap().public_key().clone();
+            k.set_comment("");
+            k
+        };
+        let pub_a = strip(&dir.join("a"));
+        let pub_b = strip(&dir.join("b"));
+
+        // 1. Nothing recorded yet -> unknown, which is what triggers a prompt.
+        assert_eq!(
+            check_known_hosts_path("example.test", 22, &pub_a, &file).ok(),
+            Some(false),
+            "an unrecorded host must read as unknown, not as trusted",
+        );
+
+        // 2. After learning it -> trusted, silently.
+        learn_known_hosts_path("example.test", 22, &pub_a, &file).expect("learn");
+        assert_eq!(
+            check_known_hosts_path("example.test", 22, &pub_a, &file).ok(),
+            Some(true),
+            "the key we just recorded must verify",
+        );
+
+        // 3. Same host, different key -> KeyChanged. This is the attack shape,
+        //    and the one case that must never become a question.
+        assert!(
+            matches!(
+                check_known_hosts_path("example.test", 22, &pub_b, &file),
+                Err(russh::keys::Error::KeyChanged { .. }),
+            ),
+            "a different key for a known host must be KeyChanged, not Ok(false)",
+        );
+
+        // 4. Port is part of the identity: same key, different port is a
+        //    different entry, so it must not inherit trust.
+        assert_eq!(
+            check_known_hosts_path("example.test", 2222, &pub_a, &file).ok(),
+            Some(false),
+            "trust must not leak across ports",
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

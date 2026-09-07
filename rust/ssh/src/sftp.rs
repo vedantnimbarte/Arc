@@ -29,11 +29,13 @@ use std::sync::Arc;
 use anyhow::{anyhow, Context, Result};
 use dashmap::DashMap;
 use russh::client::{self, Handle};
+use russh::keys::ssh_key::HashAlg;
+use russh::keys::PrivateKeyWithHashAlg;
 use russh_sftp::client::SftpSession;
 use serde::{Deserialize, Serialize};
 use tokio::sync::Mutex;
 
-use crate::{load_key, ClientHandler, HANDSHAKE_TIMEOUT_SECS};
+use crate::{load_key, ClientHandler, HANDSHAKE_TIMEOUT_SECS, HOST_KEY_PROMPT_TIMEOUT_SECS};
 
 /// Ceiling on a single remote file read, mirroring the local editor's cap.
 /// Without it a stray click on a multi-gigabyte log pulls the whole thing
@@ -92,7 +94,16 @@ impl SftpManager {
     /// Dial `opts` and start an SFTP session under `id`. Reconnecting an id
     /// that is already live replaces it — the old connection is dropped,
     /// which is what a user pressing "Reconnect" means.
-    pub async fn connect(&self, id: &str, opts: RemoteFsOpts) -> Result<()> {
+    /// `asker` is asked about an unknown host key, exactly as in the shell
+    /// path. A remote workspace can be mounted without ever opening a
+    /// terminal to that host, so it needs its own way to ask rather than
+    /// assuming the host is already trusted.
+    pub async fn connect(
+        &self,
+        id: &str,
+        opts: RemoteFsOpts,
+        asker: Option<crate::HostKeyAsker>,
+    ) -> Result<()> {
         let key_pair = load_key(
             Path::new(&opts.identity_path),
             opts.passphrase.as_deref(),
@@ -106,21 +117,36 @@ impl SftpManager {
         // and the next click fails instead of the tree staying live.
         config.keepalive_interval = Some(std::time::Duration::from_secs(30));
 
-        let handler = ClientHandler::silent();
+        let can_prompt = asker.is_some();
+        let handler = ClientHandler::silent(opts.host.clone(), opts.port, asker);
         let connect_fut = client::connect(Arc::new(config), (opts.host.as_str(), opts.port), handler);
+        // Same reasoning as the shell path: `check_server_key` runs inside
+        // this future, so a pending host-key prompt must not be cut short by
+        // the network budget.
+        let budget = if can_prompt {
+            HANDSHAKE_TIMEOUT_SECS + HOST_KEY_PROMPT_TIMEOUT_SECS
+        } else {
+            HANDSHAKE_TIMEOUT_SECS
+        };
         let mut handle = tokio::time::timeout(
-            std::time::Duration::from_secs(HANDSHAKE_TIMEOUT_SECS),
+            std::time::Duration::from_secs(budget),
             connect_fut,
         )
         .await
-        .map_err(|_| anyhow!("connect timeout after {HANDSHAKE_TIMEOUT_SECS}s"))?
+        .map_err(|_| anyhow!("connect timeout after {budget}s"))?
         .with_context(|| format!("connect {}:{}", opts.host, opts.port))?;
 
+        // SHA-512 for the same reason as the shell path in lib.rs: `None`
+        // signs RSA with SHA-1, which OpenSSH 8.8+ rejects. Ignored for
+        // Ed25519.
         let authed = handle
-            .authenticate_publickey(&opts.username, Arc::new(key_pair))
+            .authenticate_publickey(
+                &opts.username,
+                PrivateKeyWithHashAlg::new(Arc::new(key_pair), Some(HashAlg::Sha512)),
+            )
             .await
             .context("publickey auth")?;
-        if !authed {
+        if !authed.success() {
             return Err(anyhow!("authentication failed: publickey rejected"));
         }
 

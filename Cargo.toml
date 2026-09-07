@@ -47,14 +47,28 @@ dashmap = "6"
 portable-pty = "0.9"
 bytes = "1.7"
 
-# SSH client (pure-Rust) + key generation. russh handles the wire protocol;
-# ssh-key gives us a stable API for generating + serialising OpenSSH keys.
-russh = "0.45"
-russh-keys = "0.45"
+# SSH client (pure-Rust) + key generation. russh handles the wire protocol and
+# re-exports ssh-key as `russh::keys::ssh_key`, which is where key generation
+# and serialisation now come from. Depending on ssh-key directly would pull a
+# second, incompatible copy of it — russh pins 0.7.0-rc, the latest release on
+# crates.io is 0.6, and the two do not share types.
+#
+# `ring` rather than russh's default `aws-lc-rs` backend: aws-lc-sys builds
+# BoringSSL from source and needs NASM plus a working C toolchain, which fails
+# on a stock Windows dev machine and would make a native toolchain a
+# prerequisite for `cargo check` on a repo that otherwise needs none. ring
+# ships prebuilt and covers the algorithms we negotiate.
+#
+# There is no separate russh-keys any more — it was folded into russh as
+# `russh::keys` (its own last publish was an 0.50 beta).
+russh = { version = "0.63", default-features = false, features = ["ring"] }
 # SFTP client for remote workspaces, layered over a russh channel stream.
 russh-sftp = "2.4"
-ssh-key = { version = "0.6", features = ["ed25519", "rsa", "encryption"] }
-rand_core = { version = "0.6", features = ["std"] }
+# Both must match what ssh-key 0.7 uses, or the RNG traits are different
+# types with the same names. rand_core supplies `UnwrapErr`; `OsRng` moved out
+# of rand_core in 0.10 and now lives in getrandom as `SysRng`.
+rand_core = "0.10"
+getrandom = "0.4"
 base64 = "0.22"
 
 # Native file dialogs
