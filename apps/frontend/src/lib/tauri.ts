@@ -2363,6 +2363,43 @@ export async function sshClose(id: SshId): Promise<void> {
   await invoke('ssh_close', { id });
 }
 
+// ─── Host key verification ───────────────────────────────────────────────
+//
+// Host keys are checked against ~/.ssh/known_hosts by the Rust side. A key
+// that CHANGED aborts the connection outright and never reaches here — that's
+// the interception case, and there is deliberately no way to click past it.
+// Only an *unknown* key produces a prompt.
+
+export interface SshHostKeyPrompt {
+  /** Pass back to `sshHostKeyRespond`. */
+  promptId: string;
+  host: string;
+  port: number;
+  /** `SHA256:…`, the form to compare against what the host's admin published. */
+  fingerprint: string;
+  /** e.g. `ssh-ed25519`. */
+  algorithm: string;
+}
+
+/** A handshake is parked waiting on this answer, so always answer it.
+ *  Not answering stalls the connection until the backend's own timeout. */
+export async function onSshHostKeyPrompt(
+  handler: (prompt: SshHostKeyPrompt) => void,
+): Promise<UnlistenFn> {
+  return listen<SshHostKeyPrompt>('ssh://host-key', (event) => {
+    handler(event.payload);
+  });
+}
+
+/** Accepting also writes the key to `~/.ssh/known_hosts`, so it is trusted by
+ *  the user's own `ssh` from then on too. */
+export async function sshHostKeyRespond(
+  promptId: string,
+  accept: boolean,
+): Promise<void> {
+  await invoke('ssh_host_key_respond', { promptId, accept });
+}
+
 export async function onSshLog(
   id: SshId,
   handler: (entry: SshLogEvent) => void,

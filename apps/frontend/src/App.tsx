@@ -37,6 +37,7 @@ import {
 import { useCommands, type CommandAction, type CommandGroup } from './state/commands';
 import { useTaskCommands } from './state/tasks';
 import { WingmanPromptDialog } from './components/WingmanPromptDialog';
+import { HostKeyPrompt } from './components/ssh/HostKeyPrompt';
 
 /** Languages offered as scratch buffers in the palette. Kept short on
  *  purpose — the point of a scratch buffer is not choosing one. */
@@ -789,6 +790,7 @@ export default function App() {
       )}
       <PasteWarning />
       <TrustPrompt />
+      <HostKeyPrompt />
       <ConfirmDialog />
       <Toasts />
       <UpdateToast />

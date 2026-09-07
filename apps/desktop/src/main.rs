@@ -230,6 +230,7 @@ fn main() {
             commands::secrets::secret_delete,
             commands::secrets::secret_list,
             commands::ssh::ssh_connect,
+            commands::ssh::ssh_host_key_respond,
             commands::ssh::ssh_write,
             commands::ssh::ssh_resize,
             commands::ssh::ssh_close,
