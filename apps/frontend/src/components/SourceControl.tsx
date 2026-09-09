@@ -1422,54 +1422,9 @@ function notifyGitFailure(title: string, err: unknown): void {
         </div>
       )}
 
-      {/* Stash section */}
-      {isTauri && root && !panelOpen && (
-        <div className="shrink-0 border-b border-border-hairline">
-          <button
-            onClick={() => setStashOpen((o) => !o)}
-            className="flex w-full items-center gap-1.5 px-2.5 py-1.5 text-left hover:bg-surface-1"
-          >
-            {stashOpen ? <ChevronDown size={10} strokeWidth={2} className="text-fg-subtle" /> : <ChevronRight size={10} strokeWidth={2} className="text-fg-subtle" />}
-            <Archive size={11} strokeWidth={2} className="text-fg-muted" />
-            <span className="flex-1 font-sans text-xs text-fg-muted">Stash</span>
-            {stashes.length > 0 && (
-              <span className="rounded-full bg-surface-2 px-1.5 font-mono text-2xs text-fg-subtle">{stashes.length}</span>
-            )}
-            <button
-              onClick={(e) => { e.stopPropagation(); void handleStashPush(); }}
-              disabled={stashBusy}
-              title="Stash all changes"
-              className="flex h-5 items-center gap-0.5 rounded px-1.5 font-sans text-2xs text-fg-muted hover:bg-surface-2 hover:text-fg-base disabled:opacity-40"
-            >
-              <Plus size={9} strokeWidth={2.5} /> Stash
-            </button>
-          </button>
-          {stashOpen && (
-            <div className="px-2 pb-1.5">
-              {stashes.length === 0 ? (
-                <p className="px-1 font-sans text-2xs text-fg-subtle/60">No stashes</p>
-              ) : (
-                <ul className="space-y-px">
-                  {stashes.map((s) => (
-                    <li key={s.index} className="group flex items-center gap-1.5 rounded px-1 py-[3px] hover:bg-surface-1">
-                      <span className="w-5 shrink-0 font-mono text-2xs text-fg-subtle/60">{s.index}</span>
-                      <span className="flex-1 truncate font-sans text-xs text-fg-base/80">{s.message}</span>
-                      <span className="hidden items-center gap-1 group-hover:flex">
-                        <button onClick={() => void handleStashPop(s.index)} title="Apply & drop" disabled={stashBusy} className="text-fg-muted hover:text-accent disabled:opacity-40"><ArrowDownToLine size={11} strokeWidth={2} /></button>
-                        <button onClick={() => void handleStashDrop(s.index)} title="Drop" disabled={stashBusy} className="text-fg-muted hover:text-red-400 disabled:opacity-40"><Trash2 size={11} strokeWidth={2} /></button>
-                      </span>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </div>
-          )}
-        </div>
-      )}
-
       {/* Commit composer — card with focus bloom + gradient commit bar */}
-      {isTauri && info?.branch && !panelOpen && (
-        <div className="shrink-0 border-b border-border-hairline px-2.5 py-2.5">
+      {isTauri && root && !panelOpen && (
+        <div className="shrink-0 border-b border-border-hairline bg-surface-1/30 px-2.5 py-2.5">
           <div
             className={cn(
               'group/composer relative rounded-lg border border-edge-1 bg-bg-base/55',
@@ -1571,172 +1526,6 @@ function notifyGitFailure(title: string, err: unknown): void {
         </div>
       )}
 
-      {/* Tags */}
-      {isTauri && root && !panelOpen && (
-        <div className="shrink-0 border-b border-border-hairline">
-          <button
-            onClick={() => setTagsOpen((o) => !o)}
-            className="flex w-full items-center gap-1.5 px-2.5 py-1.5 text-left hover:bg-surface-1"
-          >
-            {tagsOpen ? <ChevronDown size={10} strokeWidth={2} className="text-fg-subtle" /> : <ChevronRight size={10} strokeWidth={2} className="text-fg-subtle" />}
-            <Tag size={11} strokeWidth={2} className="text-fg-muted" />
-            <span className="flex-1 font-sans text-xs text-fg-muted">Tags</span>
-            {tags.length > 0 && (
-              <span className="rounded-full bg-surface-2 px-1.5 font-mono text-2xs text-fg-subtle">{tags.length}</span>
-            )}
-          </button>
-          {tagsOpen && (
-            <div className="px-2 pb-1.5">
-              <div className="mb-1.5 flex gap-1.5">
-                <input
-                  value={newTagName}
-                  onChange={(e) => setNewTagName(e.target.value)}
-                  onKeyDown={(e) => { if (e.key === 'Enter') void handleTagCreate(); }}
-                  placeholder="v1.0.0 — tags HEAD"
-                  aria-label="New tag name"
-                  className="flex-1 rounded-md bg-surface-1 px-2 py-1 font-mono text-xs text-fg-base placeholder:text-fg-subtle outline-none focus:ring-1 focus:ring-accent/40"
-                />
-                <button
-                  onClick={() => void handleTagCreate()}
-                  disabled={!newTagName.trim() || tagBusy}
-                  title="Create tag at HEAD"
-                  className="flex h-6 items-center gap-1 rounded-md bg-accent/10 px-2 font-sans text-2xs text-accent hover:bg-accent/20 disabled:opacity-40"
-                >
-                  <Plus size={10} strokeWidth={2.5} /> Tag
-                </button>
-              </div>
-              {tags.length === 0 ? (
-                <p className="px-1 font-sans text-2xs text-fg-subtle/60">No tags</p>
-              ) : (
-                <ul className="max-h-40 space-y-px overflow-y-auto">
-                  {tags.map((t) => (
-                    <li key={t.name} className="group flex items-center gap-1.5 rounded px-1 py-[3px] hover:bg-surface-1">
-                      <span className="flex-1 truncate font-mono text-xs text-fg-base/85" title={t.subject}>
-                        {t.name}
-                      </span>
-                      <span className="shrink-0 font-mono text-2xs text-fg-subtle/70">{t.head_short}</span>
-                      <span className="hidden items-center gap-1 group-hover:flex">
-                        <button onClick={() => void handleTagPush(t.name)} title="Push to origin" disabled={tagBusy} className="text-fg-muted hover:text-accent disabled:opacity-40"><Upload size={10} strokeWidth={2} /></button>
-                        <button onClick={() => void handleTagDelete(t.name)} title="Delete" disabled={tagBusy} className="text-fg-muted hover:text-red-400 disabled:opacity-40"><Trash2 size={10} strokeWidth={2} /></button>
-                      </span>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* Remotes */}
-      {isTauri && root && !panelOpen && (
-        <div className="shrink-0 border-b border-border-hairline">
-          <button
-            onClick={() => setRemotesOpen((o) => !o)}
-            className="flex w-full items-center gap-1.5 px-2.5 py-1.5 text-left hover:bg-surface-1"
-          >
-            {remotesOpen ? <ChevronDown size={10} strokeWidth={2} className="text-fg-subtle" /> : <ChevronRight size={10} strokeWidth={2} className="text-fg-subtle" />}
-            <Cloud size={11} strokeWidth={2} className="text-fg-muted" />
-            <span className="flex-1 font-sans text-xs text-fg-muted">Remotes</span>
-            {remotes.length > 0 && (
-              <span className="rounded-full bg-surface-2 px-1.5 font-mono text-2xs text-fg-subtle">{remotes.length}</span>
-            )}
-          </button>
-          {remotesOpen && (
-            <div className="px-2 pb-1.5">
-              <div className="mb-1.5 flex gap-1.5">
-                <input
-                  value={newRemoteName}
-                  onChange={(e) => setNewRemoteName(e.target.value)}
-                  placeholder="name"
-                  aria-label="New remote name"
-                  className="w-16 shrink-0 rounded-md bg-surface-1 px-2 py-1 font-mono text-xs text-fg-base placeholder:text-fg-subtle outline-none focus:ring-1 focus:ring-accent/40"
-                />
-                <input
-                  value={newRemoteUrl}
-                  onChange={(e) => setNewRemoteUrl(e.target.value)}
-                  onKeyDown={(e) => { if (e.key === 'Enter') void handleRemoteAdd(); }}
-                  placeholder="url"
-                  aria-label="New remote URL"
-                  className="min-w-0 flex-1 rounded-md bg-surface-1 px-2 py-1 font-mono text-xs text-fg-base placeholder:text-fg-subtle outline-none focus:ring-1 focus:ring-accent/40"
-                />
-                <button
-                  onClick={() => void handleRemoteAdd()}
-                  disabled={!newRemoteName.trim() || !newRemoteUrl.trim() || remoteBusy}
-                  title="Add remote"
-                  aria-label="Add remote"
-                  className="flex h-6 shrink-0 items-center rounded-md bg-accent/10 px-1.5 text-accent hover:bg-accent/20 disabled:opacity-40"
-                >
-                  <Plus size={10} strokeWidth={2.5} />
-                </button>
-              </div>
-              {remotes.length === 0 ? (
-                <p className="px-1 font-sans text-2xs text-fg-subtle/60">No remotes</p>
-              ) : (
-                <ul className="space-y-px">
-                  {remotes.map((r) => (
-                    <li key={r.name} className="group flex items-center gap-1.5 rounded px-1 py-[3px] hover:bg-surface-1">
-                      <span className="w-14 shrink-0 truncate font-mono text-xs text-fg-base/85">{r.name}</span>
-                      <span className="min-w-0 flex-1 truncate font-mono text-2xs text-fg-subtle" title={r.fetch_url}>
-                        {r.fetch_url}
-                      </span>
-                      <span className="hidden items-center gap-1 group-hover:flex">
-                        <button onClick={() => void handleRemoteSetUrl(r.name, r.fetch_url)} title="Change URL" disabled={remoteBusy} className="text-fg-muted hover:text-fg-base disabled:opacity-40"><Pencil size={10} strokeWidth={2} /></button>
-                        <button onClick={() => void handleRemoteRemove(r.name)} title="Remove" disabled={remoteBusy} className="text-fg-muted hover:text-red-400 disabled:opacity-40"><Trash2 size={10} strokeWidth={2} /></button>
-                      </span>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* Submodules — hidden entirely for the repos that have none. */}
-      {isTauri && root && !panelOpen && submodules.length > 0 && (
-        <div className="shrink-0 border-b border-border-hairline">
-          <button
-            onClick={() => setSubmodulesOpen((o) => !o)}
-            className="flex w-full items-center gap-1.5 px-2.5 py-1.5 text-left hover:bg-surface-1"
-          >
-            {submodulesOpen ? <ChevronDown size={10} strokeWidth={2} className="text-fg-subtle" /> : <ChevronRight size={10} strokeWidth={2} className="text-fg-subtle" />}
-            <Boxes size={11} strokeWidth={2} className="text-fg-muted" />
-            <span className="flex-1 font-sans text-xs text-fg-muted">Submodules</span>
-            <span className="rounded-full bg-surface-2 px-1.5 font-mono text-2xs text-fg-subtle">{submodules.length}</span>
-          </button>
-          {submodulesOpen && (
-            <ul className="space-y-px px-2 pb-1.5">
-              {submodules.map((m) => (
-                <li key={m.path} className="flex items-center gap-1.5 rounded px-1 py-[3px] hover:bg-surface-1">
-                  <span className="min-w-0 flex-1 truncate font-mono text-xs text-fg-base/85" title={m.describe ?? undefined}>
-                    {m.path}
-                  </span>
-                  <span className="shrink-0 font-mono text-2xs text-fg-subtle/70">{m.head_short}</span>
-                  {m.state !== 'ok' && (
-                    <span
-                      className={cn(
-                        'shrink-0 rounded px-1 font-sans text-2xs',
-                        m.state === 'conflict' ? 'text-red-400' : 'text-status-warn',
-                      )}
-                      title={
-                        m.state === 'uninitialized'
-                          ? 'not checked out — run git submodule update --init'
-                          : m.state === 'out-of-sync'
-                            ? "checked out at a commit the superproject doesn't record"
-                            : 'merge conflict'
-                      }
-                    >
-                      {m.state}
-                    </span>
-                  )}
-                </li>
-              ))}
-            </ul>
-          )}
-        </div>
-      )}
-
       {/* Body */}
       {!panelOpen && (
       <div className="selectable flex-1 overflow-auto px-1.5 py-2">
@@ -1815,6 +1604,217 @@ function notifyGitFailure(title: string, err: unknown): void {
           );
         })}
       </div>
+      )}
+
+      {/* Stash section */}
+      {isTauri && root && !panelOpen && (
+        <div className="shrink-0 border-t border-border-hairline">
+          <button
+            onClick={() => setStashOpen((o) => !o)}
+            className="flex w-full items-center gap-1.5 px-2.5 py-1.5 text-left hover:bg-surface-1"
+          >
+            {stashOpen ? <ChevronDown size={10} strokeWidth={2} className="text-fg-subtle" /> : <ChevronRight size={10} strokeWidth={2} className="text-fg-subtle" />}
+            <Archive size={11} strokeWidth={2} className="text-fg-muted" />
+            <span className="flex-1 font-sans text-xs text-fg-muted">Stash</span>
+            {stashes.length > 0 && (
+              <span className="rounded-full bg-surface-2 px-1.5 font-mono text-2xs text-fg-subtle">{stashes.length}</span>
+            )}
+            <button
+              onClick={(e) => { e.stopPropagation(); void handleStashPush(); }}
+              disabled={stashBusy}
+              title="Stash all changes"
+              className="flex h-5 items-center gap-0.5 rounded px-1.5 font-sans text-2xs text-fg-muted hover:bg-surface-2 hover:text-fg-base disabled:opacity-40"
+            >
+              <Plus size={9} strokeWidth={2.5} /> Stash
+            </button>
+          </button>
+          {stashOpen && (
+            <div className="px-2 pb-1.5">
+              {stashes.length === 0 ? (
+                <p className="px-1 font-sans text-2xs text-fg-subtle/60">No stashes</p>
+              ) : (
+                <ul className="max-h-40 space-y-px overflow-y-auto">
+                  {stashes.map((s) => (
+                    <li key={s.index} className="group flex items-center gap-1.5 rounded px-1 py-[3px] hover:bg-surface-1">
+                      <span className="w-5 shrink-0 font-mono text-2xs text-fg-subtle/60">{s.index}</span>
+                      <span className="flex-1 truncate font-sans text-xs text-fg-base/80">{s.message}</span>
+                      <span className="hidden items-center gap-1 group-hover:flex">
+                        <button onClick={() => void handleStashPop(s.index)} title="Apply & drop" disabled={stashBusy} className="text-fg-muted hover:text-accent disabled:opacity-40"><ArrowDownToLine size={11} strokeWidth={2} /></button>
+                        <button onClick={() => void handleStashDrop(s.index)} title="Drop" disabled={stashBusy} className="text-fg-muted hover:text-red-400 disabled:opacity-40"><Trash2 size={11} strokeWidth={2} /></button>
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Tags */}
+      {isTauri && root && !panelOpen && (
+        <div className="shrink-0 border-t border-border-hairline">
+          <button
+            onClick={() => setTagsOpen((o) => !o)}
+            className="flex w-full items-center gap-1.5 px-2.5 py-1.5 text-left hover:bg-surface-1"
+          >
+            {tagsOpen ? <ChevronDown size={10} strokeWidth={2} className="text-fg-subtle" /> : <ChevronRight size={10} strokeWidth={2} className="text-fg-subtle" />}
+            <Tag size={11} strokeWidth={2} className="text-fg-muted" />
+            <span className="flex-1 font-sans text-xs text-fg-muted">Tags</span>
+            {tags.length > 0 && (
+              <span className="rounded-full bg-surface-2 px-1.5 font-mono text-2xs text-fg-subtle">{tags.length}</span>
+            )}
+          </button>
+          {tagsOpen && (
+            <div className="px-2 pb-1.5">
+              <div className="mb-1.5 flex gap-1.5">
+                <input
+                  value={newTagName}
+                  onChange={(e) => setNewTagName(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === 'Enter') void handleTagCreate(); }}
+                  placeholder="v1.0.0 — tags HEAD"
+                  aria-label="New tag name"
+                  className="flex-1 rounded-md bg-surface-1 px-2 py-1 font-mono text-xs text-fg-base placeholder:text-fg-subtle outline-none focus:ring-1 focus:ring-accent/40"
+                />
+                <button
+                  onClick={() => void handleTagCreate()}
+                  disabled={!newTagName.trim() || tagBusy}
+                  title="Create tag at HEAD"
+                  className="flex h-6 items-center gap-1 rounded-md bg-accent/10 px-2 font-sans text-2xs text-accent hover:bg-accent/20 disabled:opacity-40"
+                >
+                  <Plus size={10} strokeWidth={2.5} /> Tag
+                </button>
+              </div>
+              {tags.length === 0 ? (
+                <p className="px-1 font-sans text-2xs text-fg-subtle/60">No tags</p>
+              ) : (
+                <ul className="max-h-40 space-y-px overflow-y-auto">
+                  {tags.map((t) => (
+                    <li key={t.name} className="group flex items-center gap-1.5 rounded px-1 py-[3px] hover:bg-surface-1">
+                      <span className="flex-1 truncate font-mono text-xs text-fg-base/85" title={t.subject}>
+                        {t.name}
+                      </span>
+                      <span className="shrink-0 font-mono text-2xs text-fg-subtle/70">{t.head_short}</span>
+                      <span className="hidden items-center gap-1 group-hover:flex">
+                        <button onClick={() => void handleTagPush(t.name)} title="Push to origin" disabled={tagBusy} className="text-fg-muted hover:text-accent disabled:opacity-40"><Upload size={10} strokeWidth={2} /></button>
+                        <button onClick={() => void handleTagDelete(t.name)} title="Delete" disabled={tagBusy} className="text-fg-muted hover:text-red-400 disabled:opacity-40"><Trash2 size={10} strokeWidth={2} /></button>
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Remotes */}
+      {isTauri && root && !panelOpen && (
+        <div className="shrink-0 border-t border-border-hairline">
+          <button
+            onClick={() => setRemotesOpen((o) => !o)}
+            className="flex w-full items-center gap-1.5 px-2.5 py-1.5 text-left hover:bg-surface-1"
+          >
+            {remotesOpen ? <ChevronDown size={10} strokeWidth={2} className="text-fg-subtle" /> : <ChevronRight size={10} strokeWidth={2} className="text-fg-subtle" />}
+            <Cloud size={11} strokeWidth={2} className="text-fg-muted" />
+            <span className="flex-1 font-sans text-xs text-fg-muted">Remotes</span>
+            {remotes.length > 0 && (
+              <span className="rounded-full bg-surface-2 px-1.5 font-mono text-2xs text-fg-subtle">{remotes.length}</span>
+            )}
+          </button>
+          {remotesOpen && (
+            <div className="px-2 pb-1.5">
+              <div className="mb-1.5 flex gap-1.5">
+                <input
+                  value={newRemoteName}
+                  onChange={(e) => setNewRemoteName(e.target.value)}
+                  placeholder="name"
+                  aria-label="New remote name"
+                  className="w-16 shrink-0 rounded-md bg-surface-1 px-2 py-1 font-mono text-xs text-fg-base placeholder:text-fg-subtle outline-none focus:ring-1 focus:ring-accent/40"
+                />
+                <input
+                  value={newRemoteUrl}
+                  onChange={(e) => setNewRemoteUrl(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === 'Enter') void handleRemoteAdd(); }}
+                  placeholder="url"
+                  aria-label="New remote URL"
+                  className="min-w-0 flex-1 rounded-md bg-surface-1 px-2 py-1 font-mono text-xs text-fg-base placeholder:text-fg-subtle outline-none focus:ring-1 focus:ring-accent/40"
+                />
+                <button
+                  onClick={() => void handleRemoteAdd()}
+                  disabled={!newRemoteName.trim() || !newRemoteUrl.trim() || remoteBusy}
+                  title="Add remote"
+                  aria-label="Add remote"
+                  className="flex h-6 shrink-0 items-center rounded-md bg-accent/10 px-1.5 text-accent hover:bg-accent/20 disabled:opacity-40"
+                >
+                  <Plus size={10} strokeWidth={2.5} />
+                </button>
+              </div>
+              {remotes.length === 0 ? (
+                <p className="px-1 font-sans text-2xs text-fg-subtle/60">No remotes</p>
+              ) : (
+                <ul className="max-h-40 space-y-px overflow-y-auto">
+                  {remotes.map((r) => (
+                    <li key={r.name} className="group flex items-center gap-1.5 rounded px-1 py-[3px] hover:bg-surface-1">
+                      <span className="w-14 shrink-0 truncate font-mono text-xs text-fg-base/85">{r.name}</span>
+                      <span className="min-w-0 flex-1 truncate font-mono text-2xs text-fg-subtle" title={r.fetch_url}>
+                        {r.fetch_url}
+                      </span>
+                      <span className="hidden items-center gap-1 group-hover:flex">
+                        <button onClick={() => void handleRemoteSetUrl(r.name, r.fetch_url)} title="Change URL" disabled={remoteBusy} className="text-fg-muted hover:text-fg-base disabled:opacity-40"><Pencil size={10} strokeWidth={2} /></button>
+                        <button onClick={() => void handleRemoteRemove(r.name)} title="Remove" disabled={remoteBusy} className="text-fg-muted hover:text-red-400 disabled:opacity-40"><Trash2 size={10} strokeWidth={2} /></button>
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Submodules — hidden entirely for the repos that have none. */}
+      {isTauri && root && !panelOpen && submodules.length > 0 && (
+        <div className="shrink-0 border-t border-border-hairline">
+          <button
+            onClick={() => setSubmodulesOpen((o) => !o)}
+            className="flex w-full items-center gap-1.5 px-2.5 py-1.5 text-left hover:bg-surface-1"
+          >
+            {submodulesOpen ? <ChevronDown size={10} strokeWidth={2} className="text-fg-subtle" /> : <ChevronRight size={10} strokeWidth={2} className="text-fg-subtle" />}
+            <Boxes size={11} strokeWidth={2} className="text-fg-muted" />
+            <span className="flex-1 font-sans text-xs text-fg-muted">Submodules</span>
+            <span className="rounded-full bg-surface-2 px-1.5 font-mono text-2xs text-fg-subtle">{submodules.length}</span>
+          </button>
+          {submodulesOpen && (
+            <ul className="max-h-40 space-y-px overflow-y-auto px-2 pb-1.5">
+              {submodules.map((m) => (
+                <li key={m.path} className="flex items-center gap-1.5 rounded px-1 py-[3px] hover:bg-surface-1">
+                  <span className="min-w-0 flex-1 truncate font-mono text-xs text-fg-base/85" title={m.describe ?? undefined}>
+                    {m.path}
+                  </span>
+                  <span className="shrink-0 font-mono text-2xs text-fg-subtle/70">{m.head_short}</span>
+                  {m.state !== 'ok' && (
+                    <span
+                      className={cn(
+                        'shrink-0 rounded px-1 font-sans text-2xs',
+                        m.state === 'conflict' ? 'text-red-400' : 'text-status-warn',
+                      )}
+                      title={
+                        m.state === 'uninitialized'
+                          ? 'not checked out — run git submodule update --init'
+                          : m.state === 'out-of-sync'
+                            ? "checked out at a commit the superproject doesn't record"
+                            : 'merge conflict'
+                      }
+                    >
+                      {m.state}
+                    </span>
+                  )}
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
       )}
 
       {contextMenu && (
