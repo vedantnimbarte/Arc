@@ -10,6 +10,7 @@ import {
   type PersistedSettings,
 } from '../lib/tauri';
 import {
+  applyFontFamily,
   applyTheme,
   DEFAULT_APPEARANCE,
   DEFAULT_FONT_ID,
@@ -709,6 +710,17 @@ export async function rehydrateSettingsFromBroadcast(): Promise<void> {
   } catch (err) {
     console.error('[settings] rehydrate broadcast failed:', err);
   }
+}
+
+// Keep `--font-user` in sync with the stored family. One subscription covers
+// every path that can change it — the Settings picker, SQLite hydration, the
+// legacy-localStorage migration and the cross-window broadcast — so none of
+// them has to remember to re-apply it.
+if (typeof document !== 'undefined') {
+  applyFontFamily(useSettings.getState().fontId);
+  useSettings.subscribe((s, prev) => {
+    if (s.fontId !== prev.fontId) applyFontFamily(s.fontId);
+  });
 }
 
 // Re-paint when the OS color scheme changes — only matters when the user

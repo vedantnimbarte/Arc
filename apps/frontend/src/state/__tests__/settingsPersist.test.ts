@@ -17,6 +17,7 @@ vi.mock('../../lib/tauri', () => ({
 }));
 
 vi.mock('../../themes', () => ({
+  applyFontFamily: vi.fn(),
   applyTheme: vi.fn(),
   resolveActiveTheme: vi.fn(() => 'dark'),
   onSystemAppearanceChange: vi.fn(),

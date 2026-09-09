@@ -329,7 +329,7 @@ function AppearancePane({
         </div>
       </Section>
 
-      <Section title="Font Family" hint="Used by the terminal and editor. Pick from the fonts installed on your system.">
+      <Section title="Font Family" hint="Used everywhere in ARC — terminal, editor and the interface. Pick from the fonts installed on your system.">
         <FontPicker value={fontId} onChange={onFontChange} />
       </Section>
 

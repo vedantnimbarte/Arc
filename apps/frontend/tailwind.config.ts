@@ -9,6 +9,9 @@ export default {
         // SF Pro on Apple, falls through to Inter elsewhere — mirrors the
         // native macOS feel without shipping a binary blob.
         display: [
+          // The user's Settings → Font Family pick, published as a CSS var by
+          // `applyFontFamily()`. Unset (tests, pre-boot) → the default below.
+          'var(--font-user)',
           '-apple-system',
           'BlinkMacSystemFont',
           'SF Pro Display',
@@ -22,6 +25,7 @@ export default {
         ],
         // SF Mono → JetBrains Mono fallback for the terminal + code.
         mono: [
+          'var(--font-user)',
           'SF Mono',
           'ui-monospace',
           'JetBrains Mono Variable',

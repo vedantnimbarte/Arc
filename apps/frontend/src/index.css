@@ -12,6 +12,12 @@
 @layer base {
   :root {
     color-scheme: dark;
+    /* The user's Settings → Font Family pick. `applyFontFamily()` overwrites
+       this on <html> at boot and on every change; every font stack in the app
+       (Tailwind's `display` + `mono`, the markdown preview) resolves through
+       it, so one write re-fonts the whole UI. The value here is the default
+       font's stack, used until the store loads. */
+    --font-user: 'SF Mono', ui-monospace, Menlo, Monaco, monospace;
     /* Wallpaper tints that bleed through the translucent chrome. Cool
        platinum / steel washes — same atmospheric idea as macOS but tuned
        to the brushed-silver palette instead of the warm system-blue.
@@ -288,7 +294,7 @@
      editing rather than print-style prose. */
   .md-preview {
     color: #eef0f3;
-    font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Inter', system-ui, sans-serif;
+    font-family: var(--font-user), -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Inter', system-ui, sans-serif;
     font-size: 14px;
     line-height: 1.7;
     letter-spacing: -0.005em;
@@ -348,7 +354,7 @@
     font-style: italic;
   }
   .md-preview code {
-    font-family: 'SF Mono', ui-monospace, 'JetBrains Mono Variable', 'JetBrains Mono', Menlo, Monaco, 'Cascadia Code', Consolas, monospace;
+    font-family: var(--font-user), 'SF Mono', ui-monospace, 'JetBrains Mono Variable', 'JetBrains Mono', Menlo, Monaco, 'Cascadia Code', Consolas, monospace;
     font-size: 0.88em;
     background: rgba(255, 255, 255, 0.06);
     color: #fab387;
