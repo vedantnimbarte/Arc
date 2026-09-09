@@ -113,6 +113,9 @@ const ReflogPanel = lazy(() =>
 const BisectPanel = lazy(() =>
   import('./git/BisectPanel').then((m) => ({ default: m.BisectPanel })),
 );
+const PrPanel = lazy(() =>
+  import('./git/PrPanel').then((m) => ({ default: m.PrPanel })),
+);
 
 /** Path separator that matches the workspace root style. */
 function joinPath(root: string, rel: string): string {
@@ -311,7 +314,7 @@ export function SourceControl() {
   const rebaseInline = useGitUi((s) => s.rebasePanelOpen && !s.rebaseExpanded);
   const reflogInline = useGitUi((s) => s.reflogPanelOpen && !s.reflogExpanded);
   const bisectInline = useGitUi((s) => s.bisectPanelOpen && !s.bisectExpanded);
-  const panelOpen = worktreesInline || rebaseInline || reflogInline || bisectInline;
+  const prInline = useGitUi((s) => s.prPanelView.kind !== 'closed' && !s.prExpanded);
 
   // Commit switches — `-S` and `-s`, remembered across sessions.
   const signCommits = useGitUi((s) => s.signCommits);
@@ -1187,48 +1190,6 @@ function notifyGitFailure(title: string, err: unknown): void {
         </button>
       </div>
 
-      {/* Git launchers — Changes / Worktrees / Rebase pick what fills the
-          panel below, one at a time. PRs still open as an overlay. */}
-      {isTauri && root && (
-        <div className="flex shrink-0 items-center gap-1 border-b border-border-hairline px-2 py-1.5">
-          <GitLauncher
-            icon={<FileText size={11.5} strokeWidth={2} />}
-            label="Changes"
-            active={!panelOpen}
-            onClick={() => useGitUi.getState().setWorktreePanelOpen(false)}
-          />
-          <GitLauncher
-            icon={<GitPullRequest size={11.5} strokeWidth={2} />}
-            label="Pull Requests"
-            onClick={() => useGitUi.getState().openPrList()}
-          />
-          <GitLauncher
-            icon={<FolderTree size={11.5} strokeWidth={2} />}
-            label="Worktrees"
-            active={worktreesOpen}
-            onClick={() => useGitUi.getState().setWorktreePanelOpen(!worktreesOpen)}
-          />
-          <GitLauncher
-            icon={<ListOrdered size={11.5} strokeWidth={2} />}
-            label="Rebase"
-            active={rebaseOpen}
-            onClick={() => useGitUi.getState().setRebasePanelOpen(!rebaseOpen)}
-          />
-          <GitLauncher
-            icon={<History size={11.5} strokeWidth={2} />}
-            label="Reflog"
-            active={reflogOpen}
-            onClick={() => useGitUi.getState().setReflogPanelOpen(!reflogOpen)}
-          />
-          <GitLauncher
-            icon={<Target size={11.5} strokeWidth={2} />}
-            label="Bisect"
-            active={bisectOpen}
-            onClick={() => useGitUi.getState().setBisectPanelOpen(!bisectOpen)}
-          />
-        </div>
-      )}
-
       {/* Mid-operation bar — a stopped rebase (conflict, or an `edit` row)
           needs continue / abort, and the other multi-step operations at
           least need saying out loud. */}
@@ -1263,17 +1224,6 @@ function notifyGitFailure(title: string, err: unknown): void {
             </>
           )}
         </div>
-      )}
-
-      {/* An open worktree / rebase section replaces the rest of the panel —
-          stash, composer and change list — rather than stacking above it. */}
-      {panelOpen && (
-        <Suspense fallback={null}>
-          {worktreesInline && <WorktreePanel inline />}
-          {rebaseInline && <RebasePanel inline />}
-          {reflogInline && <ReflogPanel inline />}
-          {bisectInline && <BisectPanel inline />}
-        </Suspense>
       )}
 
       {/* Agent review bar — only while a baseline exists for this root. Names
@@ -1362,7 +1312,7 @@ function notifyGitFailure(title: string, err: unknown): void {
       )}
 
       {/* Branch management panel */}
-      {branchPanelOpen && !panelOpen && (
+      {branchPanelOpen && (
         <div className="shrink-0 border-b border-border-hairline bg-surface-1 px-2.5 py-2">
           {/* Create branch */}
           <div className="mb-2 flex gap-1.5">
@@ -1423,7 +1373,7 @@ function notifyGitFailure(title: string, err: unknown): void {
       )}
 
       {/* Commit composer — card with focus bloom + gradient commit bar */}
-      {isTauri && root && !panelOpen && (
+      {isTauri && root && (
         <div className="shrink-0 border-b border-border-hairline bg-surface-1/30 px-2.5 py-2.5">
           <div
             className={cn(
@@ -1527,7 +1477,6 @@ function notifyGitFailure(title: string, err: unknown): void {
       )}
 
       {/* Body */}
-      {!panelOpen && (
       <div className="selectable flex-1 overflow-auto px-1.5 py-2">
         {!isTauri && (
           <div className="mx-1 mb-2 flex items-start gap-2 rounded-lg border border-status-warn/20 bg-status-warn/[0.06] px-2.5 py-2 font-display text-2xs leading-relaxed">
@@ -1604,10 +1553,62 @@ function notifyGitFailure(title: string, err: unknown): void {
           );
         })}
       </div>
+
+      {/* Git tools — Changes / PRs / worktrees / rebase / reflog / bisect, each
+          a collapsible section in the bottom stack beside stash and tags. */}
+      {isTauri && root && (
+        <Suspense fallback={null}>
+          <GitToolRow
+            icon={<FileText size={11} strokeWidth={2} />}
+            label="Changes"
+            count={total}
+            onClick={() => useGitUi.getState().closeGitPanels()}
+          />
+          <GitToolSection
+            icon={<GitPullRequest size={11} strokeWidth={2} />}
+            label="Pull Requests"
+            open={prInline}
+            onOpen={() => useGitUi.getState().openPrList()}
+          >
+            <PrPanel inline />
+          </GitToolSection>
+          <GitToolSection
+            icon={<FolderTree size={11} strokeWidth={2} />}
+            label="Worktrees"
+            open={worktreesInline}
+            onOpen={() => useGitUi.getState().setWorktreePanelOpen(true)}
+          >
+            <WorktreePanel inline />
+          </GitToolSection>
+          <GitToolSection
+            icon={<ListOrdered size={11} strokeWidth={2} />}
+            label="Rebase"
+            open={rebaseInline}
+            onOpen={() => useGitUi.getState().setRebasePanelOpen(true)}
+          >
+            <RebasePanel inline />
+          </GitToolSection>
+          <GitToolSection
+            icon={<History size={11} strokeWidth={2} />}
+            label="Reflog"
+            open={reflogInline}
+            onOpen={() => useGitUi.getState().setReflogPanelOpen(true)}
+          >
+            <ReflogPanel inline />
+          </GitToolSection>
+          <GitToolSection
+            icon={<Target size={11} strokeWidth={2} />}
+            label="Bisect"
+            open={bisectInline}
+            onOpen={() => useGitUi.getState().setBisectPanelOpen(true)}
+          >
+            <BisectPanel inline />
+          </GitToolSection>
+        </Suspense>
       )}
 
       {/* Stash section */}
-      {isTauri && root && !panelOpen && (
+      {isTauri && root && (
         <div className="shrink-0 border-t border-border-hairline">
           <button
             onClick={() => setStashOpen((o) => !o)}
@@ -1652,7 +1653,7 @@ function notifyGitFailure(title: string, err: unknown): void {
       )}
 
       {/* Tags */}
-      {isTauri && root && !panelOpen && (
+      {isTauri && root && (
         <div className="shrink-0 border-t border-border-hairline">
           <button
             onClick={() => setTagsOpen((o) => !o)}
@@ -1709,7 +1710,7 @@ function notifyGitFailure(title: string, err: unknown): void {
       )}
 
       {/* Remotes */}
-      {isTauri && root && !panelOpen && (
+      {isTauri && root && (
         <div className="shrink-0 border-t border-border-hairline">
           <button
             onClick={() => setRemotesOpen((o) => !o)}
@@ -1774,7 +1775,7 @@ function notifyGitFailure(title: string, err: unknown): void {
       )}
 
       {/* Submodules — hidden entirely for the repos that have none. */}
-      {isTauri && root && !panelOpen && submodules.length > 0 && (
+      {isTauri && root && submodules.length > 0 && (
         <div className="shrink-0 border-t border-border-hairline">
           <button
             onClick={() => setSubmodulesOpen((o) => !o)}
@@ -1869,42 +1870,63 @@ function notifyGitFailure(title: string, err: unknown): void {
   );
 }
 
-/** Equal-width launcher chip for the heavier git panels (PRs / worktrees /
- *  rebase). Icon + label, kept quiet until hover. */
-function GitLauncher({
+/** One row of the bottom stack: chevron slot, icon, label, optional count.
+ *  Styled to match the stash / tags / remotes rows it sits beside. */
+function GitToolRow({
   icon,
   label,
+  count,
+  open,
   onClick,
-  active = false,
 }: {
   icon: React.ReactNode;
   label: string;
+  count?: number;
+  /** Omitted for the rows that don't expand (Changes, Pull Requests). */
+  open?: boolean;
   onClick: () => void;
-  /** Marks the launchers whose panel expands inline below the bar. */
-  active?: boolean;
 }) {
   return (
-    <Tooltip label={label} className="min-w-0 flex-1">
+    <div className="shrink-0 border-t border-border-hairline">
       <button
-        type="button"
         onClick={onClick}
-        aria-label={label}
-        aria-expanded={active}
-        className={cn(
-          'group/launch flex h-[26px] w-full min-w-0 items-center justify-center rounded-md',
-          'border transition-all duration-150 ease-apple',
-          active
-            ? 'border-accent/35 bg-accent-soft text-fg-base'
-            : 'border-edge-1 bg-surface-1 text-fg-muted hover:border-accent/25 hover:text-fg-base hover:shadow-[inset_0_1px_0_0_rgba(255,255,255,0.04)]',
-          'active:scale-[0.97]',
-        )}
+        aria-expanded={open}
+        className="flex w-full items-center gap-1.5 px-2.5 py-1.5 text-left hover:bg-surface-1"
       >
-        <span className="shrink-0 text-fg-subtle transition-colors duration-150 group-hover/launch:text-accent-bright">
-          {icon}
-        </span>
+        {open === undefined ? (
+          <span aria-hidden className="w-2.5 shrink-0" />
+        ) : open ? (
+          <ChevronDown size={10} strokeWidth={2} className="text-fg-subtle" />
+        ) : (
+          <ChevronRight size={10} strokeWidth={2} className="text-fg-subtle" />
+        )}
+        <span className="shrink-0 text-fg-muted">{icon}</span>
+        <span className="flex-1 font-sans text-xs text-fg-muted">{label}</span>
+        {count !== undefined && count > 0 && (
+          <span className="rounded-full bg-surface-2 px-1.5 font-mono text-2xs text-fg-subtle">{count}</span>
+        )}
       </button>
-    </Tooltip>
+    </div>
   );
+}
+
+/** A git tool as an accordion section. Collapsed it is a `GitToolRow`; open,
+ *  the panel supplies its own (compact) header, so the row steps aside. */
+function GitToolSection({
+  icon,
+  label,
+  open,
+  onOpen,
+  children,
+}: {
+  icon: React.ReactNode;
+  label: string;
+  open: boolean;
+  onOpen: () => void;
+  children: React.ReactNode;
+}) {
+  if (open) return <>{children}</>;
+  return <GitToolRow icon={icon} label={label} open={false} onClick={onOpen} />;
 }
 
 /** Sticky on/off pill for a commit flag (`-S`, `-s`). */

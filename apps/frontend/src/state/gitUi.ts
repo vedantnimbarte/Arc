@@ -42,6 +42,9 @@ interface GitUiState {
   bisectPanelOpen: boolean;
   setBisectPanelOpen: (open: boolean) => void;
 
+  /** Collapse every git tool section at once — what the Changes row does. */
+  closeGitPanels: () => void;
+
   /** Commit switches, remembered across sessions: `-S` (signature) and `-s`
    *  (Signed-off-by trailer). Off by default — a repo without a signing key
    *  configured fails the commit outright with `-S`. */
@@ -54,14 +57,18 @@ interface GitUiState {
    *  PR's detail, or in the create flow. Tracking which view is active in
    *  the store keeps PrPanel.tsx stateless across mounts. */
   prPanelView: { kind: 'closed' } | { kind: 'list' } | { kind: 'detail'; number: number } | { kind: 'create' };
+  /** Same inline-vs-modal split as the other tools: the PR panel is a
+   *  collapsible section of the source control panel until it's expanded. */
+  prExpanded: boolean;
+  setPrExpanded: (v: boolean) => void;
   openPrList: () => void;
   openPrDetail: (number: number) => void;
   openPrCreate: () => void;
   closePrPanel: () => void;
 }
 
-// Worktrees, rebase and reflog share one slot in the source control panel —
-// opening one replaces the other rather than stacking a second section below.
+// Every git tool is its own collapsible section in the source control panel;
+// they open independently, so only `closeGitPanels` clears the lot.
 const CLOSED = {
   worktreePanelOpen: false,
   worktreeExpanded: false,
@@ -77,10 +84,9 @@ export const useGitUi = create<GitUiState>()(
   persist(
     (set) => ({
       ...CLOSED,
-      setWorktreePanelOpen: (open) =>
-        set(open ? { ...CLOSED, worktreePanelOpen: true } : CLOSED),
+      setWorktreePanelOpen: (open) => set({ worktreePanelOpen: open, worktreeExpanded: false }),
       toggleWorktreePanel: () =>
-        set((s) => (s.worktreePanelOpen ? CLOSED : { ...CLOSED, worktreePanelOpen: true })),
+        set((s) => ({ worktreePanelOpen: !s.worktreePanelOpen, worktreeExpanded: false })),
 
       setWorktreeExpanded: (v) => set({ worktreeExpanded: v }),
       setRebaseExpanded: (v) => set({ rebaseExpanded: v }),
@@ -91,9 +97,10 @@ export const useGitUi = create<GitUiState>()(
       openCherryPick: (ctx) => set({ cherryPickTarget: ctx }),
       closeCherryPick: () => set({ cherryPickTarget: null }),
 
-      setRebasePanelOpen: (open) => set(open ? { ...CLOSED, rebasePanelOpen: true } : CLOSED),
-      setReflogPanelOpen: (open) => set(open ? { ...CLOSED, reflogPanelOpen: true } : CLOSED),
-      setBisectPanelOpen: (open) => set(open ? { ...CLOSED, bisectPanelOpen: true } : CLOSED),
+      setRebasePanelOpen: (open) => set({ rebasePanelOpen: open, rebaseExpanded: false }),
+      setReflogPanelOpen: (open) => set({ reflogPanelOpen: open, reflogExpanded: false }),
+      setBisectPanelOpen: (open) => set({ bisectPanelOpen: open, bisectExpanded: false }),
+      closeGitPanels: () => set({ ...CLOSED, prPanelView: { kind: 'closed' }, prExpanded: false }),
 
       signCommits: false,
       setSignCommits: (v) => set({ signCommits: v }),
@@ -101,10 +108,12 @@ export const useGitUi = create<GitUiState>()(
       setSignoffCommits: (v) => set({ signoffCommits: v }),
 
       prPanelView: { kind: 'closed' },
+      prExpanded: false,
+      setPrExpanded: (v) => set({ prExpanded: v }),
       openPrList: () => set({ prPanelView: { kind: 'list' } }),
       openPrDetail: (number) => set({ prPanelView: { kind: 'detail', number } }),
       openPrCreate: () => set({ prPanelView: { kind: 'create' } }),
-      closePrPanel: () => set({ prPanelView: { kind: 'closed' } }),
+      closePrPanel: () => set({ prPanelView: { kind: 'closed' }, prExpanded: false }),
     }),
     {
       name: 'arc-git-ui',

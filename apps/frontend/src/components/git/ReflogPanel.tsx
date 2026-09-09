@@ -6,7 +6,7 @@ import { useGit } from '../../state/git';
 import { useGitUi } from '../../state/gitUi';
 import { askConfirm } from '../../state/confirm';
 import { toast } from '../../state/toast';
-import { PanelShell } from './PanelShell';
+import { PanelHeading, PanelShell } from './PanelShell';
 import { cn } from '../../lib/cn';
 
 /**
@@ -78,8 +78,13 @@ export function ReflogPanel({ inline = false }: { inline?: boolean }) {
 
   return (
     <PanelShell inline={inline} width="680px" onClose={() => onClose(false)}>
-      <div className="flex items-center justify-between border-b border-border-hairline px-4 py-2.5">
-        <div className="flex items-center gap-2 font-display text-sm font-semibold tracking-tight text-fg-base">
+      <div
+        className={cn(
+          'flex items-center justify-between border-b border-border-hairline',
+          inline ? 'px-2.5 py-1.5' : 'px-4 py-2.5',
+        )}
+      >
+        <PanelHeading inline={inline} onCollapse={() => onClose(false)}>
           <History size={12} strokeWidth={2.1} className="text-fg-muted" />
           Reflog
           {entries.length > 0 && (
@@ -87,7 +92,7 @@ export function ReflogPanel({ inline = false }: { inline?: boolean }) {
               · {entries.length}
             </span>
           )}
-        </div>
+        </PanelHeading>
         <div className="flex items-center gap-1">
           <button
             onClick={() => setExpanded(inline)}
@@ -105,13 +110,17 @@ export function ReflogPanel({ inline = false }: { inline?: boolean }) {
           >
             <RefreshCw size={11} strokeWidth={2.1} className={loading ? 'animate-spin' : ''} />
           </button>
-          <button
-            onClick={() => onClose(false)}
-            title="Close (esc)"
-            className="rounded p-1 text-fg-subtle transition-colors hover:bg-surface-2 hover:text-fg-base"
-          >
-            <X size={11} strokeWidth={2.2} />
-          </button>
+          {/* Inline the heading itself collapses the section, so this would
+              be a second control for the same thing. The modal needs it. */}
+          {!inline && (
+            <button
+              onClick={() => onClose(false)}
+              title="Close (esc)"
+              className="rounded p-1 text-fg-subtle transition-colors hover:bg-surface-2 hover:text-fg-base"
+            >
+              <X size={11} strokeWidth={2.2} />
+            </button>
+          )}
         </div>
       </div>
 

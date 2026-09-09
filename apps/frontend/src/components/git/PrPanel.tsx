@@ -2,6 +2,8 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ArrowLeft,
   ExternalLink,
+  Maximize2,
+  Minimize2,
   FileDiff,
   GitMerge,
   GitPullRequest,
@@ -32,6 +34,7 @@ import { useFiles } from '../../state/files';
 import { useGitUi } from '../../state/gitUi';
 import { useGitHub } from '../../state/github';
 import { cn } from '../../lib/cn';
+import { PanelHeading, PanelShell } from './PanelShell';
 
 /**
  * GitHub PR panel — list, detail, create. V1 scope: read + create only.
@@ -39,13 +42,18 @@ import { cn } from '../../lib/cn';
  *
  * Auth: PAT stored in OS keychain under `dev.arc.terminal.git-host`. If the
  * token is missing, the panel shows a one-time token-entry pane.
+ *
+ * Inline it is a collapsible section of the source control panel, like every
+ * other git tool; the standalone git window and the expand button get the
+ * modal instead.
  */
-export function PrPanel() {
+export function PrPanel({ inline = false }: { inline?: boolean }) {
   const view = useGitUi((s) => s.prPanelView);
   const close = useGitUi((s) => s.closePrPanel);
   const openList = useGitUi((s) => s.openPrList);
   const openDetail = useGitUi((s) => s.openPrDetail);
   const openCreate = useGitUi((s) => s.openPrCreate);
+  const setExpanded = useGitUi((s) => s.setPrExpanded);
   const root = useFiles((s) => s.root);
 
   const [slug, setSlug] = useState<GitHostRepoSlug | null>(null);
@@ -53,13 +61,13 @@ export function PrPanel() {
 
   // Esc closes (only from the list view; the detail view shows a back arrow).
   useEffect(() => {
-    if (view.kind === 'closed') return;
+    if (view.kind === 'closed' || inline) return;
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') close();
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [view, close]);
+  }, [view, close, inline]);
 
   // Detect repo slug + token state when the panel opens.
   useEffect(() => {
@@ -76,6 +84,59 @@ export function PrPanel() {
 
   const isGitHubRepo = slug !== null;
 
+  const body = (
+    <>
+      <Header
+        slug={slug}
+        view={view}
+        inline={inline}
+        onBack={view.kind === 'detail' ? openList : null}
+        onCreate={view.kind === 'list' && isGitHubRepo && hasToken === true ? openCreate : null}
+        onExpand={() => setExpanded(inline)}
+        onClose={close}
+      />
+
+      {!root && (
+        <EmptyMessage>open a repository first</EmptyMessage>
+      )}
+
+      {root && !isGitHubRepo && (
+        <EmptyMessage>
+          no <span className="font-mono">origin</span> remote pointing at github.com on this repo.
+        </EmptyMessage>
+      )}
+
+      {root && isGitHubRepo && hasToken === false && (
+        <TokenPane
+          onSaved={() => setHasToken(true)}
+        />
+      )}
+
+      {root && isGitHubRepo && hasToken === true && view.kind === 'list' && (
+        <ListView slug={slug} onPick={openDetail} />
+      )}
+
+      {root && isGitHubRepo && hasToken === true && view.kind === 'detail' && (
+        <DetailView root={root} number={view.number} />
+      )}
+
+      {root && isGitHubRepo && hasToken === true && view.kind === 'create' && (
+        <CreateView
+          root={root}
+          onCreated={(pr) => openDetail(pr.number)}
+          onCancel={openList}
+        />
+      )}
+    </>
+  );
+
+  if (inline) {
+    return (
+      <PanelShell inline width="860px" onClose={close}>
+        {body}
+      </PanelShell>
+    );
+  }
   return (
     <div
       className="fixed inset-0 z-50 flex items-start justify-center bg-scrim-2 backdrop-blur-sm"
@@ -85,45 +146,7 @@ export function PrPanel() {
         onClick={(e) => e.stopPropagation()}
         className="material-sheet mt-[6vh] flex h-[80vh] w-[860px] max-w-[96vw] animate-sheet-in flex-col overflow-hidden rounded-window shadow-sheet ring-1 ring-edge-2"
       >
-        <Header
-          slug={slug}
-          view={view}
-          onBack={view.kind === 'detail' ? openList : null}
-          onCreate={view.kind === 'list' && isGitHubRepo && hasToken === true ? openCreate : null}
-          onClose={close}
-        />
-
-        {!root && (
-          <EmptyMessage>open a repository first</EmptyMessage>
-        )}
-
-        {root && !isGitHubRepo && (
-          <EmptyMessage>
-            no <span className="font-mono">origin</span> remote pointing at github.com on this repo.
-          </EmptyMessage>
-        )}
-
-        {root && isGitHubRepo && hasToken === false && (
-          <TokenPane
-            onSaved={() => setHasToken(true)}
-          />
-        )}
-
-        {root && isGitHubRepo && hasToken === true && view.kind === 'list' && (
-          <ListView slug={slug} onPick={openDetail} />
-        )}
-
-        {root && isGitHubRepo && hasToken === true && view.kind === 'detail' && (
-          <DetailView root={root} number={view.number} />
-        )}
-
-        {root && isGitHubRepo && hasToken === true && view.kind === 'create' && (
-          <CreateView
-            root={root}
-            onCreated={(pr) => openDetail(pr.number)}
-            onCancel={openList}
-          />
-        )}
+        {body}
       </div>
     </div>
   );
@@ -132,35 +155,47 @@ export function PrPanel() {
 function Header({
   slug,
   view,
+  inline,
   onBack,
   onCreate,
+  onExpand,
   onClose,
 }: {
   slug: GitHostRepoSlug | null;
   view: { kind: string };
+  inline: boolean;
   onBack: (() => void) | null;
   onCreate: (() => void) | null;
+  onExpand: () => void;
   onClose: () => void;
 }) {
   return (
-    <div className="flex items-center justify-between border-b border-border-hairline px-4 py-2.5">
-      <div className="flex items-center gap-2 font-display text-sm font-semibold tracking-tight text-fg-base">
+    <div
+      className={cn(
+        'flex items-center justify-between border-b border-border-hairline',
+        inline ? 'px-2.5 py-1.5' : 'px-4 py-2.5',
+      )}
+    >
+      <div className="flex min-w-0 flex-1 items-center gap-1">
+        {/* Back sits outside the heading — the heading is itself a button. */}
         {onBack && (
           <button
             onClick={onBack}
-            className="rounded p-1 text-fg-muted transition-colors hover:bg-surface-2 hover:text-fg-base"
+            className="shrink-0 rounded p-1 text-fg-muted transition-colors hover:bg-surface-2 hover:text-fg-base"
             title="Back to list"
           >
             <ArrowLeft size={12} strokeWidth={2.2} />
           </button>
         )}
-        <GitPullRequest size={12} strokeWidth={2.1} className="text-fg-muted" />
-        {view.kind === 'create' ? 'New Pull Request' : 'Pull Requests'}
-        {slug && (
-          <span className="font-mono text-2xs font-normal text-fg-subtle">
-            · {slug.owner}/{slug.name}
-          </span>
-        )}
+        <PanelHeading inline={inline} onCollapse={onClose}>
+          <GitPullRequest size={12} strokeWidth={2.1} className="shrink-0 text-fg-muted" />
+          {view.kind === 'create' ? 'New Pull Request' : 'Pull Requests'}
+          {slug && (
+            <span className="truncate font-mono text-2xs font-normal text-fg-subtle">
+              · {slug.owner}/{slug.name}
+            </span>
+          )}
+        </PanelHeading>
       </div>
       <div className="flex items-center gap-1">
         {onCreate && (
@@ -173,12 +208,24 @@ function Header({
           </button>
         )}
         <button
-          onClick={onClose}
-          title="Close (esc)"
+          onClick={onExpand}
+          title={inline ? 'Expand to a window' : 'Show in the source control panel'}
+          aria-label={inline ? 'Expand to a window' : 'Show in the source control panel'}
           className="rounded p-1 text-fg-subtle transition-colors hover:bg-surface-2 hover:text-fg-base"
         >
-          <X size={11} strokeWidth={2.2} />
+          {inline ? <Maximize2 size={11} strokeWidth={2.1} /> : <Minimize2 size={11} strokeWidth={2.1} />}
         </button>
+        {/* Inline the heading itself collapses the section, so this would be a
+            second control for the same thing. The modal still needs it. */}
+        {!inline && (
+          <button
+            onClick={onClose}
+            title="Close (esc)"
+            className="rounded p-1 text-fg-subtle transition-colors hover:bg-surface-2 hover:text-fg-base"
+          >
+            <X size={11} strokeWidth={2.2} />
+          </button>
+        )}
       </div>
     </div>
   );

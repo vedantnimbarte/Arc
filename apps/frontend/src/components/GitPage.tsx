@@ -335,7 +335,7 @@ function TitleBar({
       </div>
       <div className="absolute right-2.5 top-1/2 flex -translate-y-1/2 items-center gap-1">
         <button
-          onClick={() => useGitUi.getState().openPrList()}
+          onClick={() => { useGitUi.getState().openPrList(); useGitUi.getState().setPrExpanded(true); }}
           className="group flex h-6 items-center gap-1 rounded-full px-2 text-fg-subtle transition-all duration-200 ease-out hover:bg-surface-2 hover:text-fg-base active:scale-95"
           aria-label="Pull requests"
           title="Pull requests"
