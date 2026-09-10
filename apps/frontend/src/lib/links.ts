@@ -132,3 +132,35 @@ export function createPathLinkProvider(
     },
   };
 }
+
+/**
+ * Turn an OSC 7 payload (`file://host/path`) into a filesystem path.
+ *
+ * The awkward case is Git Bash / MSYS on Windows: `$PWD` there is
+ * `/c/Users/...`, so the URL carries a path no Windows API can open. Adopting
+ * it verbatim points the workspace at a directory that does not exist, and
+ * every `git -C` against it fails the same way a non-repo does — which is why
+ * a `cd` in that shell could leave the panel claiming "not a git repository".
+ *
+ * `windowsLike` says whether this machine uses drive letters; the caller knows
+ * from the cwd the shell started in. Off, a leading `/c/` is left alone — it
+ * is a perfectly ordinary directory on Linux.
+ *
+ * Returns null when the payload isn't a usable `file://` URL.
+ */
+export function osc7Path(data: string, windowsLike: boolean): string | null {
+  const url = data.trim();
+  if (!url.startsWith('file://')) return null;
+  let path = decodeURIComponent(url.slice('file://'.length));
+  // Drop the host portion: file://host/path → /path
+  const slash = path.indexOf('/');
+  if (slash < 0) return null;
+  path = path.slice(slash);
+  // Windows: `/C:/Users/...` → `C:/Users/...`
+  if (/^\/[a-zA-Z]:/.test(path)) path = path.slice(1);
+  // MSYS / Cygwin: `/c/Users/...` → `C:/Users/...`
+  else if (windowsLike && /^\/[a-zA-Z]\//.test(path)) {
+    path = `${path[1]!.toUpperCase()}:${path.slice(2)}`;
+  }
+  return path || null;
+}
