@@ -272,6 +272,7 @@ export function SourceControl() {
 
   // Single shared refresh driver lives in `Sidebar`; we just subscribe to the cache.
   const info = useGit((s) => s.info);
+  const repoRoot = useGit((s) => s.repoRoot);
   const entries = useGit((s) => s.entries);
   const loading = useGit((s) => s.loading);
   const storeError = useGit((s) => s.error);
@@ -1088,7 +1089,7 @@ function notifyGitFailure(title: string, err: unknown): void {
               : 'not a git repository'
           }
         >
-          {info?.branch ?? '—'}
+          {info?.branch ?? (info?.head_short ? `detached @ ${info.head_short}` : '—')}
         </button>
         {/* Ahead/behind chevrons — only render the side that's non-zero. */}
         {info && (info.ahead > 0 || info.behind > 0) && (
@@ -1496,7 +1497,7 @@ function notifyGitFailure(title: string, err: unknown): void {
           </div>
         )}
         {isTauri && !error && total === 0 && !loading && (
-          <EmptyState branch={info?.branch ?? null} />
+          <EmptyState isRepo={!!repoRoot} />
         )}
         {SECTION_ORDER.map((section) => {
           const rows = grouped[section];
@@ -2077,7 +2078,7 @@ function SectionAction({
 }
 
 /** Small illustrative empty-state mark + line of copy. */
-function EmptyState({ branch }: { branch: string | null }) {
+function EmptyState({ isRepo }: { isRepo: boolean }) {
   return (
     <div className="flex flex-col items-center gap-3 px-2 py-8 text-center">
       {/* A trio of stacked rings — pure CSS, no asset. Reads as "all clean". */}
@@ -2094,7 +2095,7 @@ function EmptyState({ branch }: { branch: string | null }) {
           aria-hidden
           className="absolute inset-[12px] flex items-center justify-center rounded-full bg-accent-soft ring-1 ring-inset ring-accent/20"
         >
-          {branch ? (
+          {isRepo ? (
             <Check size={9} strokeWidth={2.4} className="text-accent-bright/80" />
           ) : (
             <X size={9} strokeWidth={2.4} className="text-fg-subtle" />
@@ -2103,10 +2104,10 @@ function EmptyState({ branch }: { branch: string | null }) {
       </div>
       <div className="space-y-0.5">
         <p className="font-display text-xs font-medium tracking-tight text-fg-base/85">
-          {branch ? 'Working tree clean' : 'Not a git repository'}
+          {isRepo ? 'Working tree clean' : 'Not a git repository'}
         </p>
         <p className="font-display text-2xs leading-relaxed text-fg-subtle">
-          {branch
+          {isRepo
             ? 'Every change committed. Make an edit to see it here.'
             : 'Open a folder under git to enable source control.'}
         </p>

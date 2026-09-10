@@ -38,6 +38,10 @@ export function normPathKey(p: string): string {
  */
 interface GitStoreState {
   info: GitInfo | null;
+  /** `git rev-parse --show-toplevel`, or null when the root isn't in a repo.
+   *  Distinct from `info.branch`, which is also null on a detached HEAD and
+   *  in a repo with no commits yet. */
+  repoRoot: string | null;
   entries: GitChangeEntry[];
   diffStat: GitDiffStat | null;
   /** Per-file decorations keyed by normalized absolute path (file tree). */
@@ -132,6 +136,7 @@ let lastSnapshot: string | null = null;
 
 export const useGit = create<GitStoreState>((set) => ({
   info: null,
+  repoRoot: null,
   entries: [],
   diffStat: null,
   statusByPath: new Map(),
@@ -147,6 +152,7 @@ export const useGit = create<GitStoreState>((set) => ({
       lastSnapshot = null;
       set({
         info: null,
+        repoRoot: null,
         entries: [],
         diffStat: null,
         statusByPath: new Map(),
@@ -176,6 +182,7 @@ export const useGit = create<GitStoreState>((set) => ({
       const { statusByPath, dirtyDirs, ignoredPaths } = buildDecorations(repoRoot, entries);
       set({
         info,
+        repoRoot,
         // Ignored paths ride along on the same `git status` call but aren't
         // changes — keep them out of the list SourceControl renders and counts.
         entries: ignoredPaths.size > 0 ? entries.filter((e) => e.kind !== 'ignored') : entries,
@@ -190,6 +197,7 @@ export const useGit = create<GitStoreState>((set) => ({
       if (seq !== refreshSeq) return;
       lastSnapshot = null;
       set({
+        repoRoot: null,
         entries: [],
         diffStat: null,
         statusByPath: new Map(),
@@ -204,6 +212,7 @@ export const useGit = create<GitStoreState>((set) => ({
     lastSnapshot = null;
     set({
       info: null,
+      repoRoot: null,
       entries: [],
       diffStat: null,
       statusByPath: new Map(),
