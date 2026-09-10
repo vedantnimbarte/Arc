@@ -1,4 +1,6 @@
+import { useState } from 'react';
 import { ArrowDown, ArrowUp, Command as CommandIcon, FolderOpen, GitBranch } from 'lucide-react';
+import { BranchPicker, type BranchPickerAnchor } from './BranchPicker';
 import { useFiles } from '../state/files';
 import { useGit } from '../state/git';
 import { runCommand } from '../state/commands';
@@ -25,6 +27,7 @@ export function StatusBar() {
   );
 
   const paletteKbd = formatBinding(getBinding('open-command-palette'));
+  const [branchAnchor, setBranchAnchor] = useState<BranchPickerAnchor | null>(null);
 
   return (
     <footer className="material-toolbar flex h-6 shrink-0 items-center gap-1 border-t border-border-hairline px-2 font-display text-2xs text-fg-muted">
@@ -43,9 +46,12 @@ export function StatusBar() {
       {info?.branch && (
         <Item
           icon={GitBranch}
-          onClick={() => showSidebarView('git')}
+          onClick={(e) => {
+            const r = e.currentTarget.getBoundingClientRect();
+            setBranchAnchor({ x: r.left, y: r.top, placement: 'above' });
+          }}
           label={info.branch}
-          title={`On branch ${info.branch} — open Source Control`}
+          title={`On branch ${info.branch} — switch branch`}
         >
           {info.ahead > 0 && (
             <span className="flex items-center tabular-nums">
@@ -83,6 +89,14 @@ export function StatusBar() {
       >
         <kbd className="font-mono text-fg-subtle">{paletteKbd}</kbd>
       </Item>
+
+      {branchAnchor && (
+        <BranchPicker
+          anchor={branchAnchor}
+          onClose={() => setBranchAnchor(null)}
+          onCheckedOut={() => root && void useGit.getState().refresh(root)}
+        />
+      )}
     </footer>
   );
 }
@@ -104,7 +118,7 @@ function Item({
   icon: typeof GitBranch;
   label: string;
   title: string;
-  onClick: () => void;
+  onClick: (e: React.MouseEvent<HTMLButtonElement>) => void;
   /** Draw attention — used for the "no folder yet" call to action. */
   accent?: boolean;
   children?: React.ReactNode;
