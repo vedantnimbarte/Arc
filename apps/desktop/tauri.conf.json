@@ -42,6 +42,18 @@
       "icons/icon.icns"
     ],
     "category": "DeveloperTool",
+    "windows": {
+      "wix": {
+        "bannerPath": "icons/installer-banner.bmp",
+        "dialogImagePath": "icons/installer-dialog.bmp"
+      },
+      "nsis": {
+        "installerIcon": "icons/icon.ico",
+        "uninstallerIcon": "icons/icon.ico",
+        "headerImage": "icons/installer-header.bmp",
+        "sidebarImage": "icons/installer-sidebar.bmp"
+      }
+    },
     "shortDescription": "AI-native terminal & agent runtime",
     "longDescription": "ARC is an AI-native terminal that combines high-performance shell I/O with agent orchestration and an embedded code editor."
   },

@@ -83,8 +83,21 @@ export function WorkspaceRail({ onOpenSettings }: { onOpenSettings: () => void }
 
   return (
     <div className="material-sidebar flex h-full w-12 shrink-0 flex-col items-center border-r border-border-hairline">
-      {/* Drag region aligned to the top bar so the window still moves up here. */}
-      <div data-tauri-drag-region="deep" className="h-9 w-full shrink-0" />
+      {/* Drag region aligned to the top bar so the window still moves up here —
+          the logo rides along, pointer-events off so it never eats the drag. */}
+      <div
+        data-tauri-drag-region="deep"
+        className="flex h-9 w-full shrink-0 items-center justify-center"
+      >
+        <img
+          src="/arc-logo.png"
+          alt="Arc"
+          width={22}
+          height={22}
+          draggable={false}
+          className="pointer-events-none h-[22px] w-[22px] select-none rounded-md"
+        />
+      </div>
 
       <div className="flex min-h-0 flex-1 flex-col items-center gap-3.5 overflow-y-auto py-2">
         {workspaces.map((w) => {

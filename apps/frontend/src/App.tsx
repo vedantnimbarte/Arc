@@ -276,7 +276,7 @@ export default function App() {
       s.reflogExpanded ||
       s.bisectExpanded ||
       s.cherryPickTarget !== null ||
-      s.prPanelView.kind !== 'closed',
+      (s.prPanelView.kind !== 'closed' && s.prExpanded),
   );
   const sidebarWidth = useFiles((s) => s.sidebarWidth);
   const sidebarView = useFiles((s) => s.sidebarView);
@@ -540,6 +540,7 @@ export default function App() {
         keywords: ['pr', 'pull', 'request', 'github', 'review', 'merge'],
         icon: GitPullRequest,
         run: () => {
+          useFiles.getState().showSidebarView('git');
           void import('./state/gitUi').then(({ useGitUi }) => {
             useGitUi.getState().openPrList();
           });

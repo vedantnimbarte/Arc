@@ -22,7 +22,7 @@ import {
   sessionScrollbackSave,
   type PtyId,
 } from '../lib/tauri';
-import { createPathLinkProvider } from '../lib/links';
+import { createPathLinkProvider, osc7Path } from '../lib/links';
 import { isRemotePath } from '../lib/remote';
 import { formatDuration } from '../lib/notify';
 import { NewTabSplash } from './NewTabSplash';
@@ -747,20 +747,15 @@ export function Terminal({ sessionKey }: Props) {
         // their CWD changes. We sync the file tree root to it so the tree
         // follows the shell. Shells that don't emit it (default cmd.exe,
         // unmodified PowerShell) fall back to the cd-sniffer below.
+        // Drive letters in the shell's own starting directory are what tell us
+        // an MSYS `/c/...` payload needs translating — see `osc7Path`.
+        const windowsLike = /^[A-Za-z]:/.test(shellCwd ?? '');
         term.parser.registerOscHandler(7, (data) => {
-          const url = data.trim();
-          if (!url.startsWith('file://')) return false;
-          let path = decodeURIComponent(url.slice('file://'.length));
-          // Drop the host portion: file://host/path → /path
-          const slash = path.indexOf('/');
-          if (slash >= 0) path = path.slice(slash);
-          // Windows: `/C:/Users/...` → `C:/Users/...`
-          if (/^\/[a-zA-Z]:/.test(path)) path = path.slice(1);
-          if (path) {
-            shellCwd = path;
-            useFiles.getState().setRoot(path);
-            setTabCwd(path);
-          }
+          const path = osc7Path(data, windowsLike);
+          if (!path) return false;
+          shellCwd = path;
+          useFiles.getState().setRoot(path);
+          setTabCwd(path);
           return true; // we handled the OSC
         });
 

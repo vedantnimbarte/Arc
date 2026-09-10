@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import {
   AlertTriangle,
   Check,
@@ -17,31 +18,64 @@ import {
 import { useFiles } from '../state/files';
 import { cn } from '../lib/cn';
 
+/** Where the popover hangs off its trigger, in viewport coordinates. */
+export interface BranchPickerAnchor {
+  x: number;
+  y: number;
+  /** 'above' for the status bar, 'below' for a pane header. */
+  placement: 'above' | 'below';
+}
+
 interface Props {
-  open: boolean;
+  anchor: BranchPickerAnchor;
+  /** Repo to list. Defaults to the workspace root; a pane header passes its
+   *  own cwd, which may sit in a different repo. */
+  root?: string;
   onClose: () => void;
-  /** Called after a successful checkout so the status bar can refresh. */
+  /** Called after a successful checkout so the caller can refresh. */
   onCheckedOut?: (branch: string) => void;
 }
 
+const WIDTH = 420;
+const GAP = 6;
+const EDGE = 8;
+
 /**
- * Branch switcher invoked by clicking the StatusBar branch chip.
+ * Where to pin the sheet: left-aligned to the trigger but clamped to the
+ * viewport, so a chip in either corner still opens the popover in full.
+ * Exported for the test — everything here is pure arithmetic.
+ */
+export function popoverPosition(
+  anchor: BranchPickerAnchor,
+  viewportWidth: number,
+  viewportHeight: number,
+): { left: number; top: number } | { left: number; bottom: number } {
+  const left = Math.min(Math.max(EDGE, anchor.x), Math.max(EDGE, viewportWidth - WIDTH - EDGE));
+  return anchor.placement === 'above'
+    ? { left, bottom: Math.max(EDGE, viewportHeight - anchor.y + GAP) }
+    : { left, top: Math.max(EDGE, anchor.y + GAP) };
+}
+
+/**
+ * Branch switcher, hung off whichever branch label was clicked — the status
+ * bar chip or a pane header pill.
  *
  * Lists every local + remote branch in the current workspace repo, with a
  * fuzzy filter input pinned at the top and a quiet "tip-of-branch" preview
  * line under each row. Picking a remote branch ("origin/x") creates a local
  * tracking branch automatically.
  *
- * Layout follows the established CommandPalette / SearchPalette pattern
- * (centered material sheet, sheet-in animation, kbd hint footer) but adds:
+ * Layout follows the established popover pattern (portalled material sheet,
+ * kbd hint footer) but adds:
  *
  *   - Pinned current branch row with a luminous accent pip
  *   - Sectioned grouping (Local / Remote) with quiet category labels
  *   - Per-row subject + relative-time meta in the right rail
  *   - Inline "switching…" + error states
  */
-export function BranchPicker({ open, onClose, onCheckedOut }: Props) {
-  const root = useFiles((s) => s.root);
+export function BranchPicker({ anchor, root: rootProp, onClose, onCheckedOut }: Props) {
+  const workspaceRoot = useFiles((s) => s.root);
+  const root = rootProp ?? workspaceRoot;
   const [query, setQuery] = useState('');
   const [rows, setRows] = useState<GitBranchInfo[]>([]);
   const [selected, setSelected] = useState(0);
@@ -53,7 +87,6 @@ export function BranchPicker({ open, onClose, onCheckedOut }: Props) {
   // Fetch on open + after a successful checkout (which closes & re-opens
   // the modal via the parent).
   useEffect(() => {
-    if (!open) return;
     if (!isTauri || !root) {
       setRows([]);
       return;
@@ -76,19 +109,12 @@ export function BranchPicker({ open, onClose, onCheckedOut }: Props) {
     return () => {
       cancelled = true;
     };
-  }, [open, root]);
+  }, [root]);
 
-  // Focus + reset transient state on open / close.
   useEffect(() => {
-    if (open) {
-      requestAnimationFrame(() => inputRef.current?.focus());
-    } else {
-      setQuery('');
-      setSelected(0);
-      setError(null);
-      setSwitching(null);
-    }
-  }, [open]);
+    const id = requestAnimationFrame(() => inputRef.current?.focus());
+    return () => cancelAnimationFrame(id);
+  }, []);
 
   // Filtered + grouped view. The current branch is always pinned to the
   // top regardless of sort/filter, so the user has a clear anchor.
@@ -146,19 +172,17 @@ export function BranchPicker({ open, onClose, onCheckedOut }: Props) {
     }
   };
 
-  if (!open) return null;
-
   // Compute a flat index for a given row so highlighting matches keyboard.
   const indexOf = (b: GitBranchInfo) => flat.indexOf(b);
 
-  return (
-    <div
-      className="fixed inset-0 z-50 flex items-start justify-center bg-scrim-2 backdrop-blur-sm"
-      onClick={onClose}
-    >
+  const pos = popoverPosition(anchor, window.innerWidth, window.innerHeight);
+
+  return createPortal(
+    <div className="fixed inset-0 z-[60]" onMouseDown={onClose}>
       <div
-        onClick={(e) => e.stopPropagation()}
-        className="material-sheet mt-[12vh] flex w-[640px] max-w-[92vw] animate-sheet-in flex-col overflow-hidden rounded-window shadow-sheet ring-1 ring-edge-2"
+        onMouseDown={(e) => e.stopPropagation()}
+        style={{ position: 'fixed', width: WIDTH, ...pos }}
+        className="material-sheet flex max-w-[92vw] animate-popover-in flex-col overflow-hidden rounded-md shadow-sheet ring-1 ring-edge-2"
       >
         {/* Header — search input */}
         <div className="flex items-center gap-2 border-b border-border-hairline px-3.5 py-2.5">
@@ -169,7 +193,7 @@ export function BranchPicker({ open, onClose, onCheckedOut }: Props) {
             onChange={(e) => setQuery(e.target.value)}
             onKeyDown={onKeyDown}
             placeholder="switch branch…"
-            className="flex-1 bg-transparent font-display text-base text-fg-base placeholder:text-fg-subtle focus:outline-none"
+            className="flex-1 bg-transparent font-display text-sm text-fg-base placeholder:text-fg-subtle focus:outline-none"
             autoComplete="off"
             spellCheck={false}
             disabled={!!switching}
@@ -189,7 +213,7 @@ export function BranchPicker({ open, onClose, onCheckedOut }: Props) {
         )}
 
         {/* Body — sectioned branch list */}
-        <div className="max-h-[440px] overflow-y-auto py-1">
+        <div className="max-h-[min(400px,50vh)] overflow-y-auto py-1">
           {!isTauri && (
             <EmptyState text="branch list is unavailable in web preview" />
           )}
@@ -268,7 +292,8 @@ export function BranchPicker({ open, onClose, onCheckedOut }: Props) {
           </span>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
 

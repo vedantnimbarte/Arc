@@ -15,6 +15,7 @@ import {
   Sparkles,
 } from 'lucide-react';
 import { cn } from '../lib/cn';
+import { Select } from './Select';
 import { useWorkspace } from '../state/workspace';
 import {
   apiclientAppendHistory,
@@ -1294,14 +1295,16 @@ function AuthEditor({
             <label className="font-display text-2xs uppercase tracking-wider text-fg-subtle/70">
               Add to
             </label>
-            <select
+            <Select
               value={auth.apiKeyIn}
-              onChange={(e) => onChange({ ...auth, apiKeyIn: e.target.value as 'header' | 'query' })}
-              className="h-8 rounded-md border border-edge-1 bg-scrim-1 px-2 font-display text-xs text-fg-base outline-none focus:border-accent/40"
-            >
-              <option value="header">Header</option>
-              <option value="query">Query</option>
-            </select>
+              onChange={(v) => onChange({ ...auth, apiKeyIn: v })}
+              ariaLabel="Send the API key in"
+              className="h-8 py-0"
+              options={[
+                { value: 'header', label: 'Header', hint: 'Sent as a request header.' },
+                { value: 'query', label: 'Query', hint: 'Appended to the URL as a query parameter.' },
+              ]}
+            />
           </div>
         </div>
       )}

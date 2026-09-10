@@ -17,8 +17,11 @@ import {
   X,
   type LucideIcon,
 } from 'lucide-react';
+import { BranchPicker, type BranchPickerAnchor } from './BranchPicker';
 import { findLeaf, useWorkspace, type Tab } from '../state/workspace';
 import { gitStatus, isTauri } from '../lib/tauri';
+import { useFiles } from '../state/files';
+import { useGit } from '../state/git';
 import { Tooltip } from './Tooltip';
 import { cn } from '../lib/cn';
 
@@ -74,11 +77,15 @@ export function PaneHeader({ paneId }: Props) {
   const toggleMaximizePane = useWorkspace((s) => s.toggleMaximizePane);
 
   const tab = leaf?.activeTabId ? tabs.find((t) => t.id === leaf.activeTabId) ?? null : null;
-  const branch = useBranch(tab?.kind === 'terminal' ? tab.cwd : undefined);
+  const cwd = tab?.kind === 'terminal' ? tab.cwd : undefined;
+  // Bumped after a checkout so the cached branch for this cwd is re-read.
+  const [branchNonce, setBranchNonce] = useState(0);
+  const branch = useBranch(cwd, branchNonce);
 
   const rootRef = useRef<HTMLDivElement>(null);
   const [compact, setCompact] = useState(false);
   const [menuAnchor, setMenuAnchor] = useState<{ x: number; y: number } | null>(null);
+  const [branchAnchor, setBranchAnchor] = useState<BranchPickerAnchor | null>(null);
   useEffect(() => {
     const el = rootRef.current;
     if (!el) return;
@@ -175,13 +182,18 @@ export function PaneHeader({ paneId }: Props) {
       <div className="ml-auto flex shrink-0 items-center gap-1 pl-1">
         {/* Branch pill only when there's room — it's the first thing to yield. */}
         {branch && !compact && (
-          <span
-            className="flex items-center gap-1 rounded-full bg-surface-2 px-1.5 py-0.5 font-mono text-2xs text-fg-muted"
-            title={`On branch ${branch}`}
+          <button
+            type="button"
+            onClick={(e) => {
+              const r = e.currentTarget.getBoundingClientRect();
+              setBranchAnchor({ x: r.left, y: r.bottom, placement: 'below' });
+            }}
+            className="flex items-center gap-1 rounded-full bg-surface-2 px-1.5 py-0.5 font-mono text-2xs text-fg-muted transition-colors hover:bg-surface-3 hover:text-fg-base"
+            title={`On branch ${branch} — switch branch`}
           >
             <GitBranch size={9} strokeWidth={2.2} className="shrink-0" />
             <span className="max-w-[96px] truncate">{branch}</span>
-          </span>
+          </button>
         )}
 
         {/* Wide: split-right, split-down, maximize inline. Narrow: collapse them
@@ -226,6 +238,20 @@ export function PaneHeader({ paneId }: Props) {
           branch={branch}
           actions={overflow}
           onClose={() => setMenuAnchor(null)}
+        />
+      )}
+
+      {branchAnchor && (
+        <BranchPicker
+          anchor={branchAnchor}
+          root={cwd}
+          onClose={() => setBranchAnchor(null)}
+          onCheckedOut={() => {
+            if (cwd) branchCache.delete(cwd);
+            setBranchNonce((n) => n + 1);
+            const wsRoot = useFiles.getState().root;
+            if (wsRoot) void useGit.getState().refresh(wsRoot);
+          }}
         />
       )}
     </div>
@@ -330,7 +356,7 @@ function basename(p: string): string {
 // cwd → branch, cached so panes sharing a repo don't each re-query.
 const branchCache = new Map<string, string | null>();
 
-function useBranch(cwd: string | undefined): string | null {
+function useBranch(cwd: string | undefined, nonce = 0): string | null {
   const [branch, setBranch] = useState<string | null>(cwd ? branchCache.get(cwd) ?? null : null);
   useEffect(() => {
     if (!isTauri || !cwd) {
@@ -353,6 +379,6 @@ function useBranch(cwd: string | undefined): string | null {
     return () => {
       cancelled = true;
     };
-  }, [cwd]);
+  }, [cwd, nonce]);
   return branch;
 }

@@ -113,6 +113,9 @@ const ReflogPanel = lazy(() =>
 const BisectPanel = lazy(() =>
   import('./git/BisectPanel').then((m) => ({ default: m.BisectPanel })),
 );
+const PrPanel = lazy(() =>
+  import('./git/PrPanel').then((m) => ({ default: m.PrPanel })),
+);
 
 /** Path separator that matches the workspace root style. */
 function joinPath(root: string, rel: string): string {
@@ -269,6 +272,7 @@ export function SourceControl() {
 
   // Single shared refresh driver lives in `Sidebar`; we just subscribe to the cache.
   const info = useGit((s) => s.info);
+  const repoRoot = useGit((s) => s.repoRoot);
   const entries = useGit((s) => s.entries);
   const loading = useGit((s) => s.loading);
   const storeError = useGit((s) => s.error);
@@ -311,7 +315,7 @@ export function SourceControl() {
   const rebaseInline = useGitUi((s) => s.rebasePanelOpen && !s.rebaseExpanded);
   const reflogInline = useGitUi((s) => s.reflogPanelOpen && !s.reflogExpanded);
   const bisectInline = useGitUi((s) => s.bisectPanelOpen && !s.bisectExpanded);
-  const panelOpen = worktreesInline || rebaseInline || reflogInline || bisectInline;
+  const prInline = useGitUi((s) => s.prPanelView.kind !== 'closed' && !s.prExpanded);
 
   // Commit switches — `-S` and `-s`, remembered across sessions.
   const signCommits = useGitUi((s) => s.signCommits);
@@ -1085,7 +1089,7 @@ function notifyGitFailure(title: string, err: unknown): void {
               : 'not a git repository'
           }
         >
-          {info?.branch ?? '—'}
+          {info?.branch ?? (info?.head_short ? `detached @ ${info.head_short}` : '—')}
         </button>
         {/* Ahead/behind chevrons — only render the side that's non-zero. */}
         {info && (info.ahead > 0 || info.behind > 0) && (
@@ -1187,48 +1191,6 @@ function notifyGitFailure(title: string, err: unknown): void {
         </button>
       </div>
 
-      {/* Git launchers — Changes / Worktrees / Rebase pick what fills the
-          panel below, one at a time. PRs still open as an overlay. */}
-      {isTauri && root && (
-        <div className="flex shrink-0 items-center gap-1 border-b border-border-hairline px-2 py-1.5">
-          <GitLauncher
-            icon={<FileText size={11.5} strokeWidth={2} />}
-            label="Changes"
-            active={!panelOpen}
-            onClick={() => useGitUi.getState().setWorktreePanelOpen(false)}
-          />
-          <GitLauncher
-            icon={<GitPullRequest size={11.5} strokeWidth={2} />}
-            label="Pull Requests"
-            onClick={() => useGitUi.getState().openPrList()}
-          />
-          <GitLauncher
-            icon={<FolderTree size={11.5} strokeWidth={2} />}
-            label="Worktrees"
-            active={worktreesOpen}
-            onClick={() => useGitUi.getState().setWorktreePanelOpen(!worktreesOpen)}
-          />
-          <GitLauncher
-            icon={<ListOrdered size={11.5} strokeWidth={2} />}
-            label="Rebase"
-            active={rebaseOpen}
-            onClick={() => useGitUi.getState().setRebasePanelOpen(!rebaseOpen)}
-          />
-          <GitLauncher
-            icon={<History size={11.5} strokeWidth={2} />}
-            label="Reflog"
-            active={reflogOpen}
-            onClick={() => useGitUi.getState().setReflogPanelOpen(!reflogOpen)}
-          />
-          <GitLauncher
-            icon={<Target size={11.5} strokeWidth={2} />}
-            label="Bisect"
-            active={bisectOpen}
-            onClick={() => useGitUi.getState().setBisectPanelOpen(!bisectOpen)}
-          />
-        </div>
-      )}
-
       {/* Mid-operation bar — a stopped rebase (conflict, or an `edit` row)
           needs continue / abort, and the other multi-step operations at
           least need saying out loud. */}
@@ -1263,17 +1225,6 @@ function notifyGitFailure(title: string, err: unknown): void {
             </>
           )}
         </div>
-      )}
-
-      {/* An open worktree / rebase section replaces the rest of the panel —
-          stash, composer and change list — rather than stacking above it. */}
-      {panelOpen && (
-        <Suspense fallback={null}>
-          {worktreesInline && <WorktreePanel inline />}
-          {rebaseInline && <RebasePanel inline />}
-          {reflogInline && <ReflogPanel inline />}
-          {bisectInline && <BisectPanel inline />}
-        </Suspense>
       )}
 
       {/* Agent review bar — only while a baseline exists for this root. Names
@@ -1362,7 +1313,7 @@ function notifyGitFailure(title: string, err: unknown): void {
       )}
 
       {/* Branch management panel */}
-      {branchPanelOpen && !panelOpen && (
+      {branchPanelOpen && (
         <div className="shrink-0 border-b border-border-hairline bg-surface-1 px-2.5 py-2">
           {/* Create branch */}
           <div className="mb-2 flex gap-1.5">
@@ -1422,54 +1373,9 @@ function notifyGitFailure(title: string, err: unknown): void {
         </div>
       )}
 
-      {/* Stash section */}
-      {isTauri && root && !panelOpen && (
-        <div className="shrink-0 border-b border-border-hairline">
-          <button
-            onClick={() => setStashOpen((o) => !o)}
-            className="flex w-full items-center gap-1.5 px-2.5 py-1.5 text-left hover:bg-surface-1"
-          >
-            {stashOpen ? <ChevronDown size={10} strokeWidth={2} className="text-fg-subtle" /> : <ChevronRight size={10} strokeWidth={2} className="text-fg-subtle" />}
-            <Archive size={11} strokeWidth={2} className="text-fg-muted" />
-            <span className="flex-1 font-sans text-xs text-fg-muted">Stash</span>
-            {stashes.length > 0 && (
-              <span className="rounded-full bg-surface-2 px-1.5 font-mono text-2xs text-fg-subtle">{stashes.length}</span>
-            )}
-            <button
-              onClick={(e) => { e.stopPropagation(); void handleStashPush(); }}
-              disabled={stashBusy}
-              title="Stash all changes"
-              className="flex h-5 items-center gap-0.5 rounded px-1.5 font-sans text-2xs text-fg-muted hover:bg-surface-2 hover:text-fg-base disabled:opacity-40"
-            >
-              <Plus size={9} strokeWidth={2.5} /> Stash
-            </button>
-          </button>
-          {stashOpen && (
-            <div className="px-2 pb-1.5">
-              {stashes.length === 0 ? (
-                <p className="px-1 font-sans text-2xs text-fg-subtle/60">No stashes</p>
-              ) : (
-                <ul className="space-y-px">
-                  {stashes.map((s) => (
-                    <li key={s.index} className="group flex items-center gap-1.5 rounded px-1 py-[3px] hover:bg-surface-1">
-                      <span className="w-5 shrink-0 font-mono text-2xs text-fg-subtle/60">{s.index}</span>
-                      <span className="flex-1 truncate font-sans text-xs text-fg-base/80">{s.message}</span>
-                      <span className="hidden items-center gap-1 group-hover:flex">
-                        <button onClick={() => void handleStashPop(s.index)} title="Apply & drop" disabled={stashBusy} className="text-fg-muted hover:text-accent disabled:opacity-40"><ArrowDownToLine size={11} strokeWidth={2} /></button>
-                        <button onClick={() => void handleStashDrop(s.index)} title="Drop" disabled={stashBusy} className="text-fg-muted hover:text-red-400 disabled:opacity-40"><Trash2 size={11} strokeWidth={2} /></button>
-                      </span>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </div>
-          )}
-        </div>
-      )}
-
       {/* Commit composer — card with focus bloom + gradient commit bar */}
-      {isTauri && info?.branch && !panelOpen && (
-        <div className="shrink-0 border-b border-border-hairline px-2.5 py-2.5">
+      {isTauri && root && (
+        <div className="shrink-0 border-b border-border-hairline bg-surface-1/30 px-2.5 py-2.5">
           <div
             className={cn(
               'group/composer relative rounded-lg border border-edge-1 bg-bg-base/55',
@@ -1571,174 +1477,7 @@ function notifyGitFailure(title: string, err: unknown): void {
         </div>
       )}
 
-      {/* Tags */}
-      {isTauri && root && !panelOpen && (
-        <div className="shrink-0 border-b border-border-hairline">
-          <button
-            onClick={() => setTagsOpen((o) => !o)}
-            className="flex w-full items-center gap-1.5 px-2.5 py-1.5 text-left hover:bg-surface-1"
-          >
-            {tagsOpen ? <ChevronDown size={10} strokeWidth={2} className="text-fg-subtle" /> : <ChevronRight size={10} strokeWidth={2} className="text-fg-subtle" />}
-            <Tag size={11} strokeWidth={2} className="text-fg-muted" />
-            <span className="flex-1 font-sans text-xs text-fg-muted">Tags</span>
-            {tags.length > 0 && (
-              <span className="rounded-full bg-surface-2 px-1.5 font-mono text-2xs text-fg-subtle">{tags.length}</span>
-            )}
-          </button>
-          {tagsOpen && (
-            <div className="px-2 pb-1.5">
-              <div className="mb-1.5 flex gap-1.5">
-                <input
-                  value={newTagName}
-                  onChange={(e) => setNewTagName(e.target.value)}
-                  onKeyDown={(e) => { if (e.key === 'Enter') void handleTagCreate(); }}
-                  placeholder="v1.0.0 — tags HEAD"
-                  aria-label="New tag name"
-                  className="flex-1 rounded-md bg-surface-1 px-2 py-1 font-mono text-xs text-fg-base placeholder:text-fg-subtle outline-none focus:ring-1 focus:ring-accent/40"
-                />
-                <button
-                  onClick={() => void handleTagCreate()}
-                  disabled={!newTagName.trim() || tagBusy}
-                  title="Create tag at HEAD"
-                  className="flex h-6 items-center gap-1 rounded-md bg-accent/10 px-2 font-sans text-2xs text-accent hover:bg-accent/20 disabled:opacity-40"
-                >
-                  <Plus size={10} strokeWidth={2.5} /> Tag
-                </button>
-              </div>
-              {tags.length === 0 ? (
-                <p className="px-1 font-sans text-2xs text-fg-subtle/60">No tags</p>
-              ) : (
-                <ul className="max-h-40 space-y-px overflow-y-auto">
-                  {tags.map((t) => (
-                    <li key={t.name} className="group flex items-center gap-1.5 rounded px-1 py-[3px] hover:bg-surface-1">
-                      <span className="flex-1 truncate font-mono text-xs text-fg-base/85" title={t.subject}>
-                        {t.name}
-                      </span>
-                      <span className="shrink-0 font-mono text-2xs text-fg-subtle/70">{t.head_short}</span>
-                      <span className="hidden items-center gap-1 group-hover:flex">
-                        <button onClick={() => void handleTagPush(t.name)} title="Push to origin" disabled={tagBusy} className="text-fg-muted hover:text-accent disabled:opacity-40"><Upload size={10} strokeWidth={2} /></button>
-                        <button onClick={() => void handleTagDelete(t.name)} title="Delete" disabled={tagBusy} className="text-fg-muted hover:text-red-400 disabled:opacity-40"><Trash2 size={10} strokeWidth={2} /></button>
-                      </span>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* Remotes */}
-      {isTauri && root && !panelOpen && (
-        <div className="shrink-0 border-b border-border-hairline">
-          <button
-            onClick={() => setRemotesOpen((o) => !o)}
-            className="flex w-full items-center gap-1.5 px-2.5 py-1.5 text-left hover:bg-surface-1"
-          >
-            {remotesOpen ? <ChevronDown size={10} strokeWidth={2} className="text-fg-subtle" /> : <ChevronRight size={10} strokeWidth={2} className="text-fg-subtle" />}
-            <Cloud size={11} strokeWidth={2} className="text-fg-muted" />
-            <span className="flex-1 font-sans text-xs text-fg-muted">Remotes</span>
-            {remotes.length > 0 && (
-              <span className="rounded-full bg-surface-2 px-1.5 font-mono text-2xs text-fg-subtle">{remotes.length}</span>
-            )}
-          </button>
-          {remotesOpen && (
-            <div className="px-2 pb-1.5">
-              <div className="mb-1.5 flex gap-1.5">
-                <input
-                  value={newRemoteName}
-                  onChange={(e) => setNewRemoteName(e.target.value)}
-                  placeholder="name"
-                  aria-label="New remote name"
-                  className="w-16 shrink-0 rounded-md bg-surface-1 px-2 py-1 font-mono text-xs text-fg-base placeholder:text-fg-subtle outline-none focus:ring-1 focus:ring-accent/40"
-                />
-                <input
-                  value={newRemoteUrl}
-                  onChange={(e) => setNewRemoteUrl(e.target.value)}
-                  onKeyDown={(e) => { if (e.key === 'Enter') void handleRemoteAdd(); }}
-                  placeholder="url"
-                  aria-label="New remote URL"
-                  className="min-w-0 flex-1 rounded-md bg-surface-1 px-2 py-1 font-mono text-xs text-fg-base placeholder:text-fg-subtle outline-none focus:ring-1 focus:ring-accent/40"
-                />
-                <button
-                  onClick={() => void handleRemoteAdd()}
-                  disabled={!newRemoteName.trim() || !newRemoteUrl.trim() || remoteBusy}
-                  title="Add remote"
-                  aria-label="Add remote"
-                  className="flex h-6 shrink-0 items-center rounded-md bg-accent/10 px-1.5 text-accent hover:bg-accent/20 disabled:opacity-40"
-                >
-                  <Plus size={10} strokeWidth={2.5} />
-                </button>
-              </div>
-              {remotes.length === 0 ? (
-                <p className="px-1 font-sans text-2xs text-fg-subtle/60">No remotes</p>
-              ) : (
-                <ul className="space-y-px">
-                  {remotes.map((r) => (
-                    <li key={r.name} className="group flex items-center gap-1.5 rounded px-1 py-[3px] hover:bg-surface-1">
-                      <span className="w-14 shrink-0 truncate font-mono text-xs text-fg-base/85">{r.name}</span>
-                      <span className="min-w-0 flex-1 truncate font-mono text-2xs text-fg-subtle" title={r.fetch_url}>
-                        {r.fetch_url}
-                      </span>
-                      <span className="hidden items-center gap-1 group-hover:flex">
-                        <button onClick={() => void handleRemoteSetUrl(r.name, r.fetch_url)} title="Change URL" disabled={remoteBusy} className="text-fg-muted hover:text-fg-base disabled:opacity-40"><Pencil size={10} strokeWidth={2} /></button>
-                        <button onClick={() => void handleRemoteRemove(r.name)} title="Remove" disabled={remoteBusy} className="text-fg-muted hover:text-red-400 disabled:opacity-40"><Trash2 size={10} strokeWidth={2} /></button>
-                      </span>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* Submodules — hidden entirely for the repos that have none. */}
-      {isTauri && root && !panelOpen && submodules.length > 0 && (
-        <div className="shrink-0 border-b border-border-hairline">
-          <button
-            onClick={() => setSubmodulesOpen((o) => !o)}
-            className="flex w-full items-center gap-1.5 px-2.5 py-1.5 text-left hover:bg-surface-1"
-          >
-            {submodulesOpen ? <ChevronDown size={10} strokeWidth={2} className="text-fg-subtle" /> : <ChevronRight size={10} strokeWidth={2} className="text-fg-subtle" />}
-            <Boxes size={11} strokeWidth={2} className="text-fg-muted" />
-            <span className="flex-1 font-sans text-xs text-fg-muted">Submodules</span>
-            <span className="rounded-full bg-surface-2 px-1.5 font-mono text-2xs text-fg-subtle">{submodules.length}</span>
-          </button>
-          {submodulesOpen && (
-            <ul className="space-y-px px-2 pb-1.5">
-              {submodules.map((m) => (
-                <li key={m.path} className="flex items-center gap-1.5 rounded px-1 py-[3px] hover:bg-surface-1">
-                  <span className="min-w-0 flex-1 truncate font-mono text-xs text-fg-base/85" title={m.describe ?? undefined}>
-                    {m.path}
-                  </span>
-                  <span className="shrink-0 font-mono text-2xs text-fg-subtle/70">{m.head_short}</span>
-                  {m.state !== 'ok' && (
-                    <span
-                      className={cn(
-                        'shrink-0 rounded px-1 font-sans text-2xs',
-                        m.state === 'conflict' ? 'text-red-400' : 'text-status-warn',
-                      )}
-                      title={
-                        m.state === 'uninitialized'
-                          ? 'not checked out — run git submodule update --init'
-                          : m.state === 'out-of-sync'
-                            ? "checked out at a commit the superproject doesn't record"
-                            : 'merge conflict'
-                      }
-                    >
-                      {m.state}
-                    </span>
-                  )}
-                </li>
-              ))}
-            </ul>
-          )}
-        </div>
-      )}
-
       {/* Body */}
-      {!panelOpen && (
       <div className="selectable flex-1 overflow-auto px-1.5 py-2">
         {!isTauri && (
           <div className="mx-1 mb-2 flex items-start gap-2 rounded-lg border border-status-warn/20 bg-status-warn/[0.06] px-2.5 py-2 font-display text-2xs leading-relaxed">
@@ -1758,7 +1497,7 @@ function notifyGitFailure(title: string, err: unknown): void {
           </div>
         )}
         {isTauri && !error && total === 0 && !loading && (
-          <EmptyState branch={info?.branch ?? null} />
+          <EmptyState isRepo={!!repoRoot} />
         )}
         {SECTION_ORDER.map((section) => {
           const rows = grouped[section];
@@ -1815,6 +1554,269 @@ function notifyGitFailure(title: string, err: unknown): void {
           );
         })}
       </div>
+
+      {/* Git tools — Changes / PRs / worktrees / rebase / reflog / bisect, each
+          a collapsible section in the bottom stack beside stash and tags. */}
+      {isTauri && root && (
+        <Suspense fallback={null}>
+          <GitToolRow
+            icon={<FileText size={11} strokeWidth={2} />}
+            label="Changes"
+            count={total}
+            onClick={() => useGitUi.getState().closeGitPanels()}
+          />
+          <GitToolSection
+            icon={<GitPullRequest size={11} strokeWidth={2} />}
+            label="Pull Requests"
+            open={prInline}
+            onOpen={() => useGitUi.getState().openPrList()}
+          >
+            <PrPanel inline />
+          </GitToolSection>
+          <GitToolSection
+            icon={<FolderTree size={11} strokeWidth={2} />}
+            label="Worktrees"
+            open={worktreesInline}
+            onOpen={() => useGitUi.getState().setWorktreePanelOpen(true)}
+          >
+            <WorktreePanel inline />
+          </GitToolSection>
+          <GitToolSection
+            icon={<ListOrdered size={11} strokeWidth={2} />}
+            label="Rebase"
+            open={rebaseInline}
+            onOpen={() => useGitUi.getState().setRebasePanelOpen(true)}
+          >
+            <RebasePanel inline />
+          </GitToolSection>
+          <GitToolSection
+            icon={<History size={11} strokeWidth={2} />}
+            label="Reflog"
+            open={reflogInline}
+            onOpen={() => useGitUi.getState().setReflogPanelOpen(true)}
+          >
+            <ReflogPanel inline />
+          </GitToolSection>
+          <GitToolSection
+            icon={<Target size={11} strokeWidth={2} />}
+            label="Bisect"
+            open={bisectInline}
+            onOpen={() => useGitUi.getState().setBisectPanelOpen(true)}
+          >
+            <BisectPanel inline />
+          </GitToolSection>
+        </Suspense>
+      )}
+
+      {/* Stash section */}
+      {isTauri && root && (
+        <div className="shrink-0 border-t border-border-hairline">
+          <button
+            onClick={() => setStashOpen((o) => !o)}
+            className="flex w-full items-center gap-1.5 px-2.5 py-1.5 text-left hover:bg-surface-1"
+          >
+            {stashOpen ? <ChevronDown size={10} strokeWidth={2} className="text-fg-subtle" /> : <ChevronRight size={10} strokeWidth={2} className="text-fg-subtle" />}
+            <Archive size={11} strokeWidth={2} className="text-fg-muted" />
+            <span className="flex-1 font-sans text-xs text-fg-muted">Stash</span>
+            {stashes.length > 0 && (
+              <span className="rounded-full bg-surface-2 px-1.5 font-mono text-2xs text-fg-subtle">{stashes.length}</span>
+            )}
+            <button
+              onClick={(e) => { e.stopPropagation(); void handleStashPush(); }}
+              disabled={stashBusy}
+              title="Stash all changes"
+              className="flex h-5 items-center gap-0.5 rounded px-1.5 font-sans text-2xs text-fg-muted hover:bg-surface-2 hover:text-fg-base disabled:opacity-40"
+            >
+              <Plus size={9} strokeWidth={2.5} /> Stash
+            </button>
+          </button>
+          {stashOpen && (
+            <div className="px-2 pb-1.5">
+              {stashes.length === 0 ? (
+                <p className="px-1 font-sans text-2xs text-fg-subtle/60">No stashes</p>
+              ) : (
+                <ul className="max-h-40 space-y-px overflow-y-auto">
+                  {stashes.map((s) => (
+                    <li key={s.index} className="group flex items-center gap-1.5 rounded px-1 py-[3px] hover:bg-surface-1">
+                      <span className="w-5 shrink-0 font-mono text-2xs text-fg-subtle/60">{s.index}</span>
+                      <span className="flex-1 truncate font-sans text-xs text-fg-base/80">{s.message}</span>
+                      <span className="hidden items-center gap-1 group-hover:flex">
+                        <button onClick={() => void handleStashPop(s.index)} title="Apply & drop" disabled={stashBusy} className="text-fg-muted hover:text-accent disabled:opacity-40"><ArrowDownToLine size={11} strokeWidth={2} /></button>
+                        <button onClick={() => void handleStashDrop(s.index)} title="Drop" disabled={stashBusy} className="text-fg-muted hover:text-red-400 disabled:opacity-40"><Trash2 size={11} strokeWidth={2} /></button>
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Tags */}
+      {isTauri && root && (
+        <div className="shrink-0 border-t border-border-hairline">
+          <button
+            onClick={() => setTagsOpen((o) => !o)}
+            className="flex w-full items-center gap-1.5 px-2.5 py-1.5 text-left hover:bg-surface-1"
+          >
+            {tagsOpen ? <ChevronDown size={10} strokeWidth={2} className="text-fg-subtle" /> : <ChevronRight size={10} strokeWidth={2} className="text-fg-subtle" />}
+            <Tag size={11} strokeWidth={2} className="text-fg-muted" />
+            <span className="flex-1 font-sans text-xs text-fg-muted">Tags</span>
+            {tags.length > 0 && (
+              <span className="rounded-full bg-surface-2 px-1.5 font-mono text-2xs text-fg-subtle">{tags.length}</span>
+            )}
+          </button>
+          {tagsOpen && (
+            <div className="px-2 pb-1.5">
+              <div className="mb-1.5 flex gap-1.5">
+                <input
+                  value={newTagName}
+                  onChange={(e) => setNewTagName(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === 'Enter') void handleTagCreate(); }}
+                  placeholder="v1.0.0 — tags HEAD"
+                  aria-label="New tag name"
+                  className="flex-1 rounded-md bg-surface-1 px-2 py-1 font-mono text-xs text-fg-base placeholder:text-fg-subtle outline-none focus:ring-1 focus:ring-accent/40"
+                />
+                <button
+                  onClick={() => void handleTagCreate()}
+                  disabled={!newTagName.trim() || tagBusy}
+                  title="Create tag at HEAD"
+                  className="flex h-6 items-center gap-1 rounded-md bg-accent/10 px-2 font-sans text-2xs text-accent hover:bg-accent/20 disabled:opacity-40"
+                >
+                  <Plus size={10} strokeWidth={2.5} /> Tag
+                </button>
+              </div>
+              {tags.length === 0 ? (
+                <p className="px-1 font-sans text-2xs text-fg-subtle/60">No tags</p>
+              ) : (
+                <ul className="max-h-40 space-y-px overflow-y-auto">
+                  {tags.map((t) => (
+                    <li key={t.name} className="group flex items-center gap-1.5 rounded px-1 py-[3px] hover:bg-surface-1">
+                      <span className="flex-1 truncate font-mono text-xs text-fg-base/85" title={t.subject}>
+                        {t.name}
+                      </span>
+                      <span className="shrink-0 font-mono text-2xs text-fg-subtle/70">{t.head_short}</span>
+                      <span className="hidden items-center gap-1 group-hover:flex">
+                        <button onClick={() => void handleTagPush(t.name)} title="Push to origin" disabled={tagBusy} className="text-fg-muted hover:text-accent disabled:opacity-40"><Upload size={10} strokeWidth={2} /></button>
+                        <button onClick={() => void handleTagDelete(t.name)} title="Delete" disabled={tagBusy} className="text-fg-muted hover:text-red-400 disabled:opacity-40"><Trash2 size={10} strokeWidth={2} /></button>
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Remotes */}
+      {isTauri && root && (
+        <div className="shrink-0 border-t border-border-hairline">
+          <button
+            onClick={() => setRemotesOpen((o) => !o)}
+            className="flex w-full items-center gap-1.5 px-2.5 py-1.5 text-left hover:bg-surface-1"
+          >
+            {remotesOpen ? <ChevronDown size={10} strokeWidth={2} className="text-fg-subtle" /> : <ChevronRight size={10} strokeWidth={2} className="text-fg-subtle" />}
+            <Cloud size={11} strokeWidth={2} className="text-fg-muted" />
+            <span className="flex-1 font-sans text-xs text-fg-muted">Remotes</span>
+            {remotes.length > 0 && (
+              <span className="rounded-full bg-surface-2 px-1.5 font-mono text-2xs text-fg-subtle">{remotes.length}</span>
+            )}
+          </button>
+          {remotesOpen && (
+            <div className="px-2 pb-1.5">
+              <div className="mb-1.5 flex gap-1.5">
+                <input
+                  value={newRemoteName}
+                  onChange={(e) => setNewRemoteName(e.target.value)}
+                  placeholder="name"
+                  aria-label="New remote name"
+                  className="w-16 shrink-0 rounded-md bg-surface-1 px-2 py-1 font-mono text-xs text-fg-base placeholder:text-fg-subtle outline-none focus:ring-1 focus:ring-accent/40"
+                />
+                <input
+                  value={newRemoteUrl}
+                  onChange={(e) => setNewRemoteUrl(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === 'Enter') void handleRemoteAdd(); }}
+                  placeholder="url"
+                  aria-label="New remote URL"
+                  className="min-w-0 flex-1 rounded-md bg-surface-1 px-2 py-1 font-mono text-xs text-fg-base placeholder:text-fg-subtle outline-none focus:ring-1 focus:ring-accent/40"
+                />
+                <button
+                  onClick={() => void handleRemoteAdd()}
+                  disabled={!newRemoteName.trim() || !newRemoteUrl.trim() || remoteBusy}
+                  title="Add remote"
+                  aria-label="Add remote"
+                  className="flex h-6 shrink-0 items-center rounded-md bg-accent/10 px-1.5 text-accent hover:bg-accent/20 disabled:opacity-40"
+                >
+                  <Plus size={10} strokeWidth={2.5} />
+                </button>
+              </div>
+              {remotes.length === 0 ? (
+                <p className="px-1 font-sans text-2xs text-fg-subtle/60">No remotes</p>
+              ) : (
+                <ul className="max-h-40 space-y-px overflow-y-auto">
+                  {remotes.map((r) => (
+                    <li key={r.name} className="group flex items-center gap-1.5 rounded px-1 py-[3px] hover:bg-surface-1">
+                      <span className="w-14 shrink-0 truncate font-mono text-xs text-fg-base/85">{r.name}</span>
+                      <span className="min-w-0 flex-1 truncate font-mono text-2xs text-fg-subtle" title={r.fetch_url}>
+                        {r.fetch_url}
+                      </span>
+                      <span className="hidden items-center gap-1 group-hover:flex">
+                        <button onClick={() => void handleRemoteSetUrl(r.name, r.fetch_url)} title="Change URL" disabled={remoteBusy} className="text-fg-muted hover:text-fg-base disabled:opacity-40"><Pencil size={10} strokeWidth={2} /></button>
+                        <button onClick={() => void handleRemoteRemove(r.name)} title="Remove" disabled={remoteBusy} className="text-fg-muted hover:text-red-400 disabled:opacity-40"><Trash2 size={10} strokeWidth={2} /></button>
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Submodules — hidden entirely for the repos that have none. */}
+      {isTauri && root && submodules.length > 0 && (
+        <div className="shrink-0 border-t border-border-hairline">
+          <button
+            onClick={() => setSubmodulesOpen((o) => !o)}
+            className="flex w-full items-center gap-1.5 px-2.5 py-1.5 text-left hover:bg-surface-1"
+          >
+            {submodulesOpen ? <ChevronDown size={10} strokeWidth={2} className="text-fg-subtle" /> : <ChevronRight size={10} strokeWidth={2} className="text-fg-subtle" />}
+            <Boxes size={11} strokeWidth={2} className="text-fg-muted" />
+            <span className="flex-1 font-sans text-xs text-fg-muted">Submodules</span>
+            <span className="rounded-full bg-surface-2 px-1.5 font-mono text-2xs text-fg-subtle">{submodules.length}</span>
+          </button>
+          {submodulesOpen && (
+            <ul className="max-h-40 space-y-px overflow-y-auto px-2 pb-1.5">
+              {submodules.map((m) => (
+                <li key={m.path} className="flex items-center gap-1.5 rounded px-1 py-[3px] hover:bg-surface-1">
+                  <span className="min-w-0 flex-1 truncate font-mono text-xs text-fg-base/85" title={m.describe ?? undefined}>
+                    {m.path}
+                  </span>
+                  <span className="shrink-0 font-mono text-2xs text-fg-subtle/70">{m.head_short}</span>
+                  {m.state !== 'ok' && (
+                    <span
+                      className={cn(
+                        'shrink-0 rounded px-1 font-sans text-2xs',
+                        m.state === 'conflict' ? 'text-red-400' : 'text-status-warn',
+                      )}
+                      title={
+                        m.state === 'uninitialized'
+                          ? 'not checked out — run git submodule update --init'
+                          : m.state === 'out-of-sync'
+                            ? "checked out at a commit the superproject doesn't record"
+                            : 'merge conflict'
+                      }
+                    >
+                      {m.state}
+                    </span>
+                  )}
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
       )}
 
       {contextMenu && (
@@ -1869,42 +1871,63 @@ function notifyGitFailure(title: string, err: unknown): void {
   );
 }
 
-/** Equal-width launcher chip for the heavier git panels (PRs / worktrees /
- *  rebase). Icon + label, kept quiet until hover. */
-function GitLauncher({
+/** One row of the bottom stack: chevron slot, icon, label, optional count.
+ *  Styled to match the stash / tags / remotes rows it sits beside. */
+function GitToolRow({
   icon,
   label,
+  count,
+  open,
   onClick,
-  active = false,
 }: {
   icon: React.ReactNode;
   label: string;
+  count?: number;
+  /** Omitted for the rows that don't expand (Changes, Pull Requests). */
+  open?: boolean;
   onClick: () => void;
-  /** Marks the launchers whose panel expands inline below the bar. */
-  active?: boolean;
 }) {
   return (
-    <Tooltip label={label} className="min-w-0 flex-1">
+    <div className="shrink-0 border-t border-border-hairline">
       <button
-        type="button"
         onClick={onClick}
-        aria-label={label}
-        aria-expanded={active}
-        className={cn(
-          'group/launch flex h-[26px] w-full min-w-0 items-center justify-center rounded-md',
-          'border transition-all duration-150 ease-apple',
-          active
-            ? 'border-accent/35 bg-accent-soft text-fg-base'
-            : 'border-edge-1 bg-surface-1 text-fg-muted hover:border-accent/25 hover:text-fg-base hover:shadow-[inset_0_1px_0_0_rgba(255,255,255,0.04)]',
-          'active:scale-[0.97]',
-        )}
+        aria-expanded={open}
+        className="flex w-full items-center gap-1.5 px-2.5 py-1.5 text-left hover:bg-surface-1"
       >
-        <span className="shrink-0 text-fg-subtle transition-colors duration-150 group-hover/launch:text-accent-bright">
-          {icon}
-        </span>
+        {open === undefined ? (
+          <span aria-hidden className="w-2.5 shrink-0" />
+        ) : open ? (
+          <ChevronDown size={10} strokeWidth={2} className="text-fg-subtle" />
+        ) : (
+          <ChevronRight size={10} strokeWidth={2} className="text-fg-subtle" />
+        )}
+        <span className="shrink-0 text-fg-muted">{icon}</span>
+        <span className="flex-1 font-sans text-xs text-fg-muted">{label}</span>
+        {count !== undefined && count > 0 && (
+          <span className="rounded-full bg-surface-2 px-1.5 font-mono text-2xs text-fg-subtle">{count}</span>
+        )}
       </button>
-    </Tooltip>
+    </div>
   );
+}
+
+/** A git tool as an accordion section. Collapsed it is a `GitToolRow`; open,
+ *  the panel supplies its own (compact) header, so the row steps aside. */
+function GitToolSection({
+  icon,
+  label,
+  open,
+  onOpen,
+  children,
+}: {
+  icon: React.ReactNode;
+  label: string;
+  open: boolean;
+  onOpen: () => void;
+  children: React.ReactNode;
+}) {
+  if (open) return <>{children}</>;
+  return <GitToolRow icon={icon} label={label} open={false} onClick={onOpen} />;
 }
 
 /** Sticky on/off pill for a commit flag (`-S`, `-s`). */
@@ -2055,7 +2078,7 @@ function SectionAction({
 }
 
 /** Small illustrative empty-state mark + line of copy. */
-function EmptyState({ branch }: { branch: string | null }) {
+function EmptyState({ isRepo }: { isRepo: boolean }) {
   return (
     <div className="flex flex-col items-center gap-3 px-2 py-8 text-center">
       {/* A trio of stacked rings — pure CSS, no asset. Reads as "all clean". */}
@@ -2072,7 +2095,7 @@ function EmptyState({ branch }: { branch: string | null }) {
           aria-hidden
           className="absolute inset-[12px] flex items-center justify-center rounded-full bg-accent-soft ring-1 ring-inset ring-accent/20"
         >
-          {branch ? (
+          {isRepo ? (
             <Check size={9} strokeWidth={2.4} className="text-accent-bright/80" />
           ) : (
             <X size={9} strokeWidth={2.4} className="text-fg-subtle" />
@@ -2081,10 +2104,10 @@ function EmptyState({ branch }: { branch: string | null }) {
       </div>
       <div className="space-y-0.5">
         <p className="font-display text-xs font-medium tracking-tight text-fg-base/85">
-          {branch ? 'Working tree clean' : 'Not a git repository'}
+          {isRepo ? 'Working tree clean' : 'Not a git repository'}
         </p>
         <p className="font-display text-2xs leading-relaxed text-fg-subtle">
-          {branch
+          {isRepo
             ? 'Every change committed. Make an edit to see it here.'
             : 'Open a folder under git to enable source control.'}
         </p>

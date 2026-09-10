@@ -267,9 +267,12 @@ export function Editor({ filePath, tabId }: Props) {
               // fallback, so the Mocha palette below is what actually paints.
               syntaxHighlighting(catppuccinHighlight),
               macTheme,
-              // Sits after macTheme so the user's font family + size override
-              // the base theme's defaults. Seeded from current settings; the
-              // effect below keeps it live.
+              // In CodeMirror the EARLIER extension wins, so this cannot sit
+              // after `macTheme` and still override it — that is why the
+              // editor used to ignore the Settings font. `macTheme` no longer
+              // declares a family or size at all; this compartment is the only
+              // source. Seeded from current settings; the effect below keeps
+              // it live.
               fontCompartment.current.of(
                 fontTheme(
                   getFont(useSettings.getState().fontId).stack,
@@ -836,8 +839,9 @@ const macTheme: Extension = EditorView.theme(
       backgroundColor: 'transparent',
       height: '100%',
       color: MOCHA.text,
-      fontSize: '13px',
-      fontFamily: "'SF Mono', ui-monospace, 'JetBrains Mono', Menlo, Monaco, 'Cascadia Code', Consolas, monospace",
+      // No fontFamily / fontSize here: `macTheme` outranks the font
+      // compartment (earlier = higher precedence), so anything it declared
+      // would pin the editor to it and mute the Settings picker.
     },
     '.cm-scroller': { fontFamily: 'inherit', overflow: 'auto' },
     '.cm-content': { caretColor: '#d4d6dc', padding: '14px 0' },

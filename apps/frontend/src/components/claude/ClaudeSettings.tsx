@@ -3,6 +3,7 @@ import { CircleAlert, CircleCheck, TriangleAlert } from 'lucide-react';
 import { CLAUDE_PERMISSION_MODES, useSettings } from '../../state/settings';
 import { useClaudeCode } from '../../state/claudeCode';
 import type { ClaudePermissionMode } from '../../lib/tauri';
+import { Select, type SelectOption } from '../Select';
 
 /**
  * Settings block for the Claude Code panel.
@@ -25,6 +26,15 @@ const MODE_HELP: Record<ClaudePermissionMode, string> = {
 };
 
 const RISKY: ClaudePermissionMode[] = ['dontAsk', 'bypassPermissions'];
+
+/** Each mode carries its own help into the popover, so you can read what a
+ *  mode does before choosing it rather than after. */
+const MODE_OPTIONS: SelectOption<ClaudePermissionMode>[] = CLAUDE_PERMISSION_MODES.map((m) => ({
+  value: m,
+  label: m,
+  hint: MODE_HELP[m],
+  risky: RISKY.includes(m),
+}));
 
 export function ClaudeSettings() {
   const status = useClaudeCode((s) => s.status);
@@ -71,23 +81,19 @@ export function ClaudeSettings() {
         )}
       </div>
 
-      <label className="flex flex-col gap-1">
+      <div className="flex flex-col gap-1">
         <span className="font-display text-2xs text-fg-muted">Permission mode</span>
-        <select
+        <Select
           value={mode}
-          onChange={(e) => setMode(e.target.value as ClaudePermissionMode)}
-          className="rounded border border-edge-1 bg-surface-1 px-2 py-1 font-mono text-2xs text-fg-base focus:outline-none"
-        >
-          {CLAUDE_PERMISSION_MODES.map((m) => (
-            <option key={m} value={m}>
-              {m}
-            </option>
-          ))}
-        </select>
+          onChange={setMode}
+          ariaLabel="Permission mode"
+          mono
+          options={MODE_OPTIONS}
+        />
         <span className="font-display text-2xs leading-relaxed text-fg-subtle">
           {MODE_HELP[mode]}
         </span>
-      </label>
+      </div>
 
       {RISKY.includes(mode) && (
         <p className="flex items-start gap-1.5 rounded bg-status-warn/10 px-2 py-1.5 font-display text-2xs leading-relaxed text-status-warn">

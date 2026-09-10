@@ -345,7 +345,13 @@ function railQuickActions(view: SidebarView): RailMenuItem[] {
     }
     case 'git':
       return [
-        { label: 'Pull Requests', onClick: () => useGitUi.getState().openPrList() },
+        {
+          label: 'Pull Requests',
+          onClick: () => {
+            useFiles.getState().showSidebarView('git');
+            useGitUi.getState().openPrList();
+          },
+        },
         {
           label: 'Worktrees',
           onClick: () => {

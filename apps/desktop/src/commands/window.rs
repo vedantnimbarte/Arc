@@ -25,7 +25,7 @@ pub async fn settings_window_open(app: AppHandle) -> Result<(), String> {
     let url = WebviewUrl::App("index.html?view=settings".into());
     let win = WebviewWindowBuilder::new(&app, SETTINGS_LABEL, url)
         .title("ARC — Settings")
-        .inner_size(820.0, 620.0)
+        .inner_size(960.0, 700.0)
         .min_inner_size(640.0, 480.0)
         .resizable(true)
         .decorations(false)

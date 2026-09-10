@@ -1,9 +1,11 @@
 import type { ReactNode } from 'react';
+import { ChevronDown } from 'lucide-react';
 
 /**
  * Chrome for the worktree / rebase panels. They render as a centred modal in
  * the standalone git window, and as a plain section when embedded in the
- * source control sidebar — same body either way, only the frame changes.
+ * source control sidebar, where it is one capped-height collapsible section
+ * among the others — same body either way, only the frame changes.
  */
 export function PanelShell({
   inline,
@@ -19,7 +21,7 @@ export function PanelShell({
 }) {
   if (inline) {
     return (
-      <div className="flex min-h-0 flex-1 flex-col border-b border-border-hairline bg-surface-1/40">
+      <div className="flex max-h-64 min-h-0 shrink-0 flex-col border-t border-border-hairline bg-surface-1/40">
         {children}
       </div>
     );
@@ -37,5 +39,40 @@ export function PanelShell({
         {children}
       </div>
     </div>
+  );
+}
+
+/**
+ * A panel's title. Inline it doubles as the section's collapse control, so an
+ * open git tool closes the same way stash / tags / remotes do — click the row,
+ * not a close button off in the corner.
+ */
+export function PanelHeading({
+  inline,
+  onCollapse,
+  children,
+}: {
+  inline: boolean;
+  onCollapse: () => void;
+  children: ReactNode;
+}) {
+  if (!inline) {
+    return (
+      <div className="flex items-center gap-2 font-display text-sm font-semibold tracking-tight text-fg-base">
+        {children}
+      </div>
+    );
+  }
+  return (
+    <button
+      type="button"
+      onClick={onCollapse}
+      aria-expanded
+      title="Collapse"
+      className="-ml-0.5 flex min-w-0 flex-1 items-center gap-1.5 rounded py-0.5 text-left font-sans text-xs tracking-tight text-fg-muted transition-colors hover:text-fg-base"
+    >
+      <ChevronDown size={10} strokeWidth={2} className="shrink-0 text-fg-subtle" />
+      {children}
+    </button>
   );
 }

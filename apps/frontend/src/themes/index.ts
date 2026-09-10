@@ -517,6 +517,16 @@ export function systemFontStack(family: string): string {
   return `"${family.replace(/"/g, '')}", ui-monospace, monospace`;
 }
 
+/** Publish the user's font family as the `--font-user` CSS variable on
+ *  `<html>`. Tailwind's `display` + `mono` stacks and the markdown preview
+ *  all start with that var, so a single write re-fonts every surface in the
+ *  app. The terminal and editor read `getFont().stack` directly — they own
+ *  their own font plumbing (xterm options / a CodeMirror compartment). */
+export function applyFontFamily(id: string | null | undefined): void {
+  if (typeof document === 'undefined') return;
+  document.documentElement.style.setProperty('--font-user', getFont(id).stack);
+}
+
 /** Resolve a stored `fontId` to a usable FontOption.
  *
  *  Ids that match a bundled ("Arc supported") font return that option. Any
