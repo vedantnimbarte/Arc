@@ -16,6 +16,7 @@ import {
   Wrench,
 } from 'lucide-react';
 import { cn } from '../../lib/cn';
+import { Select } from '../Select';
 import { pendingReviewCount, useWingman, type ChatItem } from '../../state/wingman';
 import { useWorkspace } from '../../state/workspace';
 
@@ -95,19 +96,19 @@ export function WingmanPanel() {
   return (
     <div className="flex h-full min-h-0 flex-col">
       <div className="flex shrink-0 items-center gap-1.5 border-b border-border-hairline px-2 py-1.5">
-        <select
+        <Select
           value={activeProject ?? ''}
-          onChange={(e) => setActiveProject(e.target.value)}
-          aria-label="Wingman project"
-          className="min-w-0 flex-1 rounded border border-edge-1 bg-surface-1 px-1.5 py-0.5 font-mono text-2xs text-fg-base focus:outline-none"
-        >
-          {projects.map((p) => (
-            <option key={p.id} value={p.id}>
-              {p.id}
-              {p.branch ? ` · ${p.branch}` : ''}
-            </option>
-          ))}
-        </select>
+          onChange={setActiveProject}
+          ariaLabel="Wingman project"
+          mono
+          size="compact"
+          className="min-w-0 flex-1"
+          options={projects.map((p) => ({
+            value: p.id,
+            label: p.id,
+            hint: p.branch ?? undefined,
+          }))}
+        />
         {/* The board is the other half of Wingman: this panel drives one
             conversation, the board dispatches durable goals across projects.
             Opens as a tab — it's too wide for the sidebar. */}

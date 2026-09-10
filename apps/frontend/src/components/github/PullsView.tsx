@@ -17,6 +17,7 @@ import {
 import { splitRepoKey, useGitHub } from '../../state/github';
 import { askConfirm } from '../../state/confirm';
 import { cn } from '../../lib/cn';
+import { Select } from '../Select';
 import { ListRow } from './ListRow';
 import { prGlyph } from './stateGlyph';
 import { meta, relative } from './format';
@@ -255,16 +256,18 @@ function PullDetail({
         actions={
           open && (
             <div className="flex shrink-0 items-center gap-1">
-              <select
+              <Select
                 value={method}
-                onChange={(e) => setMethod(e.target.value as GitHostMergeMethod)}
-                aria-label="Merge method"
-                className="h-7 rounded-lg bg-surface-1 px-1.5 font-display text-2xs text-fg-muted ring-1 ring-inset ring-edge-1 focus:outline-none focus:shadow-focus"
-              >
-                <option value="merge">Merge</option>
-                <option value="squash">Squash</option>
-                <option value="rebase">Rebase</option>
-              </select>
+                onChange={setMethod}
+                ariaLabel="Merge method"
+                size="compact"
+                className="w-auto rounded-lg"
+                options={[
+                  { value: 'merge', label: 'Merge', hint: 'Keeps every commit and adds a merge commit.' },
+                  { value: 'squash', label: 'Squash', hint: 'Collapses the branch into one commit on the base.' },
+                  { value: 'rebase', label: 'Rebase', hint: 'Replays each commit onto the base, no merge commit.' },
+                ]}
+              />
               <button
                 onClick={() => void merge()}
                 disabled={busy || pr.mergeable === false}

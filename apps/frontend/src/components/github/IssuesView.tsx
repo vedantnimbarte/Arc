@@ -16,6 +16,7 @@ import {
 import { splitRepoKey, useGitHub } from '../../state/github';
 import { askConfirm } from '../../state/confirm';
 import { cn } from '../../lib/cn';
+import { Select } from '../Select';
 import { ListRow } from './ListRow';
 import { issueGlyph } from './stateGlyph';
 import { meta, relative } from './format';
@@ -101,19 +102,17 @@ export function IssuesView() {
             ]}
           />
           {labels.length > 0 && (
-            <select
+            <Select
               value={activeLabel ?? ''}
-              onChange={(e) => setActiveLabel(e.target.value || null)}
-              aria-label="Filter by label"
-              className="h-7 max-w-[140px] rounded-md bg-surface-1 px-2 font-display text-2xs text-fg-muted ring-1 ring-inset ring-edge-1 focus:outline-none focus:shadow-focus"
-            >
-              <option value="">Any label</option>
-              {labels.map((l) => (
-                <option key={l.name} value={l.name}>
-                  {l.name}
-                </option>
-              ))}
-            </select>
+              onChange={(v) => setActiveLabel(v || null)}
+              ariaLabel="Filter by label"
+              size="compact"
+              className="w-auto max-w-[140px]"
+              options={[
+                { value: '', label: 'Any label' },
+                ...labels.map((l) => ({ value: l.name, label: l.name })),
+              ]}
+            />
           )}
           <div className="flex-1" />
           <button

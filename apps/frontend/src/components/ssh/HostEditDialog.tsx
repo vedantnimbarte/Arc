@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useSsh } from '../../state/ssh';
 import { cn } from '../../lib/cn';
+import { Select } from '../Select';
 import type { SshHost } from '../../lib/tauri';
 
 interface HostEditDialogProps {
@@ -78,18 +79,22 @@ export function HostEditDialog({ existing, onClose }: HostEditDialogProps) {
           <Input value={username} onChange={setUsername} placeholder="ubuntu" />
         </FormRow>
         <FormRow label="Identity">
-          <select
+          <Select
             value={identityId}
-            onChange={(e) => setIdentityId(e.target.value)}
-            className="w-full rounded-squircle border border-border-subtle bg-bg-subtle px-2 py-1.5 font-mono text-sm text-fg-base focus:border-accent focus:outline-none"
-          >
-            <option value="">(none — connect will fail)</option>
-            {keys.map((k) => (
-              <option key={k.id} value={k.id}>
-                {k.name} · {k.kind}
-              </option>
-            ))}
-          </select>
+            onChange={setIdentityId}
+            ariaLabel="Identity"
+            mono
+            className="rounded-squircle"
+            options={[
+              {
+                value: '',
+                label: 'No key',
+                hint: 'Connecting will fail without one.',
+                risky: true,
+              },
+              ...keys.map((k) => ({ value: k.id, label: k.name, hint: k.kind })),
+            ]}
+          />
         </FormRow>
         <FormRow label="Keepalive (seconds)">
           <Input

@@ -34,6 +34,7 @@ import { useFiles } from '../../state/files';
 import { useGitUi } from '../../state/gitUi';
 import { useGitHub } from '../../state/github';
 import { cn } from '../../lib/cn';
+import { Select } from '../Select';
 import { PanelHeading, PanelShell } from './PanelShell';
 
 /**
@@ -748,19 +749,25 @@ function BranchPicker({
       <span className="font-display text-2xs uppercase tracking-wider text-fg-subtle">
         {label}
       </span>
-      <select
+      <Select
         value={value}
-        onChange={(e) => onChange(e.target.value)}
-        className="appearance-none rounded border border-border-subtle bg-bg-base/60 px-2.5 py-1.5 font-mono text-xs text-fg-base focus:border-accent/45 focus:outline-none"
-      >
-        {!options.find((b) => b.name === value) && <option value={value}>{value}</option>}
-        {options.map((b) => (
-          <option key={b.name} value={b.name}>
-            {b.name}
-            {b.current ? ' (current)' : ''}
-          </option>
-        ))}
-      </select>
+        onChange={onChange}
+        ariaLabel={label}
+        mono
+        options={[
+          // A value that is not among the local branches still has to be
+          // selectable, or switching base to a remote-only branch would blank
+          // the field.
+          ...(options.some((b) => b.name === value)
+            ? []
+            : [{ value, label: value }]),
+          ...options.map((b) => ({
+            value: b.name,
+            label: b.name,
+            hint: b.current ? 'Current branch' : undefined,
+          })),
+        ]}
+      />
     </label>
   );
 }
