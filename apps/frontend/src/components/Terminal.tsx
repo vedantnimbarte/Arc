@@ -172,8 +172,24 @@ export function Terminal({ sessionKey }: Props) {
     // ⌘F (mac) / ctrl+shift+F (win/linux) opens the find bar. Plain ctrl+F is
     // deliberately left alone — readline binds it to forward-char, and
     // stealing it would break cursor movement in every shell.
+    const isMac = /mac/i.test(navigator.platform || navigator.userAgent);
     term.attachCustomKeyEventHandler((e) => {
       if (e.type !== 'keydown') return true;
+      // Windows/Linux clipboard. Left to xterm, Ctrl+V becomes ^V and the key
+      // event is cancelled, so the browser's paste never fires — which also
+      // breaks dictation tools (Wispr Flow) that type by simulating Ctrl+V.
+      // Returning false lets the native paste/copy events run: paste goes
+      // through `onPaste` below, copy through xterm's own selection handler.
+      // Ctrl+C only copies when there's a selection; otherwise it stays SIGINT.
+      if (!isMac && e.ctrlKey && !e.altKey && !e.metaKey) {
+        const k = e.key.toLowerCase();
+        if (k === 'v') return false;
+        if (k === 'c' && (e.shiftKey || term.hasSelection())) {
+          // Clear after the copy lands so the next Ctrl+C interrupts again.
+          setTimeout(() => term.clearSelection());
+          return false;
+        }
+      }
       const isFind = e.key === 'F' || e.key === 'f';
       if (!isFind) return true;
       if (e.metaKey && !e.ctrlKey && !e.altKey) {
