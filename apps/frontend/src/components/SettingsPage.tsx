@@ -33,13 +33,16 @@ import {
   Loader2,
   ClipboardCopy,
   Trash2,
+  CircleDollarSign,
 } from 'lucide-react';
 import {
   DEFAULT_AI_MODEL,
   DEFAULT_SEARCH_IGNORE_DIRS,
+  DEFAULT_USAGE_AGENTS,
   flushSettingsSave,
   useSettings,
   type TerminalProfile,
+  type UsageAgent,
 } from '../state/settings';
 import { checkForUpdate, installUpdate, type UpdateInfo } from '../lib/updater';
 import {
@@ -102,6 +105,7 @@ type Pane =
   | 'shortcuts'
   | 'wingman'
   | 'claude'
+  | 'usage'
   | 'startup'
   | 'secrets'
   | 'about';
@@ -130,6 +134,7 @@ const NAV: { label?: string; items: { id: Pane; icon: typeof Cpu; label: string 
     items: [
       { id: 'wingman', icon: Bot, label: 'Wingman' },
       { id: 'claude', icon: Sparkles, label: 'Claude Code' },
+      { id: 'usage', icon: CircleDollarSign, label: 'Usage' },
     ],
   },
   {
@@ -194,7 +199,12 @@ export function SettingsPage() {
     // otherwise a quick toggle-then-close is lost.
     void flushSettingsSave()
       .catch(() => {})
-      .finally(() => void getCurrentWindow().close().catch(() => {}));
+      .finally(
+        () =>
+          void getCurrentWindow()
+            .close()
+            .catch(() => {}),
+      );
   };
 
   useEffect(() => {
@@ -310,6 +320,7 @@ export function SettingsPage() {
             {pane === 'secrets' && <SecretsPane />}
             {pane === 'wingman' && <WingmanPane />}
             {pane === 'claude' && <ClaudePane />}
+            {pane === 'usage' && <UsagePane />}
             {pane === 'about' && <AboutPane />}
           </div>
         </div>
@@ -444,7 +455,9 @@ function ThemeGroup({
   // The Settings window is a separate JS context, so register the user's
   // installed themes here too (the main window does this on boot).
   useEffect(() => {
-    void loadInstalledThemes().then(reload).catch(() => {});
+    void loadInstalledThemes()
+      .then(reload)
+      .catch(() => {});
   }, []);
 
   // Both install paths land here so success and failure read the same way
@@ -519,9 +532,9 @@ function ThemeGroup({
       {addOpen && (
         <Panel className="mt-3 animate-view-in space-y-3">
           <p className="font-display text-xs leading-relaxed text-fg-muted">
-            Paste a link to a theme JSON, or load one from disk. VS Code colour themes
-            work too - the workbench palette is converted to ARC’s, with the text ramp
-            re-solved for contrast. Installed themes are saved to{' '}
+            Paste a link to a theme JSON, or load one from disk. VS Code colour themes work too -
+            the workbench palette is converted to ARC’s, with the text ramp re-solved for contrast.
+            Installed themes are saved to{' '}
             <code className="font-mono text-fg-subtle">~/.arc/themes</code>.
           </p>
           <div className="flex items-center gap-2">
@@ -748,15 +761,55 @@ function LayoutModeCard({
         <svg viewBox="0 0 48 30" className="h-[46px] w-[74px]" aria-hidden>
           {mode === 'tiling' ? (
             <>
-              <rect x="1" y="1" width="21.5" height="28" rx="2.5" fill="currentColor" opacity={0.5} />
-              <rect x="25.5" y="1" width="21.5" height="13" rx="2.5" fill="currentColor" opacity={0.5} />
-              <rect x="25.5" y="16" width="21.5" height="13" rx="2.5" fill="currentColor" opacity={0.5} />
+              <rect
+                x="1"
+                y="1"
+                width="21.5"
+                height="28"
+                rx="2.5"
+                fill="currentColor"
+                opacity={0.5}
+              />
+              <rect
+                x="25.5"
+                y="1"
+                width="21.5"
+                height="13"
+                rx="2.5"
+                fill="currentColor"
+                opacity={0.5}
+              />
+              <rect
+                x="25.5"
+                y="16"
+                width="21.5"
+                height="13"
+                rx="2.5"
+                fill="currentColor"
+                opacity={0.5}
+              />
             </>
           ) : (
             <>
               <rect x="1" y="1" width="15" height="6" rx="1.5" fill="currentColor" opacity={0.75} />
-              <rect x="17.5" y="1" width="15" height="6" rx="1.5" fill="currentColor" opacity={0.28} />
-              <rect x="34" y="1" width="13" height="6" rx="1.5" fill="currentColor" opacity={0.28} />
+              <rect
+                x="17.5"
+                y="1"
+                width="15"
+                height="6"
+                rx="1.5"
+                fill="currentColor"
+                opacity={0.28}
+              />
+              <rect
+                x="34"
+                y="1"
+                width="13"
+                height="6"
+                rx="1.5"
+                fill="currentColor"
+                opacity={0.28}
+              />
               <rect x="1" y="9" width="46" height="20" rx="2.5" fill="currentColor" opacity={0.5} />
             </>
           )}
@@ -764,7 +817,9 @@ function LayoutModeCard({
       </div>
       <div className="flex items-center justify-between border-t border-border-subtle bg-bg-base/40 px-3 py-2">
         <div className="min-w-0">
-          <div className="font-display text-sm font-medium tracking-tight text-fg-base">{label}</div>
+          <div className="font-display text-sm font-medium tracking-tight text-fg-base">
+            {label}
+          </div>
           <div className="truncate font-display text-2xs text-fg-subtle">{hint}</div>
         </div>
         {active && <Check size={11} className="shrink-0 text-accent" />}
@@ -801,14 +856,22 @@ function AppearanceCard({
         {preview === 'dark' && <DarkSwatch />}
         {preview === 'system' && (
           <div className="flex h-full">
-            <div className="flex-1"><LightSwatch /></div>
-            <div className="flex-1"><DarkSwatch /></div>
+            <div className="flex-1">
+              <LightSwatch />
+            </div>
+            <div className="flex-1">
+              <DarkSwatch />
+            </div>
           </div>
         )}
       </div>
       <div className="flex items-center justify-between border-t border-border-subtle bg-bg-base/40 px-3 py-2">
         <div className="flex items-center gap-1.5">
-          <Icon size={11} strokeWidth={2.1} className={active ? 'text-accent-bright' : 'text-fg-muted'} />
+          <Icon
+            size={11}
+            strokeWidth={2.1}
+            className={active ? 'text-accent-bright' : 'text-fg-muted'}
+          />
           <span className="font-display text-sm font-medium tracking-tight text-fg-base">
             {label}
           </span>
@@ -864,7 +927,10 @@ function ThemeCard({
 
 function LightSwatch() {
   return (
-    <div className="flex h-full flex-col gap-1 p-2.5" style={{ background: '#f7f7f8', color: '#1c1c1e' }}>
+    <div
+      className="flex h-full flex-col gap-1 p-2.5"
+      style={{ background: '#f7f7f8', color: '#1c1c1e' }}
+    >
       <div className="flex gap-1">
         <span className="h-1.5 w-1.5 rounded-full" style={{ background: '#ff5f57' }} />
         <span className="h-1.5 w-1.5 rounded-full" style={{ background: '#febc2e' }} />
@@ -879,7 +945,10 @@ function LightSwatch() {
 
 function DarkSwatch() {
   return (
-    <div className="flex h-full flex-col gap-1 p-2.5" style={{ background: '#161618', color: '#eef0f3' }}>
+    <div
+      className="flex h-full flex-col gap-1 p-2.5"
+      style={{ background: '#161618', color: '#eef0f3' }}
+    >
       <div className="flex gap-1">
         <span className="h-1.5 w-1.5 rounded-full" style={{ background: '#ff5252' }} />
         <span className="h-1.5 w-1.5 rounded-full" style={{ background: '#f0a958' }} />
@@ -894,13 +963,7 @@ function DarkSwatch() {
 
 // ─── Shortcuts ─────────────────────────────────────────────────────────────
 
-const SHORTCUT_CATEGORIES: ActionCategory[] = [
-  'Workspace',
-  'Terminal',
-  'SSH',
-  'AI CLIs',
-  'Help',
-];
+const SHORTCUT_CATEGORIES: ActionCategory[] = ['Workspace', 'Terminal', 'SSH', 'AI CLIs', 'Help'];
 
 function ShortcutsPane() {
   const overrides = useShortcuts((s) => s.overrides);
@@ -1043,9 +1106,7 @@ function ShortcutsPane() {
 
       {noMatches && (
         <div className="rounded-squircle border border-edge-1 bg-surface-1 px-6 py-14 text-center">
-          <p className="font-display text-sm text-fg-muted">
-            Nothing matches “{query}”.
-          </p>
+          <p className="font-display text-sm text-fg-muted">Nothing matches “{query}”.</p>
           <button
             onClick={() => setQuery('')}
             className="mt-3 rounded-md px-3 py-1.5 font-display text-xs text-fg-base ring-1 ring-edge-2 transition-colors hover:bg-surface-2"
@@ -1119,9 +1180,7 @@ function ShortcutRow({
     >
       <div className="min-w-0">
         <div className="flex items-center gap-2">
-          <span className="font-display text-sm tracking-tight text-fg-base">
-            {meta.label}
-          </span>
+          <span className="font-display text-sm tracking-tight text-fg-base">{meta.label}</span>
           {isCustom && (
             <span
               className="rounded bg-accent/20 px-1.5 py-px font-display text-2xs text-accent-bright"
@@ -1216,7 +1275,6 @@ function currentBinding(
   if (ov === undefined) return DEFAULT_BINDINGS[id];
   return ov;
 }
-
 
 // ─── Editor ───────────────────────────────────────────────
 
@@ -1336,10 +1394,7 @@ function SidebarSettingsPane() {
             return (
               <div
                 key={id}
-                className={cn(
-                  'flex items-center gap-3 px-4 py-2.5',
-                  isHidden && 'opacity-50',
-                )}
+                className={cn('flex items-center gap-3 px-4 py-2.5', isHidden && 'opacity-50')}
               >
                 <Icon size={14} strokeWidth={1.9} className="shrink-0 text-fg-muted" />
                 <span className="flex-1 font-display text-sm tracking-tight text-fg-base">
@@ -1641,9 +1696,7 @@ function AiCommandSettings() {
   return (
     <Panel className="space-y-4">
       <label className="block">
-        <span className="font-display text-sm tracking-tight text-fg-base">
-          Anthropic API key
-        </span>
+        <span className="font-display text-sm tracking-tight text-fg-base">Anthropic API key</span>
         <span className="mt-0.5 block font-display text-xs leading-relaxed text-fg-subtle">
           {hasKey
             ? 'A key is stored in your OS credential vault. Paste a new one to replace it.'
@@ -1684,8 +1737,8 @@ function AiCommandSettings() {
       <label className="block">
         <span className="font-display text-sm tracking-tight text-fg-base">Model</span>
         <span className="mt-0.5 block font-display text-xs leading-relaxed text-fg-subtle">
-          Any Claude model id. <code className="font-mono">claude-haiku-4-5</code> is the
-          cheapest and quickest; the default trades a little latency for better commands.
+          Any Claude model id. <code className="font-mono">claude-haiku-4-5</code> is the cheapest
+          and quickest; the default trades a little latency for better commands.
         </span>
         <input
           value={model}
@@ -1712,8 +1765,7 @@ function ShellPicker({
   defaultShell: string | null;
   onPick: (shell: string | null) => void;
 }) {
-  const matchesKnown =
-    defaultShell !== null && (shells ?? []).some((s) => s.path === defaultShell);
+  const matchesKnown = defaultShell !== null && (shells ?? []).some((s) => s.path === defaultShell);
   const showCustom = defaultShell !== null && !matchesKnown;
   const [customPath, setCustomPath] = useState(showCustom ? defaultShell : '');
 
@@ -1728,8 +1780,7 @@ function ShellPicker({
           onClick={() => onPick(null)}
           label="System default"
           subtitle={
-            shells?.find((s) => s.is_default)?.path ??
-            'COMSPEC on Windows, $SHELL elsewhere'
+            shells?.find((s) => s.is_default)?.path ?? 'COMSPEC on Windows, $SHELL elsewhere'
           }
         />
 
@@ -1750,9 +1801,7 @@ function ShellPicker({
         ))}
 
         <div className={cn('px-4 py-3', showCustom && 'bg-accent-soft')}>
-          <div className="font-display text-sm tracking-tight text-fg-base">
-            Something else
-          </div>
+          <div className="font-display text-sm tracking-tight text-fg-base">Something else</div>
           <input
             value={customPath}
             onChange={(e) => {
@@ -1930,8 +1979,8 @@ function SecretsPane() {
             ) : names.length === 0 ? (
               <Panel>
                 <p className="font-display text-sm text-fg-muted">
-                  No secrets yet. Add one above and it becomes available to your terminals
-                  and agents.
+                  No secrets yet. Add one above and it becomes available to your terminals and
+                  agents.
                 </p>
               </Panel>
             ) : (
@@ -1988,9 +2037,7 @@ function AboutPane() {
           draggable={false}
         />
         <div className="min-w-0">
-          <h2 className="font-display text-2xl font-semibold tracking-tight text-fg-base">
-            ARC
-          </h2>
+          <h2 className="font-display text-2xl font-semibold tracking-tight text-fg-base">ARC</h2>
           <p className="mt-0.5 font-display text-sm text-fg-muted">
             AI-native terminal and agent runtime
           </p>
@@ -2014,11 +2061,7 @@ function AboutPane() {
 
       <Group title="Project">
         <Rows>
-          <LinkRow
-            icon={Github}
-            label="Source on GitHub"
-            onClick={() => openExternal(REPO_URL)}
-          />
+          <LinkRow icon={Github} label="Source on GitHub" onClick={() => openExternal(REPO_URL)} />
           <LinkRow
             icon={AlertTriangle}
             label="Report an issue"
@@ -2118,11 +2161,7 @@ function UpdatesCard() {
           {status === 'found' && !installing && (
             <ArrowUpCircle size={11} strokeWidth={2.2} className="text-accent" />
           )}
-          {installing
-            ? `${progress}%`
-            : status === 'found'
-              ? 'Install and restart'
-              : 'Check now'}
+          {installing ? `${progress}%` : status === 'found' ? 'Install and restart' : 'Check now'}
         </button>
       }
     >
@@ -2212,7 +2251,12 @@ function DiagnosticsCard() {
 }
 
 function AboutRow({ label, value }: { label: string; value: string }) {
-  return <Row label={label} control={<span className="font-display text-sm text-fg-muted">{value}</span>} />;
+  return (
+    <Row
+      label={label}
+      control={<span className="font-display text-sm text-fg-muted">{value}</span>}
+    />
+  );
 }
 
 function detectPlatform(): string {
@@ -2265,6 +2309,96 @@ function ClaudePane() {
         <Panel>
           <ClaudeSettings />
         </Panel>
+      </Group>
+    </>
+  );
+}
+
+/**
+ * The status bar's usage popup reads from here: a name plus a shell command
+ * line that prints an agent's token/credit usage. ARC runs the command as-is
+ * and parses whatever JSON comes back (or shows it raw) — there's no usage
+ * API of ARC's own, so this pane is entirely "what command do I run".
+ */
+function UsagePane() {
+  const agents = useSettings((s) => s.usageAgents);
+  const setAgents = useSettings((s) => s.setUsageAgents);
+
+  const patch = (id: string, fields: Partial<UsageAgent>) =>
+    setAgents(agents.map((a) => (a.id === id ? { ...a, ...fields } : a)));
+
+  const add = () =>
+    setAgents([
+      ...agents,
+      {
+        id: `usage-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+        name: '',
+        command: '',
+      },
+    ]);
+
+  const remove = (id: string) => setAgents(agents.filter((a) => a.id !== id));
+
+  return (
+    <>
+      <PaneHeader
+        title="Usage"
+        blurb="Commands that print an agent's token or credit usage, run in your workspace's shell when you open or refresh the status bar's usage popup. ARC doesn't call any billing API of its own — it runs the command and shows what comes back."
+      />
+      <Group
+        title="Agents"
+        hint="Each command runs on your machine, in your shell, with no arguments added. An empty list hides the status bar item."
+        action={
+          <button
+            onClick={add}
+            className="flex items-center gap-1.5 rounded-md px-2 py-1 font-display text-xs text-fg-muted transition-colors hover:bg-surface-2 hover:text-fg-base"
+          >
+            <Plus size={11} strokeWidth={2.2} />
+            Add agent
+          </button>
+        }
+      >
+        {agents.length === 0 ? (
+          <Panel>
+            <p className="font-display text-sm text-fg-muted">
+              No agents yet. Add one — for Claude,{' '}
+              <code className="font-mono text-xs">{DEFAULT_USAGE_AGENTS[0]!.command}</code> is a
+              good start.
+            </p>
+          </Panel>
+        ) : (
+          <div className="space-y-2.5">
+            {agents.map((a) => (
+              <Panel key={a.id} className="space-y-2.5">
+                <div className="flex items-center gap-2">
+                  <input
+                    value={a.name}
+                    onChange={(e) => patch(a.id, { name: e.target.value })}
+                    placeholder="Name"
+                    aria-label="Agent name"
+                    className="min-w-0 flex-1 rounded-md border border-edge-2 bg-bg-base/50 px-2.5 py-1.5 font-display text-sm text-fg-base outline-none focus:border-accent/45"
+                  />
+                  <button
+                    onClick={() => remove(a.id)}
+                    title="Delete agent"
+                    aria-label={`Delete ${a.name || 'agent'}`}
+                    className="rounded-md p-1.5 text-fg-subtle transition-colors hover:bg-surface-2 hover:text-status-err"
+                  >
+                    <Trash2 size={12} strokeWidth={2.1} />
+                  </button>
+                </div>
+                <input
+                  value={a.command}
+                  onChange={(e) => patch(a.id, { command: e.target.value })}
+                  placeholder="Command, e.g. npx ccusage@latest --json"
+                  aria-label="Usage command"
+                  spellCheck={false}
+                  className="w-full min-w-0 rounded-md border border-edge-2 bg-bg-base/50 px-2.5 py-1.5 font-mono text-xs text-fg-base placeholder:text-fg-subtle outline-none focus:border-accent/45"
+                />
+              </Panel>
+            ))}
+          </div>
+        )}
       </Group>
     </>
   );
@@ -2324,8 +2458,8 @@ function TerminalProfilesSection() {
       {profiles.length === 0 ? (
         <Panel>
           <p className="font-display text-sm text-fg-muted">
-            No profiles yet. Add one to open a terminal with a particular shell,
-            arguments and working directory in a single command.
+            No profiles yet. Add one to open a terminal with a particular shell, arguments and
+            working directory in a single command.
           </p>
         </Panel>
       ) : (
@@ -2442,9 +2576,7 @@ export function splitArgs(input: string): string[] {
 function PaneHeader({ title, blurb }: { title: string; blurb: string }) {
   return (
     <header className="mb-8 border-b border-edge-1 pb-5">
-      <h2 className="font-display text-xl font-semibold tracking-tight text-fg-base">
-        {title}
-      </h2>
+      <h2 className="font-display text-xl font-semibold tracking-tight text-fg-base">{title}</h2>
       <p className="mt-1.5 max-w-[56ch] font-display text-sm leading-relaxed text-fg-muted">
         {blurb}
       </p>
@@ -2540,20 +2672,9 @@ function Row({
 
 /** Free-form content that still wants the group container — a picker grid, an
  *  input pair, an editor. Same border and ground as `Rows`, no divisions. */
-function Panel({
-  children,
-  className,
-}: {
-  children: React.ReactNode;
-  className?: string;
-}) {
+function Panel({ children, className }: { children: React.ReactNode; className?: string }) {
   return (
-    <div
-      className={cn(
-        'rounded-squircle border border-edge-1 bg-surface-1 p-4',
-        className,
-      )}
-    >
+    <div className={cn('rounded-squircle border border-edge-1 bg-surface-1 p-4', className)}>
       {children}
     </div>
   );

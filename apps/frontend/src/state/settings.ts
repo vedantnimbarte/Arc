@@ -87,6 +87,23 @@ export interface TerminalProfile {
   env?: Record<string, string>;
 }
 
+/**
+ * One entry in the status bar's usage picker: a display name and a shell
+ * command line that prints that agent's token/credit usage. ARC doesn't know
+ * or care what the command is — it runs it and shows whatever comes back.
+ */
+export interface UsageAgent {
+  /** Stable across renames — keys the result cache in `state/usage.ts`. */
+  id: string;
+  name: string;
+  /** Full shell command line, run as-is (e.g. `npx ccusage@latest --json`). */
+  command: string;
+}
+
+export const DEFAULT_USAGE_AGENTS: UsageAgent[] = [
+  { id: 'claude', name: 'Claude', command: 'npx ccusage@latest --json' },
+];
+
 /** Shape-check profiles coming out of the persisted settings blob. A
  *  hand-edited or downgraded settings row must not be able to hand the PTY
  *  spawn a non-string shell path. */
@@ -215,6 +232,9 @@ export interface Settings {
    *  `AiCliId`. Sparse: an agent left at its default has no entry, which is
    *  what makes the launcher's Reset a delete rather than a re-write. */
   agentCommands: Partial<Record<AiCliId, string>>;
+  /** Agents listed in the status bar's usage popup. Empty hides the status
+   *  bar item entirely — that's the off switch, there's no separate toggle. */
+  usageAgents: UsageAgent[];
   /** Check for a new ARC release on launch and offer it in-app. Off means
    *  ARC never contacts the update endpoint on its own — Settings → About
    *  still has a manual "Check for updates" button. */
@@ -260,6 +280,9 @@ export interface Settings {
   /** Override an agent's start command, or clear the override when `command`
    *  is blank or matches the built-in default. */
   setAgentCommand: (id: AiCliId, command: string) => void;
+  /** Replace the whole usage-agent list — add/edit/delete all funnel through
+   *  one setter, same as `setTerminalProfiles`. */
+  setUsageAgents: (agents: UsageAgent[]) => void;
   setAutoUpdateCheck: (on: boolean) => void;
   setAiModel: (model: string) => void;
   hydrateSettings: () => Promise<void>;
@@ -290,6 +313,7 @@ const DEFAULTS = {
   notifyOs: ['agent', 'command'] as NotificationSource[],
   defaultLayoutMode: 'tiling' as LayoutMode,
   agentCommands: {} as Partial<Record<AiCliId, string>>,
+  usageAgents: DEFAULT_USAGE_AGENTS,
   autoUpdateCheck: true,
   aiModel: DEFAULT_AI_MODEL,
 };
@@ -395,6 +419,7 @@ export const useSettings = create<Settings>()((set, get) => ({
       else next[id] = trimmed;
       return { agentCommands: next };
     }),
+  setUsageAgents: (agents) => set({ usageAgents: agents }),
   setAutoUpdateCheck: (on) => set({ autoUpdateCheck: on }),
   setAiModel: (model) => set({ aiModel: model.trim() || DEFAULT_AI_MODEL }),
 
@@ -481,10 +506,7 @@ export const useSettings = create<Settings>()((set, get) => ({
 // ─── helpers ───────────────────────────────────────────────────────────────
 
 /** Merge a stored settings blob into the current store state. */
-function applyStored(
-  current: Settings,
-  stored: Partial<PersistedSettings>,
-): Partial<Settings> {
+function applyStored(current: Settings, stored: Partial<PersistedSettings>): Partial<Settings> {
   return {
     defaultShell: stored.defaultShell ?? current.defaultShell,
     appearance: isAppearance(stored.appearance) ? stored.appearance : current.appearance,
@@ -496,23 +518,16 @@ function applyStored(
           : current.themeId,
     fontId: stored.fontId ?? current.fontId,
     fontSize:
-      typeof stored.fontSize === 'number'
-        ? clampFontSize(stored.fontSize)
-        : current.fontSize,
+      typeof stored.fontSize === 'number' ? clampFontSize(stored.fontSize) : current.fontSize,
     launchAtLogin:
-      typeof stored.launchAtLogin === 'boolean'
-        ? stored.launchAtLogin
-        : current.launchAtLogin,
+      typeof stored.launchAtLogin === 'boolean' ? stored.launchAtLogin : current.launchAtLogin,
     restoreWindowState:
       typeof stored.restoreWindowState === 'boolean'
         ? stored.restoreWindowState
         : current.restoreWindowState,
     editorVimMode:
-      typeof stored.editorVimMode === 'boolean'
-        ? stored.editorVimMode
-        : current.editorVimMode,
-    editorLsp:
-      typeof stored.editorLsp === 'boolean' ? stored.editorLsp : current.editorLsp,
+      typeof stored.editorVimMode === 'boolean' ? stored.editorVimMode : current.editorVimMode,
+    editorLsp: typeof stored.editorLsp === 'boolean' ? stored.editorLsp : current.editorLsp,
     editorFormatOnSave:
       typeof stored.editorFormatOnSave === 'boolean'
         ? stored.editorFormatOnSave
@@ -521,20 +536,16 @@ function applyStored(
     // Drop a default pointing at a profile that no longer survives coercion.
     defaultProfileId:
       typeof stored.defaultProfileId === 'string' &&
-      coerceTerminalProfiles(stored.terminalProfiles).some(
-        (p) => p.id === stored.defaultProfileId,
-      )
+      coerceTerminalProfiles(stored.terminalProfiles).some((p) => p.id === stored.defaultProfileId)
         ? stored.defaultProfileId
         : null,
-    wingmanUrl:
-      typeof stored.wingmanUrl === 'string' ? stored.wingmanUrl : current.wingmanUrl,
+    wingmanUrl: typeof stored.wingmanUrl === 'string' ? stored.wingmanUrl : current.wingmanUrl,
     claudePermissionMode: CLAUDE_PERMISSION_MODES.includes(
       stored.claudePermissionMode as ClaudePermissionMode,
     )
       ? (stored.claudePermissionMode as ClaudePermissionMode)
       : current.claudePermissionMode,
-    claudeModel:
-      typeof stored.claudeModel === 'string' ? stored.claudeModel : current.claudeModel,
+    claudeModel: typeof stored.claudeModel === 'string' ? stored.claudeModel : current.claudeModel,
     claudeMaxBudgetUsd:
       typeof stored.claudeMaxBudgetUsd === 'number' && stored.claudeMaxBudgetUsd > 0
         ? stored.claudeMaxBudgetUsd
@@ -547,8 +558,7 @@ function applyStored(
       typeof stored.notifyThresholdSecs === 'number'
         ? clampNotifySecs(stored.notifyThresholdSecs)
         : current.notifyThresholdSecs,
-    notifySound:
-      typeof stored.notifySound === 'boolean' ? stored.notifySound : current.notifySound,
+    notifySound: typeof stored.notifySound === 'boolean' ? stored.notifySound : current.notifySound,
     searchIgnoreDirs:
       Array.isArray(stored.searchIgnoreDirs) &&
       stored.searchIgnoreDirs.every((d) => typeof d === 'string')
@@ -561,6 +571,7 @@ function applyStored(
     notifyMuted: coerceSources(stored.notifyMuted, current.notifyMuted),
     notifyOs: coerceSources(stored.notifyOs, current.notifyOs),
     agentCommands: coerceAgentCommands(stored.agentCommands, current.agentCommands),
+    usageAgents: coerceUsageAgents(stored.usageAgents, current.usageAgents),
     autoUpdateCheck:
       typeof stored.autoUpdateCheck === 'boolean'
         ? stored.autoUpdateCheck
@@ -598,6 +609,7 @@ function toPersistedSettings(s: Settings): PersistedSettings {
     notifyMuted: s.notifyMuted,
     notifyOs: s.notifyOs,
     agentCommands: s.agentCommands,
+    usageAgents: s.usageAgents,
     autoUpdateCheck: s.autoUpdateCheck,
     aiModel: s.aiModel,
   };
@@ -629,6 +641,22 @@ function coerceAgentCommands(
   return out;
 }
 
+/** Shape-check usage agents coming out of the persisted settings blob. The
+ *  row is plaintext SQLite and user-editable on disk, so a non-string command
+ *  must never reach a shell. Duplicate ids collapse to the last one. */
+function coerceUsageAgents(raw: unknown, fallback: UsageAgent[]): UsageAgent[] {
+  if (!Array.isArray(raw)) return fallback;
+  const out = new Map<string, UsageAgent>();
+  for (const item of raw) {
+    if (!item || typeof item !== 'object') continue;
+    const r = item as Record<string, unknown>;
+    if (typeof r.id !== 'string' || !r.id) continue;
+    if (typeof r.name !== 'string' || typeof r.command !== 'string' || !r.command.trim()) continue;
+    out.set(r.id, { id: r.id, name: r.name, command: r.command });
+  }
+  return [...out.values()];
+}
+
 // Suppress save during programmatic hydrate. Set true around set(), cleared
 // next microtask.
 let suppressSave = false;
@@ -653,9 +681,7 @@ useSettings.subscribe(() => {
   clearTimeout(settingsSaveTimer);
   settingsSaveTimer = setTimeout(() => {
     settingsSaveTimer = undefined;
-    void persistSettingsNow().catch((err) =>
-      console.error('[settings] SQLite save failed:', err),
-    );
+    void persistSettingsNow().catch((err) => console.error('[settings] SQLite save failed:', err));
   }, 500);
 });
 
@@ -690,9 +716,8 @@ export async function rehydrateSettingsFromBroadcast(): Promise<void> {
     const sameTheme = incomingThemeId === current.themeId;
     const sameFont =
       (stored.fontId ?? current.fontId) === current.fontId &&
-      (typeof stored.fontSize === 'number'
-        ? clampFontSize(stored.fontSize)
-        : current.fontSize) === current.fontSize;
+      (typeof stored.fontSize === 'number' ? clampFontSize(stored.fontSize) : current.fontSize) ===
+        current.fontSize;
     const sameShell = (stored.defaultShell ?? current.defaultShell) === current.defaultShell;
     const sameStartup =
       (stored.launchAtLogin ?? current.launchAtLogin) === current.launchAtLogin &&

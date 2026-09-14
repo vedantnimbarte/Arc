@@ -1,8 +1,18 @@
 import { useState } from 'react';
-import { ArrowDown, ArrowUp, Command as CommandIcon, FolderOpen, GitBranch } from 'lucide-react';
+import {
+  ArrowDown,
+  ArrowUp,
+  CircleDollarSign,
+  Command as CommandIcon,
+  FolderOpen,
+  GitBranch,
+} from 'lucide-react';
 import { BranchPicker, type BranchPickerAnchor } from './BranchPicker';
+import { UsagePopover } from './UsagePopover';
 import { useFiles } from '../state/files';
 import { useGit } from '../state/git';
+import { useSettings } from '../state/settings';
+import { useUsage } from '../state/usage';
 import { runCommand } from '../state/commands';
 import { formatBinding, getBinding } from '../state/shortcuts';
 import { cn } from '../lib/cn';
@@ -29,15 +39,22 @@ export function StatusBar() {
   const paletteKbd = formatBinding(getBinding('open-command-palette'));
   const [branchAnchor, setBranchAnchor] = useState<BranchPickerAnchor | null>(null);
 
+  const usageAgents = useSettings((s) => s.usageAgents);
+  const usageSelectedId = useUsage((s) => s.selectedId);
+  const usageResults = useUsage((s) => s.results);
+  const [usageAnchor, setUsageAnchor] = useState<BranchPickerAnchor | null>(null);
+  const usageAgent = usageAgents.find((a) => a.id === usageSelectedId) ?? usageAgents[0] ?? null;
+  const usageCost = usageAgent
+    ? usageResults[usageAgent.id]?.summary?.rows.find((r) => /cost/i.test(r.label))?.value
+    : undefined;
+
   return (
     <footer className="material-toolbar flex h-6 shrink-0 items-center gap-1 border-t border-border-hairline px-2 font-display text-2xs text-fg-muted">
       {/* Folder — the answer to "what am I even looking at". With no root
           picked yet this is the call to action instead. */}
       <Item
         icon={FolderOpen}
-        onClick={() =>
-          root ? showSidebarView('files') : void runCommand('workspace.open-folder')
-        }
+        onClick={() => (root ? showSidebarView('files') : void runCommand('workspace.open-folder'))}
         label={root ? basename(root) : 'Open a folder…'}
         title={root ?? 'Choose the folder to work in'}
         accent={!root}
@@ -67,7 +84,10 @@ export function StatusBar() {
           )}
           {changes > 0 && (
             <span
-              className={cn('tabular-nums', conflicts > 0 ? 'text-status-err' : 'text-accent-bright')}
+              className={cn(
+                'tabular-nums',
+                conflicts > 0 ? 'text-status-err' : 'text-accent-bright',
+              )}
             >
               {conflicts > 0
                 ? `${conflicts} conflict${conflicts === 1 ? '' : 's'}`
@@ -78,6 +98,18 @@ export function StatusBar() {
       )}
 
       <div className="flex-1" />
+
+      {usageAgents.length > 0 && (
+        <Item
+          icon={CircleDollarSign}
+          onClick={(e) => {
+            const r = e.currentTarget.getBoundingClientRect();
+            setUsageAnchor({ x: r.left, y: r.top, placement: 'above' });
+          }}
+          label={usageCost ?? 'Usage'}
+          title="Agent token & credit usage"
+        />
+      )}
 
       {/* The one thing every new user needs to know. Deliberately spelled out
           rather than left as a bare glyph. */}
@@ -97,6 +129,8 @@ export function StatusBar() {
           onCheckedOut={() => root && void useGit.getState().refresh(root)}
         />
       )}
+
+      {usageAnchor && <UsagePopover anchor={usageAnchor} onClose={() => setUsageAnchor(null)} />}
     </footer>
   );
 }
