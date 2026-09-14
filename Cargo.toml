@@ -82,7 +82,10 @@ notify = "6"
 walkdir = "2"
 
 # Full-text indexing — used by `arc-filesystem::index` to back fs_search.
-tantivy = { version = "0.22", default-features = false, features = ["mmap", "stopwords"] }
+# 0.26 split stopword filtering's `Language` type out under a `stemmer`
+# feature that 0.22 didn't need explicitly — "stopwords" alone no longer
+# compiles on its own.
+tantivy = { version = "0.26", default-features = false, features = ["mmap", "stopwords", "stemmer"] }
 sha2 = "0.10"
 
 # OS credential vault (Keychain / Credential Manager / Secret Service).
@@ -109,6 +112,12 @@ chrono = { version = "0.4", default-features = false, features = ["clock", "serd
 dirs = "5"
 
 # Tauri (workspace-pinned for app crate)
+# Tracked: RUSTSEC/Dependabot flags `glib` <0.20 (GHSA-wrw7-89jp-8q8g,
+# Linux-only, via tauri-runtime-wry -> wry -> webkit2gtk's gtk-rs 0.18
+# stack). No fix here yet — 2.11.5 is the latest stable tauri 2.x, and
+# `cargo update` (whole workspace) doesn't move wry/glib at all under it.
+# Forcing a `[patch]` to an untested gtk-rs version risks the native webview
+# layer for a Linux-only advisory; wait for an upstream tauri/wry release.
 tauri = { version = "2", features = [] }
 tauri-build = { version = "2", features = [] }
 tauri-plugin-autostart = "2"
@@ -139,4 +148,9 @@ debug = true
 opt-level = 3
 lto = "thin"
 codegen-units = 1
+# Drops unwind tables for a further binary-size win. If a panicking Tauri
+# command handler ever needs to fail just that one IPC call instead of taking
+# the whole process down, revert this — verified no catch_unwind in our own
+# crates relies on it, but Tauri's own dispatcher wasn't fully auditable here.
+panic = "abort"
 strip = true

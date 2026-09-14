@@ -325,8 +325,11 @@ pub fn search(
     let q = parser
         .parse_query(query)
         .map_err(|e| Error::Index(format!("parse: {e}")))?;
+    // 0.26: `TopDocs::with_limit` alone is just the builder now — it no
+    // longer implements `Collector` itself. `.order_by_score()` is the chain
+    // that gets back to "top N by descending BM25 score", same as before.
     let top = searcher
-        .search(&q, &TopDocs::with_limit(limit.max(1).min(200)))
+        .search(&q, &TopDocs::with_limit(limit.max(1).min(200)).order_by_score())
         .map_err(|e| Error::Index(format!("search: {e}")))?;
 
     let mut out = Vec::with_capacity(top.len());
