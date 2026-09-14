@@ -68,30 +68,19 @@ export function StatusBar() {
             setBranchAnchor({ x: r.left, y: r.top, placement: 'above' });
           }}
           label={info.branch}
-          title={`On branch ${info.branch} — switch branch`}
+          title={branchTitle(info.branch, changes, conflicts)}
+          danger={conflicts > 0}
         >
           {info.ahead > 0 && (
-            <span className="flex items-center tabular-nums">
+            <span className="flex shrink-0 items-center tabular-nums">
               <ArrowUp size={9} strokeWidth={2.4} />
               {info.ahead}
             </span>
           )}
           {info.behind > 0 && (
-            <span className="flex items-center tabular-nums">
+            <span className="flex shrink-0 items-center tabular-nums">
               <ArrowDown size={9} strokeWidth={2.4} />
               {info.behind}
-            </span>
-          )}
-          {changes > 0 && (
-            <span
-              className={cn(
-                'tabular-nums',
-                conflicts > 0 ? 'text-status-err' : 'text-accent-bright',
-              )}
-            >
-              {conflicts > 0
-                ? `${conflicts} conflict${conflicts === 1 ? '' : 's'}`
-                : `${changes} change${changes === 1 ? '' : 's'}`}
             </span>
           )}
         </Item>
@@ -141,12 +130,27 @@ function basename(p: string): string {
   return parts[parts.length - 1] ?? p;
 }
 
+/** The branch pill only shows name + ahead/behind on screen — a long name
+ *  already eats the pill's width, and a "N changes" badge next to it wraps
+ *  instead of truncating (the bug this replaced). Changes/conflicts still
+ *  need to be *somewhere*, so they land in the hover tooltip instead. */
+function branchTitle(branch: string, changes: number, conflicts: number): string {
+  const detail =
+    changes > 0
+      ? conflicts > 0
+        ? `${conflicts} conflict${conflicts === 1 ? '' : 's'}`
+        : `${changes} change${changes === 1 ? '' : 's'}`
+      : null;
+  return `On branch ${branch}${detail ? ` — ${detail}` : ''} — switch branch`;
+}
+
 function Item({
   icon: Icon,
   label,
   title,
   onClick,
   accent,
+  danger,
   children,
 }: {
   icon: typeof GitBranch;
@@ -155,6 +159,9 @@ function Item({
   onClick: (e: React.MouseEvent<HTMLButtonElement>) => void;
   /** Draw attention — used for the "no folder yet" call to action. */
   accent?: boolean;
+  /** Tint the whole pill for something that needs attention now — e.g. an
+   *  unresolved merge conflict. No extra width, unlike a text badge. */
+  danger?: boolean;
   children?: React.ReactNode;
 }) {
   return (
@@ -167,10 +174,15 @@ function Item({
         'hover:bg-surface-2 hover:text-fg-base',
         'focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent/40',
         accent && 'text-accent-bright',
+        danger && 'text-status-err',
       )}
     >
       <Icon size={11} strokeWidth={2} className="shrink-0" />
-      <span className="truncate">{label}</span>
+      {/* min-w-0: a flex child's default min-width is its content's intrinsic
+          width, which defeats `truncate` entirely — this is what let a long
+          branch name shove the sibling badge into wrapping instead of
+          ellipsizing. */}
+      <span className="min-w-0 truncate">{label}</span>
       {children}
     </button>
   );

@@ -211,22 +211,6 @@ export function TabBar() {
         </div>
       )}
 
-      {/* Sidebar toggle — left rail, mirrors macOS toolbar control */}
-      <Tooltip label={sidebarCollapsed ? 'Show sidebar' : 'Hide sidebar'} kbd="⌘B">
-        <button
-          onClick={toggleSidebar}
-          className="group flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-fg-muted transition-all duration-200 ease-apple hover:bg-surface-2 hover:text-fg-base active:bg-surface-3"
-          aria-label={sidebarCollapsed ? 'Show sidebar' : 'Hide sidebar'}
-          aria-pressed={!sidebarCollapsed}
-        >
-          {sidebarCollapsed ? (
-            <PanelRightOpen size={14} strokeWidth={1.9} />
-          ) : (
-            <PanelRightClose size={14} strokeWidth={1.9} />
-          )}
-        </button>
-      </Tooltip>
-
       {/* AI CLI launcher + keyboard shortcuts — relocated here from the old
           bottom status bar, sitting between the sidebar toggle and the +. */}
       <AiCliMenuButton clis={aiClis} />
@@ -270,6 +254,23 @@ export function TabBar() {
       <NotificationCenter />
 
       <LayoutModeSwitch mode={layoutMode} onSelect={setLayoutMode} compact={compactChrome} />
+
+      {/* Sidebar toggle — grouped with the layout switch since both control
+          how the workspace is laid out. */}
+      <Tooltip label={sidebarCollapsed ? 'Show sidebar' : 'Hide sidebar'} kbd="⌘B" align="end">
+        <button
+          onClick={toggleSidebar}
+          className="group flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-fg-muted transition-all duration-200 ease-apple hover:bg-surface-2 hover:text-fg-base active:bg-surface-3"
+          aria-label={sidebarCollapsed ? 'Show sidebar' : 'Hide sidebar'}
+          aria-pressed={!sidebarCollapsed}
+        >
+          {sidebarCollapsed ? (
+            <PanelRightOpen size={14} strokeWidth={1.9} />
+          ) : (
+            <PanelRightClose size={14} strokeWidth={1.9} />
+          )}
+        </button>
+      </Tooltip>
 
       <div className="ml-0.5 pr-2" />
 
