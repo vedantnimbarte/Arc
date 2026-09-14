@@ -127,6 +127,7 @@ export default function App() {
   const launchAiCli = useWorkspace((s) => s.launchAiCli);
   const launchWingman = useWorkspace((s) => s.launchWingman);
   const newTerminal = useWorkspace((s) => s.newTerminal);
+  const reopenClosedTab = useWorkspace((s) => s.reopenClosedTab);
   const hydrate = useWorkspace((s) => s.hydrate);
   const activeTab = tabs.find((t) => t.id === activeTabId);
 
@@ -356,6 +357,9 @@ export default function App() {
       case 'new-terminal':
         void newTerminal();
         return;
+      case 'reopen-closed-tab':
+        reopenClosedTab();
+        return;
       case 'open-settings':
         void settingsWindowOpen().catch((err) =>
           console.error('[shortcut] open settings window failed:', err),
@@ -460,7 +464,12 @@ export default function App() {
         title: meta.label,
         description: meta.description,
         group: CATEGORY_TO_GROUP[meta.category],
-        keywords: [meta.description, meta.category],
+        // Just the category, not the whole description sentence — every
+        // "Launch X" entry's description says "...running a new terminal
+        // tab...", so a full-sentence keyword used to make "term" surface
+        // all 15 of them ahead of scannability. `description` is still
+        // shown under the title in the palette row; it just isn't matched.
+        keywords: [meta.category],
         shortcut: binding ? formatBinding(binding) : undefined,
         run: () => dispatchActionRef.current(id),
       };

@@ -48,7 +48,16 @@ export function TestExplorer() {
   const shownOutcome = openOutput ? tests.outcomes[openOutput] : undefined;
 
   if (!isTauri) {
-    return <Empty>The test explorer needs the desktop app.</Empty>;
+    return (
+      <div className="flex min-h-0 flex-1 flex-col">
+        <div className="flex shrink-0 items-center gap-1.5 px-3 py-2">
+          <span className="flex-1 font-sans text-2xs uppercase tracking-widest text-fg-subtle/60">
+            Tests
+          </span>
+        </div>
+        <Empty>The test explorer needs the desktop app.</Empty>
+      </div>
+    );
   }
 
   return (
