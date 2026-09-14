@@ -23,6 +23,7 @@ import { gitStatus, isTauri } from '../lib/tauri';
 import { useFiles } from '../state/files';
 import { useGit } from '../state/git';
 import { Tooltip } from './Tooltip';
+import { MoveIcon, WorkspaceFlyout } from './MoveToWorkspace';
 import { cn } from '../lib/cn';
 
 // Below this header width, the split/maximize buttons collapse into a "⋯"
@@ -88,6 +89,7 @@ export function PaneHeader({ paneId }: Props) {
   const [compact, setCompact] = useState(false);
   const [menuAnchor, setMenuAnchor] = useState<{ x: number; y: number } | null>(null);
   const [branchAnchor, setBranchAnchor] = useState<BranchPickerAnchor | null>(null);
+  const [moveAnchor, setMoveAnchor] = useState<{ el: HTMLElement; kb: boolean } | null>(null);
   useEffect(() => {
     const el = rootRef.current;
     if (!el) return;
@@ -226,6 +228,18 @@ export function PaneHeader({ paneId }: Props) {
           ))
         )}
 
+        <HeaderButton
+          label="Move to workspace"
+          active={!!moveAnchor}
+          onClick={(e) => {
+            // `detail` is 0 for a keyboard-activated click.
+            const next = { el: e.currentTarget, kb: e.detail === 0 };
+            setMoveAnchor((a) => (a ? null : next));
+          }}
+        >
+          <MoveIcon size={13} strokeWidth={2} />
+        </HeaderButton>
+
         {/* Always offered, last tab included — emptying the workspace shows
             the launcher rather than nothing. */}
         <HeaderButton label="Close pane" onClick={() => closeTab(tab.id)}>
@@ -240,6 +254,19 @@ export function PaneHeader({ paneId }: Props) {
           branch={branch}
           actions={overflow}
           onClose={() => setMenuAnchor(null)}
+        />
+      )}
+
+      {moveAnchor && (
+        <WorkspaceFlyout
+          anchorEl={moveAnchor.el}
+          placement="below"
+          tabId={tab.id}
+          focusFirst={moveAnchor.kb}
+          onDismiss={(refocus) => {
+            if (refocus) moveAnchor.el.focus();
+            setMoveAnchor(null);
+          }}
         />
       )}
 
@@ -326,10 +353,13 @@ function OverflowMenu({
 function HeaderButton({
   label,
   onClick,
+  active,
   children,
 }: {
   label: string;
-  onClick: () => void;
+  onClick: (e: React.MouseEvent<HTMLButtonElement>) => void;
+  /** Its popover is open. */
+  active?: boolean;
   children: React.ReactNode;
 }) {
   return (
@@ -337,11 +367,15 @@ function HeaderButton({
       <button
         type="button"
         aria-label={label}
+        aria-expanded={active}
         onClick={(e) => {
           e.stopPropagation();
-          onClick();
+          onClick(e);
         }}
-        className="flex h-[22px] w-[22px] items-center justify-center rounded text-fg-subtle transition-colors hover:bg-surface-3 hover:text-fg-base"
+        className={cn(
+          'flex h-[22px] w-[22px] items-center justify-center rounded transition-colors hover:bg-surface-3 hover:text-fg-base',
+          active ? 'bg-surface-3 text-fg-base' : 'text-fg-subtle',
+        )}
       >
         {children}
       </button>

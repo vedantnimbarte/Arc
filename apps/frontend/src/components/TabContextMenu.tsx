@@ -10,6 +10,7 @@ import {
 } from 'lucide-react';
 import { cn } from '../lib/cn';
 import { groupColorDef, type TabGroupColorId } from '../lib/tabGroups';
+import { MoveToWorkspaceItem, isInFlyout } from './MoveToWorkspace';
 
 /** A same-leaf group this tab could be added to. */
 export interface GroupOption {
@@ -19,6 +20,8 @@ export interface GroupOption {
 }
 
 interface Props {
+  /** The tab this menu acts on. */
+  tabId: string;
   /** Anchor coords — typically `e.clientX/Y` from the contextmenu event. */
   x: number;
   y: number;
@@ -95,6 +98,7 @@ function MenuItem({
 }
 
 export function TabContextMenu({
+  tabId,
   x,
   y,
   closable,
@@ -130,7 +134,7 @@ export function TabContextMenu({
     const onDown = (e: PointerEvent) => {
       const target = e.target as Node | null;
       if (!target) return;
-      if (rootRef.current?.contains(target)) return;
+      if (rootRef.current?.contains(target) || isInFlyout(target)) return;
       onClose();
     };
     const onKey = (e: KeyboardEvent) => {
@@ -199,6 +203,7 @@ export function TabContextMenu({
       )}
 
       <div className="my-1 h-px bg-surface-2" aria-hidden />
+      <MoveToWorkspaceItem tabId={tabId} onDone={onClose} className="rounded-md px-2.5 py-1.5" />
       <MenuItem icon={X} label="Close tab" danger disabled={!closable} onSelect={run(onCloseTab)} />
     </div>,
     document.body,
