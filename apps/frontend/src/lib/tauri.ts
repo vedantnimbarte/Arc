@@ -638,10 +638,7 @@ export async function apiclientEnvsDelete(id: string): Promise<void> {
   await invoke('apiclient_envs_delete', { id });
 }
 
-export async function apiclientEnvsSetActive(
-  sessionId: string,
-  id: string | null,
-): Promise<void> {
+export async function apiclientEnvsSetActive(sessionId: string, id: string | null): Promise<void> {
   await invoke('apiclient_envs_set_active', { sessionId, id });
 }
 
@@ -775,10 +772,7 @@ export async function lspIsRunning(id: string): Promise<boolean> {
 
 /** Subscribe to a language server's notifications (diagnostics, logs, …).
  *  Returns an unlisten function. */
-export async function onLspEvent(
-  id: string,
-  handler: (ev: LspEvent) => void,
-): Promise<UnlistenFn> {
+export async function onLspEvent(id: string, handler: (ev: LspEvent) => void): Promise<UnlistenFn> {
   return listen<LspEvent>(`lsp://event/${id}`, (e) => handler(e.payload));
 }
 
@@ -869,10 +863,7 @@ export async function sessionWorkspacesList(): Promise<Workspace[]> {
   return invoke<Workspace[]>('session_workspaces_list');
 }
 
-export async function sessionWorkspaceUpsert(
-  name: string,
-  root: string,
-): Promise<Workspace> {
+export async function sessionWorkspaceUpsert(name: string, root: string): Promise<Workspace> {
   return invoke<Workspace>('session_workspace_upsert', { name, root });
 }
 
@@ -948,6 +939,9 @@ export interface PersistedSettings {
    *  Sparse — only agents whose command the user edited away from
    *  `AI_CLI_COMMANDS` appear, so Reset is "delete the key". */
   agentCommands?: Record<string, string>;
+  /** Agents listed in the status bar's usage popup. Validated on load by
+   *  `coerceUsageAgents` — this row is user-editable on disk. */
+  usageAgents?: unknown;
 }
 
 /** Returns the stored settings blob, or `null` on first launch. */
@@ -1356,19 +1350,12 @@ export async function gitBisectStatus(path: string): Promise<GitBisectStatus> {
 
 /** `git bisect start [<bad> [<good>]]`. Resolves to git's own output, which
  *  names the commit to test and how many steps remain. */
-export async function gitBisectStart(
-  path: string,
-  bad?: string,
-  good?: string,
-): Promise<string> {
+export async function gitBisectStart(path: string, bad?: string, good?: string): Promise<string> {
   return invoke<string>('git_bisect_start', { path, bad: bad ?? null, good: good ?? null });
 }
 
 /** Mark the checked-out commit. Resolves to git's output (next commit + steps left). */
-export async function gitBisectMark(
-  path: string,
-  term: 'good' | 'bad' | 'skip',
-): Promise<string> {
+export async function gitBisectMark(path: string, term: 'good' | 'bad' | 'skip'): Promise<string> {
   return invoke<string>('git_bisect_mark', { path, term });
 }
 
@@ -1392,10 +1379,7 @@ export interface GitRemoteOpResult {
   message: string;
 }
 
-export async function gitFetch(
-  path: string,
-  remote?: string | null,
-): Promise<GitRemoteOpResult> {
+export async function gitFetch(path: string, remote?: string | null): Promise<GitRemoteOpResult> {
   return invoke<GitRemoteOpResult>('git_fetch', { path, remote: remote ?? null });
 }
 
@@ -1442,10 +1426,7 @@ export async function gitStashPush(path: string, message?: string | null): Promi
  * nothing to restore to. Tracked files only — a file created afterwards is
  * untracked at both ends and survives a restore.
  */
-export async function gitCheckpointCreate(
-  path: string,
-  label: string,
-): Promise<string | null> {
+export async function gitCheckpointCreate(path: string, label: string): Promise<string | null> {
   return invoke<string | null>('git_checkpoint_create', { path, label });
 }
 
@@ -1485,11 +1466,7 @@ export async function gitBranchRename(
   return invoke<void>('git_branch_rename', { path, oldName, newName });
 }
 
-export async function gitBranchDelete(
-  path: string,
-  name: string,
-  force: boolean,
-): Promise<void> {
+export async function gitBranchDelete(path: string, name: string, force: boolean): Promise<void> {
   return invoke<void>('git_branch_delete', { path, name, force });
 }
 
@@ -1527,11 +1504,7 @@ export async function gitCherryPick(path: string, oid: string): Promise<void> {
 
 export type GitResetMode = 'soft' | 'mixed' | 'hard';
 
-export async function gitReset(
-  path: string,
-  oid: string,
-  mode: GitResetMode,
-): Promise<void> {
+export async function gitReset(path: string, oid: string, mode: GitResetMode): Promise<void> {
   return invoke<void>('git_reset', { path, oid, mode });
 }
 
@@ -1748,9 +1721,7 @@ export async function gitHostViewer(): Promise<GitHostViewer> {
 
 /** Matches the Rust `RepoScope` enum's serde shape (`tag`/`content`). */
 export type GitHostRepoScope =
-  | { kind: 'mine' }
-  | { kind: 'starred' }
-  | { kind: 'org'; name: string };
+  { kind: 'mine' } | { kind: 'starred' } | { kind: 'org'; name: string };
 
 export interface GitHostRepoSummary {
   owner: string;
@@ -1774,9 +1745,7 @@ export interface GitHostOrg {
   avatar_url: string;
 }
 
-export async function gitHostRepoList(
-  scope: GitHostRepoScope,
-): Promise<GitHostRepoSummary[]> {
+export async function gitHostRepoList(scope: GitHostRepoScope): Promise<GitHostRepoSummary[]> {
   return invoke<GitHostRepoSummary[]>('git_host_repo_list', { scope });
 }
 
@@ -1901,10 +1870,7 @@ export async function gitHostIssueSetState(
   return invoke<GitHostIssueSummary>('git_host_issue_set_state', { owner, name, number, open });
 }
 
-export async function gitHostLabelList(
-  owner: string,
-  name: string,
-): Promise<GitHostLabel[]> {
+export async function gitHostLabelList(owner: string, name: string): Promise<GitHostLabel[]> {
   return invoke<GitHostLabel[]>('git_host_label_list', { owner, name });
 }
 
@@ -2059,24 +2025,15 @@ export async function gitHostRunRerun(
   await invoke('git_host_run_rerun', { owner, name, runId, failedOnly });
 }
 
-export async function gitHostRunCancel(
-  owner: string,
-  name: string,
-  runId: number,
-): Promise<void> {
+export async function gitHostRunCancel(owner: string, name: string, runId: number): Promise<void> {
   await invoke('git_host_run_cancel', { owner, name, runId });
 }
 
-export async function gitHostReleaseList(
-  owner: string,
-  name: string,
-): Promise<GitHostRelease[]> {
+export async function gitHostReleaseList(owner: string, name: string): Promise<GitHostRelease[]> {
   return invoke<GitHostRelease[]>('git_host_release_list', { owner, name });
 }
 
-export async function gitHostNotificationList(
-  all: boolean,
-): Promise<GitHostNotification[]> {
+export async function gitHostNotificationList(all: boolean): Promise<GitHostNotification[]> {
   return invoke<GitHostNotification[]>('git_host_notification_list', { all });
 }
 
@@ -2177,10 +2134,7 @@ export interface GitCheckoutResult {
 }
 
 /** Switch to `name`. Remote short names ("origin/foo") create a tracking local. */
-export async function gitCheckout(
-  path: string,
-  name: string,
-): Promise<GitCheckoutResult> {
+export async function gitCheckout(path: string, name: string): Promise<GitCheckoutResult> {
   return invoke<GitCheckoutResult>('git_checkout', { path, name });
 }
 
@@ -2302,7 +2256,6 @@ export interface SshLogEventPayload {
   entry: SshLogEvent;
 }
 
-
 export interface SshExitEvent {
   id: SshId;
   code: number | null;
@@ -2393,10 +2346,7 @@ export async function onSshHostKeyPrompt(
 
 /** Accepting also writes the key to `~/.ssh/known_hosts`, so it is trusted by
  *  the user's own `ssh` from then on too. */
-export async function sshHostKeyRespond(
-  promptId: string,
-  accept: boolean,
-): Promise<void> {
+export async function sshHostKeyRespond(promptId: string, accept: boolean): Promise<void> {
   await invoke('ssh_host_key_respond', { promptId, accept });
 }
 
@@ -2446,10 +2396,7 @@ export async function sshKeyDelete(id: string, deleteFiles = false): Promise<voi
   await invoke('ssh_key_delete', { id, deleteFiles });
 }
 
-export async function sshSessionLogs(
-  hostId: string,
-  limit?: number,
-): Promise<SshSessionLogRow[]> {
+export async function sshSessionLogs(hostId: string, limit?: number): Promise<SshSessionLogRow[]> {
   return invoke<SshSessionLogRow[]>('ssh_session_logs', {
     hostId,
     limit: limit ?? null,
@@ -2769,12 +2716,7 @@ export async function onWingmanEvents(
  *  else (shell commands included), and `plan` never writes at all.
  *  `dontAsk` and `bypassPermissions` never ask. */
 export type ClaudePermissionMode =
-  | 'plan'
-  | 'acceptEdits'
-  | 'auto'
-  | 'manual'
-  | 'dontAsk'
-  | 'bypassPermissions';
+  'plan' | 'acceptEdits' | 'auto' | 'manual' | 'dontAsk' | 'bypassPermissions';
 
 /** One event from a turn: `init`, `text_delta`, `thinking_delta`, `tool_start`,
  *  `tool_result`, `usage`, `result`, plus ARC's own terminal `done` / `error`.
@@ -2996,10 +2938,6 @@ export async function dbTables(id: string): Promise<string[]> {
   return invoke<string[]>('db_tables', { id });
 }
 
-export async function dbPreview(
-  id: string,
-  table: string,
-  limit?: number,
-): Promise<DbQueryResult> {
+export async function dbPreview(id: string, table: string, limit?: number): Promise<DbQueryResult> {
   return invoke<DbQueryResult>('db_preview', { id, table, limit: limit ?? null });
 }
