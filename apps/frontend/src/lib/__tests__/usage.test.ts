@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { parseUsage } from '../usage';
+import { formatReset, parsePlanLimits, parseUsage } from '../usage';
 
 describe('parseUsage', () => {
   it('reads ccusage-shaped output under a totals key', () => {
@@ -56,5 +56,32 @@ describe('parseUsage', () => {
   it('treats a JSON array or primitive as non-JSON for summary purposes', () => {
     expect(parseUsage('[1,2,3]').json).toBe(false);
     expect(parseUsage('42').json).toBe(false);
+  });
+});
+
+describe('parsePlanLimits', () => {
+  it('labels session, weekly, and model-scoped limits', () => {
+    const body = JSON.stringify({
+      limits: [
+        { kind: 'session', group: 'session', percent: 4, severity: 'normal', resets_at: '2026-09-14T21:50:00Z', scope: null },
+        { kind: 'weekly_all', group: 'weekly', percent: 32, severity: 'warning', resets_at: null, scope: null },
+        { kind: 'weekly_scoped', group: 'weekly', percent: 120, severity: 'bogus', scope: { model: { display_name: 'Fable' } } },
+        { kind: 'broken' },
+      ],
+    });
+    const [session, week, fable, ...rest] = parsePlanLimits(body);
+    expect(session).toMatchObject({ label: 'Current session', percent: 4, windowMs: 5 * 3_600_000 });
+    expect(session!.resetsAt).toBe(Date.parse('2026-09-14T21:50:00Z'));
+    expect(week).toMatchObject({ label: 'All models this week', severity: 'warning', resetsAt: null });
+    expect(fable).toMatchObject({ label: 'Fable this week', percent: 100, severity: 'normal' });
+    expect(rest).toEqual([]);
+    expect(parsePlanLimits('not json')).toEqual([]);
+  });
+
+  it('formats resets relative inside a day', () => {
+    const now = 0;
+    expect(formatReset(now + 3 * 3_600_000 + 12 * 60_000, now)).toBe('Resets in 3h 12m');
+    expect(formatReset(now + 59 * 60_000 + 30_000, now)).toBe('Resets in 1h 0m');
+    expect(formatReset(now + 5 * 60_000, now)).toBe('Resets in 5m');
   });
 });

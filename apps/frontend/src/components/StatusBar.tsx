@@ -3,6 +3,7 @@ import {
   ArrowDown,
   ArrowUp,
   CircleDollarSign,
+  Gauge,
   Command as CommandIcon,
   FolderOpen,
   GitBranch,
@@ -13,6 +14,7 @@ import { useFiles } from '../state/files';
 import { useGit } from '../state/git';
 import { useSettings } from '../state/settings';
 import { useUsage } from '../state/usage';
+import type { PlanLimit } from '../lib/usage';
 import { runCommand } from '../state/commands';
 import { formatBinding, getBinding } from '../state/shortcuts';
 import { cn } from '../lib/cn';
@@ -44,9 +46,13 @@ export function StatusBar() {
   const usageResults = useUsage((s) => s.results);
   const [usageAnchor, setUsageAnchor] = useState<BranchPickerAnchor | null>(null);
   const usageAgent = usageAgents.find((a) => a.id === usageSelectedId) ?? usageAgents[0] ?? null;
-  const usageCost = usageAgent
-    ? usageResults[usageAgent.id]?.summary?.rows.find((r) => /cost/i.test(r.label))?.value
-    : undefined;
+  const usageResult = usageAgent ? usageResults[usageAgent.id] : undefined;
+  const usageCost = usageResult?.summary?.rows.find((r) => /cost/i.test(r.label))?.value;
+  // The limit closest to full is the one that will stop you first.
+  const topLimit = usageResult?.limits?.reduce<PlanLimit | undefined>(
+    (top, l) => (!top || l.percent > top.percent ? l : top),
+    undefined,
+  );
 
   return (
     <footer className="material-toolbar flex h-6 shrink-0 items-center gap-1 border-t border-border-hairline px-2 font-display text-2xs text-fg-muted">
@@ -90,13 +96,15 @@ export function StatusBar() {
 
       {usageAgents.length > 0 && (
         <Item
-          icon={CircleDollarSign}
+          icon={topLimit ? Gauge : CircleDollarSign}
           onClick={(e) => {
             const r = e.currentTarget.getBoundingClientRect();
             setUsageAnchor({ x: r.left, y: r.top, placement: 'above' });
           }}
-          label={usageCost ?? 'Usage'}
-          title="Agent token & credit usage"
+          label={topLimit ? `${Math.round(topLimit.percent)}%` : (usageCost ?? 'Usage')}
+          title={topLimit ? `${topLimit.label}: ${Math.round(topLimit.percent)}% used` : 'Agent token & credit usage'}
+          warn={topLimit?.severity === 'warning'}
+          danger={topLimit?.severity === 'critical'}
         />
       )}
 
@@ -151,6 +159,7 @@ function Item({
   onClick,
   accent,
   danger,
+  warn,
   children,
 }: {
   icon: typeof GitBranch;
@@ -162,6 +171,8 @@ function Item({
   /** Tint the whole pill for something that needs attention now — e.g. an
    *  unresolved merge conflict. No extra width, unlike a text badge. */
   danger?: boolean;
+  /** Softer than `danger` — something approaching a limit. */
+  warn?: boolean;
   children?: React.ReactNode;
 }) {
   return (
@@ -174,6 +185,7 @@ function Item({
         'hover:bg-surface-2 hover:text-fg-base',
         'focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent/40',
         accent && 'text-accent-bright',
+        warn && 'text-status-warn',
         danger && 'text-status-err',
       )}
     >

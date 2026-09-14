@@ -316,6 +316,7 @@ fn main() {
             commands::wingman::wingman_turn_start,
             commands::wingman::wingman_events_subscribe,
             commands::claude_code::claude_available,
+            commands::claude_code::claude_plan_usage,
             commands::claude_code::claude_turn_start,
             commands::claude_code::claude_turn_cancel,
             commands::claude_code::claude_permission_respond,

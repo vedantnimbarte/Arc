@@ -2734,6 +2734,12 @@ export async function claudeAvailable(): Promise<string | null> {
   return invoke<string | null>('claude_available');
 }
 
+/** Raw JSON of the user's Claude plan limits (what `/usage` shows). Rejects
+ *  with a user-facing message when signed out or expired. */
+export async function claudePlanUsage(): Promise<string> {
+  return invoke<string>('claude_plan_usage');
+}
+
 /** Start a turn. Returns the topic to listen on; `resume` continues a prior
  *  conversation by its session id. */
 export async function claudeTurnStart(opts: {

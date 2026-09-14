@@ -2417,7 +2417,7 @@ function UsagePane() {
     <>
       <PaneHeader
         title="Usage"
-        blurb="Commands that print an agent's token or credit usage, run in your workspace's shell when you open or refresh the status bar's usage popup. ARC doesn't call any billing API of its own — it runs the command and shows what comes back."
+        blurb="Commands that print an agent's token or credit usage, run in your workspace's shell when you open or refresh the status bar's usage popup. For Claude agents, ARC also shows your plan limits using Claude Code's sign-in."
       />
       <Group
         title="Agents"
