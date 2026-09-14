@@ -10,6 +10,7 @@ import {
   Bot,
   Columns3,
   LayoutGrid,
+  LayoutPanelLeft,
   Monitor,
   Send,
   Database,
@@ -19,7 +20,8 @@ import {
   type LucideIcon,
 } from 'lucide-react';
 import { getCurrentWindow } from '@tauri-apps/api/window';
-import { layoutModeOf, useWorkspace, type LayoutMode } from '../state/workspace';
+import { LAYOUT_MODES, layoutModeOf, useWorkspace, type LayoutMode } from '../state/workspace';
+import { LAYOUT_MODE_INFO, LayoutModeGlyph } from './LayoutModeGlyph';
 import { useFiles } from '../state/files';
 import { runCommand } from '../state/commands';
 import { Tooltip } from './Tooltip';
@@ -35,9 +37,6 @@ import {
 } from '../lib/tauri';
 
 const isTauri = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
-
-/** Toolbar width under which the layout switch drops its label. */
-const COMPACT_CHROME_BELOW = 720;
 
 /** Last path segment of a cwd, forward or back slashes. */
 function basename(p: string): string {
@@ -74,21 +73,6 @@ export function TabBar() {
   const [aiClis, setAiClis] = useState<AiCliInfo[]>([]);
   const plusRef = useRef<HTMLButtonElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
-  const barRef = useRef<HTMLDivElement>(null);
-  // Below this the centered window title (max 44% wide) starts closing on the
-  // side clusters, so the layout switch sheds its label. Same ResizeObserver
-  // approach PaneHeader uses for its own overflow threshold.
-  const [compactChrome, setCompactChrome] = useState(false);
-  useEffect(() => {
-    const el = barRef.current;
-    if (!el) return;
-    const obs = new ResizeObserver(() => {
-      setCompactChrome(el.getBoundingClientRect().width < COMPACT_CHROME_BELOW);
-    });
-    obs.observe(el);
-    return () => obs.disconnect();
-  }, []);
-
   // One-shot detection. The list is cheap (PATH scan) but doesn't change
   // mid-session, so we cache it. Users who install a CLI mid-session can
   // hit the action again to re-detect (we re-run on every menu open below).
@@ -192,7 +176,6 @@ export function TabBar() {
         content row — a later sibling with no z-index of its own. Without this,
         every tooltip here is painted over the moment it hangs past h-9. */}
     <div
-      ref={barRef}
       data-tauri-drag-region="deep"
       className="material-toolbar relative z-20 flex h-9 shrink-0 items-center gap-2 pl-3"
     >
@@ -247,13 +230,12 @@ export function TabBar() {
         </Tooltip>
       </div>
 
-      {/* Layout mode — flips this workspace between tiled panes (one tab per
-          pane) and a tab strip. Per-workspace, so it reflects whichever
+      {/* Layout mode — tiles, tabs or floating. Per-workspace, so it reflects whichever
           workspace is active. Sits in the right cluster, inboard of the
           window controls. */}
       <NotificationCenter />
 
-      <LayoutModeSwitch mode={layoutMode} onSelect={setLayoutMode} compact={compactChrome} />
+      <LayoutModePicker mode={layoutMode} onSelect={setLayoutMode} />
 
       {/* Sidebar toggle — grouped with the layout switch since both control
           how the workspace is laid out. */}
@@ -413,78 +395,145 @@ export function TabBar() {
   );
 }
 
+const LAYOUT_ICONS: Record<LayoutMode, React.ReactNode> = {
+  tiling: <LayoutGrid size={14} strokeWidth={1.9} />,
+  standard: <Columns3 size={14} strokeWidth={1.9} />,
+  // Mirrored so the small stacked panels sit on the left, like the deck does.
+  floating: <LayoutPanelLeft size={14} strokeWidth={1.9} className="-scale-x-100" />,
+};
+
+const PICKER_W = 316;
+
+/**
+ * Layout mode for the active workspace: one icon showing the current mode,
+ * opening a popover of three picture cards. Portaled to body so the toolbar's
+ * backdrop-filter doesn't trap it.
+ */
+function LayoutModePicker({
+  mode,
+  onSelect,
+}: {
+  mode: LayoutMode;
+  onSelect: (mode: LayoutMode) => void;
+}) {
+  const [pos, setPos] = useState<{ top: number; left: number } | null>(null);
+  const btnRef = useRef<HTMLButtonElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+  const open = pos !== null;
+  const kbd = formatBinding(getBinding('toggle-layout-mode'));
+
+  const close = (refocus: boolean) => {
+    setPos(null);
+    if (refocus) btnRef.current?.focus();
+  };
+
+  // Land focus on the current mode so arrows start from where you are.
+  useLayoutEffect(() => {
+    if (open) menuRef.current?.querySelector<HTMLElement>('[aria-checked="true"]')?.focus();
+  }, [open]);
+
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e: MouseEvent) => {
+      const t = e.target as Node | null;
+      if (t && (menuRef.current?.contains(t) || btnRef.current?.contains(t))) return;
+      close(false);
+    };
+    const onResize = () => close(false);
+    window.addEventListener('mousedown', onDown);
+    window.addEventListener('resize', onResize);
+    return () => {
+      window.removeEventListener('mousedown', onDown);
+      window.removeEventListener('resize', onResize);
+    };
+  }, [open]);
+
+  const onMenuKey = (e: React.KeyboardEvent) => {
+    if (e.key === 'Escape' || e.key === 'Tab') {
+      e.preventDefault();
+      close(true);
+      return;
+    }
+    const step = { ArrowRight: 1, ArrowDown: 1, ArrowLeft: -1, ArrowUp: -1 }[e.key];
+    if (!step) return;
+    e.preventDefault();
+    const items = Array.from(menuRef.current?.querySelectorAll<HTMLElement>('[role="menuitemradio"]') ?? []);
+    const i = items.indexOf(document.activeElement as HTMLElement);
+    items[(i + step + items.length) % items.length]?.focus();
+  };
+
+  return (
+    <>
+      <Tooltip align="end" label={`Layout: ${LAYOUT_MODE_INFO[mode].label}`} kbd={kbd}>
+        <button
+          ref={btnRef}
+          onClick={() => {
+            if (open) return close(false);
+            const r = btnRef.current!.getBoundingClientRect();
+            setPos({ top: r.bottom + 6, left: Math.max(8, r.right - PICKER_W) });
+          }}
+          aria-label={`Layout: ${LAYOUT_MODE_INFO[mode].label}`}
+          aria-haspopup="menu"
+          aria-expanded={open}
+          className={cn(
+            'flex h-8 w-8 shrink-0 items-center justify-center rounded-md transition-colors duration-200 ease-apple',
+            open ? 'bg-surface-3 text-fg-base' : 'text-fg-muted hover:bg-surface-2 hover:text-fg-base',
+          )}
+        >
+          {LAYOUT_ICONS[mode]}
+        </button>
+      </Tooltip>
+
+      {open &&
+        createPortal(
+          <div
+            ref={menuRef}
+            role="menu"
+            aria-label="Layout"
+            onKeyDown={onMenuKey}
+            style={{ position: 'fixed', top: pos.top, left: pos.left, width: PICKER_W }}
+            className="material-sheet z-50 grid origin-top-right animate-popover-in grid-cols-3 gap-1.5 rounded-lg bg-bg-panel p-1.5 shadow-sheet ring-1 ring-edge-2 motion-reduce:animate-none"
+          >
+            {LAYOUT_MODES.map((m) => {
+              const active = m === mode;
+              return (
+                <button
+                  key={m}
+                  role="menuitemradio"
+                  aria-checked={active}
+                  title={LAYOUT_MODE_INFO[m].hint}
+                  onClick={() => {
+                    onSelect(m);
+                    close(true);
+                  }}
+                  className={cn(
+                    'flex flex-col items-center gap-1.5 rounded-md px-1 pb-2 pt-2.5 outline-none transition-colors duration-150',
+                    'focus-visible:ring-2 focus-visible:ring-accent/60',
+                    active
+                      ? 'bg-accent/15 text-accent ring-1 ring-inset ring-accent/30'
+                      : 'text-fg-muted hover:bg-surface-2 hover:text-fg-base',
+                  )}
+                >
+                  <LayoutModeGlyph mode={m} className="h-[38px] w-[62px]" />
+                  <span className="font-display text-xs font-medium tracking-tight">
+                    {LAYOUT_MODE_INFO[m].label}
+                  </span>
+                </button>
+              );
+            })}
+          </div>,
+          document.body,
+        )}
+    </>
+  );
+}
+
 /**
  * Toolbar AI CLI launcher — an icon that opens a downward dropdown of the
  * detected coding CLIs (Claude Code / Codex / OpenCode / …). Relocated from
  * the old bottom status bar. Portaled to body so the toolbar's backdrop-filter
  * doesn't trap the menu.
  */
-/** The two layout modes, in the order the switch renders them. */
-const LAYOUT_SEGMENTS: { mode: LayoutMode; label: string; Icon: LucideIcon; hint: string }[] = [
-  { mode: 'tiling', label: 'Tiles', Icon: LayoutGrid, hint: 'One pane per tab, split automatically' },
-  { mode: 'standard', label: 'Tabs', Icon: Columns3, hint: 'One pane, tabs in a strip' },
-];
-
-/**
- * Segmented switch for the active workspace's layout mode. The selected
- * segment is a filled pill carrying icon + name; the other is icon-only, so
- * the control states the current mode rather than making you decode an icon.
- *
- * `compact` drops both labels — the toolbar's centered title is only 44% wide,
- * and on a narrow window the two would otherwise meet.
- */
-function LayoutModeSwitch({
-  mode,
-  onSelect,
-  compact,
-}: {
-  mode: LayoutMode;
-  onSelect: (mode: LayoutMode) => void;
-  compact: boolean;
-}) {
-  const kbd = formatBinding(getBinding('toggle-layout-mode'));
-  return (
-    <div
-      role="group"
-      aria-label="Layout mode"
-      className="flex h-8 shrink-0 items-center gap-0.5"
-    >
-      {LAYOUT_SEGMENTS.map(({ mode: m, label, Icon, hint }) => {
-        const active = m === mode;
-        return (
-          // End-aligned: the switch sits inboard of the window controls, so a
-          // centred bubble would hang off the window's right edge.
-          <Tooltip
-            key={m}
-            align="end"
-            label={active ? hint : `Switch to ${label.toLowerCase()}`}
-            kbd={kbd}
-          >
-            <button
-              onClick={() => onSelect(m)}
-              aria-pressed={active}
-              aria-label={label}
-              className={cn(
-                'flex h-[26px] shrink-0 items-center gap-1.5 rounded-[7px]',
-                'font-display text-xs font-medium tracking-tight',
-                'transition-all duration-200 ease-apple',
-                compact ? 'w-[26px] justify-center' : active ? 'pl-2 pr-2.5' : 'w-[26px] justify-center',
-                active
-                  ? 'bg-accent/15 text-accent shadow-[inset_0_1px_0_0_rgba(255,255,255,0.06)] ring-1 ring-inset ring-accent/30'
-                  : 'text-fg-muted hover:bg-surface-3 hover:text-fg-base',
-              )}
-            >
-              <Icon size={14} strokeWidth={1.9} className="shrink-0" />
-              {/* Only the active segment is named, and only when there's room. */}
-              {active && !compact && <span>{label}</span>}
-            </button>
-          </Tooltip>
-        );
-      })}
-    </div>
-  );
-}
-
 function AiCliMenuButton({ clis }: { clis: AiCliInfo[] }) {
   const [open, setOpen] = useState(false);
   const [pos, setPos] = useState<{ top: number; left: number } | null>(null);

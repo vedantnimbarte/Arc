@@ -58,7 +58,8 @@ import { copyText } from '../lib/clipboard';
 import { ANTHROPIC_KEY_SECRET } from '../lib/ai';
 import { FontPicker } from './FontPicker';
 import { useFiles, type SidebarView } from '../state/files';
-import type { LayoutMode } from '../state/workspace';
+import { LAYOUT_MODES, type LayoutMode } from '../state/workspace';
+import { LAYOUT_MODE_INFO, LayoutModeGlyph } from './LayoutModeGlyph';
 import { useSidebarLayout } from '../state/sidebarLayout';
 import { normalizeOrder, PINNED_VIEW, SIDEBAR_VIEW_BY_ID } from '../lib/sidebarViews';
 import {
@@ -638,21 +639,15 @@ function StartupPane({
         title="Default workspace layout"
         hint="Applies to workspaces you create from now on. Existing ones keep their layout, and the top bar switches any workspace at any time."
       >
-        <div className="grid grid-cols-2 gap-3">
-          <LayoutModeCard
-            label="Tiles"
-            hint="Each tab gets its own pane"
-            mode="tiling"
-            active={defaultLayoutMode === 'tiling'}
-            onPick={() => onDefaultLayoutModeChange('tiling')}
-          />
-          <LayoutModeCard
-            label="Tabs"
-            hint="One pane, tabs in a strip"
-            mode="standard"
-            active={defaultLayoutMode === 'standard'}
-            onPick={() => onDefaultLayoutModeChange('standard')}
-          />
+        <div className="grid grid-cols-3 gap-3">
+          {LAYOUT_MODES.map((m) => (
+            <LayoutModeCard
+              key={m}
+              mode={m}
+              active={defaultLayoutMode === m}
+              onPick={() => onDefaultLayoutModeChange(m)}
+            />
+          ))}
         </div>
       </Group>
 
@@ -805,21 +800,18 @@ function Switch({
 }
 
 /** Picker card for the default workspace layout. The preview draws the same
- *  arrangement the two modes actually produce — tiled panes versus one pane
- *  under a tab strip — so the choice is legible without reading the label. */
+ *  arrangement each mode actually produces, so the choice is legible without
+ *  reading the label. */
 function LayoutModeCard({
-  label,
-  hint,
   mode,
   active,
   onPick,
 }: {
-  label: string;
-  hint: string;
   mode: LayoutMode;
   active: boolean;
   onPick: () => void;
 }) {
+  const { label, hint } = LAYOUT_MODE_INFO[mode];
   return (
     <button
       onClick={onPick}
@@ -832,62 +824,7 @@ function LayoutModeCard({
       )}
     >
       <div className="flex h-20 items-center justify-center bg-bg-base/40">
-        <svg viewBox="0 0 48 30" className="h-[46px] w-[74px]" aria-hidden>
-          {mode === 'tiling' ? (
-            <>
-              <rect
-                x="1"
-                y="1"
-                width="21.5"
-                height="28"
-                rx="2.5"
-                fill="currentColor"
-                opacity={0.5}
-              />
-              <rect
-                x="25.5"
-                y="1"
-                width="21.5"
-                height="13"
-                rx="2.5"
-                fill="currentColor"
-                opacity={0.5}
-              />
-              <rect
-                x="25.5"
-                y="16"
-                width="21.5"
-                height="13"
-                rx="2.5"
-                fill="currentColor"
-                opacity={0.5}
-              />
-            </>
-          ) : (
-            <>
-              <rect x="1" y="1" width="15" height="6" rx="1.5" fill="currentColor" opacity={0.75} />
-              <rect
-                x="17.5"
-                y="1"
-                width="15"
-                height="6"
-                rx="1.5"
-                fill="currentColor"
-                opacity={0.28}
-              />
-              <rect
-                x="34"
-                y="1"
-                width="13"
-                height="6"
-                rx="1.5"
-                fill="currentColor"
-                opacity={0.28}
-              />
-              <rect x="1" y="9" width="46" height="20" rx="2.5" fill="currentColor" opacity={0.5} />
-            </>
-          )}
-        </svg>
+        <LayoutModeGlyph mode={mode} className="h-[46px] w-[74px]" />
       </div>
       <div className="flex items-center justify-between border-t border-border-subtle bg-bg-base/40 px-3 py-2">
         <div className="min-w-0">

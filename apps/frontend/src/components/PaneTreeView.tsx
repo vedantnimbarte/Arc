@@ -11,10 +11,12 @@ import { PaneLeafView } from './PaneLeafView';
 import { PaneHeader } from './PaneHeader';
 import { PaneTabStrip } from './PaneTabStrip';
 import { EmptyWorkspace } from './EmptyWorkspace';
+import { FloatingLayout } from './FloatingLayout';
 import { cn } from '../lib/cn';
 
 /** The per-leaf header, chosen by the active workspace's layout mode: the
- *  single-tab `PaneHeader` when tiling, the multi-tab strip when standard.
+ *  single-tab `PaneHeader` when tiling, the multi-tab strip when standard
+ *  (floating renders its own view, see `FloatingLayout`).
  *  This and `addTab`'s split-vs-append branch are the whole feature. */
 function LeafHeader({ paneId }: { paneId: string }) {
   const mode = useWorkspace((s) => layoutModeOf(s.workspaces, s.activeWorkspaceId));
@@ -38,11 +40,17 @@ interface Props {
 export function PaneTreeView({ hostsRef, stageRef, onOpenCommandPalette }: Props) {
   const layout = useWorkspace((s) => s.layout);
   const maximizedPaneId = useWorkspace((s) => s.maximizedPaneId);
+  const floating = useWorkspace((s) => layoutModeOf(s.workspaces, s.activeWorkspaceId) === 'floating');
 
   // Closing/moving the last tab can leave the active workspace with an empty
   // leaf — show the launcher instead of a blank pane.
   if (layout.kind === 'leaf' && layout.tabIds.length === 0) {
     return <EmptyWorkspace onOpenCommandPalette={onOpenCommandPalette} />;
+  }
+
+  // Floating is always a single leaf (the store refuses splits there).
+  if (floating && layout.kind === 'leaf') {
+    return <FloatingLayout leaf={layout} hostsRef={hostsRef} stageRef={stageRef} />;
   }
 
   // Maximize: when a leaf is zoomed (and still exists in this workspace),

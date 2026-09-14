@@ -18,7 +18,7 @@ import {
   type LucideIcon,
 } from 'lucide-react';
 import { BranchPicker, type BranchPickerAnchor } from './BranchPicker';
-import { findLeaf, useWorkspace, type Tab } from '../state/workspace';
+import { findLeaf, layoutModeOf, useWorkspace, type Tab } from '../state/workspace';
 import { gitStatus, isTauri } from '../lib/tauri';
 import { useFiles } from '../state/files';
 import { useGit } from '../state/git';
@@ -40,7 +40,7 @@ interface Props {
   paneId: string;
 }
 
-function iconForKind(kind: Tab['kind']): LucideIcon {
+export function iconForKind(kind: Tab['kind']): LucideIcon {
   switch (kind) {
     case 'terminal':
       return TerminalIcon;
@@ -75,6 +75,8 @@ export function PaneHeader({ paneId }: Props) {
   const closeTab = useWorkspace((s) => s.closeTab);
   const splitPane = useWorkspace((s) => s.splitPane);
   const toggleMaximizePane = useWorkspace((s) => s.toggleMaximizePane);
+  // Floating's main window is already maximized and never splits.
+  const floating = useWorkspace((s) => layoutModeOf(s.workspaces, s.activeWorkspaceId) === 'floating');
 
   const tab = leaf?.activeTabId ? tabs.find((t) => t.id === leaf.activeTabId) ?? null : null;
   const cwd = tab?.kind === 'terminal' ? tab.cwd : undefined;
@@ -105,7 +107,7 @@ export function PaneHeader({ paneId }: Props) {
   const folder = tab.cwd ? basename(tab.cwd) : null;
   const Icon = iconForKind(tab.kind);
 
-  const overflow: OverflowAction[] = [
+  const overflow: OverflowAction[] = floating ? [] : [
     {
       key: 'split-right',
       label: 'Split right',
@@ -198,7 +200,7 @@ export function PaneHeader({ paneId }: Props) {
 
         {/* Wide: split-right, split-down, maximize inline. Narrow: collapse them
             into a "⋯" overflow popover so they never overlap the title. */}
-        {compact ? (
+        {overflow.length === 0 ? null : compact ? (
           <button
             type="button"
             aria-label="More actions"
