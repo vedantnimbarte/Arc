@@ -584,8 +584,9 @@ function applyStored(current: Settings, stored: Partial<PersistedSettings>): Par
         ? stored.searchIgnoreDirs
         : current.searchIgnoreDirs,
     defaultLayoutMode:
-      stored.defaultLayoutMode === 'standard' || stored.defaultLayoutMode === 'tiling'
-        ? stored.defaultLayoutMode
+      // Literal list, not `LAYOUT_MODES`: workspace.ts imports this module.
+      ['tiling', 'standard', 'floating'].includes(stored.defaultLayoutMode as string)
+        ? (stored.defaultLayoutMode as LayoutMode)
         : current.defaultLayoutMode,
     tileGap: typeof stored.tileGap === 'number' ? clampTileGap(stored.tileGap) : current.tileGap,
     notifyMuted: coerceSources(stored.notifyMuted, current.notifyMuted),

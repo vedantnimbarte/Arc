@@ -8,9 +8,12 @@
  * program + argv, because the user is naming an arbitrary CLI invocation —
  * quoting/piping/`&&` should work the way it would in their own terminal.
  * `proc_run` has no shell of its own, so it's wrapped here.
+ *
+ * The one exception is Claude's plan limits (the percentages `/usage` shows):
+ * no CLI prints those, so `claude_plan_usage` fetches them — see the bottom.
  */
 
-import { procRun } from './tauri';
+import { claudePlanUsage, procRun } from './tauri';
 
 export interface UsageRow {
   label: string;
@@ -126,4 +129,79 @@ export function parseUsage(stdout: string): UsageSummary {
   }
 
   return { rows, groups, raw, json: true };
+}
+
+// ─── Claude plan limits ────────────────────────────────────────────────────
+
+export interface PlanLimit {
+  label: string;
+  /** 0–100. */
+  percent: number;
+  severity: 'normal' | 'warning' | 'critical';
+  /** Epoch ms, or null when the window hasn't started. */
+  resetsAt: number | null;
+  /** Window length in ms, for the elapsed-time tick. Null when unknown. */
+  windowMs: number | null;
+}
+
+const HOUR = 3_600_000;
+
+/** Fetch and parse the plan limits. Throws the backend's user-facing message. */
+export async function fetchPlanLimits(): Promise<PlanLimit[]> {
+  return parsePlanLimits(await claudePlanUsage());
+}
+
+/**
+ * Reads the `limits` array of Claude's (undocumented) plan-usage response.
+ * Unknown kinds still render, just with a generic label, so a new limit type
+ * shows up instead of vanishing.
+ */
+export function parsePlanLimits(body: string): PlanLimit[] {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(body);
+  } catch {
+    return [];
+  }
+  if (!isPlainObject(parsed) || !Array.isArray(parsed.limits)) return [];
+
+  const out: PlanLimit[] = [];
+  for (const l of parsed.limits) {
+    if (!isPlainObject(l) || typeof l.percent !== 'number') continue;
+    const model = isPlainObject(l.scope) && isPlainObject(l.scope.model)
+      ? l.scope.model.display_name
+      : null;
+    const weekly = l.group === 'weekly';
+    const label =
+      l.kind === 'session'
+        ? 'Current session'
+        : weekly && typeof model === 'string'
+          ? `${model} this week`
+          : weekly
+            ? 'All models this week'
+            : humanizeKey(String(l.kind ?? 'Limit'));
+    const resetsAt = typeof l.resets_at === 'string' ? Date.parse(l.resets_at) : NaN;
+    out.push({
+      label,
+      percent: Math.max(0, Math.min(100, l.percent)),
+      severity: l.severity === 'warning' || l.severity === 'critical' ? l.severity : 'normal',
+      resetsAt: Number.isFinite(resetsAt) ? resetsAt : null,
+      windowMs: l.group === 'session' ? 5 * HOUR : weekly ? 168 * HOUR : null,
+    });
+  }
+  return out;
+}
+
+/** "Resets in 3h 12m" inside a day, otherwise "Resets Tue 9:00 PM". */
+export function formatReset(resetsAt: number, now = Date.now()): string {
+  const ms = resetsAt - now;
+  if (ms <= 0) return 'Resets now';
+  if (ms < 24 * HOUR) {
+    const mins = Math.ceil(ms / 60_000);
+    const h = Math.floor(mins / 60);
+    const m = mins % 60;
+    return h ? `Resets in ${h}h ${m}m` : `Resets in ${m}m`;
+  }
+  const d = new Date(resetsAt);
+  return `Resets ${d.toLocaleDateString(undefined, { weekday: 'short' })} ${d.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })}`;
 }

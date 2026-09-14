@@ -932,7 +932,7 @@ export interface PersistedSettings {
    *  build is simply dropped on load. */
   notifyMuted?: string[];
   notifyOs?: string[];
-  /** Layout mode stamped onto a newly created workspace: 'tiling' | 'standard'.
+  /** Layout mode stamped onto a newly created workspace: 'tiling' | 'standard' | 'floating'.
    *  Existing workspaces keep whatever they were set to. */
   defaultLayoutMode?: string;
   /** Gap in px between panes when a workspace is split. */
@@ -2732,6 +2732,12 @@ export interface ClaudeStreamEvent {
  *  This is the gate for the whole feature. */
 export async function claudeAvailable(): Promise<string | null> {
   return invoke<string | null>('claude_available');
+}
+
+/** Raw JSON of the user's Claude plan limits (what `/usage` shows). Rejects
+ *  with a user-facing message when signed out or expired. */
+export async function claudePlanUsage(): Promise<string> {
+  return invoke<string>('claude_plan_usage');
 }
 
 /** Start a turn. Returns the topic to listen on; `resume` continues a prior

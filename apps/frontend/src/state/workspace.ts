@@ -27,8 +27,15 @@ import { nextGroupColor, type TabGroupColorId } from '../lib/tabGroups';
  *
  *  `standard` — new tabs append to the focused pane and each pane wears a
  *  multi-tab strip, the way an ordinary editor behaves. Manual splits stay
- *  available in both modes; only *automatic* splitting differs. */
-export type LayoutMode = 'tiling' | 'standard';
+ *  available in both modes; only *automatic* splitting differs.
+ *
+ *  `floating` — one leaf like `standard`, but its `tabIds` are kept
+ *  most-recent-first: the head is the maximized window, the rest render as a
+ *  card stack beside it. No splits. */
+export type LayoutMode = 'tiling' | 'standard' | 'floating';
+
+/** Picker / cycle order for the layout modes. */
+export const LAYOUT_MODES: readonly LayoutMode[] = ['tiling', 'standard', 'floating'];
 
 /** A named container of tabs. Switching the active workspace changes which
  *  tabs the grid shows; every other workspace's tabs stay mounted (PTYs alive)
@@ -296,7 +303,7 @@ interface WorkspaceState {
    *  `tiling` restores the tree you left (or re-tiles when the stash is stale).
    *  No-op when the workspace is already in `mode`. */
   setLayoutMode: (mode: LayoutMode) => void;
-  /** Flip the active workspace between tiling and standard. */
+  /** Cycle the active workspace through `LAYOUT_MODES`. */
   toggleLayoutMode: () => void;
   /** Move a tab into another workspace. */
   moveTabToWorkspace: (tabId: string, workspaceId: string) => void;
@@ -609,6 +616,17 @@ export function appendTabToLeaf(node: PaneNode, paneId: string, tabId: string): 
   };
 }
 
+/** Floating: make `tabId` active AND move it to the head of its leaf, so
+ *  `tabIds` stays most-recent-first and closing the main window falls back to
+ *  the top of the stack (`pruneLayout` picks `tabIds[0]`). */
+export function promoteTabInLeaf(node: PaneNode, paneId: string, tabId: string): PaneNode {
+  if (node.kind === 'leaf') {
+    if (node.id !== paneId || !node.tabIds.includes(tabId)) return node;
+    return { ...node, tabIds: [tabId, ...node.tabIds.filter((t) => t !== tabId)], activeTabId: tabId };
+  }
+  return { ...node, children: node.children.map((c) => promoteTabInLeaf(c, paneId, tabId)) };
+}
+
 /** Set the active tab inside a specific leaf. */
 export function setLeafActiveTab(node: PaneNode, paneId: string, tabId: string): PaneNode {
   if (node.kind === 'leaf') {
@@ -867,11 +885,14 @@ export const useWorkspace = create<WorkspaceState>()((set, get) => ({
       // Standard model: the tab joins the focused pane's strip instead. This
       // branch is the *entire* behavioural difference between the two modes —
       // manual splits still work either way.
-      if (leaf.tabIds.length === 0 || layoutModeOf(s.workspaces, s.activeWorkspaceId) === 'standard') {
+      const mode = layoutModeOf(s.workspaces, s.activeWorkspaceId);
+      if (leaf.tabIds.length === 0 || mode !== 'tiling') {
+        const appended = appendTabToLeaf(s.layout, leaf.id, tab.id);
         return {
           tabs: [...s.tabs, tab],
           activeTabId: tab.id,
-          layout: appendTabToLeaf(s.layout, leaf.id, tab.id),
+          // Floating: the new tab becomes the main window.
+          layout: mode === 'floating' ? promoteTabInLeaf(appended, leaf.id, tab.id) : appended,
         };
       }
       const side = dwindleSide(leaf.id);
@@ -958,9 +979,10 @@ export const useWorkspace = create<WorkspaceState>()((set, get) => ({
     set((s) => {
       const owningLeaf = findLeafContaining(s.layout, id);
       if (!owningLeaf) return { activeTabId: id };
+      const floating = layoutModeOf(s.workspaces, s.activeWorkspaceId) === 'floating';
       return {
         activeTabId: id,
-        layout: setLeafActiveTab(s.layout, owningLeaf.id, id),
+        layout: (floating ? promoteTabInLeaf : setLeafActiveTab)(s.layout, owningLeaf.id, id),
         focusedPaneId: owningLeaf.id,
       };
     }),
@@ -1248,11 +1270,12 @@ export const useWorkspace = create<WorkspaceState>()((set, get) => ({
           : null;
 
       const tabIds = flattenTabIds(s.layout);
-      const layout =
+      let layout =
         usable ??
-        (mode === 'standard'
-          ? singleLeafLayout(tabIds, s.activeTabId)
-          : tileAll(tabIds, s.activeTabId));
+        (mode === 'tiling' ? tileAll(tabIds, s.activeTabId) : singleLeafLayout(tabIds, s.activeTabId));
+      // Floating: whatever you were looking at stays the main window.
+      const activeLeaf = s.activeTabId ? findLeafContaining(layout, s.activeTabId) : null;
+      if (mode === 'floating' && activeLeaf) layout = promoteTabInLeaf(layout, activeLeaf.id, s.activeTabId!);
 
       const focusedLeaf =
         (s.activeTabId ? findLeafContaining(layout, s.activeTabId) : null) ?? allLeaves(layout)[0]!;
@@ -1269,9 +1292,8 @@ export const useWorkspace = create<WorkspaceState>()((set, get) => ({
 
   toggleLayoutMode: () => {
     const s = get();
-    get().setLayoutMode(
-      layoutModeOf(s.workspaces, s.activeWorkspaceId) === 'tiling' ? 'standard' : 'tiling',
-    );
+    const i = LAYOUT_MODES.indexOf(layoutModeOf(s.workspaces, s.activeWorkspaceId));
+    get().setLayoutMode(LAYOUT_MODES[(i + 1) % LAYOUT_MODES.length]!);
   },
 
   moveTabToWorkspace: (tabId, workspaceId) =>
@@ -1581,6 +1603,8 @@ export const useWorkspace = create<WorkspaceState>()((set, get) => ({
       };
     }),
   splitPane: async (fromTabId, direction) => {
+    // Floating has no splits — one main window plus the stack.
+    if (layoutModeOf(get().workspaces, get().activeWorkspaceId) === 'floating') return '';
     const source = get().tabs.find((t) => t.id === fromTabId);
     if (!source) return '';
     const sourceLeaf = findLeafContaining(get().layout, fromTabId);
@@ -1689,6 +1713,7 @@ export const useWorkspace = create<WorkspaceState>()((set, get) => ({
     }),
   splitPaneWithTab: (targetPaneId, side, tabId) =>
     set((s) => {
+      if (layoutModeOf(s.workspaces, s.activeWorkspaceId) === 'floating') return s;
       const target = findLeaf(s.layout, targetPaneId);
       if (!target) return s;
       // Splitting a tab into its own new leaf pulls it out of any group.
@@ -2223,7 +2248,7 @@ function coerceWorkspaces(raw: unknown): WorkspaceMeta[] {
         ? { color: color as TabGroupColorId }
         : {}),
       // Anything unrecognised falls through as undefined, i.e. tiling.
-      ...(mode === 'standard' || mode === 'tiling' ? { mode: mode as LayoutMode } : {}),
+      ...(LAYOUT_MODES.includes(mode as LayoutMode) ? { mode: mode as LayoutMode } : {}),
     });
   }
   return out;

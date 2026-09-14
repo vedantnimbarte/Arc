@@ -144,8 +144,8 @@ export const ACTION_META: Record<ActionId, ActionMeta> = {
   },
   'toggle-layout-mode': {
     id: 'toggle-layout-mode',
-    label: 'Toggle Layout Mode',
-    description: 'Switch this workspace between tiled panes and a tab strip.',
+    label: 'Cycle Layout Mode',
+    description: 'Cycle this workspace through tiles, tabs and floating.',
     category: 'Workspace',
   },
   ...(Object.fromEntries(

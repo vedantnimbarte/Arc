@@ -53,6 +53,57 @@ pub async fn claude_available() -> Result<Option<String>, String> {
     Ok(arc_claude_code::binary())
 }
 
+/// The user's Claude plan limits (session / weekly / per-model), as the raw
+/// JSON body of the endpoint Claude Code's own `/usage` reads. Undocumented,
+/// so the frontend parses defensively.
+///
+/// Reuses the OAuth token Claude Code already stores. The token never leaves
+/// Rust, and ARC never refreshes it — rotating the refresh token here would
+/// sign the user out of Claude Code itself. An expired token just asks the
+/// user to run `claude` once.
+#[tauri::command]
+pub async fn claude_plan_usage() -> Result<String, String> {
+    use arc_http_client::{execute, HeaderKV, HttpBody, HttpRequest};
+
+    let token = claude_oauth_token()
+        .ok_or("Sign in to Claude Code to see plan limits.")?;
+    let res = execute(HttpRequest {
+        method: "GET".into(),
+        url: "https://api.anthropic.com/api/oauth/usage".into(),
+        headers: vec![
+            HeaderKV { name: "Authorization".into(), value: format!("Bearer {token}") },
+            HeaderKV { name: "anthropic-beta".into(), value: "oauth-2025-04-20".into() },
+        ],
+        body: HttpBody::None,
+        timeout_ms: Some(15_000),
+    })
+    .await
+    .map_err(|e| format!("Couldn't reach Anthropic: {e:#}"))?;
+
+    match res.status {
+        200 => res.body_text.ok_or_else(|| "Empty response from Anthropic.".into()),
+        401 | 403 => Err("Claude sign-in expired. Run `claude` once to refresh it.".into()),
+        s => Err(format!("Plan limits unavailable (HTTP {s}).")),
+    }
+}
+
+/// `claudeAiOauth.accessToken` from Claude Code's credential store: the
+/// `.credentials.json` file (honoring `CLAUDE_CONFIG_DIR`), or on macOS the
+/// login keychain, where Claude Code keeps it instead.
+fn claude_oauth_token() -> Option<String> {
+    let dir = std::env::var_os("CLAUDE_CONFIG_DIR")
+        .map(std::path::PathBuf::from)
+        .or_else(|| dirs::home_dir().map(|h| h.join(".claude")))?;
+    let json = std::fs::read_to_string(dir.join(".credentials.json"))
+        .ok()
+        .or_else(|| {
+            let user = std::env::var("USER").ok()?;
+            keyring::Entry::new("Claude Code-credentials", &user).ok()?.get_password().ok()
+        })?;
+    let v: serde_json::Value = serde_json::from_str(&json).ok()?;
+    v["claudeAiOauth"]["accessToken"].as_str().map(str::to_owned)
+}
+
 /// Start a turn and stream it.
 ///
 /// `resume` continues a prior conversation by its `session_id`; omitting it

@@ -168,7 +168,7 @@ interface Props {
  */
 export function AgentLauncher({ detected, onBack, onDone }: Props) {
   const launchAiCli = useWorkspace((s) => s.launchAiCli);
-  const tabbed = useWorkspace((s) => layoutModeOf(s.workspaces, s.activeWorkspaceId) === 'standard');
+  const tabbed = useWorkspace((s) => layoutModeOf(s.workspaces, s.activeWorkspaceId) !== 'tiling');
   const agentCommands = useSettings((s) => s.agentCommands);
   const setAgentCommand = useSettings((s) => s.setAgentCommand);
 

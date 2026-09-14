@@ -294,3 +294,66 @@ describe('addTab', () => {
     expect(findLeafContaining(s.layout, 't3')!.tabIds).toEqual(['t3']);
   });
 });
+
+describe('floating', () => {
+  // Floating keeps one leaf's `tabIds` most-recent-first: head = main window,
+  // the rest = the card stack. Every case asks "is the stack in MRU order?".
+  const order = () => allLeaves(useWorkspace.getState().layout)[0]!.tabIds;
+
+  it('enters as one leaf with the active tab as the main window', () => {
+    seed(3);
+    useWorkspace.getState().setActive('t2');
+    useWorkspace.getState().setLayoutMode('floating');
+    const s = useWorkspace.getState();
+    expect(allLeaves(s.layout)).toHaveLength(1);
+    expect(order()[0]).toBe('t2');
+    expect(new Set(order())).toEqual(new Set(['t1', 't2', 't3']));
+  });
+
+  it('puts the window you left on top of the stack', () => {
+    seed(3);
+    useWorkspace.getState().setLayoutMode('floating');
+    useWorkspace.getState().setActive('t3');
+    expect(order().slice(0, 2)).toEqual(['t3', 't1']);
+    useWorkspace.getState().setActive('t2');
+    expect(order()).toEqual(['t2', 't3', 't1']);
+  });
+
+  it('opens a new tab as the main window', () => {
+    seed(2);
+    useWorkspace.getState().setLayoutMode('floating');
+    useWorkspace.getState().addTab(tab('t3'));
+    expect(order()[0]).toBe('t3');
+    expect(useWorkspace.getState().activeTabId).toBe('t3');
+  });
+
+  it('falls back to the top of the stack when the main window closes', () => {
+    seed(3);
+    useWorkspace.getState().setLayoutMode('floating');
+    useWorkspace.getState().setActive('t3');
+    useWorkspace.getState().setActive('t2');
+    useWorkspace.getState().closeTab('t2');
+    expect(useWorkspace.getState().activeTabId).toBe('t3');
+  });
+
+  it('refuses splits', async () => {
+    seed(2);
+    useWorkspace.getState().setLayoutMode('floating');
+    const leafId = allLeaves(useWorkspace.getState().layout)[0]!.id;
+    useWorkspace.getState().splitPaneWithTab(leafId, 'right', 't2');
+    expect(await useWorkspace.getState().splitPane('t1', 'horizontal')).toBe('');
+    expect(allLeaves(useWorkspace.getState().layout)).toHaveLength(1);
+  });
+
+  it('cycles tiles → tabs → floating → tiles', () => {
+    seed(2);
+    const mode = () => layoutModeOf(useWorkspace.getState().workspaces, WS);
+    useWorkspace.getState().toggleLayoutMode();
+    expect(mode()).toBe('standard');
+    useWorkspace.getState().toggleLayoutMode();
+    expect(mode()).toBe('floating');
+    useWorkspace.getState().toggleLayoutMode();
+    expect(mode()).toBe('tiling');
+    expect(countLayoutTabs(useWorkspace.getState().layout)).toBe(2);
+  });
+});
