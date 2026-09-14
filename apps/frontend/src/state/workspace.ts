@@ -242,8 +242,17 @@ interface WorkspaceState {
    *  awaiting user input and the resolved CLI so submit can launch without
    *  re-scanning PATH. Transient (never persisted). */
   wingmanPrompt: { mode: 'pilot' | 'headless'; cli: AiCliInfo } | null;
+  /** Last few tabs closed per workspace (newest last), for Ctrl+Shift+T.
+   *  In-memory only, like `modeStash` — a relaunch clears it rather than
+   *  restoring it, since "undo a close from three sessions ago" isn't
+   *  really undo any more. Capped per workspace in `closeTab`. */
+  closedTabs: Tab[];
   addTab: (tab: Tab) => void;
   closeTab: (id: string) => void;
+  /** Reopens the most recently closed tab in the ACTIVE workspace, if any —
+   *  a no-op otherwise. Terminal tabs come back as a fresh shell on the same
+   *  profile (the PTY was already killed on close; nothing to resume). */
+  reopenClosedTab: () => void;
   setActive: (id: string) => void;
   renameTab: (id: string, title: string) => void;
   // ─── Tab groups (Chrome-style) ──────────────────────────────────────────
@@ -770,6 +779,39 @@ export function splitLeafForTab(
   };
 }
 
+// ─── Reopen closed tab ─────────────────────────────────────────────────────
+
+const MAX_CLOSED_TABS_PER_WORKSPACE = 10;
+
+/** Strip the bits of a tab that only meant something while it was live — a
+ *  dead `ptyId`, a one-off CLI launch's shell override, a cwd snapshot. A
+ *  reopened tab always comes back "cold": same identity (profile, file
+ *  path, host, ...) but no live process to reattach to, matching how a
+ *  terminal tab already looks after a full app relaunch. */
+function sanitizeForReopen(tab: Tab): Tab {
+  const {
+    ptyId: _ptyId,
+    cwd: _cwd,
+    launchCwd: _launchCwd,
+    shellOverride: _shellOverride,
+    shellArgs: _shellArgs,
+    runCommand: _runCommand,
+    sshSessionId: _sshSessionId,
+    ...rest
+  } = tab;
+  return rest;
+}
+
+/** Appends a just-closed tab to the stack, capped per workspace so Chrome-style
+ *  "reopen closed tab" doesn't grow unbounded across a long session. */
+function pushClosedTab(closedTabs: Tab[], tab: Tab): Tab[] {
+  const next = [...closedTabs, sanitizeForReopen(tab)];
+  const ownWorkspace = next.filter((t) => t.workspaceId === tab.workspaceId);
+  if (ownWorkspace.length <= MAX_CLOSED_TABS_PER_WORKSPACE) return next;
+  const oldestId = ownWorkspace[0]!.id;
+  return next.filter((t) => t.id !== oldestId);
+}
+
 // ─── Store ───────────────────────────────────────────────────────────────
 
 /** Initial state used before hydrate. The single seed tab lives in a single
@@ -793,6 +835,7 @@ export const useWorkspace = create<WorkspaceState>()((set, get) => ({
   maximizedPaneId: null,
   tabDirty: {},
   tabRunning: {},
+  closedTabs: [],
   tabGroups: [],
   workspaces: [DEFAULT_WORKSPACE],
   activeWorkspaceId: DEFAULT_WORKSPACE_ID,
@@ -852,6 +895,8 @@ export const useWorkspace = create<WorkspaceState>()((set, get) => ({
       // expands to fill the parent split), and emptying the workspace leaves
       // an empty leaf, which `PaneTreeView` renders as the launcher. There is
       // nothing left to protect the user from by refusing.
+      const closing = s.tabs.find((t) => t.id === id);
+      const closedTabs = closing ? pushClosedTab(s.closedTabs, closing) : s.closedTabs;
       const remaining = s.tabs.filter((t) => t.id !== id);
       const pruned = pruneLayout(s.layout, new Set([id]));
       const { [id]: _omit, ...nextDirty } = s.tabDirty;
@@ -875,6 +920,7 @@ export const useWorkspace = create<WorkspaceState>()((set, get) => ({
           focusedPaneId: fresh.focusedPaneId,
           tabDirty: nextDirty,
           tabGroups: pruneEmptyGroups(s.tabGroups, remaining),
+          closedTabs,
         };
       }
       const focusedExists = !!findLeaf(pruned, s.focusedPaneId);
@@ -890,8 +936,23 @@ export const useWorkspace = create<WorkspaceState>()((set, get) => ({
         tabDirty: nextDirty,
         // A group that just lost its last member disappears with it.
         tabGroups: pruneEmptyGroups(s.tabGroups, remaining),
+        closedTabs,
       };
     });
+  },
+  reopenClosedTab: () => {
+    const s = get();
+    let idx = -1;
+    for (let i = s.closedTabs.length - 1; i >= 0; i--) {
+      if (s.closedTabs[i]!.workspaceId === s.activeWorkspaceId) {
+        idx = i;
+        break;
+      }
+    }
+    if (idx === -1) return; // nothing closed in this workspace — no-op
+    const tab = s.closedTabs[idx]!;
+    set((st) => ({ closedTabs: st.closedTabs.filter((_, i) => i !== idx) }));
+    get().addTab(tab);
   },
   setActive: (id) =>
     set((s) => {

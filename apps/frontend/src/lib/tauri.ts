@@ -935,6 +935,8 @@ export interface PersistedSettings {
   /** Layout mode stamped onto a newly created workspace: 'tiling' | 'standard'.
    *  Existing workspaces keep whatever they were set to. */
   defaultLayoutMode?: string;
+  /** Gap in px between panes when a workspace is split. */
+  tileGap?: number;
   /** Per-agent overrides of the launcher's start command, keyed by `AiCliId`.
    *  Sparse — only agents whose command the user edited away from
    *  `AI_CLI_COMMANDS` appear, so Reset is "delete the key". */

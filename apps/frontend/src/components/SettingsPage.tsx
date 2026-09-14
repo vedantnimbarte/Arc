@@ -40,6 +40,8 @@ import {
   DEFAULT_SEARCH_IGNORE_DIRS,
   DEFAULT_USAGE_AGENTS,
   flushSettingsSave,
+  MAX_TILE_GAP,
+  MIN_TILE_GAP,
   useSettings,
   type TerminalProfile,
   type UsageAgent,
@@ -166,6 +168,8 @@ export function SettingsPage() {
     setAppearance,
     defaultLayoutMode,
     setDefaultLayoutMode,
+    tileGap,
+    setTileGap,
     setThemeId,
     setFontId,
     setFontSize,
@@ -313,6 +317,8 @@ export function SettingsPage() {
                 restoreWindowState={restoreWindowState}
                 defaultLayoutMode={defaultLayoutMode}
                 onDefaultLayoutModeChange={setDefaultLayoutMode}
+                tileGap={tileGap}
+                onTileGapChange={setTileGap}
                 onLaunchAtLoginChange={setLaunchAtLogin}
                 onRestoreWindowStateChange={setRestoreWindowState}
               />
@@ -590,6 +596,8 @@ function StartupPane({
   restoreWindowState,
   defaultLayoutMode,
   onDefaultLayoutModeChange,
+  tileGap,
+  onTileGapChange,
   onLaunchAtLoginChange,
   onRestoreWindowStateChange,
 }: {
@@ -597,6 +605,8 @@ function StartupPane({
   restoreWindowState: boolean;
   defaultLayoutMode: LayoutMode;
   onDefaultLayoutModeChange: (m: LayoutMode) => void;
+  tileGap: number;
+  onTileGapChange: (px: number) => void;
   onLaunchAtLoginChange: (on: boolean) => void;
   onRestoreWindowStateChange: (on: boolean) => void;
 }) {
@@ -645,7 +655,71 @@ function StartupPane({
           />
         </div>
       </Group>
+
+      <Group
+        title="Pane spacing"
+        hint="Space between panes when a workspace is split — either layout mode can be split. Takes effect immediately."
+      >
+        <Rows>
+          <Row
+            label="Gap between tiles"
+            control={<TileGapControl value={tileGap} onChange={onTileGapChange} />}
+          />
+        </Rows>
+      </Group>
     </>
+  );
+}
+
+/** Slider + number input, kept in lockstep. The slider commits on every
+ *  drag tick (it can't hold an invalid intermediate value); the number
+ *  input gets its own draft so a mid-edit state like an empty box or a
+ *  leading "-" doesn't get clamped back out from under the caret on every
+ *  keystroke — it only commits on blur/Enter, same as the other free-text
+ *  numeric settings in this file. */
+function TileGapControl({
+  value,
+  onChange,
+}: {
+  value: number;
+  onChange: (px: number) => void;
+}) {
+  const [draft, setDraft] = useState(String(value));
+  useEffect(() => setDraft(String(value)), [value]);
+
+  const commit = () => {
+    const n = Number.parseInt(draft, 10);
+    if (Number.isFinite(n)) onChange(n);
+    else setDraft(String(value));
+  };
+
+  return (
+    <div className="flex items-center gap-3">
+      <input
+        type="range"
+        min={MIN_TILE_GAP}
+        max={MAX_TILE_GAP}
+        step={1}
+        value={value}
+        onChange={(e) => onChange(Number(e.target.value))}
+        className="h-1.5 w-36 cursor-pointer appearance-none rounded-full bg-surface-2 accent-accent"
+        aria-label="Gap between tiles"
+      />
+      <input
+        type="number"
+        min={MIN_TILE_GAP}
+        max={MAX_TILE_GAP}
+        value={draft}
+        onChange={(e) => setDraft(e.target.value)}
+        onBlur={commit}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') commit();
+        }}
+        className="w-14 rounded-md border border-edge-2 bg-bg-base/50 px-2 py-1 text-right font-mono text-sm text-fg-base outline-none focus:border-accent/45"
+        aria-label="Gap between tiles in pixels"
+      />
+      <span className="font-display text-xs text-fg-subtle">px</span>
+    </div>
   );
 }
 

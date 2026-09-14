@@ -6,6 +6,7 @@ import {
   type PaneNode,
   type PaneSplit,
 } from '../state/workspace';
+import { useSettings } from '../state/settings';
 import { PaneLeafView } from './PaneLeafView';
 import { PaneHeader } from './PaneHeader';
 import { PaneTabStrip } from './PaneTabStrip';
@@ -158,6 +159,17 @@ function SplitChild({
   stageRef: React.RefObject<HTMLDivElement>;
   showHeader: boolean;
 }) {
+  const gap = useSettings((s) => s.tileGap);
+  // The visible/hoverable accent handle caps at 4px regardless of how wide
+  // the configured gap is — a bigger gap should read as more quiet space
+  // between panes, not a thicker colored bar. Margins take up the rest.
+  // Below 4px of gap the handle itself shrinks so the total still adds up
+  // (down to 0 at gap 0, fully edge-to-edge); the absolutely-positioned
+  // child span still extends the drag hit-target beyond the handle's own
+  // box either way, so dragging keeps working even with no visible line.
+  const handle = Math.min(4, gap);
+  const margin = Math.max(0, (gap - handle) / 2);
+
   return (
     <>
       <Panel id={child.id} defaultSize={defaultSize} minSize={10} className="min-h-0 min-w-0">
@@ -170,14 +182,12 @@ function SplitChild({
       </Panel>
       {!isLast && (
         <Separator
-          className={cn(
-            'group relative shrink-0 rounded-full bg-transparent transition-colors duration-150',
-            // A small gap between panes; a rounded accent pill appears on hover
-            // / drag so the resize affordance reads without a heavy divider.
+          style={
             direction === 'horizontal'
-              ? 'mx-1 w-1 hover:bg-accent/30 data-[dragging=true]:bg-accent/50'
-              : 'my-1 h-1 hover:bg-accent/30 data-[dragging=true]:bg-accent/50',
-          )}
+              ? { width: handle, marginLeft: margin, marginRight: margin }
+              : { height: handle, marginTop: margin, marginBottom: margin }
+          }
+          className="group relative shrink-0 rounded-full bg-transparent transition-colors duration-150 hover:bg-accent/30 data-[dragging=true]:bg-accent/50"
         >
           <span
             aria-hidden

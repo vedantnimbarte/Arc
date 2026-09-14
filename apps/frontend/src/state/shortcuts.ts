@@ -7,6 +7,7 @@ import { AI_CLIS, type AiCliId } from '../lib/tauri';
  *  dispatcher, and the persisted overrides in lockstep. */
 export type ActionId =
   | 'new-terminal'
+  | 'reopen-closed-tab'
   | 'open-settings'
   | 'toggle-sidebar'
   | 'open-command-palette'
@@ -55,6 +56,12 @@ export const ACTION_META: Record<ActionId, ActionMeta> = {
     id: 'new-terminal',
     label: 'New Terminal',
     description: 'Open a new terminal tab.',
+    category: 'Workspace',
+  },
+  'reopen-closed-tab': {
+    id: 'reopen-closed-tab',
+    label: 'Reopen Closed Tab',
+    description: 'Bring back the last tab you closed in this workspace.',
     category: 'Workspace',
   },
   'open-settings': {
@@ -168,6 +175,7 @@ export const ACTION_META: Record<ActionId, ActionMeta> = {
 
 export const ACTION_ORDER: ActionId[] = [
   'new-terminal',
+  'reopen-closed-tab',
   'open-settings',
   'toggle-sidebar',
   'open-command-palette',
@@ -195,6 +203,7 @@ const mod = (extra: Partial<KeyBinding> = {}): Pick<KeyBinding, 'ctrl' | 'meta'>
 
 export const DEFAULT_BINDINGS: Record<ActionId, KeyBinding | null> = {
   'new-terminal': { code: 'KeyT', shift: false, alt: false, ...mod() },
+  'reopen-closed-tab': { code: 'KeyT', shift: true, alt: false, ...mod() },
   'open-settings': { code: 'Comma', shift: false, alt: false, ...mod() },
   'toggle-sidebar': { code: 'KeyB', shift: false, alt: false, ...mod() },
   'open-command-palette': { code: 'KeyP', shift: true, alt: false, ...mod() },

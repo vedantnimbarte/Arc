@@ -228,6 +228,10 @@ export interface Settings {
   /** Layout mode a newly created workspace starts in. Existing workspaces are
    *  untouched — each already carries its own `mode`. */
   defaultLayoutMode: LayoutMode;
+  /** Space between panes when a workspace is split, in px. Applies live,
+   *  everywhere a split exists — both layout modes render splits the same
+   *  way, so there's no reason to key this off `defaultLayoutMode`. */
+  tileGap: number;
   /** Per-agent start-command overrides for the agent launcher, keyed by
    *  `AiCliId`. Sparse: an agent left at its default has no entry, which is
    *  what makes the launcher's Reset a delete rather than a re-write. */
@@ -273,6 +277,10 @@ export interface Settings {
   setNotifySound: (on: boolean) => void;
   setSearchIgnoreDirs: (dirs: string[]) => void;
   setDefaultLayoutMode: (mode: LayoutMode) => void;
+  /** Clamped to [MIN_TILE_GAP, MAX_TILE_GAP] and rounded — both the slider
+   *  and the number input funnel through this, so neither can push a
+   *  fractional or out-of-range value into the split layout. */
+  setTileGap: (px: number) => void;
   /** Silence or unsilence one source. */
   setSourceMuted: (source: NotificationSource, muted: boolean) => void;
   /** Let one source interrupt with an OS notification, or stop it. */
@@ -287,6 +295,12 @@ export interface Settings {
   setAiModel: (model: string) => void;
   hydrateSettings: () => Promise<void>;
 }
+
+/** 12px matches the split gap ARC shipped with before this was
+ *  configurable, so the default looks identical to every prior release. */
+export const MIN_TILE_GAP = 0;
+export const MAX_TILE_GAP = 32;
+export const DEFAULT_TILE_GAP = 12;
 
 const DEFAULTS = {
   defaultShell: null as string | null,
@@ -312,6 +326,7 @@ const DEFAULTS = {
   notifyMuted: [] as NotificationSource[],
   notifyOs: ['agent', 'command'] as NotificationSource[],
   defaultLayoutMode: 'tiling' as LayoutMode,
+  tileGap: DEFAULT_TILE_GAP,
   agentCommands: {} as Partial<Record<AiCliId, string>>,
   usageAgents: DEFAULT_USAGE_AGENTS,
   autoUpdateCheck: true,
@@ -322,6 +337,9 @@ const MIN_NOTIFY_SECS = 5;
 const MAX_NOTIFY_SECS = 3600;
 const clampNotifySecs = (n: number): number =>
   Math.max(MIN_NOTIFY_SECS, Math.min(MAX_NOTIFY_SECS, Math.round(n)));
+
+const clampTileGap = (n: number): number =>
+  Math.max(MIN_TILE_GAP, Math.min(MAX_TILE_GAP, Math.round(n)));
 
 const clampFontSize = (n: number): number =>
   Math.max(MIN_FONT_SIZE, Math.min(MAX_FONT_SIZE, Math.round(n)));
@@ -393,6 +411,7 @@ export const useSettings = create<Settings>()((set, get) => ({
   setNotifySound: (on) => set({ notifySound: on }),
   setSearchIgnoreDirs: (dirs) => set({ searchIgnoreDirs: dirs }),
   setDefaultLayoutMode: (mode) => set({ defaultLayoutMode: mode }),
+  setTileGap: (px) => set({ tileGap: clampTileGap(px) }),
   setSourceMuted: (source, muted) =>
     set((s) => ({
       notifyMuted: muted
@@ -568,6 +587,7 @@ function applyStored(current: Settings, stored: Partial<PersistedSettings>): Par
       stored.defaultLayoutMode === 'standard' || stored.defaultLayoutMode === 'tiling'
         ? stored.defaultLayoutMode
         : current.defaultLayoutMode,
+    tileGap: typeof stored.tileGap === 'number' ? clampTileGap(stored.tileGap) : current.tileGap,
     notifyMuted: coerceSources(stored.notifyMuted, current.notifyMuted),
     notifyOs: coerceSources(stored.notifyOs, current.notifyOs),
     agentCommands: coerceAgentCommands(stored.agentCommands, current.agentCommands),
@@ -606,6 +626,7 @@ function toPersistedSettings(s: Settings): PersistedSettings {
     notifySound: s.notifySound,
     searchIgnoreDirs: s.searchIgnoreDirs,
     defaultLayoutMode: s.defaultLayoutMode,
+    tileGap: s.tileGap,
     notifyMuted: s.notifyMuted,
     notifyOs: s.notifyOs,
     agentCommands: s.agentCommands,

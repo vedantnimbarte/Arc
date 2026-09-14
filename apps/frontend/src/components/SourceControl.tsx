@@ -1066,6 +1066,14 @@ function notifyGitFailure(title: string, err: unknown): void {
 
   return (
     <div className="flex h-full min-w-0 flex-col">
+      {/* Panel label — every other sidebar panel names itself this way
+          (Problems, Tests, Containers); this one used to rely on the branch
+          name alone to say where you are. */}
+      <div className="flex shrink-0 items-center px-3 py-2">
+        <span className="font-sans text-2xs uppercase tracking-widest text-fg-subtle/60">
+          Source Control
+        </span>
+      </div>
       {/* Header — branch glyph, name + sync indicators, change count, refresh */}
       <div className="relative flex h-11 shrink-0 items-center gap-1.5 border-b border-border-hairline px-2.5">
         {/* Subtle top-edge highlight, matches macOS toolbar lift. */}

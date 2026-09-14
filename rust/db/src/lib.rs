@@ -36,7 +36,7 @@ use sqlx::{
 //
 // ponytail: fixed cap, no paging. Add a LIMIT/OFFSET pager if anyone actually
 // wants to page through a million-row table in the UI.
-pub const MAX_ROWS: usize = 5_000;
+pub const MAX_ROWS: usize = 20_000;
 
 /// Give up on a connect attempt after this long. A wrong host otherwise hangs
 /// the panel on the OS's TCP timeout.
