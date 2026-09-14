@@ -18,6 +18,7 @@ import {
 import { findLeaf, useWorkspace, type Tab, type TabGroup } from '../state/workspace';
 import { cn } from '../lib/cn';
 import { TabContextMenu, type GroupOption } from './TabContextMenu';
+import { MoveIcon, WorkspaceFlyout } from './MoveToWorkspace';
 import { TabGroupMenu } from './TabGroupMenu';
 import { groupColorTokens, type GroupColorTokens } from '../lib/tabGroups';
 import { Tooltip } from './Tooltip';
@@ -86,6 +87,7 @@ export function PaneTabStrip({ paneId, variant = 'leaf' }: Props) {
   const toggleMaximizePane = useWorkspace((s) => s.toggleMaximizePane);
   const isMaximized = useWorkspace((s) => s.maximizedPaneId === paneId);
 
+  const [moveFor, setMoveFor] = useState<{ tabId: string; el: HTMLElement; kb: boolean } | null>(null);
   const [contextMenu, setContextMenu] = useState<{ tabId: string; x: number; y: number } | null>(
     null,
   );
@@ -242,6 +244,36 @@ export function PaneTabStrip({ paneId, variant = 'leaf' }: Props) {
               )}
             />
             <span className="flex-1 truncate text-left">{tab.title}</span>
+            {/* Move to workspace. Shown on the active tab, and on hover for the rest. */}
+            <span
+              role="button"
+              tabIndex={0}
+              aria-label="Move to workspace"
+              title="Move to workspace"
+              aria-haspopup="menu"
+              aria-expanded={moveFor?.tabId === tabId}
+              onClick={(e) => {
+                e.stopPropagation();
+                setFocusedPane(paneId);
+                setActive(tabId);
+                // `detail` is 0 for a keyboard-activated click.
+                const next = { tabId, el: e.currentTarget as HTMLElement, kb: e.detail === 0 };
+                setMoveFor((m) => (m?.tabId === tabId ? null : next));
+              }}
+              onKeyDown={(e) => {
+                if (e.key !== 'Enter' && e.key !== ' ') return;
+                e.preventDefault();
+                e.stopPropagation();
+                (e.currentTarget as HTMLElement).click();
+              }}
+              className={cn(
+                '-mr-1.5 flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded-full text-fg-subtle',
+                'transition-all duration-150 hover:bg-white/15 hover:text-fg-base focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent/60',
+                isActive || moveFor?.tabId === tabId ? 'opacity-100' : 'opacity-0 group-hover/tab:opacity-100',
+              )}
+            >
+              <MoveIcon size={11} strokeWidth={2.4} />
+            </span>
             {/* Close is always offered now, so the old "dirty dot only" branch
                 for an unclosable last tab is gone — this control already shows
                 the dot and swaps it for an X on hover. */}
@@ -347,8 +379,22 @@ export function PaneTabStrip({ paneId, variant = 'leaf' }: Props) {
         </div>
       )}
 
+      {moveFor && (
+        <WorkspaceFlyout
+          anchorEl={moveFor.el}
+          placement="below"
+          tabId={moveFor.tabId}
+          focusFirst={moveFor.kb}
+          onDismiss={(refocus) => {
+            if (refocus) moveFor.el.focus();
+            setMoveFor(null);
+          }}
+        />
+      )}
+
       {contextMenu && (
         <TabContextMenu
+          tabId={contextMenu.tabId}
           x={contextMenu.x}
           y={contextMenu.y}
           closable

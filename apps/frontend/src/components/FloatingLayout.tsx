@@ -4,6 +4,7 @@ import { useWorkspace, type PaneLeaf } from '../state/workspace';
 import { useSettings } from '../state/settings';
 import { PaneLeafView } from './PaneLeafView';
 import { PaneHeader, iconForKind } from './PaneHeader';
+import { MoveIcon, WorkspaceFlyout } from './MoveToWorkspace';
 import { cn } from '../lib/cn';
 
 /** Width of the card stack. Previews are the main window scaled to fit it. */
@@ -118,6 +119,9 @@ export function FloatingLayout({ leaf, hostsRef, stageRef }: Props) {
   );
 }
 
+const cardAction =
+  'flex h-[22px] w-[22px] items-center justify-center rounded text-fg-muted outline-none hover:bg-surface-3 hover:text-fg-base focus-visible:ring-2 focus-visible:ring-accent/60';
+
 function StackCard({
   tabId,
   depth,
@@ -144,6 +148,7 @@ function StackCard({
   const setActive = useWorkspace((s) => s.setActive);
   const closeTab = useWorkspace((s) => s.closeTab);
   const bodyRef = useRef<HTMLDivElement>(null);
+  const [moveAnchor, setMoveAnchor] = useState<{ el: HTMLElement; kb: boolean } | null>(null);
   const host = hostsRef.current.get(tabId) ?? null;
 
   // Same imperative hosting as PaneLeafView: borrow the tab's host div, hand
@@ -175,7 +180,7 @@ function StackCard({
       }}
       className="group relative animate-pane-in overflow-hidden rounded-lg bg-bg-base shadow-[0_8px_18px_-8px_rgba(0,0,0,0.55)] ring-1 ring-border-subtle transition-[margin] duration-200 ease-apple motion-reduce:animate-none motion-reduce:transition-none"
     >
-      <div className={cn('flex h-[34px] items-center gap-2 pl-2.5 pr-8', depth > 0 && 'pt-1.5')}>
+      <div className={cn('flex h-[34px] items-center gap-2 pl-2.5 pr-14', depth > 0 && 'pt-1.5')}>
         <span
           aria-hidden
           className={cn(
@@ -216,19 +221,51 @@ function StackCard({
         </span>
       </button>
 
-      <button
-        type="button"
-        onClick={() => closeTab(tabId)}
-        aria-label={`Close ${tab.title}`}
-        title="Close"
+      <div
         className={cn(
-          'absolute right-1.5 flex h-[22px] w-[22px] items-center justify-center rounded text-fg-muted opacity-0 outline-none transition-opacity',
-          'hover:bg-surface-3 hover:text-fg-base group-hover:opacity-100 focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-accent/60',
+          'absolute right-1.5 flex items-center gap-0.5 transition-opacity',
           depth > 0 ? 'top-[9px]' : 'top-1.5',
+          moveAnchor ? 'opacity-100' : 'opacity-0 focus-within:opacity-100 group-hover:opacity-100',
         )}
       >
-        <X size={12} strokeWidth={2.2} />
-      </button>
+        <button
+          type="button"
+          onClick={(e) => {
+            // `detail` is 0 for a keyboard-activated click.
+            const next = { el: e.currentTarget, kb: e.detail === 0 };
+            setMoveAnchor((a) => (a ? null : next));
+          }}
+          aria-label={`Move ${tab.title} to workspace`}
+          aria-haspopup="menu"
+          aria-expanded={!!moveAnchor}
+          title="Move to workspace"
+          className={cardAction}
+        >
+          <MoveIcon size={12} strokeWidth={2.2} />
+        </button>
+        <button
+          type="button"
+          onClick={() => closeTab(tabId)}
+          aria-label={`Close ${tab.title}`}
+          title="Close"
+          className={cardAction}
+        >
+          <X size={12} strokeWidth={2.2} />
+        </button>
+      </div>
+
+      {moveAnchor && (
+        <WorkspaceFlyout
+          anchorEl={moveAnchor.el}
+          placement="below"
+          tabId={tabId}
+          focusFirst={moveAnchor.kb}
+          onDismiss={(refocus) => {
+            if (refocus) moveAnchor.el.focus();
+            setMoveAnchor(null);
+          }}
+        />
+      )}
     </li>
   );
 }

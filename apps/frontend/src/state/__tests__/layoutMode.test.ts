@@ -357,3 +357,81 @@ describe('floating', () => {
     expect(countLayoutTabs(useWorkspace.getState().layout)).toBe(2);
   });
 });
+
+describe('moveTabToWorkspace', () => {
+  /** Two workspaces: WS (tiled t1..tn, active) and a parked `other`. */
+  function seedTwo(n: number, otherMode?: 'tiling' | 'standard' | 'floating') {
+    const ids = seed(n);
+    const other = useWorkspace.getState().createWorkspace('Other');
+    if (otherMode) useWorkspace.getState().setLayoutMode(otherMode);
+    useWorkspace.getState().addTab({ id: 'o1', title: 'o1', kind: 'terminal' });
+    useWorkspace.getState().addTab({ id: 'o2', title: 'o2', kind: 'terminal' });
+    useWorkspace.getState().switchWorkspace(WS);
+    return { ids, other };
+  }
+
+  it('follows the tab into the target and focuses it', () => {
+    const { other } = seedTwo(3);
+    useWorkspace.getState().moveTabToWorkspace('t2', other);
+    const s = useWorkspace.getState();
+    expect(s.activeWorkspaceId).toBe(other);
+    expect(s.activeTabId).toBe('t2');
+    expect(s.tabs.find((t) => t.id === 't2')!.workspaceId).toBe(other);
+    expect(new Set(flattenTabIds(s.layout))).toEqual(new Set(['o1', 'o2', 't2']));
+  });
+
+  it('prunes the tab out of the workspace it left', () => {
+    const { other } = seedTwo(3);
+    useWorkspace.getState().moveTabToWorkspace('t2', other);
+    useWorkspace.getState().switchWorkspace(WS);
+    expect(new Set(flattenTabIds(useWorkspace.getState().layout))).toEqual(new Set(['t1', 't3']));
+  });
+
+  it('keeps a tiled target’s existing tree and splits the tab in', () => {
+    const { other } = seedTwo(2);
+    // Hand-sized split in the target — a rebuild would reset these.
+    useWorkspace.getState().switchWorkspace(other);
+    const root = useWorkspace.getState().layout;
+    if (root.kind !== 'split') throw new Error('expected split');
+    useWorkspace.setState({ layout: { ...root, sizes: [70, 30] } });
+    useWorkspace.getState().switchWorkspace(WS);
+
+    useWorkspace.getState().moveTabToWorkspace('t1', other);
+    const s = useWorkspace.getState();
+    expect(allLeaves(s.layout)).toHaveLength(3);
+    expect(findLeafContaining(s.layout, 't1')!.tabIds).toEqual(['t1']);
+    expect(JSON.stringify(s.layout)).toContain('[70,30]');
+  });
+
+  it('joins the strip in a tabs workspace and becomes main in floating', () => {
+    const tabsWs = seedTwo(2, 'standard').other;
+    useWorkspace.getState().moveTabToWorkspace('t1', tabsWs);
+    expect(allLeaves(useWorkspace.getState().layout)[0]!.tabIds).toEqual(['o1', 'o2', 't1']);
+
+    const floatWs = seedTwo(2, 'floating').other;
+    useWorkspace.getState().moveTabToWorkspace('t1', floatWs);
+    expect(allLeaves(useWorkspace.getState().layout)[0]!.tabIds[0]).toBe('t1');
+  });
+
+  it('moves into a workspace created on the spot', () => {
+    seed(2);
+    const fresh = useWorkspace.getState().createWorkspace();
+    useWorkspace.getState().moveTabToWorkspace('t1', fresh);
+    const s = useWorkspace.getState();
+    expect(s.activeWorkspaceId).toBe(fresh);
+    expect(flattenTabIds(s.layout)).toEqual(['t1']);
+    useWorkspace.getState().switchWorkspace(WS);
+    expect(flattenTabIds(useWorkspace.getState().layout)).toEqual(['t2']);
+  });
+
+  it('drops the tab’s group and leaves the source empty when it was the last tab', () => {
+    const { other } = seedTwo(1);
+    const g = useWorkspace.getState().groupTabs(['t1']);
+    useWorkspace.getState().moveTabToWorkspace('t1', other);
+    const s = useWorkspace.getState();
+    expect(s.tabs.find((t) => t.id === 't1')!.groupId).toBeUndefined();
+    expect(s.tabGroups.some((x) => x.id === g)).toBe(false);
+    useWorkspace.getState().switchWorkspace(WS);
+    expect(countLayoutTabs(useWorkspace.getState().layout)).toBe(0);
+  });
+});

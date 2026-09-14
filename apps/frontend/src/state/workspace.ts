@@ -305,7 +305,9 @@ interface WorkspaceState {
   setLayoutMode: (mode: LayoutMode) => void;
   /** Cycle the active workspace through `LAYOUT_MODES`. */
   toggleLayoutMode: () => void;
-  /** Move a tab into another workspace. */
+  /** Move a tab into another workspace and switch to it there. The tab lands
+   *  the way the target's layout mode opens a new tab; the target's own pane
+   *  tree is kept. */
   moveTabToWorkspace: (tabId: string, workspaceId: string) => void;
   setTabDirty: (id: string, dirty: boolean) => void;
   setTabRunning: (id: string, running: boolean) => void;
@@ -627,6 +629,37 @@ export function promoteTabInLeaf(node: PaneNode, paneId: string, tabId: string):
   return { ...node, children: node.children.map((c) => promoteTabInLeaf(c, paneId, tabId)) };
 }
 
+/** Put `tabId` into `layout` the way the workspace's mode opens a new tab.
+ *  It lands in the focused leaf, so a file opened while a split pane is
+ *  focused stays next to what you're looking at.
+ *
+ *  Tiling: an empty leaf takes the tab directly; an occupied one splits along
+ *  its longer side (dwindle). Standard: the tab joins the focused strip.
+ *  Floating: same, and it becomes the main window. Manual splits still work
+ *  in tiling and standard either way. */
+function placeTab(
+  layout: PaneNode,
+  focusedPaneId: string,
+  tabId: string,
+  mode: LayoutMode,
+): { layout: PaneNode; focusedPaneId: string } {
+  const leaf = findLeaf(layout, focusedPaneId);
+  if (!leaf) {
+    // Shouldn't happen post-hydrate, but be defensive: re-seed.
+    const reseeded = singleLeafLayout([tabId], tabId);
+    return { layout: reseeded, focusedPaneId: reseeded.id };
+  }
+  if (leaf.tabIds.length === 0 || mode !== 'tiling') {
+    const appended = appendTabToLeaf(layout, leaf.id, tabId);
+    return {
+      layout: mode === 'floating' ? promoteTabInLeaf(appended, leaf.id, tabId) : appended,
+      focusedPaneId: leaf.id,
+    };
+  }
+  const split = splitLeafForTab(layout, leaf.id, dwindleSide(leaf.id), tabId);
+  return { layout: split, focusedPaneId: findLeafContaining(split, tabId)?.id ?? leaf.id };
+}
+
 /** Set the active tab inside a specific leaf. */
 export function setLeafActiveTab(node: PaneNode, paneId: string, tabId: string): PaneNode {
   if (node.kind === 'leaf') {
@@ -864,46 +897,13 @@ export const useWorkspace = create<WorkspaceState>()((set, get) => ({
     set((s) => {
       // Every new tab joins the active workspace unless it already declares one.
       const tab: Tab = { ...incoming, workspaceId: incoming.workspaceId ?? s.activeWorkspaceId };
-      // New tab always lands in the currently-focused leaf so opening a
-      // file while a split pane is focused keeps the new tab adjacent to
-      // the user's attention.
-      const leaf = findLeaf(s.layout, s.focusedPaneId);
-      if (!leaf) {
-        // Shouldn't happen post-hydrate, but be defensive: re-seed.
-        const reseeded = singleLeafLayout([tab.id], tab.id);
-        return {
-          tabs: [...s.tabs, tab],
-          activeTabId: tab.id,
-          layout: reseeded,
-          focusedPaneId: reseeded.id,
-        };
-      }
-      // Tiling model: every pane holds exactly one terminal. An empty leaf
-      // (fresh workspace) takes the tab directly; an occupied one splits along
-      // its longer side (dwindle) so the new tab opens as a sibling pane.
-      //
-      // Standard model: the tab joins the focused pane's strip instead. This
-      // branch is the *entire* behavioural difference between the two modes —
-      // manual splits still work either way.
-      const mode = layoutModeOf(s.workspaces, s.activeWorkspaceId);
-      if (leaf.tabIds.length === 0 || mode !== 'tiling') {
-        const appended = appendTabToLeaf(s.layout, leaf.id, tab.id);
-        return {
-          tabs: [...s.tabs, tab],
-          activeTabId: tab.id,
-          // Floating: the new tab becomes the main window.
-          layout: mode === 'floating' ? promoteTabInLeaf(appended, leaf.id, tab.id) : appended,
-        };
-      }
-      const side = dwindleSide(leaf.id);
-      const newLayout = splitLeafForTab(s.layout, leaf.id, side, tab.id);
-      const newLeaf = findLeafContaining(newLayout, tab.id);
-      return {
-        tabs: [...s.tabs, tab],
-        activeTabId: tab.id,
-        layout: newLayout,
-        focusedPaneId: newLeaf?.id ?? s.focusedPaneId,
-      };
+      const placed = placeTab(
+        s.layout,
+        s.focusedPaneId,
+        tab.id,
+        layoutModeOf(s.workspaces, s.activeWorkspaceId),
+      );
+      return { tabs: [...s.tabs, tab], activeTabId: tab.id, ...placed };
     }),
   closeTab: (id) => {
     // A tab the user closed is gone for good — its saved scrollback would
@@ -1302,25 +1302,51 @@ export const useWorkspace = create<WorkspaceState>()((set, get) => ({
       if (!tab || tab.workspaceId === workspaceId || !s.workspaces.some((w) => w.id === workspaceId)) {
         return s;
       }
-      const tabs = s.tabs.map((t) => (t.id === tabId ? { ...t, workspaceId } : t));
-      // The tab leaves the active workspace's layout. Prune it out; if that
-      // empties the tree, reseed from whatever's left in the active workspace.
-      const activeTabs = tabs.filter((t) => t.workspaceId === s.activeWorkspaceId);
-      const pruned =
-        pruneLayout(s.layout, new Set([tabId])) ??
-        singleLeafLayout(activeTabs.map((t) => t.id), activeTabs[0]?.id ?? null);
-      const focusedPaneId = findLeaf(pruned, s.focusedPaneId)
-        ? s.focusedPaneId
-        : allLeaves(pruned)[0]!.id;
-      // Drop the target's stashed layout so it reseeds (now including the moved
-      // tab) the next time that workspace becomes active.
+      const from = tab.workspaceId ?? s.activeWorkspaceId;
+      // A group never spans workspaces, so the tab leaves its group behind.
+      const tabs = s.tabs.map((t) =>
+        t.id === tabId ? { ...t, workspaceId, groupId: undefined } : t,
+      );
+
+      // Park the tree we're leaving, then prune the tab out of its source's
+      // parked tree. The source is usually the active workspace, but not after
+      // "New workspace", which has already switched away from it.
       const stash = { ...s.layoutStash };
-      delete stash[workspaceId];
-      let activeTabId = s.activeTabId;
-      if (s.activeTabId === tabId) {
-        activeTabId = findLeaf(pruned, focusedPaneId)!.activeTabId ?? activeTabs[0]?.id ?? null;
+      if (s.activeWorkspaceId !== workspaceId) {
+        stash[s.activeWorkspaceId] = { layout: s.layout, focusedPaneId: s.focusedPaneId };
       }
-      return { tabs, layout: pruned, focusedPaneId, layoutStash: stash, activeTabId };
+      const src = stash[from];
+      if (src) {
+        const pruned = pruneLayout(src.layout, new Set([tabId]));
+        if (pruned) {
+          const focus = findLeaf(pruned, src.focusedPaneId) ? src.focusedPaneId : allLeaves(pruned)[0]!.id;
+          stash[from] = { layout: pruned, focusedPaneId: focus };
+        } else {
+          delete stash[from]; // emptied — reseeds from what's left on its next visit
+        }
+      }
+
+      // Follow the tab: open the target on its own tree (kept, not rebuilt)
+      // and place the tab the way that workspace's mode opens a new one.
+      const base =
+        s.activeWorkspaceId === workspaceId
+          ? { layout: s.layout, focusedPaneId: s.focusedPaneId }
+          : restoreWorkspaceLayout(
+              stash[workspaceId],
+              tabs.filter((t) => t.workspaceId === workspaceId && t.id !== tabId),
+              layoutModeOf(s.workspaces, workspaceId),
+            );
+      delete stash[workspaceId];
+      const placed = placeTab(base.layout, base.focusedPaneId, tabId, layoutModeOf(s.workspaces, workspaceId));
+      return {
+        tabs,
+        activeWorkspaceId: workspaceId,
+        ...placed,
+        activeTabId: tabId,
+        layoutStash: stash,
+        maximizedPaneId: null,
+        tabGroups: pruneEmptyGroups(s.tabGroups, tabs),
+      };
     }),
   setTabDirty: (id, dirty) =>
     set((s) => {
