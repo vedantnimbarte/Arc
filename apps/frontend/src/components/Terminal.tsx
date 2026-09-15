@@ -3,7 +3,6 @@ import { Terminal as XTerm } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import { WebLinksAddon } from '@xterm/addon-web-links';
 import { SearchAddon } from '@xterm/addon-search';
-import { SerializeAddon } from '@xterm/addon-serialize';
 import { WebglAddon } from '@xterm/addon-webgl';
 import '@xterm/xterm/css/xterm.css';
 import {
@@ -18,8 +17,6 @@ import {
   ptyWrite,
   sessionCommandFinish,
   sessionCommandLog,
-  sessionScrollbackLoad,
-  sessionScrollbackSave,
   type PtyId,
 } from '../lib/tauri';
 import { createPathLinkProvider, osc7Path } from '../lib/links';
@@ -54,18 +51,6 @@ const SEARCH_DECORATIONS = {
   activeMatchColorOverviewRuler: '#ff8c1a',
 };
 
-/** How much of the buffer is serialized for restore-after-relaunch. The full
- *  10k-line scrollback would be megabytes per tab; the last thousand lines is
- *  what anyone actually scrolls back to read. */
-const SCROLLBACK_SAVE_LINES = 1000;
-
-/** How often a terminal with new output writes its buffer to the DB. The app
- *  can be killed in ways React cleanup never sees (window close, crash, OS
- *  shutdown), so persistence can't hang off unmount alone.
- *  ponytail: fixed interval, dirty-gated. Worst case loses the last 15s of
- *  scrollback — drop it if that ever matters. */
-const SCROLLBACK_SAVE_MS = 15_000;
-
 /** How long an agent must print nothing before ARC calls the turn over.
  *  Long on purpose: a model thinking mid-turn also goes quiet, and announcing
  *  "finished" early is worse than announcing it late. The bell and the OSC
@@ -76,12 +61,6 @@ const AGENT_IDLE_MS = 20_000;
 const AGENT_IDLE_TICK_MS = 5_000;
 /** How long a terminal stays hidden before it gives back its WebGL context. */
 const GPU_RELEASE_AFTER_MS = 10_000;
-
-/** Divider marking where a restored buffer ends and this session begins. */
-const RESTORE_MARKER = '\x1b[2m── session restored ──\x1b[0m';
-/** Matches the marker with any newline in front, so removing one leaves no
- *  blank line behind. */
-const RESTORE_MARKER_RE = /\r?\n?\x1b\[2m── session restored ──\x1b\[0m/g;
 
 export function Terminal({ sessionKey }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -132,10 +111,6 @@ export function Terminal({ sessionKey }: Props) {
     let unlistens: Array<() => void> = [];
     let ptyId: PtyId | null = null;
     let disposed = false;
-    // Set on every PTY chunk, cleared on every write to the DB, so an idle
-    // terminal doesn't re-serialize its buffer every tick.
-    let scrollbackDirty = false;
-    let stopScrollbackTimer: (() => void) | null = null;
     let stopAgentIdleTimer: (() => void) | null = null;
 
     const initialSettings = useSettings.getState();
@@ -161,15 +136,12 @@ export function Terminal({ sessionKey }: Props) {
 
     const fit = new FitAddon();
     const links = new WebLinksAddon();
-    // Search + serialize are pure buffer operations — safe to load before
-    // `open()`. WebGL is not: it needs a live renderer, so it waits for
-    // `ensureOpen()` below.
+    // Search is a pure buffer operation — safe to load before `open()`. WebGL
+    // is not: it needs a live renderer, so it waits for `ensureOpen()` below.
     const search = new SearchAddon();
-    const serialize = new SerializeAddon();
     term.loadAddon(fit);
     term.loadAddon(links);
     term.loadAddon(search);
-    term.loadAddon(serialize);
     searchRef.current = search;
 
     // ⌘F (mac) / ctrl+shift+F (win/linux) opens the find bar. Plain ctrl+F is
@@ -590,7 +562,6 @@ export function Terminal({ sessionKey }: Props) {
       let ranPending = false;
       const onPtyChunk = (chunk: Uint8Array) => {
         sawAnyData = true;
-        scrollbackDirty = true;
         const text = decoder.decode(chunk, { stream: true });
         // Observation must never stand between the shell and the screen. This
         // parses OSC markers for command tracking and agent notifications —
@@ -611,38 +582,6 @@ export function Terminal({ sessionKey }: Props) {
           }, 250);
         }
       };
-
-      // Replay the buffer this tab had when the app last closed, before any
-      // new output arrives, so a restored tab reads in chronological order.
-      // Awaited (not fired-and-forgotten) for exactly that reason. A failure
-      // here is cosmetic — carry on and spawn the shell.
-      try {
-        const saved = await sessionScrollbackLoad(sessionKey);
-        if (saved && !disposed) {
-          // Strip markers baked in by earlier restores. The marker is written
-          // into the terminal, so the next save serialises it along with
-          // everything else — without this they stack up, one per relaunch,
-          // and the buffer fills with its own restore history.
-          write(saved.replace(RESTORE_MARKER_RE, ''));
-          writeln(`\r\n${RESTORE_MARKER}`);
-        }
-      } catch {
-        /* nothing stored, or the read failed — start clean */
-      }
-
-      // Persist the buffer periodically. Cheap when idle (the dirty flag
-      // short-circuits) and bounded when busy (SCROLLBACK_SAVE_LINES).
-      stopScrollbackTimer = every(SCROLLBACK_SAVE_MS, () => {
-        if (disposed || !scrollbackDirty || !opened) return;
-        scrollbackDirty = false;
-        try {
-          const data = serialize.serialize({ scrollback: SCROLLBACK_SAVE_LINES });
-          void sessionScrollbackSave(sessionKey, data).catch(() => {});
-        } catch {
-          /* buffer torn down mid-serialize */
-        }
-      });
-
 
       try {
         // Snapshot the picker choice at spawn time. `null` = let Rust
@@ -703,9 +642,8 @@ export function Terminal({ sessionKey }: Props) {
           onPtyChunk,
         );
         if (disposed) {
-          // Cleanup already ran, so nothing will clear the timers this boot
-          // started — clear them here or every discarded mount leaks two.
-          stopScrollbackTimer?.();
+          // Cleanup already ran, so nothing will clear the timer this boot
+          // started — clear it here or every discarded mount leaks one.
           stopAgentIdleTimer?.();
           if (ptyId) await ptyKill(ptyId).catch(() => {});
           return;
@@ -997,20 +935,7 @@ export function Terminal({ sessionKey }: Props) {
 
     return () => {
       disposed = true;
-      // Final write before the buffer goes away. Deliberately *not* gated on
-      // the dirty flag: a tab that scrolled but produced no new output since
-      // the last tick still has the content worth keeping. Tab closes are
-      // handled separately — `closeTab` deletes the row outright.
-      stopScrollbackTimer?.();
       stopAgentIdleTimer?.();
-      if (opened) {
-        try {
-          const data = serialize.serialize({ scrollback: SCROLLBACK_SAVE_LINES });
-          if (data) void sessionScrollbackSave(sessionKey, data).catch(() => {});
-        } catch {
-          /* renderer already torn down */
-        }
-      }
       cancelAnimationFrame(rafId);
       ro.disconnect();
       host?.removeEventListener('arc:host-shown', onHostShown);
