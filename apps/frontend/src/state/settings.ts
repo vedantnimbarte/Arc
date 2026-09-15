@@ -26,6 +26,7 @@ import { loadInstalledThemes } from '../lib/themeMarketplace';
 // here would close the cycle. `import type` is erased, leaving one direction.
 import type { LayoutMode } from './workspace';
 import { NOTIFICATION_SOURCES, type NotificationSource } from './notifications';
+import type { HighlightRule } from '../lib/highlightRules';
 
 /** Folder names excluded from file search by default. Mirrors the Rust
  *  crate's built-in skip list; the setting is fully editable, so the frontend
@@ -247,6 +248,13 @@ export interface Settings {
    *  is deliberately NOT here — settings are plain rows in SQLite, so it
    *  lives in the OS credential vault (see `ANTHROPIC_KEY_SECRET`). */
   aiModel: string;
+  /** Patterns that tint matching terminal output lines, and optionally
+   *  notify. Checked in list order; the first match wins. */
+  highlightRules: HighlightRule[];
+  /** On launch, re-run the agent CLI (with its resume flag where it has one)
+   *  in tabs that were running an agent when ARC closed. Off by default: an
+   *  agent resuming by itself is surprising unless asked for. */
+  relaunchAgentTabs: boolean;
   /** True once hydrateSettings() has applied stored values. */
   settingsHydrated: boolean;
   setDefaultShell: (shell: string | null) => void;
@@ -293,6 +301,8 @@ export interface Settings {
   setUsageAgents: (agents: UsageAgent[]) => void;
   setAutoUpdateCheck: (on: boolean) => void;
   setAiModel: (model: string) => void;
+  setHighlightRules: (rules: HighlightRule[]) => void;
+  setRelaunchAgentTabs: (on: boolean) => void;
   hydrateSettings: () => Promise<void>;
 }
 
@@ -331,6 +341,8 @@ const DEFAULTS = {
   usageAgents: DEFAULT_USAGE_AGENTS,
   autoUpdateCheck: true,
   aiModel: DEFAULT_AI_MODEL,
+  highlightRules: [] as HighlightRule[],
+  relaunchAgentTabs: false,
 };
 
 const MIN_NOTIFY_SECS = 5;
@@ -441,9 +453,32 @@ export const useSettings = create<Settings>()((set, get) => ({
   setUsageAgents: (agents) => set({ usageAgents: agents }),
   setAutoUpdateCheck: (on) => set({ autoUpdateCheck: on }),
   setAiModel: (model) => set({ aiModel: model.trim() || DEFAULT_AI_MODEL }),
+  setHighlightRules: (rules) => set({ highlightRules: rules }),
+  setRelaunchAgentTabs: (on) => set({ relaunchAgentTabs: on }),
 
   hydrateSettings: async () => {
     if (get().settingsHydrated) return;
+    try {
+      await loadSettings();
+    } finally {
+      resolveSettingsReady();
+    }
+  },
+}));
+
+/** Resolves once `hydrateSettings` has applied whatever was stored (or found
+ *  nothing). A terminal spawning at launch reads its shell and agent choices
+ *  from settings, and without this could read the defaults a moment before
+ *  the stored row lands. */
+let resolveSettingsReady: () => void = () => {};
+export const settingsReady = new Promise<void>((resolve) => {
+  resolveSettingsReady = resolve;
+});
+
+async function loadSettings(): Promise<void> {
+  const get = useSettings.getState;
+  const set = useSettings.setState;
+  {
     // Suppressed: `settingsHydrated` is not persisted, so letting this set
     // schedule a debounced write only races the load that follows it.
     suppressSave = true;
@@ -519,8 +554,8 @@ export const useSettings = create<Settings>()((set, get) => ({
     } catch (err) {
       console.error('[settings] localStorage migration failed:', err);
     }
-  },
-}));
+  }
+}
 
 // ─── helpers ───────────────────────────────────────────────────────────────
 
@@ -601,6 +636,11 @@ function applyStored(current: Settings, stored: Partial<PersistedSettings>): Par
       typeof stored.aiModel === 'string' && stored.aiModel.trim()
         ? stored.aiModel
         : current.aiModel,
+    highlightRules: coerceHighlightRules(stored.highlightRules, current.highlightRules),
+    relaunchAgentTabs:
+      typeof stored.relaunchAgentTabs === 'boolean'
+        ? stored.relaunchAgentTabs
+        : current.relaunchAgentTabs,
   };
 }
 
@@ -634,6 +674,8 @@ function toPersistedSettings(s: Settings): PersistedSettings {
     usageAgents: s.usageAgents,
     autoUpdateCheck: s.autoUpdateCheck,
     aiModel: s.aiModel,
+    highlightRules: s.highlightRules,
+    relaunchAgentTabs: s.relaunchAgentTabs,
   };
 }
 
@@ -677,6 +719,55 @@ function coerceUsageAgents(raw: unknown, fallback: UsageAgent[]): UsageAgent[] {
     out.set(r.id, { id: r.id, name: r.name, command: r.command });
   }
   return [...out.values()];
+}
+
+/** Shape-check highlight rules from the persisted blob. Invalid regexes are
+ *  kept (the editor shows them as invalid) — `compileRules` skips them. */
+export function coerceHighlightRules(raw: unknown, fallback: HighlightRule[]): HighlightRule[] {
+  if (!Array.isArray(raw)) return fallback;
+  const out: HighlightRule[] = [];
+  for (const item of raw) {
+    if (!item || typeof item !== 'object') continue;
+    const r = item as Record<string, unknown>;
+    if (typeof r.id !== 'string' || !r.id || typeof r.pattern !== 'string') continue;
+    out.push({
+      id: r.id,
+      pattern: r.pattern,
+      color: typeof r.color === 'string' && /^#[0-9a-f]{6}$/i.test(r.color) ? r.color : '#e5534b',
+      notify: r.notify === true,
+      enabled: r.enabled !== false,
+    });
+  }
+  return out;
+}
+
+/** The user's settings as a portable JSON document (Settings → About →
+ *  Export). Only preferences — secrets live in the OS vault, never here. */
+export function exportSettingsJson(): string {
+  return JSON.stringify(
+    { arcSettings: 1, settings: toPersistedSettings(useSettings.getState()) },
+    null,
+    2,
+  );
+}
+
+/** Apply an exported settings document. Every field goes through the same
+ *  coercion as the SQLite load, so a hand-edited file can't smuggle in bad
+ *  shapes. Throws with a readable message on a file that isn't one of ours. */
+export function importSettingsJson(text: string): void {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    throw new Error('Not valid JSON.');
+  }
+  const doc = parsed as { arcSettings?: unknown; settings?: unknown };
+  if (!doc || doc.arcSettings !== 1 || !doc.settings || typeof doc.settings !== 'object') {
+    throw new Error('Not an ARC settings export.');
+  }
+  useSettings.setState((s) => applyStored(s, doc.settings as Partial<PersistedSettings>));
+  const next = useSettings.getState();
+  applyTheme(resolveActiveTheme(next.appearance, next.themeId));
 }
 
 // Suppress save during programmatic hydrate. Set true around set(), cleared

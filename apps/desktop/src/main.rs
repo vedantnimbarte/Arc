@@ -317,6 +317,7 @@ fn main() {
             commands::diagnostics::diagnostics_collect,
             commands::diagnostics::diagnostics_summary,
             commands::diagnostics::diagnostics_clear,
+            commands::diagnostics::diagnostics_log_error,
         ])
         .setup(|app| {
             // Open the SQLite store before the window appears so the first

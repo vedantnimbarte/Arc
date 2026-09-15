@@ -11,6 +11,7 @@
 //!   invoke("diagnostics_collect")  -> String   (ready to paste)
 //!   invoke("diagnostics_summary")  -> DiagnosticsSummary
 //!   invoke("diagnostics_clear")    -> ()
+//!   invoke("diagnostics_log_error", { message }) -> ()
 
 use std::fmt::Write as _;
 use std::io::Write as _;
@@ -27,10 +28,38 @@ const CRASH_LOG_MAX_BYTES: u64 = 512 * 1024;
 /// last few panics, not the file's whole history.
 const CRASH_LOG_TAIL_BYTES: usize = 32 * 1024;
 
+/// How much of the frontend error log the diagnostics blob carries.
+const FRONTEND_LOG_TAIL_BYTES: usize = 16 * 1024;
+
+/// One frontend error line is capped at this, so a stack trace the size of a
+/// minified bundle can't blow the log's budget in a single entry.
+const FRONTEND_ENTRY_MAX_BYTES: usize = 4 * 1024;
+
 fn crash_log_path() -> Option<PathBuf> {
     let mut dir = dirs::data_dir()?;
     dir.push("arc");
     Some(dir.join("crash.log"))
+}
+
+/// Uncaught errors and `console.error`s from the webview. A panic only
+/// covers Rust; most of what goes wrong in ARC happens in the frontend, and
+/// until this file existed it vanished with the devtools console.
+fn frontend_log_path() -> Option<PathBuf> {
+    let mut dir = dirs::data_dir()?;
+    dir.push("arc");
+    Some(dir.join("frontend.log"))
+}
+
+/// The last `max` bytes of `log`, cut on a char boundary.
+fn tail(log: &str, max: usize) -> &str {
+    if log.len() <= max {
+        return log;
+    }
+    let mut cut = log.len() - max;
+    while cut < log.len() && !log.is_char_boundary(cut) {
+        cut += 1;
+    }
+    &log[cut..]
 }
 
 fn now_ms() -> i64 {
@@ -84,29 +113,33 @@ pub fn install_panic_hook() {
 
 fn append_crash_entry(entry: &str) {
     let Some(path) = crash_log_path() else { return };
+    append_capped(&path, entry);
+}
+
+fn append_capped(path: &std::path::Path, entry: &str) {
     if let Some(parent) = path.parent() {
         let _ = std::fs::create_dir_all(parent);
     }
     // Truncate from the front once the file gets large. Reading the whole
     // file to rewrite it is fine at this size and only happens after a panic.
-    if let Ok(meta) = std::fs::metadata(&path) {
+    if let Ok(meta) = std::fs::metadata(path) {
         if meta.len() > CRASH_LOG_MAX_BYTES {
-            if let Ok(existing) = std::fs::read_to_string(&path) {
+            if let Ok(existing) = std::fs::read_to_string(path) {
                 let keep = existing
                     .char_indices()
                     .nth(existing.chars().count().saturating_sub(CRASH_LOG_TAIL_BYTES))
                     .map(|(i, _)| &existing[i..])
                     .unwrap_or("");
-                let _ = std::fs::write(&path, keep);
+                let _ = std::fs::write(path, keep);
             } else {
-                let _ = std::fs::remove_file(&path);
+                let _ = std::fs::remove_file(path);
             }
         }
     }
     if let Ok(mut f) = std::fs::OpenOptions::new()
         .create(true)
         .append(true)
-        .open(&path)
+        .open(path)
     {
         let _ = f.write_all(entry.as_bytes());
     }
@@ -181,28 +214,40 @@ pub fn diagnostics_collect() -> String {
 
     match read_crash_log() {
         Some(log) if !log.trim().is_empty() => {
-            let tail = if log.len() > CRASH_LOG_TAIL_BYTES {
-                let mut cut = log.len() - CRASH_LOG_TAIL_BYTES;
-                while cut < log.len() && !log.is_char_boundary(cut) {
-                    cut += 1;
-                }
-                &log[cut..]
-            } else {
-                &log[..]
-            };
             let (count, _) = scan_entries(&log);
             let _ = writeln!(out, "\n--- crash log ({count} panic(s), most recent last) ---");
-            out.push_str(tail);
+            out.push_str(tail(&log, CRASH_LOG_TAIL_BYTES));
         }
         _ => {
             let _ = writeln!(out, "\n--- crash log: empty ---");
         }
     }
+    match frontend_log_path().and_then(|p| std::fs::read_to_string(p).ok()) {
+        Some(log) if !log.trim().is_empty() => {
+            let _ = writeln!(out, "\n--- frontend errors (most recent last) ---");
+            out.push_str(tail(&log, FRONTEND_LOG_TAIL_BYTES));
+        }
+        _ => {
+            let _ = writeln!(out, "\n--- frontend errors: none ---");
+        }
+    }
     out
+}
+
+/// Append one frontend error. Best-effort by design: a logging call that can
+/// fail would only produce another error to log.
+#[tauri::command]
+pub fn diagnostics_log_error(message: String) {
+    let Some(path) = frontend_log_path() else { return };
+    let message = tail(message.trim(), FRONTEND_ENTRY_MAX_BYTES);
+    append_capped(&path, &format!("[{}] {}\n", now_ms(), message));
 }
 
 #[tauri::command]
 pub fn diagnostics_clear() -> Result<(), String> {
+    if let Some(path) = frontend_log_path() {
+        let _ = std::fs::remove_file(path);
+    }
     let Some(path) = crash_log_path() else {
         return Ok(());
     };
@@ -227,6 +272,14 @@ message: boom
 message: boom again
 ";
         assert_eq!(scan_entries(log), (2, Some(2500)));
+    }
+
+    #[test]
+    fn tail_keeps_the_end_on_a_char_boundary() {
+        assert_eq!(tail("abcdef", 10), "abcdef");
+        assert_eq!(tail("abcdef", 3), "def");
+        // 'é' is two bytes; a cut through it moves forward, never panics.
+        assert_eq!(tail("aéb", 2), "b");
     }
 
     #[test]

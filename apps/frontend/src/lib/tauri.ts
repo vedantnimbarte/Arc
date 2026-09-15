@@ -931,6 +931,12 @@ export interface PersistedSettings {
   /** Agents listed in the status bar's usage popup. Validated on load by
    *  `coerceUsageAgents` — this row is user-editable on disk. */
   usageAgents?: unknown;
+  /** Terminal output highlight rules. Validated on load by
+   *  `coerceHighlightRules`. */
+  highlightRules?: unknown;
+  /** Re-launch agent CLIs (resuming their last conversation) in tabs that
+   *  were running one when ARC closed. */
+  relaunchAgentTabs?: boolean;
 }
 
 /** Returns the stored settings blob, or `null` on first launch. */

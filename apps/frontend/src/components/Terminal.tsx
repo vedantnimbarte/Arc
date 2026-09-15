@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState } from 'react';
-import { Terminal as XTerm } from '@xterm/xterm';
+import { Terminal as XTerm, type IMarker } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import { WebLinksAddon } from '@xterm/addon-web-links';
 import { SearchAddon } from '@xterm/addon-search';
 import { WebglAddon } from '@xterm/addon-webgl';
+import { ImageAddon } from '@xterm/addon-image';
 import '@xterm/xterm/css/xterm.css';
 import {
   fsDefaultRoot,
@@ -34,6 +35,7 @@ import { notifyEvent } from '../lib/notifyEvent';
 import { AiCommandBar } from './AiCommandBar';
 import { getFont, resolveActiveTheme } from '../themes';
 import { every } from '../lib/ticker';
+import { compileRules, matchLine } from '../lib/highlightRules';
 
 interface Props {
   /** Stable id for the terminal (tab id). Also serves as the React-effect
@@ -61,6 +63,11 @@ const AGENT_IDLE_MS = 20_000;
 const AGENT_IDLE_TICK_MS = 5_000;
 /** How long a terminal stays hidden before it gives back its WebGL context. */
 const GPU_RELEASE_AFTER_MS = 10_000;
+/** Most lines one highlight pass looks at — a burst bigger than this (a huge
+ *  `cat`) only has its tail tinted, which keeps a flood from stalling input. */
+const HIGHLIGHT_SCAN_MAX = 500;
+/** Minimum gap between two notifications from the same highlight rule. */
+const HIGHLIGHT_NOTIFY_GAP_MS = 10_000;
 
 export function Terminal({ sessionKey }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -215,6 +222,57 @@ export function Terminal({ sessionKey }: Props) {
     };
     const writeln = (data: string) => write(`${data}\r\n`);
 
+    // ─── Highlight rules ─────────────────────────────────────────────────
+    // After each parse, look at the lines that completed since the last pass
+    // and tint the ones a rule matches. The scan position is a marker rather
+    // than a row number so it survives the scrollback trimming its oldest
+    // lines. Alt-screen programs (vim, agent TUIs) redraw in place, so only the
+    // normal buffer is scanned.
+    let compiledRules = compileRules(initialSettings.highlightRules);
+    let scanFrom: IMarker | null = null;
+    const lastRuleNotify = new Map<string, number>();
+    const scanHighlights = () => {
+      if (disposed || !opened || compiledRules.length === 0) return;
+      const buf = term.buffer.active;
+      if (buf.type !== 'normal') return;
+      const end = buf.baseY + buf.cursorY;
+      // No marker yet (first pass), or it was trimmed off the top: rescan
+      // from the start, which the cap below bounds.
+      const from = scanFrom && !scanFrom.isDisposed ? scanFrom.line : 0;
+      for (let y = Math.max(from, end - HIGHLIGHT_SCAN_MAX); y < end; y++) {
+        const text = buf.getLine(y)?.translateToString(true);
+        const hit = text ? matchLine(compiledRules, text) : null;
+        if (!hit) continue;
+        const marker = term.registerMarker(y - end);
+        const deco = term.registerDecoration({
+          marker,
+          width: term.cols,
+          layer: 'top',
+          overviewRulerOptions: { color: hit.color },
+        });
+        deco?.onRender((el) => {
+          el.style.backgroundColor = hit.color;
+          el.style.opacity = '0.18';
+          el.style.pointerEvents = 'none';
+        });
+        if (hit.notify && Date.now() - (lastRuleNotify.get(hit.id) ?? 0) > HIGHLIGHT_NOTIFY_GAP_MS) {
+          lastRuleNotify.set(hit.id, Date.now());
+          notifyEvent({
+            source: 'command',
+            title: `Output matched “${hit.pattern}”`,
+            body: text!.trim().slice(0, 200),
+            target: { kind: 'tab', tabId: sessionKey },
+          });
+        }
+      }
+      scanFrom?.dispose();
+      scanFrom = term.registerMarker(0);
+    };
+    const unsubWriteParsed = term.onWriteParsed(scanHighlights);
+    const unsubRules = useSettings.subscribe((s, prev) => {
+      if (s.highlightRules !== prev.highlightRules) compiledRules = compileRules(s.highlightRules);
+    });
+
     // GPU renderer. Roughly an order of magnitude faster than the DOM
     // renderer on heavy output (a full `cargo build`, `npm test` with a
     // spinner). Every failure path here is non-fatal — xterm keeps its DOM
@@ -262,6 +320,13 @@ export function Terminal({ sessionKey }: Props) {
       term.open(container);
       safeFit();
       attachGpu();
+      // Sixel + iTerm inline images (plots, image previews). Loaded after
+      // `open()` so it attaches its canvas layer to a real screen element.
+      try {
+        term.loadAddon(new ImageAddon());
+      } catch {
+        /* no 2d canvas — images just don't render */
+      }
       // Drain on the next frame, not in this tick. `open()` does not guarantee
       // the renderer exists yet, and writing into that gap is the same
       // `dimensions`-on-undefined crash this buffer exists to avoid — PTY
@@ -382,6 +447,17 @@ export function Terminal({ sessionKey }: Props) {
         });
     };
     container.addEventListener('paste', onPaste, true);
+
+    // Keystrokes → PTY. Wired at mount, not after the spawn: anything typed
+    // while the shell is still starting used to be dropped, and so were
+    // xterm's own replies to terminal queries (ConPTY's cursor-position
+    // request among them) that arrive in the same window. Queue until the
+    // PTY exists, then flush in order.
+    const earlyInput: string[] = [];
+    const forwardInput = term.onData((data) => {
+      if (ptyId) ptyWrite(ptyId, data).catch(() => {});
+      else earlyInput.push(data);
+    });
 
     const boot = async () => {
       if (!isTauri) {
@@ -648,6 +724,9 @@ export function Terminal({ sessionKey }: Props) {
           if (ptyId) await ptyKill(ptyId).catch(() => {});
           return;
         }
+        if (earlyInput.length > 0) {
+          void ptyWrite(ptyId, earlyInput.splice(0).join('')).catch(() => {});
+        }
 
         unlistens.push(
           await onPtyExit(ptyId, (code) => {
@@ -817,7 +896,7 @@ export function Terminal({ sessionKey }: Props) {
         // them apart. Shells with shell-integration installed avoid this.
         let cmdBuffer = '';
         term.onData((data) => {
-          if (ptyId) ptyWrite(ptyId, data).catch(() => {});
+          // Forwarding to the PTY is `forwardInput`'s job; this only observes.
           // First interaction dismisses the new-tab splash.
           setShowSplash(false);
 
@@ -936,6 +1015,9 @@ export function Terminal({ sessionKey }: Props) {
     return () => {
       disposed = true;
       stopAgentIdleTimer?.();
+      forwardInput.dispose();
+      unsubWriteParsed.dispose();
+      unsubRules();
       cancelAnimationFrame(rafId);
       ro.disconnect();
       host?.removeEventListener('arc:host-shown', onHostShown);
