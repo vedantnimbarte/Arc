@@ -22,6 +22,7 @@ export type ActionId =
   | 'new-scratch'
   | 'toggle-ssh-panel'
   | 'toggle-layout-mode'
+  | 'toggle-markdown-preview'
   /** One launcher per detected CLI, derived from AI_CLIS — see LAUNCH_IDS. */
   | LaunchActionId
   | 'launch-wingman-pilot'
@@ -32,7 +33,7 @@ export type LaunchActionId = `launch-${AiCliId}`;
 
 const LAUNCH_IDS = Object.keys(AI_CLIS) as AiCliId[];
 
-export type ActionCategory = 'Workspace' | 'Terminal' | 'SSH' | 'AI CLIs' | 'Help';
+export type ActionCategory = 'Workspace' | 'Terminal' | 'Editor' | 'SSH' | 'AI CLIs' | 'Help';
 
 export interface ActionMeta {
   id: ActionId;
@@ -148,6 +149,12 @@ export const ACTION_META: Record<ActionId, ActionMeta> = {
     description: 'Cycle this workspace through tiles, tabs and floating.',
     category: 'Workspace',
   },
+  'toggle-markdown-preview': {
+    id: 'toggle-markdown-preview',
+    label: 'Toggle Markdown Preview',
+    description: 'Cycle the active markdown file through source, side-by-side and preview.',
+    category: 'Editor',
+  },
   ...(Object.fromEntries(
     LAUNCH_IDS.map((cli) => [
       `launch-${cli}`,
@@ -190,6 +197,7 @@ export const ACTION_ORDER: ActionId[] = [
   'new-scratch',
   'toggle-ssh-panel',
   'toggle-layout-mode',
+  'toggle-markdown-preview',
   ...LAUNCH_IDS.map((cli) => `launch-${cli}` as LaunchActionId),
   'launch-wingman-pilot',
   'launch-wingman-headless',
@@ -218,6 +226,9 @@ export const DEFAULT_BINDINGS: Record<ActionId, KeyBinding | null> = {
   'new-scratch': { code: 'KeyN', shift: true, alt: false, ...mod() },
   'toggle-ssh-panel': { code: 'KeyS', shift: true, alt: false, ...mod() },
   'toggle-layout-mode': { code: 'KeyL', shift: true, alt: false, ...mod() },
+  // Not ⇧⌘V (VS Code's): on Windows/Linux that is terminal paste, and app
+  // shortcuts are captured before xterm sees the key.
+  'toggle-markdown-preview': { code: 'KeyD', shift: true, alt: false, ...mod() },
   // AI CLI launchers ship unbound by default — users can assign keys via the
   // shortcuts dialog, and they're discoverable through the TabBar dropdown
   // and the new-tab popover regardless.

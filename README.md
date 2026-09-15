@@ -28,7 +28,8 @@ it.
   so they save, highlight and restore like anything else.
 - **Code Editor** — CodeMirror 6 with syntax highlighting, multi-cursor, optional Vim mode,
   optional LSP (diagnostics, hover, completion, go-to-definition, find references, rename,
-  and format-on-save), and real-time file watching.
+  and format-on-save), real-time file watching, and a live Markdown preview (source,
+  side-by-side or rendered; ⇧⌘D).
 - **File Tree & Search** — Browse, open, and manage files with git status decorations, plus
   BM25 full-text search backed by a tantivy index and a literal find-and-replace across
   the workspace (previewed per file before anything is written).

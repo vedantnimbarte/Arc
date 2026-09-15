@@ -65,6 +65,7 @@ import {
 // project-config store fresh. Doesn't render anything itself.
 import './state/projectConfig';
 import { fsPickFolder, ptyListAiClis, settingsWindowOpen, type AiCliId } from './lib/tauri';
+import { CYCLE_MARKDOWN_PREVIEW_EVENT } from './lib/markdownLinks';
 import { PasteWarning } from './components/PasteWarning';
 import { TrustPrompt } from './components/TrustPrompt';
 import { ConfirmDialog } from './components/ConfirmDialog';
@@ -424,6 +425,14 @@ export default function App() {
         return;
       case 'toggle-layout-mode':
         useWorkspace.getState().toggleLayoutMode();
+        return;
+      case 'toggle-markdown-preview':
+        // The editor owns its view mode; only the one for this tab reacts.
+        if (activeTabId) {
+          window.dispatchEvent(
+            new CustomEvent(CYCLE_MARKDOWN_PREVIEW_EVENT, { detail: activeTabId }),
+          );
+        }
         return;
       case 'launch-wingman-pilot':
         void launchWingman('pilot');
@@ -941,11 +950,12 @@ class TabErrorBoundary extends Component<
 }
 
 const CATEGORY_TO_GROUP: Record<
-  'Workspace' | 'Terminal' | 'SSH' | 'AI CLIs' | 'Help',
+  'Workspace' | 'Terminal' | 'Editor' | 'SSH' | 'AI CLIs' | 'Help',
   CommandGroup
 > = {
   Workspace: 'Workspace',
   Terminal: 'Terminal',
+  Editor: 'Editor',
   SSH: 'SSH',
   'AI CLIs': 'AI CLIs',
   Help: 'Help',
