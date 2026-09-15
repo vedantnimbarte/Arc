@@ -1,13 +1,11 @@
 //! arc-filesystem — filesystem reads + a notify-based directory watcher.
 //!
 //! The Tauri `fs_*` commands in `apps/desktop` are thin wrappers that
-//! delegate to the functions exposed here. Phase 2+ will add tantivy-backed
-//! search; for V0 we just expose what the file tree actually uses today.
+//! delegate to the functions exposed here.
 
 pub mod dir;
 pub mod dialog;
 pub mod file;
-pub mod index;
 pub mod listing;
 pub mod paths;
 pub mod replace;
@@ -17,8 +15,6 @@ pub mod watch;
 pub use dir::{read_dir, DirEntry};
 pub use dialog::{pick_files, pick_folder};
 pub use file::{read_file, write_file, MAX_EDITOR_BYTES};
-pub use index::{is_built as index_is_built, rebuild as index_rebuild, search as index_search,
-    update_paths as index_update_paths, IndexHit};
 pub use listing::{list_files, FileItem};
 pub use paths::{default_root, parent, scratch_file};
 pub use replace::{find as find_literal, replace_in_files, ReplaceMatch, ReplaceSummary};
@@ -45,8 +41,6 @@ pub enum Error {
     Watch(#[from] notify::Error),
     #[error("dialog task: {0}")]
     Dialog(String),
-    #[error("index error: {0}")]
-    Index(String),
     #[error("invalid path: {0}")]
     InvalidPath(String),
 }

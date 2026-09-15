@@ -127,66 +127,12 @@ pub async fn fs_search(
     limit: usize,
     ignore_dirs: Vec<String>,
 ) -> Result<Vec<SearchHit>, String> {
-    // Prefer the persistent index if one's been built. Otherwise fall back
-    // to the walk-based search — same shape of result either way, so the
-    // frontend palette is none the wiser.
-    let root_for_index = root.clone();
-    let query_for_index = query.clone();
-    let from_index = tokio::task::spawn_blocking(move || {
-        arc_filesystem::index_search(&root_for_index, &query_for_index, limit)
-    })
-    .await
-    .map_err(|e| format!("index task: {e}"))?
-    .map_err(|e| e.to_string())?;
-
-    if let Some(hits) = from_index {
-        // The index was built with the crate's built-in skip list, so defaults
-        // are already excluded. Post-filter honors *added* custom ignores; a
-        // removed default won't resurface here without rebuilding the index.
-        return Ok(hits
-            .into_iter()
-            .filter(|h| !path_has_ignored_dir(&h.path, &ignore_dirs))
-            .map(|h| SearchHit {
-                path: h.path,
-                name: h.name,
-                line: h.line,
-                snippet: h.snippet,
-                // Map tantivy BM25 (float, larger = better) onto the existing
-                // i32 score field by scaling. Doesn't need to be precise —
-                // we only sort within the result list.
-                score: (h.score * 100.0) as i32,
-            })
-            .collect());
-    }
-
     tokio::task::spawn_blocking(move || {
         arc_filesystem::search_files(&root, &query, limit, &ignore_dirs)
     })
     .await
     .map_err(|e| format!("search task: {e}"))?
     .map_err(|e| e.to_string())
-}
-
-/// True if any path segment matches an ignored directory name (case-insensitive).
-fn path_has_ignored_dir(path: &str, ignore: &[String]) -> bool {
-    if ignore.is_empty() {
-        return false;
-    }
-    path.split(['/', '\\'])
-        .any(|seg| ignore.iter().any(|ig| seg.eq_ignore_ascii_case(ig)))
-}
-
-#[tauri::command]
-pub async fn fs_index_rebuild(root: String) -> Result<usize, String> {
-    tokio::task::spawn_blocking(move || arc_filesystem::index_rebuild(&root))
-        .await
-        .map_err(|e| format!("index task: {e}"))?
-        .map_err(|e| e.to_string())
-}
-
-#[tauri::command]
-pub async fn fs_index_status(root: String) -> Result<bool, String> {
-    Ok(arc_filesystem::index_is_built(&root))
 }
 
 #[tauri::command]

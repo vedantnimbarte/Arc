@@ -1,5 +1,6 @@
 import { Channel, invoke } from '@tauri-apps/api/core';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
+import { getCurrentWindow } from '@tauri-apps/api/window';
 import {
   isRemotePath,
   makeRemotePath,
@@ -367,20 +368,6 @@ export async function fsReplaceApply(
     replacement,
     caseSensitive,
   });
-}
-
-/**
- * Build (or rebuild) the persistent tantivy index for `root`. Returns the
- * number of documents indexed. Subsequent `fsSearch` calls will use the
- * index automatically — no flag to flip.
- */
-export async function fsIndexRebuild(root: string): Promise<number> {
-  return invoke<number>('fs_index_rebuild', { root });
-}
-
-/** True when a tantivy index exists on disk for this root. */
-export async function fsIndexStatus(root: string): Promise<boolean> {
-  return invoke<boolean>('fs_index_status', { root });
 }
 
 /** Rename `path` to `newName` (basename only, within the same directory). Returns the new absolute path. */
@@ -1035,9 +1022,14 @@ export async function settingsBroadcastChanged(): Promise<void> {
   await invoke('settings_broadcast_changed');
 }
 
-/** Listen for cross-window settings updates. */
+/** Listen for settings updates from the OTHER windows. The event carries the
+ *  sender's label; this window's own broadcast is ignored. */
 export async function onSettingsChanged(handler: () => void): Promise<UnlistenFn> {
-  return listen('settings://changed', () => handler());
+  if (!isTauri) return () => {};
+  const self = getCurrentWindow().label;
+  return listen<string>('settings://changed', (e) => {
+    if (e.payload !== self) handler();
+  });
 }
 
 // Command history

@@ -1,6 +1,8 @@
 import { clsx, type ClassValue } from 'clsx';
-import { twMerge } from 'tailwind-merge';
 
+/** Joins class names. No conflict resolution: when two classes of the same
+ *  kind (two text colours, two paddings) can both be present, pick one in the
+ *  expression — the stylesheet's order, not argument order, decides otherwise. */
 export function cn(...inputs: ClassValue[]): string {
-  return twMerge(clsx(inputs));
+  return clsx(inputs);
 }

@@ -1115,10 +1115,9 @@ function TreeNode({
         className={cn(
           'group relative flex h-[26px] w-full items-center gap-1.5 rounded-md pr-2 font-display text-sm tracking-tight transition-colors duration-100',
           'hover:bg-surface-1',
-          entry.hidden && 'opacity-65',
           // Ignored rows stay clickable — just recede, the way VS Code greys
           // out `node_modules` and build output.
-          ignored && 'opacity-40',
+          ignored ? 'opacity-40' : entry.hidden && 'opacity-65',
         )}
         style={{ paddingLeft: indent + 6 }}
         aria-expanded={isDir ? expanded : undefined}
@@ -1157,8 +1156,8 @@ function TreeNode({
         <span
           className={cn(
             'truncate',
-            isDir ? 'font-medium text-fg-base/90' : 'text-fg-base/85',
-            decoColor,
+            isDir && 'font-medium',
+            decoColor || (isDir ? 'text-fg-base/90' : 'text-fg-base/85'),
           )}
         >
           {entry.name}

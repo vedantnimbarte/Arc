@@ -125,8 +125,8 @@ export function TerminalSearchBar({ addon, decorations, onClose }: Props) {
         aria-label="Find in terminal"
         spellCheck={false}
         className={cn(
-          'w-44 bg-transparent px-1 font-mono text-xs text-fg-base outline-none placeholder:text-fg-subtle',
-          noMatch && 'text-status-err',
+          'w-44 bg-transparent px-1 font-mono text-xs outline-none placeholder:text-fg-subtle',
+          noMatch ? 'text-status-err' : 'text-fg-base',
         )}
       />
       <span className="min-w-[3.5rem] select-none text-right font-mono text-2xs tabular-nums text-fg-subtle">

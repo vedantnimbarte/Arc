@@ -177,7 +177,7 @@ export function WorkspaceFlyout({
   };
 
   const row =
-    'flex w-full items-center gap-2.5 rounded-md px-2 py-1.5 text-left font-display text-sm tracking-tight text-fg-base transition-colors hover:bg-surface-2 focus:outline-none focus-visible:bg-surface-2';
+    'flex w-full items-center gap-2.5 rounded-md px-2 py-1.5 text-left font-display text-sm tracking-tight transition-colors hover:bg-surface-2 focus:outline-none focus-visible:bg-surface-2';
   const moveToNew = () => moveTabToWorkspace(tabId, createWorkspace());
 
   return createPortal(
@@ -209,7 +209,7 @@ export function WorkspaceFlyout({
             role="menuitem"
             onPointerDown={pick(run)}
             onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && pick(run)(e)}
-            className={row}
+            className={cn(row, 'text-fg-base')}
           >
             {/* Same squircle as the workspace rail, at menu scale. */}
             <span

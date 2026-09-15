@@ -85,8 +85,6 @@ walkdir = "2"
 # 0.26 split stopword filtering's `Language` type out under a `stemmer`
 # feature that 0.22 didn't need explicitly — "stopwords" alone no longer
 # compiles on its own.
-tantivy = { version = "0.26", default-features = false, features = ["mmap", "stopwords", "stemmer"] }
-sha2 = "0.10"
 
 # OS credential vault (Keychain / Credential Manager / Secret Service).
 # `apple-native` and `windows-native` use built-in OS APIs with no extra

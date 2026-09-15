@@ -83,6 +83,7 @@ export function PaneLeafView({ paneId, hostsRef, stageRef, header }: Props) {
       if (!stage) return;
       if (host.parentElement === container) {
         stage.appendChild(host);
+        host.dispatchEvent(new CustomEvent('arc:host-hidden'));
       }
     };
   }, [paneId, activeTabId, activeHost, hostsRef, stageRef]);

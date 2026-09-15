@@ -2722,9 +2722,9 @@ function DiffLines({ text, untracked }: { text: string; untracked: boolean }) {
           <div key={i} className="contents">
             <span
               className={cn(
-                'select-none px-3 text-right text-2xs tabular-nums text-fg-subtle/45',
+                'select-none px-3 text-right text-2xs tabular-nums',
                 'border-r border-edge-1',
-                kind === 'hunk' && 'text-accent/60',
+                kind === 'hunk' ? 'text-accent/60' : 'text-fg-subtle/45',
                 kind === 'add' && 'bg-status-ok/[0.04]',
                 kind === 'del' && 'bg-status-err/[0.04]',
                 kind === 'untracked' && 'bg-status-ok/[0.03]',

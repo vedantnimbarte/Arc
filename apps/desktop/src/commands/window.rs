@@ -42,9 +42,12 @@ pub async fn settings_window_open(app: AppHandle) -> Result<(), String> {
 /// listens for `settings://changed` and re-pulls from SQLite — so the
 /// terminal/editor in the main window picks up a theme change made in
 /// the Settings window without restart.
+///
+/// The payload is the sender's label so it can skip its own echo: re-reading
+/// SQLite there would overwrite anything changed since the save started.
 #[tauri::command]
-pub async fn settings_broadcast_changed(app: AppHandle) -> Result<(), String> {
-    app.emit("settings://changed", ()).map_err(|e| e.to_string())
+pub async fn settings_broadcast_changed(app: AppHandle, window: tauri::Window) -> Result<(), String> {
+    app.emit("settings://changed", window.label()).map_err(|e| e.to_string())
 }
 
 /// Open the Git history window. Same one-bundle, `?view=git` dispatch as

@@ -116,8 +116,6 @@ fn main() {
             commands::fs::fs_search,
             commands::fs::fs_replace_find,
             commands::fs::fs_replace_apply,
-            commands::fs::fs_index_rebuild,
-            commands::fs::fs_index_status,
             commands::fs::fs_rename,
             commands::fs::fs_delete,
             commands::fs::fs_reveal,

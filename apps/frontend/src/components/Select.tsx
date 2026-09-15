@@ -70,17 +70,22 @@ export function Select<T extends string>({
         aria-expanded={open}
         aria-label={ariaLabel}
         className={cn(
-          'flex w-full items-center gap-1.5 rounded-md bg-surface-1 text-left transition-colors hover:bg-surface-2 focus:outline-none',
+          'flex items-center gap-1.5 text-left transition-colors hover:bg-surface-2 focus:outline-none',
+          // Defaults a caller's `className` can replace. Classes of the same
+          // kind would otherwise both apply and the stylesheet's order, not
+          // the caller, would pick the winner.
+          !overrides(className, /^w-/) && 'w-full',
+          !overrides(className, /^rounded/) && 'rounded-md',
           size === 'compact'
             ? 'h-7 px-2 ring-1 ring-inset'
-            : 'border px-2.5 py-1.5',
+            : cn('border px-2.5', !overrides(className, /^py-/) && 'py-1.5'),
           open
             ? size === 'compact'
               ? 'bg-surface-2 ring-accent/45 shadow-focus'
               : 'border-accent/45 bg-surface-2 shadow-focus'
             : size === 'compact'
-              ? 'ring-edge-1'
-              : 'border-edge-2',
+              ? 'bg-surface-1 ring-edge-1'
+              : 'bg-surface-1 border-edge-2',
           className,
         )}
       >
@@ -320,4 +325,9 @@ function SelectPopover<T extends string>({
     </div>,
     document.body,
   );
+}
+
+/** True when `className` carries a class matching `group` (e.g. `/^w-/`). */
+function overrides(className: string | undefined, group: RegExp): boolean {
+  return !!className?.split(/\s+/).some((c) => group.test(c));
 }

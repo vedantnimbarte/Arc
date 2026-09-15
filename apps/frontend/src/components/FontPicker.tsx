@@ -42,10 +42,10 @@ export function FontPicker({ value, onChange }: Props) {
         aria-haspopup="listbox"
         aria-expanded={open}
         className={cn(
-          'group flex w-full items-center gap-3 rounded-lg border bg-bg-base/60 px-3 py-2 text-left transition-colors focus:outline-none',
+          'group flex w-full items-center gap-3 rounded-lg border px-3 py-2 text-left transition-colors focus:outline-none',
           open
             ? 'border-accent/45 bg-bg-base/80 shadow-focus'
-            : 'border-border-subtle hover:border-border-strong hover:bg-bg-base/70',
+            : 'border-border-subtle bg-bg-base/60 hover:border-border-strong hover:bg-bg-base/70',
         )}
       >
         <Type

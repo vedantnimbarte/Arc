@@ -147,8 +147,8 @@ function CommitRow({
                       key={m}
                       onClick={() => { onReset(commit.oid, m); setResetMenuOpen(false); }}
                       className={cn(
-                        'flex w-full items-center gap-2 px-3 py-1.5 font-sans text-xs text-fg-base transition hover:bg-surface-2',
-                        m === 'hard' && 'text-red-400 hover:text-red-300',
+                        'flex w-full items-center gap-2 px-3 py-1.5 font-sans text-xs transition hover:bg-surface-2',
+                        m === 'hard' ? 'text-red-400 hover:text-red-300' : 'text-fg-base',
                       )}
                     >
                       <span className="w-10 font-mono text-2xs text-fg-subtle">{m}</span>
