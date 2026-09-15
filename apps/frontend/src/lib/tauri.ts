@@ -996,6 +996,12 @@ export async function diagnosticsCollect(): Promise<string> {
   return invoke<string>('diagnostics_collect');
 }
 
+/** Append one line to `<data_dir>/arc/frontend.log`. See `lib/errorLog.ts`. */
+export async function diagnosticsLogError(message: string): Promise<void> {
+  if (!isTauri) return;
+  await invoke('diagnostics_log_error', { message });
+}
+
 export async function diagnosticsClear(): Promise<void> {
   if (!isTauri) return;
   await invoke('diagnostics_clear');

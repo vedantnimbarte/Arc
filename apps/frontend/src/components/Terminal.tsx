@@ -12,6 +12,7 @@ import {
   isTauri,
   onPtyExit,
   projectConfigLoad,
+  ptyListAiClis,
   ptyKill,
   ptyResize,
   ptySpawn,
@@ -28,7 +29,7 @@ import { TerminalSearchBar } from './TerminalSearchBar';
 import { useFiles } from '../state/files';
 import { useTrust } from '../state/trust';
 import { detectRiskyPaste, usePaste } from '../state/paste';
-import { resolveTerminalProfile, useSettings } from '../state/settings';
+import { resolveTerminalProfile, settingsReady, useSettings } from '../state/settings';
 import { useWorkspace } from '../state/workspace';
 import { useAi } from '../state/ai';
 import { notifyEvent } from '../lib/notifyEvent';
@@ -36,6 +37,7 @@ import { AiCommandBar } from './AiCommandBar';
 import { getFont, resolveActiveTheme } from '../themes';
 import { every } from '../lib/ticker';
 import { compileRules, matchLine } from '../lib/highlightRules';
+import { AGENT_RESUME_ARGS, isTerminalReply } from '../lib/agentResume';
 
 interface Props {
   /** Stable id for the terminal (tab id). Also serves as the React-effect
@@ -457,6 +459,20 @@ export function Terminal({ sessionKey }: Props) {
     const forwardInput = term.onData((data) => {
       if (ptyId) ptyWrite(ptyId, data).catch(() => {});
       else earlyInput.push(data);
+      const ws = useWorkspace.getState();
+      // Typing into an agent that was waiting on you is the answer it wanted.
+      ws.setAgentWaiting(sessionKey, null);
+      // Broadcast: copy the keystroke to every other live terminal in this
+      // workspace. xterm's own replies (cursor reports, focus events) answer
+      // *this* terminal and would be garbage typed into the others.
+      if (ws.broadcastInput && !isTerminalReply(data)) {
+        const self = ws.tabs.find((t) => t.id === sessionKey);
+        for (const t of ws.tabs) {
+          if (t.id === sessionKey || t.kind !== 'terminal' || !t.ptyId) continue;
+          if (t.workspaceId !== self?.workspaceId) continue;
+          void ptyWrite(t.ptyId, data).catch(() => {});
+        }
+      }
     });
 
     const boot = async () => {
@@ -513,6 +529,7 @@ export function Terminal({ sessionKey }: Props) {
         const tab = agentTab();
         if (!tab || announced) return;
         announced = true;
+        useWorkspace.getState().setAgentWaiting(sessionKey, title);
         notifyEvent({
           source: 'agent',
           title,
@@ -538,6 +555,7 @@ export function Terminal({ sessionKey }: Props) {
         if (text.trim().length > 0) {
           lastOutputMs = Date.now();
           // Fresh output means the turn resumed — re-arm the signal.
+          if (announced) useWorkspace.getState().setAgentWaiting(sessionKey, null);
           announced = false;
         }
         if (!text.includes('\x1b]133;')) {
@@ -670,8 +688,29 @@ export function Terminal({ sessionKey }: Props) {
         //   3. `defaultShell`, the single-shell setting profiles build on.
         // An unknown profile id (the user deleted it) resolves to null and
         // falls through to 3 rather than spawning nothing.
-        const tab = useWorkspace.getState().tabs.find((t) => t.id === sessionKey);
+        // Shell, profile and agent choices all come from settings; a tab
+        // restored at launch can get here before the stored row has loaded.
+        // Bounded so a settings failure can never stop a terminal starting.
+        await Promise.race([settingsReady, new Promise((r) => setTimeout(r, 3000))]);
+        let tab = useWorkspace.getState().tabs.find((t) => t.id === sessionKey);
         const settings = useSettings.getState();
+        // A tab that ran an agent when ARC closed comes back as a plain shell
+        // unless the user asked for agents to be relaunched. Either way the
+        // decision is made once: a tab left as a shell forgets its agent, so
+        // turning the setting on later doesn't resurrect weeks-old sessions.
+        if (tab?.agentCliId && !tab.shellOverride) {
+          const cliId = tab.agentCliId;
+          const cli = settings.relaunchAgentTabs
+            ? (await ptyListAiClis().catch(() => [])).find((c) => c.id === cliId)
+            : undefined;
+          useWorkspace.getState().setTabAgentLaunch(
+            sessionKey,
+            cli
+              ? { agentCliId: cli.id, shellOverride: cli.path, shellArgs: AGENT_RESUME_ARGS[cli.id] }
+              : { agentCliId: undefined, shellOverride: undefined, shellArgs: undefined },
+          );
+          tab = useWorkspace.getState().tabs.find((t) => t.id === sessionKey);
+        }
         const profile = resolveTerminalProfile(
           settings.terminalProfiles,
           tab?.profileId ?? settings.defaultProfileId,
@@ -686,7 +725,16 @@ export function Terminal({ sessionKey }: Props) {
         // A profile's cwd pins the terminal; without one it follows the tree.
         // A tab that was launched into its own worktree pins itself there;
         // otherwise a profile's cwd wins, and failing that the file tree's root.
-        const cwd = tab?.launchCwd || profile?.cwd || initialCwd.current;
+        // A tab restored at launch returns to where its shell last was, as
+        // long as that directory still exists.
+        let restoreCwd = tab?.restoreCwd;
+        if (restoreCwd) {
+          restoreCwd = await fsReadDir(restoreCwd).then(
+            () => restoreCwd,
+            () => undefined,
+          );
+        }
+        const cwd = tab?.launchCwd || restoreCwd || profile?.cwd || initialCwd.current;
         // Only inject `.arc/config.toml` env from a folder the user has
         // trusted (state/trust.ts). Untrusted repo env is drive-by RCE via
         // PROMPT_COMMAND / BASH_ENV / LD_PRELOAD, so we don't even load it.
@@ -780,7 +828,10 @@ export function Terminal({ sessionKey }: Props) {
         // `pty_spawn`, the Rust side falls back to $HOME / %USERPROFILE%
         // (see rust/pty/src/lib.rs) — `fsDefaultRoot` returns the same path,
         // so seeding from it keeps us in sync from the very first command.
-        let shellCwd: string | null = initialCwd.current ?? null;
+        // Seeded from where the shell was actually started — a worktree or a
+        // restored directory, not just the tree root — so the tab's persisted
+        // cwd is right even for shells that never report one.
+        let shellCwd: string | null = cwd ?? initialCwd.current ?? null;
         if (!shellCwd) {
           try {
             shellCwd = await fsDefaultRoot();

@@ -33,13 +33,18 @@ import {
   Loader2,
   ClipboardCopy,
   Trash2,
+  Download,
+  Upload,
+  FolderOpen,
   CircleDollarSign,
 } from 'lucide-react';
 import {
   DEFAULT_AI_MODEL,
   DEFAULT_SEARCH_IGNORE_DIRS,
   DEFAULT_USAGE_AGENTS,
+  exportSettingsJson,
   flushSettingsSave,
+  importSettingsJson,
   MAX_TILE_GAP,
   MIN_TILE_GAP,
   useSettings,
@@ -51,10 +56,16 @@ import {
   diagnosticsClear,
   diagnosticsCollect,
   diagnosticsSummary,
+  fsPickFiles,
+  fsPickSaveFile,
+  fsReadFile,
+  fsReveal,
+  fsWriteFile,
   getAppVersion,
   type DiagnosticsSummary,
 } from '../lib/tauri';
 import { copyText } from '../lib/clipboard';
+import { toast, toastError } from '../state/toast';
 import { ANTHROPIC_KEY_SECRET } from '../lib/ai';
 import { FontPicker } from './FontPicker';
 import { useFiles, type SidebarView } from '../state/files';
@@ -2069,6 +2080,7 @@ function AboutPane() {
       <UpdatesCard />
 
       <DiagnosticsCard />
+      <SettingsBackupCard />
 
       <Group title="Project">
         <Rows>
@@ -2211,6 +2223,17 @@ function DiagnosticsCard() {
     );
   };
 
+  const save = async () => {
+    try {
+      const path = await fsPickSaveFile('arc-diagnostics.txt');
+      if (!path) return;
+      await fsWriteFile(path, await diagnosticsCollect());
+      toast('Diagnostics saved');
+    } catch (err) {
+      toastError(`Couldn't save diagnostics: ${err}`);
+    }
+  };
+
   const clear = () => {
     void diagnosticsClear().then(refresh);
   };
@@ -2242,6 +2265,24 @@ function DiagnosticsCard() {
             <ClipboardCopy size={12} strokeWidth={2.1} className="text-fg-muted" />
             Copy diagnostics
           </button>
+          <button
+            onClick={() => void save()}
+            title="Save diagnostics to a file"
+            aria-label="Save diagnostics to a file"
+            className="rounded-md border border-edge-2 px-3 py-2 text-fg-subtle transition-colors hover:bg-surface-2 hover:text-fg-base"
+          >
+            <Download size={12} strokeWidth={2.1} />
+          </button>
+          {summary?.log_path && (
+            <button
+              onClick={() => void fsReveal(summary.log_path!).catch(() => {})}
+              title="Show the log folder"
+              aria-label="Show the log folder"
+              className="rounded-md border border-edge-2 px-3 py-2 text-fg-subtle transition-colors hover:bg-surface-2 hover:text-fg-base"
+            >
+              <FolderOpen size={12} strokeWidth={2.1} />
+            </button>
+          )}
           {crashes > 0 && (
             <button
               onClick={clear}
@@ -2256,6 +2297,57 @@ function DiagnosticsCard() {
         {summary?.log_path && (
           <p className="break-all font-mono text-2xs text-fg-subtle">{summary.log_path}</p>
         )}
+      </Panel>
+    </Group>
+  );
+}
+
+/**
+ * Move preferences between machines. The file is plain JSON of the same shape
+ * SQLite stores, and import runs it through the same validation — so a
+ * hand-edited or older export can't put the app in a bad state. Secrets
+ * (API keys, tokens) live in the OS vault and are never in it.
+ */
+function SettingsBackupCard() {
+  const exportNow = async () => {
+    try {
+      const path = await fsPickSaveFile('arc-settings.json');
+      if (!path) return;
+      await fsWriteFile(path, exportSettingsJson());
+      toast('Settings exported');
+    } catch (err) {
+      toastError(`Couldn't export settings: ${err}`);
+    }
+  };
+  const importNow = async () => {
+    try {
+      const [path] = await fsPickFiles(null);
+      if (!path) return;
+      importSettingsJson(await fsReadFile(path));
+      await flushSettingsSave();
+      toast('Settings imported');
+    } catch (err) {
+      toastError(`Couldn't import settings: ${err instanceof Error ? err.message : err}`);
+    }
+  };
+  const btn =
+    'flex flex-1 items-center justify-center gap-2 rounded-md border border-edge-2 px-3 py-2 font-display text-sm tracking-tight text-fg-base transition-colors hover:bg-surface-2';
+  return (
+    <Group
+      title="Settings backup"
+      hint="Export your preferences to a file, or import one from another machine. API keys and tokens stay in the OS vault and are not included."
+    >
+      <Panel>
+        <div className="flex gap-2">
+          <button onClick={() => void exportNow()} className={btn}>
+            <Download size={12} strokeWidth={2.1} className="text-fg-muted" />
+            Export settings
+          </button>
+          <button onClick={() => void importNow()} className={btn}>
+            <Upload size={12} strokeWidth={2.1} className="text-fg-muted" />
+            Import settings
+          </button>
+        </div>
       </Panel>
     </Group>
   );
