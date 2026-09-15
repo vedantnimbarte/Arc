@@ -15,6 +15,10 @@
 //!   invoke("ssh_key_delete",    { id, deleteFiles? })                 -> ()
 //!   invoke("ssh_session_logs",  { hostId, limit? })                   -> Vec<SshSessionLogEntry>
 //!   invoke("ssh_host_key_respond", { promptId, accept })              -> ()
+//!   invoke("ssh_forward_list",  { id })                               -> Vec<ForwardInfo>
+//!   invoke("ssh_forward_add",   { id, spec: ForwardSpec })            -> Vec<ForwardInfo>
+//!   invoke("ssh_forward_set_active", { id, forwardId, active })      -> Vec<ForwardInfo>
+//!   invoke("ssh_forward_remove", { id, forwardId })                   -> Vec<ForwardInfo>
 //!
 //! Shell output streams to the frontend over a per-connect `tauri::ipc::Channel`
 //! carrying raw bytes (point-to-point, no JSON-number-array bloat, no fan-out to
@@ -29,7 +33,10 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use arc_session_manager::{ssh as ssh_db, SessionStore, SshHost, SshHostInput, SshKey, SshSessionLogEntry};
-use arc_ssh::{generate_key, load_key_metadata, GeneratedKey, SshConnectOpts, SshLogEvent, SshManager};
+use arc_ssh::{
+    generate_key, load_key_metadata, ForwardInfo, ForwardSpec, GeneratedKey, SshConnectOpts,
+    SshEndpoint, SshLogEvent, SshManager,
+};
 use keyring::Entry;
 use serde::{Deserialize, Serialize};
 use tauri::ipc::{Channel, InvokeResponseBody};
@@ -146,37 +153,14 @@ pub async fn ssh_connect(
         .map_err(|e| format!("host lookup: {e}"))?
         .ok_or_else(|| format!("unknown ssh host: {}", payload.host_id))?;
 
-    let identity_id = host
-        .identity_id
-        .as_ref()
-        .ok_or_else(|| "host has no identity configured".to_string())?;
-    let identity = ssh_db::key_get(store.pool(), identity_id)
-        .await
-        .map_err(|e| format!("identity lookup: {e}"))?
-        .ok_or_else(|| format!("unknown ssh key: {identity_id}"))?;
-
-    let passphrase = if identity.has_passphrase {
-        match Entry::new(SSH_KEYRING_SERVICE, &identity.id)
-            .and_then(|e| e.get_password())
-        {
-            Ok(pp) => Some(pp),
-            Err(keyring::Error::NoEntry) => None,
-            Err(err) => return Err(format!("keyring: {err}")),
-        }
-    } else {
-        None
-    };
-
     let opts = SshConnectOpts {
-        host: host.host.clone(),
-        port: host.port as u16,
-        username: host.username.clone(),
-        identity_path: identity.path.clone(),
-        passphrase,
+        target: resolve_endpoint(&store, &host).await?,
+        jump: resolve_jump(&store, &host).await?,
         cols: payload.cols.max(1),
         rows: payload.rows.max(1),
         startup_cmd: host.startup_cmd.clone(),
         keepalive_secs: host.keepalive_secs.max(0) as u32,
+        forwards: parse_forwards(&host.forwards)?,
     };
 
     // Interactive session: there is a window to put a host-key prompt in.
@@ -296,6 +280,56 @@ pub async fn ssh_close(state: State<'_, SshState>, id: String) -> Result<(), Str
     state.manager.close(&id).await.map_err(|e| format!("{e:#}"))
 }
 
+// ---------- port forwards on a live session -------------------------------
+
+#[tauri::command]
+pub async fn ssh_forward_list(
+    state: State<'_, SshState>,
+    id: String,
+) -> Result<Vec<ForwardInfo>, String> {
+    state.manager.forward_list(&id).await.map_err(|e| format!("{e:#}"))
+}
+
+#[tauri::command]
+pub async fn ssh_forward_add(
+    state: State<'_, SshState>,
+    id: String,
+    spec: ForwardSpec,
+) -> Result<Vec<ForwardInfo>, String> {
+    state
+        .manager
+        .forward_add(&id, spec)
+        .await
+        .map_err(|e| format!("{e:#}"))
+}
+
+#[tauri::command]
+pub async fn ssh_forward_set_active(
+    state: State<'_, SshState>,
+    id: String,
+    forward_id: String,
+    active: bool,
+) -> Result<Vec<ForwardInfo>, String> {
+    state
+        .manager
+        .forward_set_active(&id, &forward_id, active)
+        .await
+        .map_err(|e| format!("{e:#}"))
+}
+
+#[tauri::command]
+pub async fn ssh_forward_remove(
+    state: State<'_, SshState>,
+    id: String,
+    forward_id: String,
+) -> Result<Vec<ForwardInfo>, String> {
+    state
+        .manager
+        .forward_remove(&id, &forward_id)
+        .await
+        .map_err(|e| format!("{e:#}"))
+}
+
 // ---------- hosts ---------------------------------------------------------
 
 #[tauri::command]
@@ -311,8 +345,37 @@ pub async fn ssh_host_list(
 #[tauri::command]
 pub async fn ssh_host_upsert(
     store: State<'_, SessionStore>,
-    input: SshHostInput,
+    mut input: SshHostInput,
 ) -> Result<SshHost, String> {
+    // Round-trip through ForwardSpec so only well-formed, valid forwards are
+    // ever stored.
+    let forwards = parse_forwards(&input.forwards)?;
+    for spec in &forwards {
+        spec.validate().map_err(|e| format!("forward: {e}"))?;
+    }
+    input.forwards = forwards
+        .iter()
+        .map(|f| serde_json::to_value(f).map_err(|e| e.to_string()))
+        .collect::<Result<_, _>>()?;
+
+    if let Some(jump_id) = input.jump_host_id.as_deref() {
+        let hosts = ssh_db::host_list(store.pool(), None)
+            .await
+            .map_err(|e| format!("{e}"))?;
+        let jump = hosts
+            .iter()
+            .find(|h| h.id == jump_id)
+            .ok_or_else(|| format!("unknown jump host: {jump_id}"))?;
+        let host_id = input.id.as_deref();
+        let jumped_through = host_id.is_some_and(|id| {
+            hosts
+                .iter()
+                .any(|h| h.id != id && h.jump_host_id.as_deref() == Some(id))
+        });
+        arc_ssh::check_jump(host_id, jump_id, jump.jump_host_id.as_deref(), jumped_through)
+            .map_err(|e| format!("{e}"))?;
+    }
+
     ssh_db::host_upsert(store.pool(), input)
         .await
         .map_err(|e| format!("{e}"))
@@ -549,11 +612,19 @@ async fn remote_fs_opts(
         .await
         .map_err(|e| format!("host lookup: {e}"))?
         .ok_or_else(|| format!("unknown ssh host: {host_id}"))?;
+    Ok(arc_ssh::RemoteFsOpts {
+        target: resolve_endpoint(store, &host).await?,
+        jump: resolve_jump(store, &host).await?,
+    })
+}
 
+/// A saved host's address and identity, with the passphrase unlocked from
+/// the OS credential vault.
+async fn resolve_endpoint(store: &SessionStore, host: &SshHost) -> Result<SshEndpoint, String> {
     let identity_id = host
         .identity_id
         .as_ref()
-        .ok_or_else(|| "host has no identity configured".to_string())?;
+        .ok_or_else(|| format!("host '{}' has no identity configured", host.name))?;
     let identity = ssh_db::key_get(store.pool(), identity_id)
         .await
         .map_err(|e| format!("identity lookup: {e}"))?
@@ -569,13 +640,35 @@ async fn remote_fs_opts(
         None
     };
 
-    Ok(arc_ssh::RemoteFsOpts {
-        host: host.host,
+    Ok(SshEndpoint {
+        host: host.host.clone(),
         port: host.port as u16,
-        username: host.username,
+        username: host.username.clone(),
         identity_path: identity.path,
         passphrase,
     })
+}
+
+/// The host's jump host, if it has one. Re-checks the one-level rule here too:
+/// the saved rows may predate it, or the jump host may have gained a jump of
+/// its own since.
+async fn resolve_jump(store: &SessionStore, host: &SshHost) -> Result<Option<SshEndpoint>, String> {
+    let Some(jump_id) = host.jump_host_id.as_deref() else {
+        return Ok(None);
+    };
+    let jump = ssh_db::host_get(store.pool(), jump_id)
+        .await
+        .map_err(|e| format!("jump host lookup: {e}"))?
+        .ok_or_else(|| format!("unknown jump host: {jump_id}"))?;
+    arc_ssh::check_jump(Some(&host.id), jump_id, jump.jump_host_id.as_deref(), false)
+        .map_err(|e| format!("{e}"))?;
+    resolve_endpoint(store, &jump).await.map(Some)
+}
+
+fn parse_forwards(raw: &[serde_json::Value]) -> Result<Vec<ForwardSpec>, String> {
+    raw.iter()
+        .map(|v| serde_json::from_value(v.clone()).map_err(|e| format!("forward: {e}")))
+        .collect()
 }
 
 /// Connect (or reconnect) the remote filesystem for `host_id` and return the

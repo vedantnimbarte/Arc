@@ -2,6 +2,7 @@
 // keeps each file focused on rendering.
 
 import type { SshSessionState, SshStatus } from '../../state/ssh';
+import type { SshForwardSpec } from '../../lib/tauri';
 
 export function relTime(at: number | null | undefined): string {
   if (!at) return '—';
@@ -87,4 +88,30 @@ export function liveSessionFor(
     }
   }
   return null;
+}
+
+/** Parse `8080:localhost:80` — ssh's own `-L` / `-R` argument order: the
+ *  listen port, then where connections go. Returns an error sentence instead
+ *  of throwing so a form can show it inline. The Rust side validates again;
+ *  this is for the message, not the trust boundary. */
+export function parseForward(
+  kind: SshForwardSpec['kind'],
+  text: string,
+): SshForwardSpec | string {
+  const m = /^\s*(\d+):(.+):(\d+)\s*$/.exec(text);
+  if (!m) return 'use listenPort:host:port, e.g. 8080:localhost:80';
+  const bind = Number(m[1]);
+  const host = (m[2] ?? '').trim().replace(/^\[(.*)\]$/, '$1');
+  const dest = Number(m[3]);
+  const okPort = (p: number) => Number.isInteger(p) && p >= 1 && p <= 65535;
+  if (!okPort(bind)) return 'listen port must be 1-65535';
+  if (!okPort(dest)) return 'destination port must be 1-65535';
+  if (!host || /\s/.test(host)) return 'destination host is required, without spaces';
+  return { kind, bind_port: bind, dest_host: host, dest_port: dest };
+}
+
+/** `L 8080 → localhost:80`, for lists. */
+export function formatForward(f: SshForwardSpec): string {
+  const host = f.dest_host.includes(':') ? `[${f.dest_host}]` : f.dest_host;
+  return `${f.kind === 'local' ? 'L' : 'R'} ${f.bind_port} → ${host}:${f.dest_port}`;
 }

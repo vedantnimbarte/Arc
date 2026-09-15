@@ -2189,6 +2189,26 @@ export interface SshHost {
   startup_cmd: string | null;
   created_at: number;
   last_used_at: number | null;
+  /** Another saved host to connect through (ProxyJump). */
+  jump_host_id: string | null;
+  /** Started automatically with every session to this host. */
+  forwards: SshForwardSpec[];
+}
+
+/** `local` = `-L` (listen on 127.0.0.1 here), `remote` = `-R` (listen on the
+ *  server's loopback). */
+export interface SshForwardSpec {
+  kind: 'local' | 'remote';
+  bind_port: number;
+  dest_host: string;
+  dest_port: number;
+}
+
+/** A forward on a live session. */
+export interface SshForwardInfo extends SshForwardSpec {
+  id: string;
+  state: 'active' | 'stopped' | 'failed';
+  error: string | null;
 }
 
 export interface SshHostInput {
@@ -2201,6 +2221,8 @@ export interface SshHostInput {
   identity_id?: string | null;
   keepalive_secs?: number;
   startup_cmd?: string | null;
+  jump_host_id?: string | null;
+  forwards?: SshForwardSpec[];
 }
 
 export interface SshKey {
@@ -2287,6 +2309,26 @@ export async function sshResize(id: SshId, cols: number, rows: number): Promise<
 
 export async function sshClose(id: SshId): Promise<void> {
   await invoke('ssh_close', { id });
+}
+
+export async function sshForwardList(id: SshId): Promise<SshForwardInfo[]> {
+  return invoke<SshForwardInfo[]>('ssh_forward_list', { id });
+}
+
+export async function sshForwardAdd(id: SshId, spec: SshForwardSpec): Promise<SshForwardInfo[]> {
+  return invoke<SshForwardInfo[]>('ssh_forward_add', { id, spec });
+}
+
+export async function sshForwardSetActive(
+  id: SshId,
+  forwardId: string,
+  active: boolean,
+): Promise<SshForwardInfo[]> {
+  return invoke<SshForwardInfo[]>('ssh_forward_set_active', { id, forwardId, active });
+}
+
+export async function sshForwardRemove(id: SshId, forwardId: string): Promise<SshForwardInfo[]> {
+  return invoke<SshForwardInfo[]>('ssh_forward_remove', { id, forwardId });
 }
 
 // ─── Host key verification ───────────────────────────────────────────────

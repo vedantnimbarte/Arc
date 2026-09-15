@@ -186,4 +186,40 @@ mod tests {
         assert_eq!(again.session.active_tab_id.as_deref(), Some("t2"));
     }
 
+    #[tokio::test]
+    async fn ssh_host_jump_and_forwards_roundtrip() {
+        let store = fresh_store().await;
+        let input = |name: &str, jump: Option<String>, forwards| SshHostInput {
+            id: None,
+            workspace_id: None,
+            name: name.into(),
+            host: format!("{name}.example"),
+            port: 22,
+            username: "u".into(),
+            identity_id: None,
+            keepalive_secs: 30,
+            startup_cmd: None,
+            jump_host_id: jump,
+            forwards,
+        };
+        let bastion = ssh::host_upsert(store.pool(), input("bastion", None, vec![]))
+            .await
+            .expect("bastion");
+        let fwd = serde_json::json!({"kind": "local", "bind_port": 8080, "dest_host": "localhost", "dest_port": 80});
+        let app = ssh::host_upsert(
+            store.pool(),
+            input("app", Some(bastion.id.clone()), vec![fwd.clone()]),
+        )
+        .await
+        .expect("app");
+
+        let got = ssh::host_get(store.pool(), &app.id).await.unwrap().unwrap();
+        assert_eq!(got.jump_host_id.as_deref(), Some(bastion.id.as_str()));
+        assert_eq!(got.forwards, vec![fwd]);
+
+        // Deleting the jump host leaves the dependent host connectable directly.
+        ssh::host_delete(store.pool(), &bastion.id).await.unwrap();
+        let got = ssh::host_get(store.pool(), &app.id).await.unwrap().unwrap();
+        assert_eq!(got.jump_host_id, None);
+    }
 }

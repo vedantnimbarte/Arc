@@ -52,7 +52,9 @@ it.
   conflicts open in a three-way view that resolves one hunk at a time — take ours,
   theirs, both, or hand-edit the result — then writes and stages the file.
 - **SSH Client** — Pure-Rust SSH (russh) with saved hosts, key generation/import, and
-  per-session logs.
+  per-session logs. Local (`-L`) and remote (`-R`) port forwards can be saved per host
+  to start on connect, or added and stopped on a live session; a host can connect
+  through one jump host (ProxyJump), for SSH tabs and remote workspaces alike.
 - **Remote Workspaces** — Mount a saved SSH host's filesystem as the workspace root over
   SFTP: browse the remote tree, open files, and save straight back. The file-tree
   connection is separate from any SSH terminal tab, so closing the shell doesn't take
