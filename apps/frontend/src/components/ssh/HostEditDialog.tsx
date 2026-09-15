@@ -2,7 +2,8 @@ import { useState } from 'react';
 import { useSsh } from '../../state/ssh';
 import { cn } from '../../lib/cn';
 import { Select } from '../Select';
-import type { SshHost } from '../../lib/tauri';
+import type { SshForwardSpec, SshHost } from '../../lib/tauri';
+import { ForwardInput, ForwardRow } from './ForwardControls';
 
 interface HostEditDialogProps {
   /** Existing host, or null when creating a new one. */
@@ -15,6 +16,7 @@ interface HostEditDialogProps {
  *  the host list. */
 export function HostEditDialog({ existing, onClose }: HostEditDialogProps) {
   const keys = useSsh((s) => s.keys);
+  const hosts = useSsh((s) => s.hosts);
   const upsert = useSsh((s) => s.hostUpsert);
   const setDetail = useSsh((s) => s.openHostDetail);
 
@@ -25,6 +27,8 @@ export function HostEditDialog({ existing, onClose }: HostEditDialogProps) {
   const [identityId, setIdentityId] = useState(existing?.identity_id ?? '');
   const [keepalive, setKeepalive] = useState(String(existing?.keepalive_secs ?? 30));
   const [startupCmd, setStartupCmd] = useState(existing?.startup_cmd ?? '');
+  const [jumpHostId, setJumpHostId] = useState(existing?.jump_host_id ?? '');
+  const [forwards, setForwards] = useState<SshForwardSpec[]>(existing?.forwards ?? []);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
@@ -46,6 +50,8 @@ export function HostEditDialog({ existing, onClose }: HostEditDialogProps) {
         identity_id: identityId || null,
         keepalive_secs: Math.max(0, parseInt(keepalive, 10) || 30),
         startup_cmd: startupCmd.trim() ? startupCmd : null,
+        jump_host_id: jumpHostId || null,
+        forwards,
       });
       setDetail(saved.id);
       onClose();
@@ -95,6 +101,37 @@ export function HostEditDialog({ existing, onClose }: HostEditDialogProps) {
               ...keys.map((k) => ({ value: k.id, label: k.name, hint: k.kind })),
             ]}
           />
+        </FormRow>
+        <FormRow label="Jump host (optional)">
+          <Select
+            value={jumpHostId}
+            onChange={setJumpHostId}
+            ariaLabel="Jump host"
+            mono
+            className="rounded-squircle"
+            options={[
+              { value: '', label: 'Direct', hint: 'Connect straight to this host.' },
+              // One level only: a host that itself jumps can't be a jump host.
+              // The backend enforces the rest (cycles, hosts others jump through).
+              ...hosts
+                .filter((h) => h.id !== existing?.id && !h.jump_host_id)
+                .map((h) => ({
+                  value: h.id,
+                  label: h.name,
+                  hint: `${h.username}@${h.host}:${h.port}`,
+                })),
+            ]}
+          />
+        </FormRow>
+        <FormRow label="Port forwards (start on connect)">
+          {forwards.map((f, i) => (
+            <ForwardRow
+              key={`${f.kind}-${f.bind_port}-${i}`}
+              spec={f}
+              onRemove={() => setForwards((list) => list.filter((_, j) => j !== i))}
+            />
+          ))}
+          <ForwardInput onAdd={(spec) => setForwards((list) => [...list, spec])} />
         </FormRow>
         <FormRow label="Keepalive (seconds)">
           <Input
