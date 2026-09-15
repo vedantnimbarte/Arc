@@ -22,6 +22,20 @@ pub async fn pick_folder(starting: Option<String>) -> Result<Option<String>> {
     .map_err(|e| Error::Dialog(e.to_string()))
 }
 
+/// Native save dialog. Returns the chosen absolute path, or `None` when the
+/// user cancels. The caller writes the file — see [`crate::write_file`].
+pub async fn pick_save_file(default_name: String) -> Result<Option<String>> {
+    tokio::task::spawn_blocking(move || {
+        rfd::FileDialog::new()
+            .set_title("Save as")
+            .set_file_name(default_name)
+            .save_file()
+            .map(|p| p.to_string_lossy().to_string())
+    })
+    .await
+    .map_err(|e| Error::Dialog(e.to_string()))
+}
+
 /// Native multi-file open dialog. Returns the picked absolute paths, or an
 /// empty vec when the user cancels.
 pub async fn pick_files(starting: Option<String>) -> Result<Vec<String>> {
