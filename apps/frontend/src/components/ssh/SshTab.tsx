@@ -165,7 +165,9 @@ export function SshTab({ sessionKey, hostId }: SshTabProps) {
     const ro = new ResizeObserver(() => safeFit());
     ro.observe(container);
 
-    const hostEl = container.parentElement;
+    // The tab's host div — where `arc:host-shown` is dispatched. CustomEvents
+    // don't bubble down, so a listener on an inner wrapper never hears it.
+    const hostEl = container.closest<HTMLElement>('[data-tab-host]');
     const onHostShown = () => {
       requestAnimationFrame(() => {
         if (disposed) return;

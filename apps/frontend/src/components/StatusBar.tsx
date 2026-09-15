@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { Suspense, lazy, useState } from 'react';
 import {
   ArrowDown,
   ArrowUp,
@@ -8,8 +8,7 @@ import {
   FolderOpen,
   GitBranch,
 } from 'lucide-react';
-import { BranchPicker, type BranchPickerAnchor } from './BranchPicker';
-import { UsagePopover } from './UsagePopover';
+import type { BranchPickerAnchor } from './BranchPicker';
 import { useFiles } from '../state/files';
 import { useGit } from '../state/git';
 import { useSettings } from '../state/settings';
@@ -18,6 +17,13 @@ import type { PlanLimit } from '../lib/usage';
 import { runCommand } from '../state/commands';
 import { formatBinding, getBinding } from '../state/shortcuts';
 import { cn } from '../lib/cn';
+
+const BranchPicker = lazy(() =>
+  import('./BranchPicker').then((m) => ({ default: m.BranchPicker })),
+);
+const UsagePopover = lazy(() =>
+  import('./UsagePopover').then((m) => ({ default: m.UsagePopover })),
+);
 
 /**
  * Thin strip along the bottom of the window: which folder you're in, what git
@@ -119,15 +125,17 @@ export function StatusBar() {
         <kbd className="font-mono text-fg-subtle">{paletteKbd}</kbd>
       </Item>
 
-      {branchAnchor && (
-        <BranchPicker
-          anchor={branchAnchor}
-          onClose={() => setBranchAnchor(null)}
-          onCheckedOut={() => root && void useGit.getState().refresh(root)}
-        />
-      )}
+      <Suspense fallback={null}>
+        {branchAnchor && (
+          <BranchPicker
+            anchor={branchAnchor}
+            onClose={() => setBranchAnchor(null)}
+            onCheckedOut={() => root && void useGit.getState().refresh(root)}
+          />
+        )}
 
-      {usageAnchor && <UsagePopover anchor={usageAnchor} onClose={() => setUsageAnchor(null)} />}
+        {usageAnchor && <UsagePopover anchor={usageAnchor} onClose={() => setUsageAnchor(null)} />}
+      </Suspense>
     </footer>
   );
 }
@@ -184,9 +192,7 @@ function Item({
         'flex h-[18px] max-w-[240px] items-center gap-1.5 rounded px-1.5 transition-colors',
         'hover:bg-surface-2 hover:text-fg-base',
         'focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent/40',
-        accent && 'text-accent-bright',
-        warn && 'text-status-warn',
-        danger && 'text-status-err',
+        danger ? 'text-status-err' : warn ? 'text-status-warn' : accent && 'text-accent-bright',
       )}
     >
       <Icon size={11} strokeWidth={2} className="shrink-0" />

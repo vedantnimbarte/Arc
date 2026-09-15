@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { Suspense, lazy, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import {
   FileCode,
@@ -17,7 +17,7 @@ import {
   X,
   type LucideIcon,
 } from 'lucide-react';
-import { BranchPicker, type BranchPickerAnchor } from './BranchPicker';
+import type { BranchPickerAnchor } from './BranchPicker';
 import { findLeaf, layoutModeOf, useWorkspace, type Tab } from '../state/workspace';
 import { gitStatus, isTauri } from '../lib/tauri';
 import { useFiles } from '../state/files';
@@ -25,6 +25,10 @@ import { useGit } from '../state/git';
 import { Tooltip } from './Tooltip';
 import { MoveIcon, WorkspaceFlyout } from './MoveToWorkspace';
 import { cn } from '../lib/cn';
+
+const BranchPicker = lazy(() =>
+  import('./BranchPicker').then((m) => ({ default: m.BranchPicker })),
+);
 
 // Below this header width, the split/maximize buttons collapse into a "⋯"
 // overflow menu so they never overlap the title.
@@ -271,17 +275,19 @@ export function PaneHeader({ paneId }: Props) {
       )}
 
       {branchAnchor && (
-        <BranchPicker
-          anchor={branchAnchor}
-          root={cwd}
-          onClose={() => setBranchAnchor(null)}
-          onCheckedOut={() => {
-            if (cwd) branchCache.delete(cwd);
-            setBranchNonce((n) => n + 1);
-            const wsRoot = useFiles.getState().root;
-            if (wsRoot) void useGit.getState().refresh(wsRoot);
-          }}
-        />
+        <Suspense fallback={null}>
+          <BranchPicker
+            anchor={branchAnchor}
+            root={cwd}
+            onClose={() => setBranchAnchor(null)}
+            onCheckedOut={() => {
+              if (cwd) branchCache.delete(cwd);
+              setBranchNonce((n) => n + 1);
+              const wsRoot = useFiles.getState().root;
+              if (wsRoot) void useGit.getState().refresh(wsRoot);
+            }}
+          />
+        </Suspense>
       )}
     </div>
   );

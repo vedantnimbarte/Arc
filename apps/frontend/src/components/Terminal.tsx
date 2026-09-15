@@ -36,6 +36,7 @@ import { useAi } from '../state/ai';
 import { notifyEvent } from '../lib/notifyEvent';
 import { AiCommandBar } from './AiCommandBar';
 import { getFont, resolveActiveTheme } from '../themes';
+import { every } from '../lib/ticker';
 
 interface Props {
   /** Stable id for the terminal (tab id). Also serves as the React-effect
@@ -73,6 +74,8 @@ const SCROLLBACK_SAVE_MS = 15_000;
 const AGENT_IDLE_MS = 20_000;
 /** How often the idle check runs. Cheap — it reads two numbers. */
 const AGENT_IDLE_TICK_MS = 5_000;
+/** How long a terminal stays hidden before it gives back its WebGL context. */
+const GPU_RELEASE_AFTER_MS = 10_000;
 
 /** Divider marking where a restored buffer ends and this session begins. */
 const RESTORE_MARKER = '\x1b[2m── session restored ──\x1b[0m';
@@ -132,8 +135,8 @@ export function Terminal({ sessionKey }: Props) {
     // Set on every PTY chunk, cleared on every write to the DB, so an idle
     // terminal doesn't re-serialize its buffer every tick.
     let scrollbackDirty = false;
-    let scrollbackTimer: ReturnType<typeof setInterval> | null = null;
-    let agentIdleTimer: ReturnType<typeof setInterval> | null = null;
+    let stopScrollbackTimer: (() => void) | null = null;
+    let stopAgentIdleTimer: (() => void) | null = null;
 
     const initialSettings = useSettings.getState();
     const initialFont = getFont(initialSettings.fontId);
@@ -240,6 +243,41 @@ export function Terminal({ sessionKey }: Props) {
     };
     const writeln = (data: string) => write(`${data}\r\n`);
 
+    // GPU renderer. Roughly an order of magnitude faster than the DOM
+    // renderer on heavy output (a full `cargo build`, `npm test` with a
+    // spinner). Every failure path here is non-fatal — xterm keeps its DOM
+    // renderer and the terminal works exactly as before:
+    //   * construction throws when there's no WebGL2 context at all
+    //     (software rendering, remote desktop, a locked-down GPU driver);
+    //   * `onContextLoss` fires when the driver resets the context later —
+    //     disposing the addon hands rendering back to the DOM path rather
+    //     than leaving a permanently blank canvas.
+    //
+    // A terminal nobody can see gives its context back (see `onHostHidden`):
+    // each one holds GPU memory and a glyph atlas, and the webview only keeps
+    // a limited number of WebGL contexts alive before dropping the oldest.
+    let webgl: WebglAddon | null = null;
+    const attachGpu = () => {
+      if (webgl || !opened || disposed) return;
+      try {
+        const addon = new WebglAddon();
+        addon.onContextLoss(() => releaseGpu());
+        term.loadAddon(addon);
+        webgl = addon;
+      } catch {
+        /* no WebGL2 available — DOM renderer stays */
+      }
+    };
+    const releaseGpu = () => {
+      const addon = webgl;
+      webgl = null;
+      try {
+        addon?.dispose();
+      } catch {
+        /* already gone */
+      }
+    };
+
     const ensureOpen = () => {
       if (opened || disposed) return;
       if (container.offsetWidth === 0 || container.offsetHeight === 0) return;
@@ -251,28 +289,7 @@ export function Terminal({ sessionKey }: Props) {
       while (container.firstChild) container.removeChild(container.firstChild);
       term.open(container);
       safeFit();
-      // GPU renderer. Roughly an order of magnitude faster than the DOM
-      // renderer on heavy output (a full `cargo build`, `npm test` with a
-      // spinner). Every failure path here is non-fatal — xterm keeps its DOM
-      // renderer and the terminal works exactly as before:
-      //   * construction throws when there's no WebGL2 context at all
-      //     (software rendering, remote desktop, a locked-down GPU driver);
-      //   * `onContextLoss` fires when the driver resets the context later —
-      //     disposing the addon hands rendering back to the DOM path rather
-      //     than leaving a permanently blank canvas.
-      try {
-        const webgl = new WebglAddon();
-        webgl.onContextLoss(() => {
-          try {
-            webgl.dispose();
-          } catch {
-            /* already gone */
-          }
-        });
-        term.loadAddon(webgl);
-      } catch {
-        /* no WebGL2 available — DOM renderer stays */
-      }
+      attachGpu();
       // Drain on the next frame, not in this tick. `open()` does not guarantee
       // the renderer exists yet, and writing into that gap is the same
       // `dimensions`-on-undefined crash this buffer exists to avoid — PTY
@@ -615,7 +632,7 @@ export function Terminal({ sessionKey }: Props) {
 
       // Persist the buffer periodically. Cheap when idle (the dirty flag
       // short-circuits) and bounded when busy (SCROLLBACK_SAVE_LINES).
-      scrollbackTimer = setInterval(() => {
+      stopScrollbackTimer = every(SCROLLBACK_SAVE_MS, () => {
         if (disposed || !scrollbackDirty || !opened) return;
         scrollbackDirty = false;
         try {
@@ -624,7 +641,7 @@ export function Terminal({ sessionKey }: Props) {
         } catch {
           /* buffer torn down mid-serialize */
         }
-      }, SCROLLBACK_SAVE_MS);
+      });
 
 
       try {
@@ -688,8 +705,8 @@ export function Terminal({ sessionKey }: Props) {
         if (disposed) {
           // Cleanup already ran, so nothing will clear the timers this boot
           // started — clear them here or every discarded mount leaks two.
-          if (scrollbackTimer) clearInterval(scrollbackTimer);
-          if (agentIdleTimer) clearInterval(agentIdleTimer);
+          stopScrollbackTimer?.();
+          stopAgentIdleTimer?.();
           if (ptyId) await ptyKill(ptyId).catch(() => {});
           return;
         }
@@ -732,13 +749,13 @@ export function Terminal({ sessionKey }: Props) {
         // gone quiet for a while is almost certainly over. Deliberately a long
         // window — a model thinking mid-turn goes quiet too, and a premature
         // "finished" is worse than a late one.
-        agentIdleTimer = setInterval(() => {
+        stopAgentIdleTimer = every(AGENT_IDLE_TICK_MS, () => {
           if (disposed || announced) return;
           if (!agentTab()) return;
           if (Date.now() - lastOutputMs < AGENT_IDLE_MS) return;
           const tab = agentTab()!;
           agentSignal(`${tab.title} has gone quiet`, `No output for ${AGENT_IDLE_MS / 1000}s.`);
-        }, AGENT_IDLE_TICK_MS);
+        });
 
         // Our best-effort view of the shell's CWD, used to resolve relative
         // `cd` targets when the shell doesn't emit OSC 7. OSC 7 (below) is
@@ -951,11 +968,22 @@ export function Terminal({ sessionKey }: Props) {
     // display:none→visible transitions, leaving the terminal on a stale size
     // (only a sliver of the prompt visible). Force a fit + full refresh on the
     // next frame so layout has settled.
-    const host = container.parentElement;
+    // The tab's host div (what PaneLeafView and the Floating cards move around
+    // and dispatch on), not our own wrapper — CustomEvents don't bubble down.
+    const host = container.closest<HTMLElement>('[data-tab-host]');
+    // Hidden long enough to be worth releasing the GPU context. The grace
+    // period keeps flipping between two tabs from rebuilding the atlas each time.
+    let gpuReleaseTimer: ReturnType<typeof setTimeout> | undefined;
+    const onHostHidden = () => {
+      clearTimeout(gpuReleaseTimer);
+      gpuReleaseTimer = setTimeout(releaseGpu, GPU_RELEASE_AFTER_MS);
+    };
     const onHostShown = () => {
+      clearTimeout(gpuReleaseTimer);
       requestAnimationFrame(() => {
         if (disposed) return;
         ensureOpen();
+        attachGpu();
         safeFit();
         try {
           term.refresh(0, Math.max(0, term.rows - 1));
@@ -965,6 +993,7 @@ export function Terminal({ sessionKey }: Props) {
       });
     };
     host?.addEventListener('arc:host-shown', onHostShown);
+    host?.addEventListener('arc:host-hidden', onHostHidden);
 
     return () => {
       disposed = true;
@@ -972,8 +1001,8 @@ export function Terminal({ sessionKey }: Props) {
       // the dirty flag: a tab that scrolled but produced no new output since
       // the last tick still has the content worth keeping. Tab closes are
       // handled separately — `closeTab` deletes the row outright.
-      if (scrollbackTimer) clearInterval(scrollbackTimer);
-      if (agentIdleTimer) clearInterval(agentIdleTimer);
+      stopScrollbackTimer?.();
+      stopAgentIdleTimer?.();
       if (opened) {
         try {
           const data = serialize.serialize({ scrollback: SCROLLBACK_SAVE_LINES });
@@ -985,6 +1014,8 @@ export function Terminal({ sessionKey }: Props) {
       cancelAnimationFrame(rafId);
       ro.disconnect();
       host?.removeEventListener('arc:host-shown', onHostShown);
+      host?.removeEventListener('arc:host-hidden', onHostHidden);
+      clearTimeout(gpuReleaseTimer);
       container.removeEventListener('paste', onPaste, true);
       window.removeEventListener('keydown', trackShift, true);
       window.removeEventListener('keyup', trackShift, true);

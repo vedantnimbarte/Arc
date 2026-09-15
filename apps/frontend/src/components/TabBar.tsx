@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { Suspense, lazy, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import {
   Plus,
@@ -25,7 +25,7 @@ import { LAYOUT_MODE_INFO, LayoutModeGlyph } from './LayoutModeGlyph';
 import { useFiles } from '../state/files';
 import { runCommand } from '../state/commands';
 import { Tooltip } from './Tooltip';
-import { AgentLauncher, AGENT_PANEL_H, AGENT_PANEL_W } from './AgentLauncher';
+import { AGENT_PANEL_H, AGENT_PANEL_W } from './agentPanelSize';
 import { NotificationCenter } from './NotificationCenter';
 import { formatBinding, getBinding } from '../state/shortcuts';
 import { cn } from '../lib/cn';
@@ -35,6 +35,10 @@ import {
   ptyListAiClis,
   type AiCliInfo,
 } from '../lib/tauri';
+
+const AgentLauncher = lazy(() =>
+  import('./AgentLauncher').then((m) => ({ default: m.AgentLauncher })),
+);
 
 const isTauri = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
 
@@ -270,11 +274,13 @@ export function TabBar() {
           )}
         >
           {menuView === 'agents' ? (
-            <AgentLauncher
-              detected={aiClis}
-              onBack={() => setMenuView('root')}
-              onDone={() => setMenuOpen(false)}
-            />
+            <Suspense fallback={null}>
+              <AgentLauncher
+                detected={aiClis}
+                onBack={() => setMenuView('root')}
+                onDone={() => setMenuOpen(false)}
+              />
+            </Suspense>
           ) : (
           <>
           <button
@@ -619,7 +625,9 @@ function AiCliMenuButton({ clis }: { clis: AiCliInfo[] }) {
             style={{ position: 'fixed', top: pos.top, left: pos.left }}
             className="material-sheet z-50 max-h-[calc(100vh-16px)] animate-popover-in overflow-y-auto rounded-lg bg-bg-panel shadow-sheet ring-1 ring-edge-2"
           >
-            <AgentLauncher detected={clis} onDone={() => setOpen(false)} />
+            <Suspense fallback={null}>
+              <AgentLauncher detected={clis} onDone={() => setOpen(false)} />
+            </Suspense>
           </div>,
           document.body,
         )}

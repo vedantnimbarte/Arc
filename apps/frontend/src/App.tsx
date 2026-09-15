@@ -6,15 +6,10 @@ import { useSsh } from './state/ssh';
 import { useGitUi } from './state/gitUi';
 import { TabBar } from './components/TabBar';
 import { WindowResizeHandles } from './components/WindowResizeHandles';
-import { CommandPalette } from './components/CommandPalette';
-import { CommandHistoryPalette } from './components/CommandHistoryPalette';
-import { CommandBlocks } from './components/CommandBlocks';
 import { Sidebar, SidebarRail } from './components/Sidebar';
 import { StatusBar } from './components/StatusBar';
 import { EmptyWorkspace } from './components/EmptyWorkspace';
 import { ResizeHandle } from './components/ResizeHandle';
-import { SearchPalette } from './components/SearchPalette';
-import { ShortcutsDialog } from './components/ShortcutsDialog';
 import { PaneTreeView } from './components/PaneTreeView';
 import { WorkspaceRail } from './components/WorkspaceRail';
 import { useWorkspace } from './state/workspace';
@@ -36,7 +31,6 @@ import {
 } from './state/shortcuts';
 import { useCommands, type CommandAction, type CommandGroup } from './state/commands';
 import { useTaskCommands } from './state/tasks';
-import { WingmanPromptDialog } from './components/WingmanPromptDialog';
 import { HostKeyPrompt } from './components/ssh/HostKeyPrompt';
 
 /** Languages offered as scratch buffers in the palette. Kept short on
@@ -80,6 +74,26 @@ import { useSettings, type TerminalProfile } from './state/settings';
 import { useAi } from './state/ai';
 import { autoConnectWingman, useWingman } from './state/wingman';
 import { useClaudeCode } from './state/claudeCode';
+
+// Palettes and dialogs mount only while open, so their code loads on first use.
+const CommandPalette = lazy(() =>
+  import('./components/CommandPalette').then((m) => ({ default: m.CommandPalette })),
+);
+const CommandHistoryPalette = lazy(() =>
+  import('./components/CommandHistoryPalette').then((m) => ({ default: m.CommandHistoryPalette })),
+);
+const CommandBlocks = lazy(() =>
+  import('./components/CommandBlocks').then((m) => ({ default: m.CommandBlocks })),
+);
+const SearchPalette = lazy(() =>
+  import('./components/SearchPalette').then((m) => ({ default: m.SearchPalette })),
+);
+const ShortcutsDialog = lazy(() =>
+  import('./components/ShortcutsDialog').then((m) => ({ default: m.ShortcutsDialog })),
+);
+const WingmanPromptDialog = lazy(() =>
+  import('./components/WingmanPromptDialog').then((m) => ({ default: m.WingmanPromptDialog })),
+);
 
 // CodeMirror is heavy — defer its bundle until a file is actually opened.
 const Editor = lazy(() =>
@@ -126,6 +140,7 @@ export default function App() {
   const { tabs, activeTabId } = useWorkspace();
   const launchAiCli = useWorkspace((s) => s.launchAiCli);
   const launchWingman = useWorkspace((s) => s.launchWingman);
+  const wingmanPromptOpen = useWorkspace((s) => s.wingmanPrompt !== null);
   const newTerminal = useWorkspace((s) => s.newTerminal);
   const reopenClosedTab = useWorkspace((s) => s.reopenClosedTab);
   const hydrate = useWorkspace((s) => s.hydrate);
@@ -778,17 +793,19 @@ export default function App() {
         </div>
       </div>
 
-      <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} />
-      <CommandHistoryPalette open={historyOpen} onClose={() => setHistoryOpen(false)} />
-      <CommandBlocks open={blocksOpen} onClose={() => setBlocksOpen(false)} />
-      <WingmanPromptDialog />
+      <Suspense fallback={null}>
+        {paletteOpen && <CommandPalette open onClose={() => setPaletteOpen(false)} />}
+        {historyOpen && <CommandHistoryPalette open onClose={() => setHistoryOpen(false)} />}
+        {blocksOpen && <CommandBlocks open onClose={() => setBlocksOpen(false)} />}
+        {wingmanPromptOpen && <WingmanPromptDialog />}
+        {searchOpen && <SearchPalette open onClose={() => setSearchOpen(false)} />}
+        {shortcutsOpen && <ShortcutsDialog open onClose={() => setShortcutsOpen(false)} />}
+      </Suspense>
       {anyGitOverlayOpen && (
         <Suspense fallback={null}>
           <GitOverlays />
         </Suspense>
       )}
-      <SearchPalette open={searchOpen} onClose={() => setSearchOpen(false)} />
-      <ShortcutsDialog open={shortcutsOpen} onClose={() => setShortcutsOpen(false)} />
       {launcherOpen && (
         <LauncherOverlay
           onClose={() => setLauncherOpen(false)}

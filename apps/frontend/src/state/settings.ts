@@ -722,6 +722,10 @@ export async function flushSettingsSave(): Promise<void> {
  *  other window broadcasts a change. */
 export async function rehydrateSettingsFromBroadcast(): Promise<void> {
   if (!isTauri) return;
+  // This window has its own unsaved change queued. Applying the other
+  // window's row now would overwrite it before it saves; its save broadcasts
+  // too, so the last edit wins either way.
+  if (settingsSaveTimer !== undefined) return;
   try {
     const stored = await sessionSettingsLoad();
     if (!stored) return;
@@ -736,21 +740,13 @@ export async function rehydrateSettingsFromBroadcast(): Promise<void> {
           ? stored.themeId
           : current.themeId;
     const sameTheme = incomingThemeId === current.themeId;
-    const sameFont =
-      (stored.fontId ?? current.fontId) === current.fontId &&
-      (typeof stored.fontSize === 'number' ? clampFontSize(stored.fontSize) : current.fontSize) ===
-        current.fontSize;
-    const sameShell = (stored.defaultShell ?? current.defaultShell) === current.defaultShell;
-    const sameStartup =
-      (stored.launchAtLogin ?? current.launchAtLogin) === current.launchAtLogin &&
-      (stored.restoreWindowState ?? current.restoreWindowState) === current.restoreWindowState &&
-      (stored.editorVimMode ?? current.editorVimMode) === current.editorVimMode;
-    if (sameAppearance && sameTheme && sameFont && sameShell && sameStartup) return;
-
+    // Apply every field, not just the theme — tile gap, default layout,
+    // notifications and agents all need to reach the open windows live.
     suppressSave = true;
     useSettings.setState((s) => applyStored(s, stored));
     const next = useSettings.getState();
-    applyTheme(resolveActiveTheme(next.appearance, next.themeId));
+    if (!sameAppearance || !sameTheme)
+      applyTheme(resolveActiveTheme(next.appearance, next.themeId));
     queueMicrotask(() => {
       suppressSave = false;
     });

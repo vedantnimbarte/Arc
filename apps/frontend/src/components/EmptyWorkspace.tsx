@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { Suspense, lazy, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import {
   TerminalSquare,
@@ -23,7 +23,11 @@ import { groupColorDef, rgba, type TabGroupColorId } from '../lib/tabGroups';
 import { formatBinding, getBinding } from '../state/shortcuts';
 import { cn } from '../lib/cn';
 import { WorkspaceEditPanel, DEFAULT_WORKSPACE_COLOR } from './WorkspaceEditPanel';
-import { AgentLauncher, AGENT_PANEL_H, AGENT_PANEL_W } from './AgentLauncher';
+import { AGENT_PANEL_H, AGENT_PANEL_W } from './agentPanelSize';
+
+const AgentLauncher = lazy(() =>
+  import('./AgentLauncher').then((m) => ({ default: m.AgentLauncher })),
+);
 
 /** Two-letter monogram from a workspace name ("Workspace 1" → "W1"). */
 function initials(name: string): string {
@@ -302,7 +306,9 @@ export function EmptyWorkspace({ onOpenCommandPalette }: Props) {
             style={{ position: 'fixed', top: agentPos.y, left: agentPos.x }}
             className="material-sheet z-50 max-h-[calc(100vh-24px)] animate-popover-in overflow-y-auto rounded-lg bg-bg-panel shadow-sheet ring-1 ring-edge-2"
           >
-            <AgentLauncher detected={aiClis} onDone={() => setAgentPos(null)} />
+            <Suspense fallback={null}>
+              <AgentLauncher detected={aiClis} onDone={() => setAgentPos(null)} />
+            </Suspense>
           </div>,
           document.body,
         )}

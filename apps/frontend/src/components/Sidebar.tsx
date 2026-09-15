@@ -1,4 +1,6 @@
 import {
+  Suspense,
+  lazy,
   useEffect,
   useLayoutEffect,
   useMemo,
@@ -10,28 +12,33 @@ import {
 import { createPortal } from 'react-dom';
 import { FileTree } from './FileTree';
 import { RemoteWorkspaceBar } from './RemoteWorkspaceBar';
-import { SourceControl } from './SourceControl';
-import { SearchView } from './SearchView';
-import { OutlineView } from './OutlineView';
-import { TestExplorer } from './TestExplorer';
-import { ProblemsPanel } from './ProblemsPanel';
-import { DockerPanel } from './DockerPanel';
-import { AgentsPanel } from './AgentsPanel';
-import { SshPanel } from './ssh/SshPanel';
 import { fsReveal, fsWatchStart, fsWatchStop, isTauri, settingsWindowOpen } from '../lib/tauri';
 import { useFiles, type SidebarView } from '../state/files';
 import { useGit } from '../state/git';
 import { useGitUi } from '../state/gitUi';
 import { useSsh } from '../state/ssh';
 import { useSidebarLayout } from '../state/sidebarLayout';
-import {
-  PINNED_VIEW,
-  resolveRailViews,
-  SIDEBAR_VIEW_BY_ID,
-} from '../lib/sidebarViews';
+import { PINNED_VIEW, resolveRailViews, SIDEBAR_VIEW_BY_ID } from '../lib/sidebarViews';
 import { Tooltip } from './Tooltip';
 import { formatBinding, getBinding } from '../state/shortcuts';
 import { cn } from '../lib/cn';
+
+// Every view but the file tree loads on first open, keeping them out of the
+// startup bundle — Source Control alone is one of the largest modules there.
+const SourceControl = lazy(() =>
+  import('./SourceControl').then((m) => ({ default: m.SourceControl })),
+);
+const SearchView = lazy(() => import('./SearchView').then((m) => ({ default: m.SearchView })));
+const OutlineView = lazy(() => import('./OutlineView').then((m) => ({ default: m.OutlineView })));
+const TestExplorer = lazy(() =>
+  import('./TestExplorer').then((m) => ({ default: m.TestExplorer })),
+);
+const ProblemsPanel = lazy(() =>
+  import('./ProblemsPanel').then((m) => ({ default: m.ProblemsPanel })),
+);
+const DockerPanel = lazy(() => import('./DockerPanel').then((m) => ({ default: m.DockerPanel })));
+const AgentsPanel = lazy(() => import('./AgentsPanel').then((m) => ({ default: m.AgentsPanel })));
+const SshPanel = lazy(() => import('./ssh/SshPanel').then((m) => ({ default: m.SshPanel })));
 
 /**
  * The sidebar panel body — whichever view `SidebarRail` (the vertical strip
@@ -84,15 +91,19 @@ export function Sidebar() {
         /* Watcher unavailable; the backstop poll still keeps status fresh. */
       });
 
-    const pollId = window.setInterval(
-      () => void refresh(root, { background: true }),
-      20_000,
-    );
+    // Skipped while the window is hidden (minimized) — nobody is looking, and
+    // git status shells out. Catch up as soon as it's visible again.
+    const backgroundRefresh = () => {
+      if (!document.hidden) void refresh(root, { background: true });
+    };
+    const pollId = window.setInterval(backgroundRefresh, 20_000);
+    document.addEventListener('visibilitychange', backgroundRefresh);
 
     return () => {
       active = false;
       if (debounce) clearTimeout(debounce);
       window.clearInterval(pollId);
+      document.removeEventListener('visibilitychange', backgroundRefresh);
       unlisten?.();
       if (watchId) void fsWatchStop(watchId);
     };
@@ -112,25 +123,27 @@ export function Sidebar() {
           it. Saving to the wrong host is not a recoverable mistake, so this
           is not tucked into a menu. Renders nothing when local. */}
       <RemoteWorkspaceBar />
-      {view === 'files' ? (
-        <FileTree />
-      ) : view === 'git' ? (
-        <SourceControl />
-      ) : view === 'search' ? (
-        <SearchView />
-      ) : view === 'outline' ? (
-        <OutlineView />
-      ) : view === 'problems' ? (
-        <ProblemsPanel />
-      ) : view === 'tests' ? (
-        <TestExplorer />
-      ) : view === 'docker' ? (
-        <DockerPanel />
-      ) : view === 'agents' ? (
-        <AgentsPanel />
-      ) : (
-        <SshPanel onClose={() => setSidebarView('files')} />
-      )}
+      <Suspense fallback={null}>
+        {view === 'files' ? (
+          <FileTree />
+        ) : view === 'git' ? (
+          <SourceControl />
+        ) : view === 'search' ? (
+          <SearchView />
+        ) : view === 'outline' ? (
+          <OutlineView />
+        ) : view === 'problems' ? (
+          <ProblemsPanel />
+        ) : view === 'tests' ? (
+          <TestExplorer />
+        ) : view === 'docker' ? (
+          <DockerPanel />
+        ) : view === 'agents' ? (
+          <AgentsPanel />
+        ) : (
+          <SshPanel onClose={() => setSidebarView('files')} />
+        )}
+      </Suspense>
     </div>
   );
 }
@@ -149,11 +162,23 @@ function railBadge(
 ): { color: string; pulse: boolean; title: string } | null {
   if (id === 'git' && gitCount > 0) {
     return gitConflicts > 0
-      ? { color: 'bg-status-err', pulse: true, title: `${gitConflicts} conflict${gitConflicts === 1 ? '' : 's'}` }
-      : { color: 'bg-accent-bright', pulse: false, title: `${gitCount} change${gitCount === 1 ? '' : 's'}` };
+      ? {
+          color: 'bg-status-err',
+          pulse: true,
+          title: `${gitConflicts} conflict${gitConflicts === 1 ? '' : 's'}`,
+        }
+      : {
+          color: 'bg-accent-bright',
+          pulse: false,
+          title: `${gitCount} change${gitCount === 1 ? '' : 's'}`,
+        };
   }
   if (id === 'ssh' && sshLive > 0) {
-    return { color: 'bg-status-ok', pulse: true, title: `${sshLive} live session${sshLive === 1 ? '' : 's'}` };
+    return {
+      color: 'bg-status-ok',
+      pulse: true,
+      title: `${sshLive} live session${sshLive === 1 ? '' : 's'}`,
+    };
   }
   return null;
 }
@@ -315,9 +340,7 @@ export function SidebarRail() {
 
 // ── Rail context menu ────────────────────────────────────────────────────────
 
-type RailMenuItem =
-  | { separator: true }
-  | { separator?: false; label: string; onClick: () => void };
+type RailMenuItem = { separator: true } | { separator?: false; label: string; onClick: () => void };
 
 const revealLabel = () =>
   typeof navigator !== 'undefined' && /Mac/i.test(navigator.platform)
@@ -445,9 +468,7 @@ function useRailMenu() {
     e.stopPropagation();
     setMenu({ x: e.clientX, y: e.clientY, view });
   };
-  const node = menu ? (
-    <RailContextMenu {...menu} onClose={() => setMenu(null)} />
-  ) : null;
+  const node = menu ? <RailContextMenu {...menu} onClose={() => setMenu(null)} /> : null;
   return { open, node };
 }
 

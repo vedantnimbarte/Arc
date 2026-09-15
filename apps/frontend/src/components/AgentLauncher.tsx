@@ -8,6 +8,7 @@ import { cn } from '../lib/cn';
 import { createRaceWorktrees } from '../lib/agentRace';
 import { useFiles } from '../state/files';
 import { toastError } from '../state/toast';
+import { AGENT_PANEL_W } from './agentPanelSize';
 
 /** A stable hue per agent from the shared tab-group palette — the same eight
  *  ARC already uses for workspaces and tab groups. Hand-assigned rather than
@@ -31,13 +32,6 @@ const AGENT_HUE: Record<AiCliId, TabGroupColorId> = {
   'pi-cli': 'amber',
   'wingman-cli': 'blue',
 };
-
-/** Footprint of the rendered panel, exported so the surfaces that anchor it
- *  (the top-bar button, the launcher's entry) can keep it inside the viewport
- *  without measuring. Approximate on purpose — a few pixels out just shifts the
- *  clamp, and the hosts pair it with a `max-h` backstop. */
-export const AGENT_PANEL_W = 318;
-export const AGENT_PANEL_H = 620;
 
 /** How many agents one launch can start. Four is where a tiled grid stops
  *  being readable on a laptop display — past that the panes are too narrow to
