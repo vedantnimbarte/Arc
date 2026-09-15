@@ -985,7 +985,7 @@ function DarkSwatch() {
 
 // ─── Shortcuts ─────────────────────────────────────────────────────────────
 
-const SHORTCUT_CATEGORIES: ActionCategory[] = ['Workspace', 'Terminal', 'Editor', 'SSH', 'AI CLIs', 'Help'];
+const SHORTCUT_CATEGORIES: ActionCategory[] = ['Workspace', 'Terminal', 'Editor', 'Debug', 'SSH', 'AI CLIs', 'Help'];
 
 function ShortcutsPane() {
   const overrides = useShortcuts((s) => s.overrides);

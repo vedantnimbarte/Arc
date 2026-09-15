@@ -34,6 +34,7 @@ arc-ssh = { workspace = true }
 arc-project-config = { workspace = true }
 arc-git-host = { workspace = true }
 arc-lsp = { workspace = true }
+arc-dap = { workspace = true }
 arc-wingman = { workspace = true }
 arc-claude-code = { workspace = true }
 arc-db = { workspace = true }

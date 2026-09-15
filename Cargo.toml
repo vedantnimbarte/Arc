@@ -11,6 +11,7 @@ members = [
     "rust/project-config",
     "rust/git-host",
     "rust/lsp",
+    "rust/dap",
     "rust/wingman",
     "rust/claude-code",
     "rust/db",
@@ -134,6 +135,7 @@ arc-ssh = { path = "rust/ssh" }
 arc-project-config = { path = "rust/project-config" }
 arc-git-host = { path = "rust/git-host" }
 arc-lsp = { path = "rust/lsp" }
+arc-dap = { path = "rust/dap" }
 arc-wingman = { path = "rust/wingman" }
 arc-claude-code = { path = "rust/claude-code" }
 arc-db = { path = "rust/db" }

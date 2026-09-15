@@ -768,6 +768,66 @@ export async function onLspEvent(id: string, handler: (ev: LspEvent) => void): P
   return listen<LspEvent>(`lsp://event/${id}`, (e) => handler(e.payload));
 }
 
+// ----- Debug adapters (DAP) ---------------------------------------------
+
+export interface DapStartParams {
+  command: string;
+  args: string[];
+  cwd: string | null;
+  /** `tcp`: `${port}` in `args` is replaced with a free port, then ARC
+   *  connects to it (dlv dap). */
+  transport: 'stdio' | 'tcp';
+  request: 'launch' | 'attach';
+  /** The launch configuration, passed through as the request arguments. */
+  config: Record<string, unknown>;
+  breakpoints: { path: string; lines: number[] }[];
+}
+
+export interface DapBreakpoint {
+  id?: number;
+  verified: boolean;
+  line?: number;
+  source?: { path?: string };
+  message?: string;
+}
+
+export interface DapStartResult {
+  capabilities: Record<string, unknown>;
+  breakpoints: { path: string; breakpoints: DapBreakpoint[] | null }[];
+}
+
+/** An adapter event, plus two synthesised by ARC: `output` (adapter stderr)
+ *  and `adapterExited`. */
+export interface DapEvent {
+  session_id: string;
+  event: string;
+  body: any;
+}
+
+/** Spawn an adapter and run the configuration handshake. Subscribe with
+ *  `onDapEvent` first — a `stopped` event can arrive before this resolves. */
+export async function dapStart(id: string, params: DapStartParams): Promise<DapStartResult> {
+  return invoke<DapStartResult>('dap_start', { id, params });
+}
+
+/** Any DAP request (`continue`, `stackTrace`, `variables`, …); resolves to
+ *  the response body. */
+export async function dapRequest<T = unknown>(
+  id: string,
+  command: string,
+  args: Record<string, unknown> = {},
+): Promise<T> {
+  return invoke<T>('dap_request', { id, command, arguments: args });
+}
+
+export async function dapStop(id: string): Promise<void> {
+  await invoke('dap_stop', { id });
+}
+
+export async function onDapEvent(id: string, handler: (ev: DapEvent) => void): Promise<UnlistenFn> {
+  return listen<DapEvent>(`dap://event/${id}`, (e) => handler(e.payload));
+}
+
 // ----- Session / persistence --------------------------------------------
 //
 // Nested struct fields (Tab, Workspace, ChatMessage) use snake_case to match
