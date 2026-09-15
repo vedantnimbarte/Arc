@@ -20,7 +20,20 @@ import {
   Columns2,
 } from 'lucide-react';
 import { fileIcon, MOCHA } from '../lib/fileIcons';
-import { fsReadFile, fsWriteFile, gitBlame, gitDiff, isTauri, type GitBlameLine } from '../lib/tauri';
+import {
+  fsReadFile,
+  fsWriteFile,
+  gitBlame,
+  gitDiff,
+  isTauri,
+  shellOpenExternal,
+  type GitBlameLine,
+} from '../lib/tauri';
+import {
+  CYCLE_MARKDOWN_PREVIEW_EVENT,
+  classifyMarkdownLink,
+  resolveMarkdownPath,
+} from '../lib/markdownLinks';
 import { changedLinesFromDiff, gitDiffGutter, setGitChanges } from '../lib/gitGutter';
 import { isRemotePath } from '../lib/remote';
 import { attachLsp, pathToFileUri, type LspAttachment } from '../lib/lspClient';
@@ -46,6 +59,9 @@ type Status =
   | { kind: 'saved'; at: number };
 
 type Mode = 'code' | 'preview' | 'split';
+
+/** Order the `toggle-markdown-preview` shortcut steps through. */
+const NEXT_MODE: Record<Mode, Mode> = { code: 'split', split: 'preview', preview: 'code' };
 
 export function Editor({ filePath, tabId }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -78,8 +94,8 @@ export function Editor({ filePath, tabId }: Props) {
    *  on doc changes when we're in preview or split mode without recreating
    *  the editor. */
   const modeRef = useRef<Mode>('code');
-  /** Coalesces preview re-renders across bursts of CM keystrokes. */
-  const previewFrameRef = useRef<number | null>(null);
+  /** Debounces preview re-renders across bursts of CM keystrokes. */
+  const previewTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const setTabDirty = useWorkspace((s) => s.setTabDirty);
   /** Pending "jump to line" for this tab — set by openFile when a terminal
    *  path link (or any caller) targets a specific line. */
@@ -98,22 +114,45 @@ export function Editor({ filePath, tabId }: Props) {
   const isMarkdown = useMemo(() => /\.(md|markdown|mdx)$/i.test(filePath), [filePath]);
 
   /** Render `currentSourceRef` into the preview pane (no-op if the pane
-   *  isn't mounted). Safe to call every keystroke — synchronous marked +
-   *  DOMPurify takes well under a frame for typical .md files. */
+   *  isn't mounted). Synchronous marked + DOMPurify takes well under a frame
+   *  for typical .md files. */
   const renderPreview = useCallback(() => {
     if (!previewRef.current) return;
-    previewRef.current.innerHTML = markdownToSafeHtml(currentSourceRef.current);
-  }, []);
+    previewRef.current.replaceChildren(markdownToSafeFragment(currentSourceRef.current, filePath));
+  }, [filePath]);
 
-  /** rAF-throttled preview render — used by the CodeMirror update
-   *  listener so a burst of keystrokes only re-renders once per frame. */
+  /** Debounced preview render — used by the CodeMirror update listener so a
+   *  burst of keystrokes re-renders once typing pauses. */
   const schedulePreviewRender = useCallback(() => {
-    if (previewFrameRef.current !== null) return;
-    previewFrameRef.current = requestAnimationFrame(() => {
-      previewFrameRef.current = null;
+    if (previewTimerRef.current !== null) clearTimeout(previewTimerRef.current);
+    previewTimerRef.current = setTimeout(() => {
+      previewTimerRef.current = null;
       renderPreview();
-    });
+    }, 150);
   }, [renderPreview]);
+
+  /** Preview links never navigate the webview: http(s) goes to the system
+   *  browser, relative markdown files open in ARC, anything else is inert. */
+  const onPreviewLinkClick = useCallback(
+    (e: React.MouseEvent) => {
+      const anchor = (e.target as HTMLElement).closest('a');
+      if (!anchor) return;
+      e.preventDefault();
+      const link = classifyMarkdownLink(filePath, anchor.getAttribute('href') ?? '');
+      if (link.kind === 'external') {
+        if (isTauri) {
+          void shellOpenExternal(link.url).catch((err) =>
+            console.error('[editor] failed to open link in browser:', err),
+          );
+        } else {
+          window.open(link.url, '_blank', 'noopener,noreferrer');
+        }
+      } else if (link.kind === 'file') {
+        useWorkspace.getState().openFile(link.path);
+      }
+    },
+    [filePath],
+  );
 
   /** Mode setter that handles the side effect of seeding the preview pane
    *  when we enter a mode that shows it. */
@@ -389,12 +428,23 @@ export function Editor({ filePath, tabId }: Props) {
 
   useEffect(() => {
     return () => {
-      if (previewFrameRef.current !== null) {
-        cancelAnimationFrame(previewFrameRef.current);
-        previewFrameRef.current = null;
+      if (previewTimerRef.current !== null) {
+        clearTimeout(previewTimerRef.current);
+        previewTimerRef.current = null;
       }
     };
   }, []);
+
+  // The `toggle-markdown-preview` shortcut / palette entry steps the active
+  // tab through code → split → preview.
+  useEffect(() => {
+    if (!isMarkdown) return;
+    const onCycle = (e: Event) => {
+      if ((e as CustomEvent<string>).detail === tabId) setMode(NEXT_MODE[modeRef.current]);
+    };
+    window.addEventListener(CYCLE_MARKDOWN_PREVIEW_EVENT, onCycle);
+    return () => window.removeEventListener(CYCLE_MARKDOWN_PREVIEW_EVENT, onCycle);
+  }, [isMarkdown, tabId, setMode]);
 
   // Live-toggle Vim keybindings without remounting the editor. Reconfigures
   // the dedicated compartment to the vim() extension (lazy-loaded) or back
@@ -608,6 +658,8 @@ export function Editor({ filePath, tabId }: Props) {
               )}
               aria-readonly="true"
               aria-label="Markdown preview"
+              onClick={onPreviewLinkClick}
+              onAuxClick={onPreviewLinkClick}
             />
           )}
         </div>
@@ -621,13 +673,27 @@ export function Editor({ filePath, tabId }: Props) {
  * call (it returns string with default options) and DOMPurify keeps the
  * surface safe even though the source is local-disk content — a malicious
  * .md could still embed e.g. `<script>` and we don't want that running.
+ * `<style>` would restyle the whole app and a `<form>` could navigate the
+ * webview, so both go too.
+ *
+ * Local images become their alt text: the webview can't load disk files
+ * without Tauri's asset protocol, which ARC leaves disabled.
+ * ponytail: enable `app.security.assetProtocol` (scoped to the workspace) and
+ * swap the replacement for `convertFileSrc(local)` to show them.
  */
-function markdownToSafeHtml(md: string): string {
+function markdownToSafeFragment(md: string, filePath: string): DocumentFragment {
   const rawHtml = marked.parse(md, { async: false, breaks: false, gfm: true }) as string;
-  return DOMPurify.sanitize(rawHtml, {
+  const fragment = DOMPurify.sanitize(rawHtml, {
     USE_PROFILES: { html: true },
-    ADD_ATTR: ['target', 'rel'],
+    FORBID_TAGS: ['style', 'form'],
+    RETURN_DOM_FRAGMENT: true,
   });
+  for (const img of fragment.querySelectorAll('img')) {
+    if (resolveMarkdownPath(filePath, img.getAttribute('src') ?? '')) {
+      img.replaceWith(img.getAttribute('alt') || '[image]');
+    }
+  }
+  return fragment;
 }
 
 function StatusLabel({ status, dirty }: { status: Status; dirty: boolean }) {
