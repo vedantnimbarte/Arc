@@ -7,8 +7,6 @@ import {
   ptyListAiClis,
   sessionLoad,
   sessionSaveTabs,
-  sessionScrollbackDelete,
-  sessionScrollbackPrune,
   type AiCliInfo,
   type SshHost,
   type TabInput,
@@ -906,10 +904,6 @@ export const useWorkspace = create<WorkspaceState>()((set, get) => ({
       return { tabs: [...s.tabs, tab], activeTabId: tab.id, ...placed };
     }),
   closeTab: (id) => {
-    // A tab the user closed is gone for good — its saved scrollback would
-    // otherwise sit in the DB until the next hydrate pruned it. Fire and
-    // forget; the prune on hydrate is the backstop if this write is lost.
-    if (isTauri) void sessionScrollbackDelete(id).catch(() => {});
     set((s) => {
       // Layout-aware close. Every tab is closable, the last one included:
       // closing the last tab in a *leaf* collapses the leaf (its sibling
@@ -1979,11 +1973,6 @@ export const useWorkspace = create<WorkspaceState>()((set, get) => ({
           serializeLayout(layout, focusedPaneId, tabGroups, tabs, workspaces, activeWorkspaceId),
         );
       }
-
-      // Reap scrollback for tabs that no longer exist — closed while the app
-      // was down, or lost to a failed delete. Best-effort: a full DB is not
-      // worth failing a launch over.
-      void sessionScrollbackPrune(tabs.map((t) => t.id)).catch(() => {});
 
       set({
         tabs,

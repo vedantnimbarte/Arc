@@ -20,8 +20,8 @@ it.
 
 - **Real PTY Terminal** — xterm.js frontend backed by portable-pty, supporting bash, zsh,
   PowerShell, cmd, Nu, WSL, and custom shells. GPU (WebGL) rendering, a find bar
-  (⌘F / Ctrl+Shift+F), named profiles (shell + args + cwd + env), scrollback that survives
-  a relaunch, clickable file paths, smart-paste warnings, long-command notifications, and
+  (⌘F / Ctrl+Shift+F), named profiles (shell + args + cwd + env),
+  clickable file paths, smart-paste warnings, long-command notifications, and
   per-tab command history (OSC 133).
 - **Scratch Buffers** — Open a throwaway file to jot in without naming or placing it
   (⇧⌘N, or pick a language from the palette). They're real files under the app data dir,
