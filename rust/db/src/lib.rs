@@ -110,6 +110,137 @@ impl Backend {
             Backend::Sqlite => format!("\"{}\"", ident.replace('"', "\"\"")),
         }
     }
+
+    /// Quote a string literal. `run` sends SQL unprepared, so the schema
+    /// queries can't bind parameters — the table name is inlined instead.
+    /// MySQL also treats backslash as an escape unless NO_BACKSLASH_ESCAPES
+    /// is set, so it gets doubled there too.
+    fn quote_literal(self, s: &str) -> String {
+        let s = match self {
+            Backend::Mysql => s.replace('\\', "\\\\"),
+            _ => s.to_string(),
+        };
+        format!("'{}'", s.replace('\'', "''"))
+    }
+
+    /// The three read-only catalog queries behind [`DbManager::schema`]:
+    /// columns, indexes, foreign keys. Each returns text cells in the order
+    /// `schema` reads them, with flags spelled `YES`/`NO` the way
+    /// `information_schema.columns.is_nullable` already is.
+    fn schema_sql(self, table: &str) -> [String; 3] {
+        match self {
+            Backend::Postgres => {
+                // Tables are listed as `schema.table`; a bare name falls back
+                // to the first schema on the search path.
+                let (schema, name) = match table.split_once('.') {
+                    Some((s, n)) => (self.quote_literal(s), self.quote_literal(n)),
+                    None => ("current_schema()".to_string(), self.quote_literal(table)),
+                };
+                let regclass = format!("{}::regclass", self.quote_literal(&self.quote_ident(table)));
+                [
+                    format!(
+                        "SELECT c.column_name, \
+                           CASE WHEN c.data_type IN ('USER-DEFINED', 'ARRAY') THEN c.udt_name ELSE c.data_type END, \
+                           c.is_nullable, c.column_default, \
+                           CASE WHEN EXISTS ( \
+                             SELECT 1 FROM information_schema.table_constraints tc \
+                             JOIN information_schema.key_column_usage k \
+                               ON k.constraint_schema = tc.constraint_schema \
+                              AND k.constraint_name = tc.constraint_name \
+                              AND k.table_name = tc.table_name \
+                             WHERE tc.constraint_type = 'PRIMARY KEY' \
+                               AND tc.table_schema = c.table_schema \
+                               AND tc.table_name = c.table_name \
+                               AND k.column_name = c.column_name \
+                           ) THEN 'YES' ELSE 'NO' END \
+                         FROM information_schema.columns c \
+                         WHERE c.table_schema = {schema} AND c.table_name = {name} \
+                         ORDER BY c.ordinal_position"
+                    ),
+                    // information_schema has no indexes. pg_index is the cheap
+                    // catalog, and pg_get_indexdef renders expression columns.
+                    format!(
+                        "SELECT i.relname, \
+                           (SELECT string_agg(pg_get_indexdef(ix.indexrelid, k, true), ', ' ORDER BY k) \
+                            FROM generate_series(1, ix.indnatts) k), \
+                           CASE WHEN ix.indisunique THEN 'YES' ELSE 'NO' END \
+                         FROM pg_index ix JOIN pg_class i ON i.oid = ix.indexrelid \
+                         WHERE ix.indrelid = {regclass} ORDER BY 1"
+                    ),
+                    // pg_constraint rather than information_schema: Postgres
+                    // constraint names are only unique per table, which makes
+                    // the information_schema joins ambiguous.
+                    format!(
+                        "SELECT c.conname, \
+                           (SELECT string_agg(a.attname, ', ' ORDER BY k) \
+                            FROM generate_subscripts(c.conkey, 1) k \
+                            JOIN pg_attribute a ON a.attrelid = c.conrelid AND a.attnum = c.conkey[k]), \
+                           c.confrelid::regclass::text || '(' || \
+                           (SELECT string_agg(a.attname, ', ' ORDER BY k) \
+                            FROM generate_subscripts(c.confkey, 1) k \
+                            JOIN pg_attribute a ON a.attrelid = c.confrelid AND a.attnum = c.confkey[k]) || ')' \
+                         FROM pg_constraint c \
+                         WHERE c.conrelid = {regclass} AND c.contype = 'f' ORDER BY 1"
+                    ),
+                ]
+            }
+            Backend::Mysql => {
+                let name = self.quote_literal(table);
+                [
+                    format!(
+                        "SELECT column_name, column_type, is_nullable, column_default, \
+                           CASE WHEN column_key = 'PRI' THEN 'YES' ELSE 'NO' END \
+                         FROM information_schema.columns \
+                         WHERE table_schema = DATABASE() AND table_name = {name} \
+                         ORDER BY ordinal_position"
+                    ),
+                    format!(
+                        "SELECT index_name, \
+                           GROUP_CONCAT(column_name ORDER BY seq_in_index SEPARATOR ', '), \
+                           CASE WHEN MIN(non_unique) = 0 THEN 'YES' ELSE 'NO' END \
+                         FROM information_schema.statistics \
+                         WHERE table_schema = DATABASE() AND table_name = {name} \
+                         GROUP BY index_name ORDER BY index_name"
+                    ),
+                    format!(
+                        "SELECT constraint_name, \
+                           GROUP_CONCAT(column_name ORDER BY ordinal_position SEPARATOR ', '), \
+                           CONCAT(MAX(referenced_table_name), '(', \
+                             GROUP_CONCAT(referenced_column_name ORDER BY ordinal_position SEPARATOR ', '), ')') \
+                         FROM information_schema.key_column_usage \
+                         WHERE table_schema = DATABASE() AND table_name = {name} \
+                           AND referenced_table_name IS NOT NULL \
+                         GROUP BY constraint_name ORDER BY constraint_name"
+                    ),
+                ]
+            }
+            Backend::Sqlite => {
+                let name = self.quote_literal(table);
+                [
+                    format!(
+                        "SELECT name, type, CASE WHEN \"notnull\" THEN 'NO' ELSE 'YES' END, dflt_value, \
+                           CASE WHEN pk > 0 THEN 'YES' ELSE 'NO' END \
+                         FROM pragma_table_info({name}) ORDER BY cid"
+                    ),
+                    format!(
+                        "SELECT il.name, \
+                           (SELECT group_concat(name, ', ') FROM \
+                             (SELECT name FROM pragma_index_info(il.name) ORDER BY seqno)), \
+                           CASE WHEN il.\"unique\" THEN 'YES' ELSE 'NO' END \
+                         FROM pragma_index_list({name}) il ORDER BY il.name"
+                    ),
+                    // SQLite foreign keys have no names. `to` is NULL when the
+                    // reference targets the parent's primary key implicitly.
+                    format!(
+                        "SELECT '', group_concat(\"from\", ', '), \
+                           \"table\" || ifnull('(' || group_concat(\"to\", ', ') || ')', '') \
+                         FROM (SELECT * FROM pragma_foreign_key_list({name}) ORDER BY id, seq) \
+                         GROUP BY id, \"table\""
+                    ),
+                ]
+            }
+        }
+    }
 }
 
 /// One query's results. `columns` is empty for statements that return no rows
@@ -123,6 +254,40 @@ pub struct QueryResult {
     pub duration_ms: u64,
     /// True when the server had more rows than [`MAX_ROWS`].
     pub truncated: bool,
+}
+
+/// Structure of one table, for the schema view. Read-only catalog data.
+#[derive(Debug, Clone, Serialize)]
+pub struct TableSchema {
+    pub columns: Vec<ColumnInfo>,
+    pub indexes: Vec<IndexInfo>,
+    pub foreign_keys: Vec<ForeignKeyInfo>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ColumnInfo {
+    pub name: String,
+    pub data_type: String,
+    pub nullable: bool,
+    pub default: Option<String>,
+    pub primary_key: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct IndexInfo {
+    pub name: String,
+    /// Comma-joined, in index order.
+    pub columns: String,
+    pub unique: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ForeignKeyInfo {
+    /// Empty on SQLite, whose foreign keys have no names.
+    pub name: String,
+    pub columns: String,
+    /// `table(col, …)`.
+    pub references: String,
 }
 
 enum Pool {
@@ -225,6 +390,56 @@ impl DbManager {
             limit.min(MAX_ROWS as u32)
         );
         run(&pool, &sql).await
+    }
+
+    /// Columns, indexes and foreign keys of `table`, read from the catalog.
+    pub async fn schema(&self, id: &str, table: &str) -> Result<TableSchema> {
+        let pool = self.clone_pool(id)?;
+        let [columns_sql, indexes_sql, fks_sql] = backend_of(&pool).schema_sql(table);
+        fn text(r: &mut [Option<String>], i: usize) -> Option<String> {
+            r.get_mut(i).and_then(Option::take)
+        }
+        fn yes(r: &mut [Option<String>], i: usize) -> bool {
+            text(r, i).as_deref() == Some("YES")
+        }
+
+        let columns = run(&pool, &columns_sql)
+            .await?
+            .rows
+            .into_iter()
+            .map(|mut r| ColumnInfo {
+                name: text(&mut r, 0).unwrap_or_default(),
+                data_type: text(&mut r, 1).unwrap_or_default(),
+                nullable: yes(&mut r, 2),
+                default: text(&mut r, 3),
+                primary_key: yes(&mut r, 4),
+            })
+            .collect();
+        let indexes = run(&pool, &indexes_sql)
+            .await?
+            .rows
+            .into_iter()
+            .map(|mut r| IndexInfo {
+                name: text(&mut r, 0).unwrap_or_default(),
+                columns: text(&mut r, 1).unwrap_or_default(),
+                unique: yes(&mut r, 2),
+            })
+            .collect();
+        let foreign_keys = run(&pool, &fks_sql)
+            .await?
+            .rows
+            .into_iter()
+            .map(|mut r| ForeignKeyInfo {
+                name: text(&mut r, 0).unwrap_or_default(),
+                columns: text(&mut r, 1).unwrap_or_default(),
+                references: text(&mut r, 2).unwrap_or_default(),
+            })
+            .collect();
+        Ok(TableSchema {
+            columns,
+            indexes,
+            foreign_keys,
+        })
     }
 
     fn clone_pool(&self, id: &str) -> Result<Pool> {
@@ -396,6 +611,54 @@ mod tests {
             "\"public\".\"Orders\""
         );
         assert_eq!(Backend::Postgres.quote_ident("a\"b"), "\"a\"\"b\"");
+    }
+
+    #[test]
+    fn literals_are_quoted_and_escaped() {
+        assert_eq!(Backend::Sqlite.quote_literal("o'k"), "'o''k'");
+        // Backslash is literal in standard Postgres strings, an escape in MySQL.
+        assert_eq!(Backend::Postgres.quote_literal("a\\b"), "'a\\b'");
+        assert_eq!(Backend::Mysql.quote_literal("a\\'b"), "'a\\\\''b'");
+    }
+
+    /// The SQLite schema queries against a real table: PK, NOT NULL, default,
+    /// a composite index in index order, and an implicit-PK foreign key. The
+    /// table name carries a quote to exercise the literal escaping.
+    #[tokio::test]
+    async fn sqlite_schema() {
+        let mgr = DbManager::new();
+        mgr.connect("s", "sqlite::memory:").await.unwrap();
+        mgr.query(
+            "s",
+            "CREATE TABLE parent (id INTEGER PRIMARY KEY); \
+             CREATE TABLE \"child's\" ( \
+               id INTEGER PRIMARY KEY, \
+               parent_id INTEGER NOT NULL REFERENCES parent, \
+               name TEXT DEFAULT 'x', \
+               age INT); \
+             CREATE UNIQUE INDEX child_name_age ON \"child's\" (age, name);",
+        )
+        .await
+        .unwrap();
+
+        let s = mgr.schema("s", "child's").await.unwrap();
+        let names: Vec<_> = s.columns.iter().map(|c| c.name.as_str()).collect();
+        assert_eq!(names, vec!["id", "parent_id", "name", "age"]);
+        assert!(s.columns[0].primary_key);
+        assert!(!s.columns[1].nullable && !s.columns[1].primary_key);
+        assert!(s.columns[2].nullable);
+        assert_eq!(s.columns[2].default.as_deref(), Some("'x'"));
+        assert_eq!(s.columns[3].default, None);
+        assert_eq!(s.columns[3].data_type, "INT");
+
+        assert_eq!(s.indexes.len(), 1);
+        assert_eq!(s.indexes[0].name, "child_name_age");
+        assert_eq!(s.indexes[0].columns, "age, name");
+        assert!(s.indexes[0].unique);
+
+        assert_eq!(s.foreign_keys.len(), 1);
+        assert_eq!(s.foreign_keys[0].columns, "parent_id");
+        assert_eq!(s.foreign_keys[0].references, "parent");
     }
 
     /// Round-trips a real query against an in-memory SQLite database: NULL

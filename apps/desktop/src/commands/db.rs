@@ -13,12 +13,13 @@
 //!   invoke("db_query",         { id, sql })           -> QueryResult
 //!   invoke("db_tables",        { id })                -> string[]
 //!   invoke("db_preview",       { id, table, limit })  -> QueryResult
+//!   invoke("db_table_schema",  { id, table })         -> TableSchema
 //!
 //! Passwords live in the OS credential vault, never in the database or in the
 //! stored URL — see `migrations/0015_db_and_merge_tabs.sql`. They are put back
 //! into the URL only in `db_connect`, in memory, on the way to sqlx.
 
-use arc_db::{Backend, DbManager, QueryResult};
+use arc_db::{Backend, DbManager, QueryResult, TableSchema};
 use arc_session_manager::{db, DbConnection, DbConnectionInput, SessionStore};
 use keyring::Entry;
 use tauri::State;
@@ -191,6 +192,19 @@ pub async fn db_preview(
     state
         .manager
         .preview(&id, &table, limit.unwrap_or(200))
+        .await
+        .map_err(|e| format!("{e:#}"))
+}
+
+#[tauri::command]
+pub async fn db_table_schema(
+    state: State<'_, DbState>,
+    id: String,
+    table: String,
+) -> Result<TableSchema, String> {
+    state
+        .manager
+        .schema(&id, &table)
         .await
         .map_err(|e| format!("{e:#}"))
 }

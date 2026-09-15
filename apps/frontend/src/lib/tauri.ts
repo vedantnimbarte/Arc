@@ -235,6 +235,11 @@ export async function fsPickFolder(starting?: string | null): Promise<string | n
   return invoke<string | null>('fs_pick_folder', { starting: starting ?? null });
 }
 
+/** Native save dialog. Returns the chosen path, or null when the user cancels. */
+export async function fsPickSaveFile(defaultName: string): Promise<string | null> {
+  return invoke<string | null>('fs_pick_save_file', { defaultName });
+}
+
 /** Native multi-file picker. Returns an empty array when the user cancels. */
 export async function fsPickFiles(starting?: string | null): Promise<string[]> {
   return invoke<string[]>('fs_pick_files', { starting: starting ?? null });
@@ -2919,4 +2924,23 @@ export async function dbTables(id: string): Promise<string[]> {
 
 export async function dbPreview(id: string, table: string, limit?: number): Promise<DbQueryResult> {
   return invoke<DbQueryResult>('db_preview', { id, table, limit: limit ?? null });
+}
+
+/** One table's structure, read from the catalog. Mirrors `arc_db::TableSchema`. */
+export interface DbTableSchema {
+  columns: Array<{
+    name: string;
+    data_type: string;
+    nullable: boolean;
+    default: string | null;
+    primary_key: boolean;
+  }>;
+  /** `columns` is comma-joined, in index order. */
+  indexes: Array<{ name: string; columns: string; unique: boolean }>;
+  /** `name` is empty on SQLite; `references` reads `table(col, …)`. */
+  foreign_keys: Array<{ name: string; columns: string; references: string }>;
+}
+
+export async function dbTableSchema(id: string, table: string): Promise<DbTableSchema> {
+  return invoke<DbTableSchema>('db_table_schema', { id, table });
 }
