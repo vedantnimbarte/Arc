@@ -28,6 +28,9 @@ export type ActionId =
   | 'debug-step-over'
   | 'debug-step-into'
   | 'debug-step-out'
+  | 'send-selection-to-agent'
+  | 'toggle-broadcast-input'
+  | 'next-waiting-agent'
   /** One launcher per detected CLI, derived from AI_CLIS — see LAUNCH_IDS. */
   | LaunchActionId
   | 'launch-wingman-pilot'
@@ -190,6 +193,24 @@ export const ACTION_META: Record<ActionId, ActionMeta> = {
     description: 'Run until the current function returns.',
     category: 'Debug',
   },
+  'send-selection-to-agent': {
+    id: 'send-selection-to-agent',
+    label: 'Send Selection to Agent',
+    description: 'Paste the text selected in the active terminal into a running agent CLI.',
+    category: 'Terminal',
+  },
+  'toggle-broadcast-input': {
+    id: 'toggle-broadcast-input',
+    label: 'Toggle Broadcast Input',
+    description: 'Type into every terminal in this workspace at once.',
+    category: 'Terminal',
+  },
+  'next-waiting-agent': {
+    id: 'next-waiting-agent',
+    label: 'Go to Waiting Agent',
+    description: 'Jump to the agent that has been waiting on you the longest.',
+    category: 'AI CLIs',
+  },
   ...(Object.fromEntries(
     LAUNCH_IDS.map((cli) => [
       `launch-${cli}`,
@@ -238,6 +259,9 @@ export const ACTION_ORDER: ActionId[] = [
   'debug-step-over',
   'debug-step-into',
   'debug-step-out',
+  'send-selection-to-agent',
+  'toggle-broadcast-input',
+  'next-waiting-agent',
   ...LAUNCH_IDS.map((cli) => `launch-${cli}` as LaunchActionId),
   'launch-wingman-pilot',
   'launch-wingman-headless',
@@ -274,6 +298,11 @@ export const DEFAULT_BINDINGS: Record<ActionId, KeyBinding | null> = {
   'debug-step-over': { code: 'F10', ctrl: false, meta: false, shift: false, alt: false },
   'debug-step-into': { code: 'F11', ctrl: false, meta: false, shift: false, alt: false },
   'debug-step-out': { code: 'F11', ctrl: false, meta: false, shift: true, alt: false },
+  // ⌥ rather than ⇧: ⇧⌘A is the JetBrains preset's action palette.
+  'send-selection-to-agent': { code: 'KeyA', shift: false, alt: true, ...mod() },
+  // iTerm's broadcast chord.
+  'toggle-broadcast-input': { code: 'KeyI', shift: false, alt: true, ...mod() },
+  'next-waiting-agent': { code: 'KeyJ', shift: false, alt: true, ...mod() },
   // AI CLI launchers ship unbound by default — users can assign keys via the
   // shortcuts dialog, and they're discoverable through the TabBar dropdown
   // and the new-tab popover regardless.

@@ -77,6 +77,26 @@ function formatValue(key: string, value: number): string {
   return COST_KEY.test(key) ? `$${value.toFixed(2)}` : value.toLocaleString('en-US');
 }
 
+/**
+ * Spend across every agent whose usage has been fetched: the first cost row of
+ * each summary, summed. `counted` says how many agents contributed, so a total
+ * built from one of three agents is never mistaken for the whole bill.
+ */
+export function totalCost(
+  summaries: ReadonlyArray<UsageSummary | null | undefined>,
+): { usd: number; counted: number } {
+  let usd = 0;
+  let counted = 0;
+  for (const summary of summaries) {
+    const row = summary?.rows.find((r) => /cost|usd|spend|price/i.test(r.label));
+    const value = row ? Number.parseFloat(row.value.replace(/[$,]/g, '')) : Number.NaN;
+    if (!Number.isFinite(value)) continue;
+    usd += value;
+    counted += 1;
+  }
+  return { usd, counted };
+}
+
 /** Numeric top-level fields of a plain object, in declaration order. */
 function numericRows(obj: Record<string, unknown>): UsageRow[] {
   const rows: UsageRow[] = [];

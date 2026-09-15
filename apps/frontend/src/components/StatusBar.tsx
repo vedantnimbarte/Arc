@@ -2,7 +2,9 @@ import { Suspense, lazy, useState } from 'react';
 import {
   ArrowDown,
   ArrowUp,
+  BellRing,
   CircleDollarSign,
+  Radio,
   Gauge,
   Command as CommandIcon,
   FolderOpen,
@@ -12,6 +14,7 @@ import type { BranchPickerAnchor } from './BranchPicker';
 import { useFiles } from '../state/files';
 import { useGit } from '../state/git';
 import { useSettings } from '../state/settings';
+import { useWorkspace } from '../state/workspace';
 import { useUsage } from '../state/usage';
 import type { PlanLimit } from '../lib/usage';
 import { runCommand } from '../state/commands';
@@ -45,6 +48,14 @@ export function StatusBar() {
   );
 
   const paletteKbd = formatBinding(getBinding('open-command-palette'));
+  const broadcastInput = useWorkspace((s) => s.broadcastInput);
+  const waitingCount = useWorkspace((s) => Object.keys(s.agentWaiting).length);
+  const waitingTitle = useWorkspace((s) =>
+    Object.keys(s.agentWaiting)
+      .map((id) => s.tabs.find((t) => t.id === id)?.title)
+      .filter(Boolean)
+      .join(', '),
+  );
   const [branchAnchor, setBranchAnchor] = useState<BranchPickerAnchor | null>(null);
 
   const usageAgents = useSettings((s) => s.usageAgents);
@@ -99,6 +110,30 @@ export function StatusBar() {
       )}
 
       <div className="flex-1" />
+
+      {/* Agents that stopped and want you. Clicking walks to the one that has
+          waited longest; typing into it clears it. */}
+      {waitingCount > 0 && (
+        <Item
+          icon={BellRing}
+          onClick={() => void runCommand('shortcut.next-waiting-agent')}
+          label={`${waitingCount} waiting`}
+          title={`Waiting on you: ${waitingTitle}`}
+          accent
+        />
+      )}
+
+      {/* Loud on purpose: typing into every terminal at once is exactly the
+          mode you must not forget you're in. */}
+      {broadcastInput && (
+        <Item
+          icon={Radio}
+          onClick={() => useWorkspace.getState().toggleBroadcastInput()}
+          label="Broadcasting"
+          title="Keystrokes go to every terminal in this workspace — click to stop"
+          danger
+        />
+      )}
 
       {usageAgents.length > 0 && (
         <Item

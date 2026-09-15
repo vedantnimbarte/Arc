@@ -76,6 +76,9 @@ import { useSettings, type TerminalProfile } from './state/settings';
 import { useAi } from './state/ai';
 import { autoConnectWingman, useWingman } from './state/wingman';
 import { useClaudeCode } from './state/claudeCode';
+import { getTerminal } from './lib/terminalRegistry';
+import { sendToAgent } from './lib/sendToAgent';
+import { selectionPrompt } from './lib/agentPrompt';
 
 // Palettes and dialogs mount only while open, so their code loads on first use.
 const CommandPalette = lazy(() =>
@@ -456,6 +459,25 @@ export default function App() {
       case 'debug-step-out':
         void useDebug.getState().step('stepOut');
         return;
+      case 'send-selection-to-agent': {
+        const text = activeTabId ? getTerminal(activeTabId)?.selection() : '';
+        if (text?.trim()) sendToAgent(selectionPrompt(text), 'Selection');
+        else toast('Select some terminal output first');
+        return;
+      }
+      case 'toggle-broadcast-input': {
+        const ws = useWorkspace.getState();
+        ws.toggleBroadcastInput();
+        toast(ws.broadcastInput ? 'Broadcast input off' : 'Broadcasting input to every terminal');
+        return;
+      }
+      case 'next-waiting-agent': {
+        const { agentWaiting, setActive } = useWorkspace.getState();
+        const next = Object.entries(agentWaiting).sort((a, b) => a[1].at - b[1].at)[0];
+        if (next) setActive(next[0]);
+        else toast('No agent is waiting on you');
+        return;
+      }
       case 'launch-wingman-pilot':
         void launchWingman('pilot');
         return;

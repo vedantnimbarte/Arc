@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { formatReset, parsePlanLimits, parseUsage } from '../usage';
+import { formatReset, parsePlanLimits, parseUsage, totalCost } from '../usage';
 
 describe('parseUsage', () => {
   it('reads ccusage-shaped output under a totals key', () => {
@@ -83,5 +83,14 @@ describe('parsePlanLimits', () => {
     expect(formatReset(now + 3 * 3_600_000 + 12 * 60_000, now)).toBe('Resets in 3h 12m');
     expect(formatReset(now + 59 * 60_000 + 30_000, now)).toBe('Resets in 1h 0m');
     expect(formatReset(now + 5 * 60_000, now)).toBe('Resets in 5m');
+  });
+});
+
+describe('totalCost', () => {
+  it('sums the cost row of each loaded agent and counts contributors', () => {
+    const claude = parseUsage('{"totals":{"inputTokens":10,"totalCost":1.25}}');
+    const codex = parseUsage('{"costUSD":2.5}');
+    const noCost = parseUsage('{"tokens":7}');
+    expect(totalCost([claude, codex, noCost, null])).toEqual({ usd: 3.75, counted: 2 });
   });
 });

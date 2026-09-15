@@ -22,7 +22,11 @@ it.
   PowerShell, cmd, Nu, WSL, and custom shells. GPU (WebGL) rendering, a find bar
   (⌘F / Ctrl+Shift+F), named profiles (shell + args + cwd + env),
   clickable file paths, smart-paste warnings, long-command notifications, and
-  per-tab command history (OSC 133).
+  per-tab command history (OSC 133). Inline images (sixel / iTerm protocol), highlight
+  rules that colour matching output and can notify ("ERROR", "listening on :3000"), and
+  broadcast input to type into every terminal in a workspace at once (⌥⌘I). Restored tabs
+  reopen in the folder their shell was last in; keys typed while a shell is still starting
+  are kept, not dropped.
 - **Scratch Buffers** — Open a throwaway file to jot in without naming or placing it
   (⇧⌘N, or pick a language from the palette). They're real files under the app data dir,
   so they save, highlight and restore like anything else.
@@ -85,6 +89,7 @@ it.
   tab rather than a cramped pane. Says plainly whether Docker is missing or just not
   running.
 - **Tabs & Workspaces** — Split panes, tab groups, and session state persisted to SQLite.
+  Tabs and layout come back on relaunch; terminal contents deliberately do not.
 - **Keymaps** — Every shortcut is rebindable, and one click swaps the whole set to a
   **VS Code** or **JetBrains** preset if that's what your hands already know.
 - **Themes** — Bundled dark/light plus Catppuccin, or import your own from a file or URL.
@@ -103,7 +108,9 @@ it.
   spend cap live in **Settings → Claude Code**.
 - **In-App Updates** — ARC checks for a new release on launch, offers it in a corner
   card, and installs it in place. Every download is minisign-verified against the key
-  baked into the build before it runs. Turn the check off in **Settings → About**.
+  baked into the build before it runs. Turn the check off in **Settings → About**, which
+  also exports and imports your settings as a file, and copies or saves a diagnostics report
+  (version, platform, crash log, and recent frontend errors) for bug reports.
 - **⌘K Command Bar** — Describe a command in plain English and get it typed onto the
   shell prompt for review; nothing runs until you press Enter. Needs an Anthropic API key
   (**Settings → Terminal**), stored in your OS credential vault.
@@ -117,6 +124,12 @@ it.
   so Source Control can narrow to just what the agent changed; staging, diffs and the commit box
   all follow the filter. It reads git rather than the agent's output, so it works identically for
   all thirteen.
+- **Send to Agent** — Hand a terminal selection (⌥⌘A), a problem, a failing test or a diff hunk to
+  a running agent CLI: it lands on the agent's input line for you to finish and send, falling back
+  to the Claude Code panel or the clipboard. The status bar counts agents waiting on you — turn
+  ended, bell, or gone quiet — and ⌥⌘J jumps to the one that has waited longest. The usage popup
+  totals spend across every configured agent. Optionally, tabs that were running Claude Code,
+  Codex, OpenCode or Aider relaunch and resume their last conversation (**Settings → Terminal**).
 
 ## Quick Start
 

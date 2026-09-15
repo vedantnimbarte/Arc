@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Check, ChevronDown, ChevronRight, RefreshCw, X } from 'lucide-react';
+import { Check, ChevronDown, ChevronRight, RefreshCw, Sparkles, X } from 'lucide-react';
 import { gitApply, gitDiff, type GitDiffScope } from '../lib/tauri';
 import { cn } from '../lib/cn';
+import { hunkPrompt } from '../lib/agentPrompt';
+import { sendToAgent } from '../lib/sendToAgent';
 
 interface Props {
   filePath: string;
@@ -292,6 +294,7 @@ export function DiffView({ filePath, diffRoot, diffScope }: Props) {
                 <HunkBlock
                   key={`${fi}-${hi}`}
                   hunk={hunk}
+                  file={relativePath}
                   scope={diffScope}
                   busy={busy}
                   onApply={applyHunk}
@@ -309,12 +312,14 @@ export function DiffView({ filePath, diffRoot, diffScope }: Props) {
 
 interface HunkBlockProps {
   hunk: DiffHunk;
+  /** Repo-relative path, for the agent prompt. */
+  file: string;
   scope: GitDiffScope;
   busy: boolean;
   onApply: (patch: string, cached: boolean, reverse: boolean) => void;
 }
 
-function HunkBlock({ hunk, scope, busy, onApply }: HunkBlockProps) {
+function HunkBlock({ hunk, file, scope, busy, onApply }: HunkBlockProps) {
   const [collapsed, setCollapsed] = useState(false);
 
   return (
@@ -331,6 +336,15 @@ function HunkBlock({ hunk, scope, busy, onApply }: HunkBlockProps) {
         <span className="flex-1 truncate font-mono text-xs text-fg-subtle/70">
           {hunk.header || '…'}
         </span>
+        <button
+          type="button"
+          onClick={() => sendToAgent(hunkPrompt(file, hunk.rawPatch))}
+          title="Send this hunk to an agent"
+          aria-label="Send this hunk to an agent"
+          className="rounded px-1 py-0.5 text-fg-muted transition hover:bg-surface-2 hover:text-fg-base"
+        >
+          <Sparkles size={11} />
+        </button>
 
         {/* Per-scope action buttons */}
         {scope === 'worktree' && (

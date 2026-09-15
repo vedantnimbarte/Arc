@@ -37,6 +37,7 @@ import {
   Upload,
   FolderOpen,
   CircleDollarSign,
+  Bell,
 } from 'lucide-react';
 import {
   DEFAULT_AI_MODEL,
@@ -66,6 +67,7 @@ import {
 } from '../lib/tauri';
 import { copyText } from '../lib/clipboard';
 import { toast, toastError } from '../state/toast';
+import { isValidPattern, type HighlightRule } from '../lib/highlightRules';
 import { ANTHROPIC_KEY_SECRET } from '../lib/ai';
 import { FontPicker } from './FontPicker';
 import { useFiles, type SidebarView } from '../state/files';
@@ -1618,6 +1620,15 @@ function TerminalPane({
       <TerminalProfilesSection />
 
       <Group
+        title="Agent tabs"
+        hint="Tabs that were running an agent CLI when ARC closed. Claude Code, Codex, OpenCode and Aider pick up their last conversation; other agents start fresh."
+      >
+        <RelaunchAgentsRow />
+      </Group>
+
+      <HighlightRulesSection />
+
+      <Group
         title="Command suggestions"
         hint="Press ⌘K / Ctrl+K in a terminal, describe what you want, and the suggested command lands on the prompt for you to read. Nothing runs until you press Enter yourself."
       >
@@ -1664,6 +1675,105 @@ function TerminalPane({
         </Rows>
       </Group>
     </>
+  );
+}
+
+function RelaunchAgentsRow() {
+  const on = useSettings((s) => s.relaunchAgentTabs);
+  const setOn = useSettings((s) => s.setRelaunchAgentTabs);
+  return (
+    <Rows>
+      <ToggleRow
+        label="Relaunch agents on startup"
+        hint="Off: those tabs come back as a plain shell in the same folder."
+        checked={on}
+        onChange={() => setOn(!on)}
+      />
+    </Rows>
+  );
+}
+
+/**
+ * Patterns that tint matching terminal output and can notify — "ERROR",
+ * "listening on :3000". Edits apply to open terminals straight away; a rule
+ * only sees output printed after it exists.
+ */
+function HighlightRulesSection() {
+  const rules = useSettings((s) => s.highlightRules);
+  const setRules = useSettings((s) => s.setHighlightRules);
+  const update = (id: string, patch: Partial<HighlightRule>) =>
+    setRules(rules.map((r) => (r.id === id ? { ...r, ...patch } : r)));
+  const add = () =>
+    setRules([
+      ...rules,
+      { id: `hl-${Date.now().toString(36)}`, pattern: '', color: '#e5534b', notify: false, enabled: true },
+    ]);
+  const input =
+    'min-w-0 flex-1 rounded-md border border-edge-2 bg-bg-base/50 px-2 py-1 font-mono text-sm text-fg-base focus:border-accent/45 focus:outline-none';
+  return (
+    <Group
+      title="Highlight rules"
+      hint="Regular expressions, case-insensitive, matched per output line. The first rule that matches colours the line; turn on the bell to be notified too."
+      action={
+        <button
+          onClick={add}
+          className="flex items-center gap-1 rounded-md px-2 py-1 font-display text-xs text-fg-muted transition-colors hover:bg-surface-2 hover:text-fg-base"
+        >
+          <Plus size={11} strokeWidth={2.2} /> Add rule
+        </button>
+      }
+    >
+      <Panel className="space-y-2">
+        {rules.length === 0 && <p className="font-display text-xs text-fg-subtle">No rules yet.</p>}
+        {rules.map((r) => {
+          const valid = isValidPattern(r.pattern);
+          return (
+            <div key={r.id} className="flex items-center gap-2">
+              <Switch
+                checked={r.enabled}
+                onChange={() => update(r.id, { enabled: !r.enabled })}
+                ariaLabel="Rule enabled"
+              />
+              <input
+                value={r.pattern}
+                onChange={(e) => update(r.id, { pattern: e.target.value })}
+                placeholder="error|failed"
+                aria-label="Pattern"
+                aria-invalid={!valid}
+                className={cn(input, !valid && 'border-status-err/60')}
+              />
+              <input
+                type="color"
+                value={r.color}
+                onChange={(e) => update(r.id, { color: e.target.value })}
+                aria-label="Highlight colour"
+                className="h-7 w-8 shrink-0 cursor-pointer rounded border border-edge-2 bg-transparent"
+              />
+              <button
+                onClick={() => update(r.id, { notify: !r.notify })}
+                title={r.notify ? 'Notifies on match' : 'Highlight only'}
+                aria-label="Notify on match"
+                aria-pressed={r.notify}
+                className={cn(
+                  'rounded-md p-1.5 transition-colors hover:bg-surface-2',
+                  r.notify ? 'text-accent-bright' : 'text-fg-subtle',
+                )}
+              >
+                <Bell size={12} strokeWidth={2.1} />
+              </button>
+              <button
+                onClick={() => setRules(rules.filter((x) => x.id !== r.id))}
+                title="Delete rule"
+                aria-label="Delete rule"
+                className="rounded-md p-1.5 text-fg-subtle transition-colors hover:bg-surface-2 hover:text-fg-base"
+              >
+                <Trash2 size={12} strokeWidth={2.1} />
+              </button>
+            </div>
+          );
+        })}
+      </Panel>
+    </Group>
   );
 }
 

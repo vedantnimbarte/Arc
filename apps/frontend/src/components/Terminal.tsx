@@ -38,6 +38,7 @@ import { getFont, resolveActiveTheme } from '../themes';
 import { every } from '../lib/ticker';
 import { compileRules, matchLine } from '../lib/highlightRules';
 import { AGENT_RESUME_ARGS, isTerminalReply } from '../lib/agentResume';
+import { registerTerminal } from '../lib/terminalRegistry';
 
 interface Props {
   /** Stable id for the terminal (tab id). Also serves as the React-effect
@@ -455,6 +456,11 @@ export function Terminal({ sessionKey }: Props) {
     // xterm's own replies to terminal queries (ConPTY's cursor-position
     // request among them) that arrive in the same window. Queue until the
     // PTY exists, then flush in order.
+    const unregister = registerTerminal(sessionKey, {
+      paste: (text) => term.paste(text),
+      selection: () => term.getSelection(),
+      focus: () => term.focus(),
+    });
     const earlyInput: string[] = [];
     const forwardInput = term.onData((data) => {
       if (ptyId) ptyWrite(ptyId, data).catch(() => {});
@@ -1067,6 +1073,7 @@ export function Terminal({ sessionKey }: Props) {
       disposed = true;
       stopAgentIdleTimer?.();
       forwardInput.dispose();
+      unregister();
       unsubWriteParsed.dispose();
       unsubRules();
       cancelAnimationFrame(rafId);
