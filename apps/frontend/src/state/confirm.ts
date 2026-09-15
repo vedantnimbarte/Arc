@@ -17,7 +17,7 @@ export interface AskRequest {
   /** Paints the affirmative button as a warning. */
   destructive?: boolean;
   /** Present means the dialog collects text — the `window.prompt` case. */
-  input?: { label: string; value?: string; placeholder?: string };
+  input?: { label: string; value?: string; placeholder?: string; multiline?: boolean };
 }
 
 type Pending = AskRequest & { resolve: (value: string | null) => void };

@@ -14,7 +14,7 @@ export function ConfirmDialog() {
   const settle = useConfirm((s) => s.settle);
 
   const [text, setText] = useState('');
-  const inputRef = useRef<HTMLInputElement>(null);
+  const inputRef = useRef<HTMLInputElement & HTMLTextAreaElement>(null);
   const okRef = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
@@ -59,8 +59,10 @@ export function ConfirmDialog() {
             e.stopPropagation();
             cancel();
           } else if (e.key === 'Enter') {
-            e.preventDefault();
             e.stopPropagation();
+            // A multi-line field keeps plain Enter for newlines; Ctrl/⌘+Enter commits.
+            if (input?.multiline && !e.ctrlKey && !e.metaKey) return;
+            e.preventDefault();
             accept();
           }
         }}
@@ -90,14 +92,26 @@ export function ConfirmDialog() {
             <span className="font-display text-2xs uppercase tracking-wider text-fg-subtle">
               {input.label}
             </span>
-            <input
-              ref={inputRef}
-              value={text}
-              onChange={(e) => setText(e.target.value)}
-              placeholder={input.placeholder}
-              spellCheck={false}
-              className="min-w-0 rounded-md border border-edge-1 bg-scrim-1 px-2.5 py-1.5 font-display text-sm text-fg-base placeholder:text-fg-subtle focus:border-accent/40 focus:bg-scrim-2 focus:shadow-focus focus:outline-none"
-            />
+            {input.multiline ? (
+              <textarea
+                ref={inputRef}
+                value={text}
+                onChange={(e) => setText(e.target.value)}
+                placeholder={input.placeholder}
+                spellCheck={false}
+                rows={8}
+                className="min-w-0 resize-y rounded-md border border-edge-1 bg-scrim-1 px-2.5 py-1.5 font-mono text-xs text-fg-base placeholder:text-fg-subtle focus:border-accent/40 focus:bg-scrim-2 focus:shadow-focus focus:outline-none"
+              />
+            ) : (
+              <input
+                ref={inputRef}
+                value={text}
+                onChange={(e) => setText(e.target.value)}
+                placeholder={input.placeholder}
+                spellCheck={false}
+                className="min-w-0 rounded-md border border-edge-1 bg-scrim-1 px-2.5 py-1.5 font-display text-sm text-fg-base placeholder:text-fg-subtle focus:border-accent/40 focus:bg-scrim-2 focus:shadow-focus focus:outline-none"
+              />
+            )}
           </label>
         )}
 
