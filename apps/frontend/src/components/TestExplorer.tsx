@@ -9,12 +9,15 @@ import {
   RefreshCw,
   X,
   XCircle,
+  Sparkles,
 } from 'lucide-react';
 import { useFiles } from '../state/files';
 import { useWorkspace } from '../state/workspace';
 import { statusOf, targetKey, useTests, type Target, type TestStatus } from '../state/tests';
 import { frameworkLabel, type Framework, type TestFile } from '../lib/testDiscovery';
 import { isTauri } from '../lib/tauri';
+import { testFailurePrompt } from '../lib/agentPrompt';
+import { sendToAgent } from '../lib/sendToAgent';
 import { cn } from '../lib/cn';
 
 /**
@@ -113,6 +116,17 @@ export function TestExplorer() {
             <span className="shrink-0 font-sans text-2xs text-fg-subtle">
               {shownOutcome.durationMs} ms
             </span>
+            {shownOutcome.status === 'fail' && (
+              <button
+                type="button"
+                onClick={() => sendToAgent(testFailurePrompt(shownOutcome.command, shownOutcome.output))}
+                title="Send this failure to an agent"
+                aria-label="Send this failure to an agent"
+                className="shrink-0 text-fg-muted hover:text-fg-base"
+              >
+                <Sparkles size={12} />
+              </button>
+            )}
             <button
               type="button"
               onClick={() => setOpenOutput(null)}

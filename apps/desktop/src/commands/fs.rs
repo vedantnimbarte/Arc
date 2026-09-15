@@ -7,6 +7,7 @@
 //!   invoke("fs_read_dir",   { path })      -> Vec<DirEntry>
 //!   invoke("fs_parent",     { path })      -> Option<String>
 //!   invoke("fs_pick_folder", { starting? })-> Option<String>
+//!   invoke("fs_pick_save_file", { defaultName }) -> Option<String>
 //!   invoke("fs_read_file",  { path })      -> String (utf-8)
 //!   invoke("fs_write_file", { path, content }) -> ()
 //!   invoke("fs_watch_start", { path })     -> String (watchId)
@@ -66,6 +67,13 @@ pub async fn fs_scratch_file(ext: String) -> Result<String, String> {
 #[tauri::command]
 pub async fn fs_pick_folder(starting: Option<String>) -> Result<Option<String>, String> {
     arc_filesystem::pick_folder(starting)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn fs_pick_save_file(default_name: String) -> Result<Option<String>, String> {
+    arc_filesystem::pick_save_file(default_name)
         .await
         .map_err(|e| e.to_string())
 }

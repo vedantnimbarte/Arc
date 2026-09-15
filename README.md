@@ -22,13 +22,18 @@ it.
   PowerShell, cmd, Nu, WSL, and custom shells. GPU (WebGL) rendering, a find bar
   (⌘F / Ctrl+Shift+F), named profiles (shell + args + cwd + env),
   clickable file paths, smart-paste warnings, long-command notifications, and
-  per-tab command history (OSC 133).
+  per-tab command history (OSC 133). Inline images (sixel / iTerm protocol), highlight
+  rules that colour matching output and can notify ("ERROR", "listening on :3000"), and
+  broadcast input to type into every terminal in a workspace at once (⌥⌘I). Restored tabs
+  reopen in the folder their shell was last in; keys typed while a shell is still starting
+  are kept, not dropped.
 - **Scratch Buffers** — Open a throwaway file to jot in without naming or placing it
   (⇧⌘N, or pick a language from the palette). They're real files under the app data dir,
   so they save, highlight and restore like anything else.
 - **Code Editor** — CodeMirror 6 with syntax highlighting, multi-cursor, optional Vim mode,
   optional LSP (diagnostics, hover, completion, go-to-definition, find references, rename,
-  and format-on-save), and real-time file watching.
+  and format-on-save), real-time file watching, and a live Markdown preview (source,
+  side-by-side or rendered; ⇧⌘D).
 - **File Tree & Search** — Browse, open, and manage files with git status decorations, plus
   BM25 full-text search backed by a tantivy index and a literal find-and-replace across
   the workspace (previewed per file before anything is written).
@@ -52,16 +57,20 @@ it.
   conflicts open in a three-way view that resolves one hunk at a time — take ours,
   theirs, both, or hand-edit the result — then writes and stages the file.
 - **SSH Client** — Pure-Rust SSH (russh) with saved hosts, key generation/import, and
-  per-session logs.
+  per-session logs. Local (`-L`) and remote (`-R`) port forwards can be saved per host
+  to start on connect, or added and stopped on a live session; a host can connect
+  through one jump host (ProxyJump), for SSH tabs and remote workspaces alike.
 - **Remote Workspaces** — Mount a saved SSH host's filesystem as the workspace root over
   SFTP: browse the remote tree, open files, and save straight back. The file-tree
   connection is separate from any SSH terminal tab, so closing the shell doesn't take
   the tree down. Local-only features (git, content search, LSP, the task runner) sit out
   rather than misreport — the terminal for that host is an SSH tab.
-- **API Client** — A built-in Postman-style REST client (collections, environments, history).
+- **API Client** — A built-in Postman-style REST client (collections, environments, history, GraphQL bodies, cURL import/copy, OpenAPI 3.x JSON import).
 - **Database Client** — Query PostgreSQL, MySQL, and SQLite from a tab: saved connections,
-  a table list, a SQL editor, and a results grid. Passwords go to your OS credential
-  vault; only `user@host` is stored alongside the connection.
+  a table list with a per-table schema view (columns, indexes, foreign keys), a SQL editor,
+  and a results grid you can export to CSV or JSON. `DROP`, `TRUNCATE`, and `UPDATE`/`DELETE`
+  without a `WHERE` ask before they run. Passwords go to your OS credential vault; only
+  `user@host` is stored alongside the connection.
 - **Problems Panel** — Runs the project's own checkers — `tsc`, `cargo check`, ESLint,
   Ruff, `go vet` — and turns what they print into rows that open the file at the offending
   line. Whichever apply are detected from the workspace root; run them all or one at a
@@ -70,11 +79,17 @@ it.
 - **Test Explorer** — Discovers vitest, jest, pytest, `cargo test`, and `go test` suites
   and runs any framework, file, or single test from the sidebar. A failed row opens the
   runner's actual output.
+- **Debugger** — A Debug Adapter Protocol client that drives adapters you already have
+  installed: debugpy (`python -m debugpy.adapter`), `lldb-dap` / `lldb-vscode` for
+  C, C++ and Rust, and Delve (`dlv dap`, over TCP) for Go. Reads `.vscode/launch.json`
+  or offers quick configs, with gutter breakpoints, stepping (F5 / F10 / F11), call
+  stack, a lazily expanded variables tree, and a debug console.
 - **Containers** — Lists Docker containers, running or not, grouped by compose project,
   with start / stop / restart / remove on each row. Logs and `compose up` open a terminal
   tab rather than a cramped pane. Says plainly whether Docker is missing or just not
   running.
 - **Tabs & Workspaces** — Split panes, tab groups, and session state persisted to SQLite.
+  Tabs and layout come back on relaunch; terminal contents deliberately do not.
 - **Keymaps** — Every shortcut is rebindable, and one click swaps the whole set to a
   **VS Code** or **JetBrains** preset if that's what your hands already know.
 - **Themes** — Bundled dark/light plus Catppuccin, or import your own from a file or URL.
@@ -93,7 +108,9 @@ it.
   spend cap live in **Settings → Claude Code**.
 - **In-App Updates** — ARC checks for a new release on launch, offers it in a corner
   card, and installs it in place. Every download is minisign-verified against the key
-  baked into the build before it runs. Turn the check off in **Settings → About**.
+  baked into the build before it runs. Turn the check off in **Settings → About**, which
+  also exports and imports your settings as a file, and copies or saves a diagnostics report
+  (version, platform, crash log, and recent frontend errors) for bug reports.
 - **⌘K Command Bar** — Describe a command in plain English and get it typed onto the
   shell prompt for review; nothing runs until you press Enter. Needs an Anthropic API key
   (**Settings → Terminal**), stored in your OS credential vault.
@@ -107,6 +124,12 @@ it.
   so Source Control can narrow to just what the agent changed; staging, diffs and the commit box
   all follow the filter. It reads git rather than the agent's output, so it works identically for
   all thirteen.
+- **Send to Agent** — Hand a terminal selection (⌥⌘A), a problem, a failing test or a diff hunk to
+  a running agent CLI: it lands on the agent's input line for you to finish and send, falling back
+  to the Claude Code panel or the clipboard. The status bar counts agents waiting on you — turn
+  ended, bell, or gone quiet — and ⌥⌘J jumps to the one that has waited longest. The usage popup
+  totals spend across every configured agent. Optionally, tabs that were running Claude Code,
+  Codex, OpenCode or Aider relaunch and resume their last conversation (**Settings → Terminal**).
 
 ## Quick Start
 

@@ -14,8 +14,7 @@ import { useFiles } from '../state/files';
 import { useWorkspace } from '../state/workspace';
 import { allProblems, useProblems } from '../state/problems';
 import { problemsPrompt } from '../lib/agentPrompt';
-import { useClaudeCode } from '../state/claudeCode';
-import { copyText } from '../lib/clipboard';
+import { sendToAgent as sendPrompt } from '../lib/sendToAgent';
 import { countBySeverity, groupByFile, type Problem, type Severity } from '../lib/problemMatchers';
 import { isRemotePath } from '../lib/remote';
 import { fileIcon } from '../lib/fileIcons';
@@ -54,17 +53,7 @@ export function ProblemsPanel() {
    * silently doing nothing — every other supported agent runs in a terminal
    * ARC cannot type a multi-line prompt into safely.
    */
-  const sendToAgent = () => {
-    const prompt = problemsPrompt(problems);
-    const claude = useClaudeCode.getState();
-    if (claude.status === 'ready') {
-      useFiles.getState().setAgentPanelTab('claude');
-      useFiles.getState().showSidebarView('agents');
-      void claude.send(prompt);
-      return;
-    }
-    copyText(prompt, 'Agent prompt');
-  };
+  const sendToAgent = () => sendPrompt(problemsPrompt(problems));
   const anyRunning = Object.keys(running).length > 0;
   const ranAnything = Object.keys(results).length > 0;
 
@@ -236,12 +225,12 @@ export function ProblemsPanel() {
               </button>
               {!isCollapsed &&
                 list.map((p, i) => (
+                  <div key={`${p.line}:${p.column}:${i}`} className="group relative">
                   <button
-                    key={`${p.line}:${p.column}:${i}`}
                     type="button"
                     onClick={() => open(p)}
                     disabled={!p.file}
-                    className="flex w-full items-start gap-1.5 py-1 pl-6 pr-2 text-left hover:bg-surface-1 disabled:cursor-default"
+                    className="flex w-full items-start gap-1.5 py-1 pl-6 pr-7 text-left hover:bg-surface-1 disabled:cursor-default"
                   >
                     <SeverityIcon severity={p.severity} />
                     <span className="min-w-0 flex-1">
@@ -255,6 +244,16 @@ export function ProblemsPanel() {
                       </span>
                     </span>
                   </button>
+                  <button
+                    type="button"
+                    onClick={() => sendPrompt(problemsPrompt([p]))}
+                    title="Send this problem to an agent"
+                    aria-label="Send this problem to an agent"
+                    className="absolute right-1.5 top-1 hidden h-5 w-5 items-center justify-center rounded text-fg-muted hover:bg-surface-2 hover:text-fg-base focus-visible:flex group-hover:flex"
+                  >
+                    <Sparkles size={11} />
+                  </button>
+                  </div>
                 ))}
             </div>
           );

@@ -5,7 +5,7 @@ import { popoverPosition, type BranchPickerAnchor } from './BranchPicker';
 import { Select, type SelectOption } from './Select';
 import { useSettings } from '../state/settings';
 import { isClaudeAgent, useUsage } from '../state/usage';
-import { formatReset, type PlanLimit, type UsageSummary } from '../lib/usage';
+import { formatReset, totalCost, type PlanLimit, type UsageSummary } from '../lib/usage';
 import { cn } from '../lib/cn';
 
 interface Props {
@@ -50,6 +50,7 @@ export function UsagePopover({ anchor, onClose }: Props) {
 
   const options: SelectOption<string>[] = agents.map((a) => ({ value: a.id, label: a.name }));
   const isLoading = !!agent && loading === agent.id;
+  const total = totalCost(agents.map((a) => results[a.id]?.summary));
   const pos = popoverPosition(anchor, window.innerWidth, window.innerHeight);
 
   return createPortal(
@@ -143,6 +144,25 @@ export function UsagePopover({ anchor, onClose }: Props) {
             )
           )}
         </div>
+
+        {/* Across agents — only worth a row once there is more than one. */}
+        {agents.length > 1 && (
+          <div className="flex items-center gap-2 border-t border-border-hairline px-3.5 py-2 font-display text-2xs text-fg-subtle">
+            <span className="flex-1">
+              All agents
+              {total.counted < agents.length && ` (${total.counted} of ${agents.length} loaded)`}
+            </span>
+            <span className="font-mono tabular-nums text-fg-base">${total.usd.toFixed(2)}</span>
+            <button
+              type="button"
+              onClick={() => agents.forEach((a) => void refresh(a))}
+              disabled={loading !== null}
+              className="rounded px-1.5 py-0.5 text-fg-muted transition-colors hover:bg-surface-2 hover:text-fg-base disabled:opacity-45"
+            >
+              Load all
+            </button>
+          </div>
+        )}
       </div>
     </div>,
     document.body,

@@ -235,6 +235,11 @@ export async function fsPickFolder(starting?: string | null): Promise<string | n
   return invoke<string | null>('fs_pick_folder', { starting: starting ?? null });
 }
 
+/** Native save dialog. Returns the chosen path, or null when the user cancels. */
+export async function fsPickSaveFile(defaultName: string): Promise<string | null> {
+  return invoke<string | null>('fs_pick_save_file', { defaultName });
+}
+
 /** Native multi-file picker. Returns an empty array when the user cancels. */
 export async function fsPickFiles(starting?: string | null): Promise<string[]> {
   return invoke<string[]>('fs_pick_files', { starting: starting ?? null });
@@ -763,6 +768,66 @@ export async function onLspEvent(id: string, handler: (ev: LspEvent) => void): P
   return listen<LspEvent>(`lsp://event/${id}`, (e) => handler(e.payload));
 }
 
+// ----- Debug adapters (DAP) ---------------------------------------------
+
+export interface DapStartParams {
+  command: string;
+  args: string[];
+  cwd: string | null;
+  /** `tcp`: `${port}` in `args` is replaced with a free port, then ARC
+   *  connects to it (dlv dap). */
+  transport: 'stdio' | 'tcp';
+  request: 'launch' | 'attach';
+  /** The launch configuration, passed through as the request arguments. */
+  config: Record<string, unknown>;
+  breakpoints: { path: string; lines: number[] }[];
+}
+
+export interface DapBreakpoint {
+  id?: number;
+  verified: boolean;
+  line?: number;
+  source?: { path?: string };
+  message?: string;
+}
+
+export interface DapStartResult {
+  capabilities: Record<string, unknown>;
+  breakpoints: { path: string; breakpoints: DapBreakpoint[] | null }[];
+}
+
+/** An adapter event, plus two synthesised by ARC: `output` (adapter stderr)
+ *  and `adapterExited`. */
+export interface DapEvent {
+  session_id: string;
+  event: string;
+  body: any;
+}
+
+/** Spawn an adapter and run the configuration handshake. Subscribe with
+ *  `onDapEvent` first — a `stopped` event can arrive before this resolves. */
+export async function dapStart(id: string, params: DapStartParams): Promise<DapStartResult> {
+  return invoke<DapStartResult>('dap_start', { id, params });
+}
+
+/** Any DAP request (`continue`, `stackTrace`, `variables`, …); resolves to
+ *  the response body. */
+export async function dapRequest<T = unknown>(
+  id: string,
+  command: string,
+  args: Record<string, unknown> = {},
+): Promise<T> {
+  return invoke<T>('dap_request', { id, command, arguments: args });
+}
+
+export async function dapStop(id: string): Promise<void> {
+  await invoke('dap_stop', { id });
+}
+
+export async function onDapEvent(id: string, handler: (ev: DapEvent) => void): Promise<UnlistenFn> {
+  return listen<DapEvent>(`dap://event/${id}`, (e) => handler(e.payload));
+}
+
 // ----- Session / persistence --------------------------------------------
 //
 // Nested struct fields (Tab, Workspace, ChatMessage) use snake_case to match
@@ -931,6 +996,12 @@ export interface PersistedSettings {
   /** Agents listed in the status bar's usage popup. Validated on load by
    *  `coerceUsageAgents` — this row is user-editable on disk. */
   usageAgents?: unknown;
+  /** Terminal output highlight rules. Validated on load by
+   *  `coerceHighlightRules`. */
+  highlightRules?: unknown;
+  /** Re-launch agent CLIs (resuming their last conversation) in tabs that
+   *  were running one when ARC closed. */
+  relaunchAgentTabs?: boolean;
 }
 
 /** Returns the stored settings blob, or `null` on first launch. */
@@ -983,6 +1054,12 @@ export async function diagnosticsSummary(): Promise<DiagnosticsSummary | null> {
 export async function diagnosticsCollect(): Promise<string> {
   if (!isTauri) return 'ARC (browser build — no diagnostics available)';
   return invoke<string>('diagnostics_collect');
+}
+
+/** Append one line to `<data_dir>/arc/frontend.log`. See `lib/errorLog.ts`. */
+export async function diagnosticsLogError(message: string): Promise<void> {
+  if (!isTauri) return;
+  await invoke('diagnostics_log_error', { message });
 }
 
 export async function diagnosticsClear(): Promise<void> {
@@ -2189,6 +2266,26 @@ export interface SshHost {
   startup_cmd: string | null;
   created_at: number;
   last_used_at: number | null;
+  /** Another saved host to connect through (ProxyJump). */
+  jump_host_id: string | null;
+  /** Started automatically with every session to this host. */
+  forwards: SshForwardSpec[];
+}
+
+/** `local` = `-L` (listen on 127.0.0.1 here), `remote` = `-R` (listen on the
+ *  server's loopback). */
+export interface SshForwardSpec {
+  kind: 'local' | 'remote';
+  bind_port: number;
+  dest_host: string;
+  dest_port: number;
+}
+
+/** A forward on a live session. */
+export interface SshForwardInfo extends SshForwardSpec {
+  id: string;
+  state: 'active' | 'stopped' | 'failed';
+  error: string | null;
 }
 
 export interface SshHostInput {
@@ -2201,6 +2298,8 @@ export interface SshHostInput {
   identity_id?: string | null;
   keepalive_secs?: number;
   startup_cmd?: string | null;
+  jump_host_id?: string | null;
+  forwards?: SshForwardSpec[];
 }
 
 export interface SshKey {
@@ -2287,6 +2386,26 @@ export async function sshResize(id: SshId, cols: number, rows: number): Promise<
 
 export async function sshClose(id: SshId): Promise<void> {
   await invoke('ssh_close', { id });
+}
+
+export async function sshForwardList(id: SshId): Promise<SshForwardInfo[]> {
+  return invoke<SshForwardInfo[]>('ssh_forward_list', { id });
+}
+
+export async function sshForwardAdd(id: SshId, spec: SshForwardSpec): Promise<SshForwardInfo[]> {
+  return invoke<SshForwardInfo[]>('ssh_forward_add', { id, spec });
+}
+
+export async function sshForwardSetActive(
+  id: SshId,
+  forwardId: string,
+  active: boolean,
+): Promise<SshForwardInfo[]> {
+  return invoke<SshForwardInfo[]>('ssh_forward_set_active', { id, forwardId, active });
+}
+
+export async function sshForwardRemove(id: SshId, forwardId: string): Promise<SshForwardInfo[]> {
+  return invoke<SshForwardInfo[]>('ssh_forward_remove', { id, forwardId });
 }
 
 // ─── Host key verification ───────────────────────────────────────────────
@@ -2919,4 +3038,23 @@ export async function dbTables(id: string): Promise<string[]> {
 
 export async function dbPreview(id: string, table: string, limit?: number): Promise<DbQueryResult> {
   return invoke<DbQueryResult>('db_preview', { id, table, limit: limit ?? null });
+}
+
+/** One table's structure, read from the catalog. Mirrors `arc_db::TableSchema`. */
+export interface DbTableSchema {
+  columns: Array<{
+    name: string;
+    data_type: string;
+    nullable: boolean;
+    default: string | null;
+    primary_key: boolean;
+  }>;
+  /** `columns` is comma-joined, in index order. */
+  indexes: Array<{ name: string; columns: string; unique: boolean }>;
+  /** `name` is empty on SQLite; `references` reads `table(col, …)`. */
+  foreign_keys: Array<{ name: string; columns: string; references: string }>;
+}
+
+export async function dbTableSchema(id: string, table: string): Promise<DbTableSchema> {
+  return invoke<DbTableSchema>('db_table_schema', { id, table });
 }

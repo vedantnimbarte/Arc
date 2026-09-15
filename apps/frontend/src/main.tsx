@@ -4,7 +4,10 @@ import App from './App';
 import { Splash } from './components/Splash';
 import { rehydrateSettingsFromBroadcast, useSettings } from './state/settings';
 import { onSettingsChanged } from './lib/tauri';
+import { installErrorLog } from './lib/errorLog';
 import './index.css';
+
+installErrorLog();
 
 // Settings and Git are separate windows — each boots this same bundle with a
 // `view` param, so neither belongs in the main window's entry chunk.

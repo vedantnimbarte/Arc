@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState } from 'react';
-import { Terminal as XTerm } from '@xterm/xterm';
+import { Terminal as XTerm, type IMarker } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import { WebLinksAddon } from '@xterm/addon-web-links';
 import { SearchAddon } from '@xterm/addon-search';
 import { WebglAddon } from '@xterm/addon-webgl';
+import { ImageAddon } from '@xterm/addon-image';
 import '@xterm/xterm/css/xterm.css';
 import {
   fsDefaultRoot,
@@ -11,6 +12,7 @@ import {
   isTauri,
   onPtyExit,
   projectConfigLoad,
+  ptyListAiClis,
   ptyKill,
   ptyResize,
   ptySpawn,
@@ -27,13 +29,16 @@ import { TerminalSearchBar } from './TerminalSearchBar';
 import { useFiles } from '../state/files';
 import { useTrust } from '../state/trust';
 import { detectRiskyPaste, usePaste } from '../state/paste';
-import { resolveTerminalProfile, useSettings } from '../state/settings';
+import { resolveTerminalProfile, settingsReady, useSettings } from '../state/settings';
 import { useWorkspace } from '../state/workspace';
 import { useAi } from '../state/ai';
 import { notifyEvent } from '../lib/notifyEvent';
 import { AiCommandBar } from './AiCommandBar';
 import { getFont, resolveActiveTheme } from '../themes';
 import { every } from '../lib/ticker';
+import { compileRules, matchLine } from '../lib/highlightRules';
+import { AGENT_RESUME_ARGS, isTerminalReply } from '../lib/agentResume';
+import { registerTerminal } from '../lib/terminalRegistry';
 
 interface Props {
   /** Stable id for the terminal (tab id). Also serves as the React-effect
@@ -61,6 +66,11 @@ const AGENT_IDLE_MS = 20_000;
 const AGENT_IDLE_TICK_MS = 5_000;
 /** How long a terminal stays hidden before it gives back its WebGL context. */
 const GPU_RELEASE_AFTER_MS = 10_000;
+/** Most lines one highlight pass looks at — a burst bigger than this (a huge
+ *  `cat`) only has its tail tinted, which keeps a flood from stalling input. */
+const HIGHLIGHT_SCAN_MAX = 500;
+/** Minimum gap between two notifications from the same highlight rule. */
+const HIGHLIGHT_NOTIFY_GAP_MS = 10_000;
 
 export function Terminal({ sessionKey }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -215,6 +225,57 @@ export function Terminal({ sessionKey }: Props) {
     };
     const writeln = (data: string) => write(`${data}\r\n`);
 
+    // ─── Highlight rules ─────────────────────────────────────────────────
+    // After each parse, look at the lines that completed since the last pass
+    // and tint the ones a rule matches. The scan position is a marker rather
+    // than a row number so it survives the scrollback trimming its oldest
+    // lines. Alt-screen programs (vim, agent TUIs) redraw in place, so only the
+    // normal buffer is scanned.
+    let compiledRules = compileRules(initialSettings.highlightRules);
+    let scanFrom: IMarker | null = null;
+    const lastRuleNotify = new Map<string, number>();
+    const scanHighlights = () => {
+      if (disposed || !opened || compiledRules.length === 0) return;
+      const buf = term.buffer.active;
+      if (buf.type !== 'normal') return;
+      const end = buf.baseY + buf.cursorY;
+      // No marker yet (first pass), or it was trimmed off the top: rescan
+      // from the start, which the cap below bounds.
+      const from = scanFrom && !scanFrom.isDisposed ? scanFrom.line : 0;
+      for (let y = Math.max(from, end - HIGHLIGHT_SCAN_MAX); y < end; y++) {
+        const text = buf.getLine(y)?.translateToString(true);
+        const hit = text ? matchLine(compiledRules, text) : null;
+        if (!hit) continue;
+        const marker = term.registerMarker(y - end);
+        const deco = term.registerDecoration({
+          marker,
+          width: term.cols,
+          layer: 'top',
+          overviewRulerOptions: { color: hit.color },
+        });
+        deco?.onRender((el) => {
+          el.style.backgroundColor = hit.color;
+          el.style.opacity = '0.18';
+          el.style.pointerEvents = 'none';
+        });
+        if (hit.notify && Date.now() - (lastRuleNotify.get(hit.id) ?? 0) > HIGHLIGHT_NOTIFY_GAP_MS) {
+          lastRuleNotify.set(hit.id, Date.now());
+          notifyEvent({
+            source: 'command',
+            title: `Output matched “${hit.pattern}”`,
+            body: text!.trim().slice(0, 200),
+            target: { kind: 'tab', tabId: sessionKey },
+          });
+        }
+      }
+      scanFrom?.dispose();
+      scanFrom = term.registerMarker(0);
+    };
+    const unsubWriteParsed = term.onWriteParsed(scanHighlights);
+    const unsubRules = useSettings.subscribe((s, prev) => {
+      if (s.highlightRules !== prev.highlightRules) compiledRules = compileRules(s.highlightRules);
+    });
+
     // GPU renderer. Roughly an order of magnitude faster than the DOM
     // renderer on heavy output (a full `cargo build`, `npm test` with a
     // spinner). Every failure path here is non-fatal — xterm keeps its DOM
@@ -262,6 +323,13 @@ export function Terminal({ sessionKey }: Props) {
       term.open(container);
       safeFit();
       attachGpu();
+      // Sixel + iTerm inline images (plots, image previews). Loaded after
+      // `open()` so it attaches its canvas layer to a real screen element.
+      try {
+        term.loadAddon(new ImageAddon());
+      } catch {
+        /* no 2d canvas — images just don't render */
+      }
       // Drain on the next frame, not in this tick. `open()` does not guarantee
       // the renderer exists yet, and writing into that gap is the same
       // `dimensions`-on-undefined crash this buffer exists to avoid — PTY
@@ -383,6 +451,36 @@ export function Terminal({ sessionKey }: Props) {
     };
     container.addEventListener('paste', onPaste, true);
 
+    // Keystrokes → PTY. Wired at mount, not after the spawn: anything typed
+    // while the shell is still starting used to be dropped, and so were
+    // xterm's own replies to terminal queries (ConPTY's cursor-position
+    // request among them) that arrive in the same window. Queue until the
+    // PTY exists, then flush in order.
+    const unregister = registerTerminal(sessionKey, {
+      paste: (text) => term.paste(text),
+      selection: () => term.getSelection(),
+      focus: () => term.focus(),
+    });
+    const earlyInput: string[] = [];
+    const forwardInput = term.onData((data) => {
+      if (ptyId) ptyWrite(ptyId, data).catch(() => {});
+      else earlyInput.push(data);
+      const ws = useWorkspace.getState();
+      // Typing into an agent that was waiting on you is the answer it wanted.
+      ws.setAgentWaiting(sessionKey, null);
+      // Broadcast: copy the keystroke to every other live terminal in this
+      // workspace. xterm's own replies (cursor reports, focus events) answer
+      // *this* terminal and would be garbage typed into the others.
+      if (ws.broadcastInput && !isTerminalReply(data)) {
+        const self = ws.tabs.find((t) => t.id === sessionKey);
+        for (const t of ws.tabs) {
+          if (t.id === sessionKey || t.kind !== 'terminal' || !t.ptyId) continue;
+          if (t.workspaceId !== self?.workspaceId) continue;
+          void ptyWrite(t.ptyId, data).catch(() => {});
+        }
+      }
+    });
+
     const boot = async () => {
       if (!isTauri) {
         writeln('\x1b[38;2;212;214;220m  arc \x1b[0m\x1b[2mrunning outside Tauri — PTY disabled.\x1b[0m');
@@ -437,6 +535,7 @@ export function Terminal({ sessionKey }: Props) {
         const tab = agentTab();
         if (!tab || announced) return;
         announced = true;
+        useWorkspace.getState().setAgentWaiting(sessionKey, title);
         notifyEvent({
           source: 'agent',
           title,
@@ -462,6 +561,7 @@ export function Terminal({ sessionKey }: Props) {
         if (text.trim().length > 0) {
           lastOutputMs = Date.now();
           // Fresh output means the turn resumed — re-arm the signal.
+          if (announced) useWorkspace.getState().setAgentWaiting(sessionKey, null);
           announced = false;
         }
         if (!text.includes('\x1b]133;')) {
@@ -594,8 +694,29 @@ export function Terminal({ sessionKey }: Props) {
         //   3. `defaultShell`, the single-shell setting profiles build on.
         // An unknown profile id (the user deleted it) resolves to null and
         // falls through to 3 rather than spawning nothing.
-        const tab = useWorkspace.getState().tabs.find((t) => t.id === sessionKey);
+        // Shell, profile and agent choices all come from settings; a tab
+        // restored at launch can get here before the stored row has loaded.
+        // Bounded so a settings failure can never stop a terminal starting.
+        await Promise.race([settingsReady, new Promise((r) => setTimeout(r, 3000))]);
+        let tab = useWorkspace.getState().tabs.find((t) => t.id === sessionKey);
         const settings = useSettings.getState();
+        // A tab that ran an agent when ARC closed comes back as a plain shell
+        // unless the user asked for agents to be relaunched. Either way the
+        // decision is made once: a tab left as a shell forgets its agent, so
+        // turning the setting on later doesn't resurrect weeks-old sessions.
+        if (tab?.agentCliId && !tab.shellOverride) {
+          const cliId = tab.agentCliId;
+          const cli = settings.relaunchAgentTabs
+            ? (await ptyListAiClis().catch(() => [])).find((c) => c.id === cliId)
+            : undefined;
+          useWorkspace.getState().setTabAgentLaunch(
+            sessionKey,
+            cli
+              ? { agentCliId: cli.id, shellOverride: cli.path, shellArgs: AGENT_RESUME_ARGS[cli.id] }
+              : { agentCliId: undefined, shellOverride: undefined, shellArgs: undefined },
+          );
+          tab = useWorkspace.getState().tabs.find((t) => t.id === sessionKey);
+        }
         const profile = resolveTerminalProfile(
           settings.terminalProfiles,
           tab?.profileId ?? settings.defaultProfileId,
@@ -610,7 +731,16 @@ export function Terminal({ sessionKey }: Props) {
         // A profile's cwd pins the terminal; without one it follows the tree.
         // A tab that was launched into its own worktree pins itself there;
         // otherwise a profile's cwd wins, and failing that the file tree's root.
-        const cwd = tab?.launchCwd || profile?.cwd || initialCwd.current;
+        // A tab restored at launch returns to where its shell last was, as
+        // long as that directory still exists.
+        let restoreCwd = tab?.restoreCwd;
+        if (restoreCwd) {
+          restoreCwd = await fsReadDir(restoreCwd).then(
+            () => restoreCwd,
+            () => undefined,
+          );
+        }
+        const cwd = tab?.launchCwd || restoreCwd || profile?.cwd || initialCwd.current;
         // Only inject `.arc/config.toml` env from a folder the user has
         // trusted (state/trust.ts). Untrusted repo env is drive-by RCE via
         // PROMPT_COMMAND / BASH_ENV / LD_PRELOAD, so we don't even load it.
@@ -647,6 +777,9 @@ export function Terminal({ sessionKey }: Props) {
           stopAgentIdleTimer?.();
           if (ptyId) await ptyKill(ptyId).catch(() => {});
           return;
+        }
+        if (earlyInput.length > 0) {
+          void ptyWrite(ptyId, earlyInput.splice(0).join('')).catch(() => {});
         }
 
         unlistens.push(
@@ -701,7 +834,10 @@ export function Terminal({ sessionKey }: Props) {
         // `pty_spawn`, the Rust side falls back to $HOME / %USERPROFILE%
         // (see rust/pty/src/lib.rs) — `fsDefaultRoot` returns the same path,
         // so seeding from it keeps us in sync from the very first command.
-        let shellCwd: string | null = initialCwd.current ?? null;
+        // Seeded from where the shell was actually started — a worktree or a
+        // restored directory, not just the tree root — so the tab's persisted
+        // cwd is right even for shells that never report one.
+        let shellCwd: string | null = cwd ?? initialCwd.current ?? null;
         if (!shellCwd) {
           try {
             shellCwd = await fsDefaultRoot();
@@ -817,7 +953,7 @@ export function Terminal({ sessionKey }: Props) {
         // them apart. Shells with shell-integration installed avoid this.
         let cmdBuffer = '';
         term.onData((data) => {
-          if (ptyId) ptyWrite(ptyId, data).catch(() => {});
+          // Forwarding to the PTY is `forwardInput`'s job; this only observes.
           // First interaction dismisses the new-tab splash.
           setShowSplash(false);
 
@@ -936,6 +1072,10 @@ export function Terminal({ sessionKey }: Props) {
     return () => {
       disposed = true;
       stopAgentIdleTimer?.();
+      forwardInput.dispose();
+      unregister();
+      unsubWriteParsed.dispose();
+      unsubRules();
       cancelAnimationFrame(rafId);
       ro.disconnect();
       host?.removeEventListener('arc:host-shown', onHostShown);

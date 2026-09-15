@@ -22,6 +22,15 @@ export type ActionId =
   | 'new-scratch'
   | 'toggle-ssh-panel'
   | 'toggle-layout-mode'
+  | 'toggle-markdown-preview'
+  | 'debug-start-continue'
+  | 'debug-stop'
+  | 'debug-step-over'
+  | 'debug-step-into'
+  | 'debug-step-out'
+  | 'send-selection-to-agent'
+  | 'toggle-broadcast-input'
+  | 'next-waiting-agent'
   /** One launcher per detected CLI, derived from AI_CLIS — see LAUNCH_IDS. */
   | LaunchActionId
   | 'launch-wingman-pilot'
@@ -32,7 +41,7 @@ export type LaunchActionId = `launch-${AiCliId}`;
 
 const LAUNCH_IDS = Object.keys(AI_CLIS) as AiCliId[];
 
-export type ActionCategory = 'Workspace' | 'Terminal' | 'SSH' | 'AI CLIs' | 'Help';
+export type ActionCategory = 'Workspace' | 'Terminal' | 'Editor' | 'Debug' | 'SSH' | 'AI CLIs' | 'Help';
 
 export interface ActionMeta {
   id: ActionId;
@@ -148,6 +157,60 @@ export const ACTION_META: Record<ActionId, ActionMeta> = {
     description: 'Cycle this workspace through tiles, tabs and floating.',
     category: 'Workspace',
   },
+  'toggle-markdown-preview': {
+    id: 'toggle-markdown-preview',
+    label: 'Toggle Markdown Preview',
+    description: 'Cycle the active markdown file through source, side-by-side and preview.',
+    category: 'Editor',
+  },
+  'debug-start-continue': {
+    id: 'debug-start-continue',
+    label: 'Start / Continue Debugging',
+    description: 'Start the selected debug configuration, or continue a paused one.',
+    category: 'Debug',
+  },
+  'debug-stop': {
+    id: 'debug-stop',
+    label: 'Stop Debugging',
+    description: 'End the debug session and its program.',
+    category: 'Debug',
+  },
+  'debug-step-over': {
+    id: 'debug-step-over',
+    label: 'Step Over',
+    description: 'Run to the next line in the current function.',
+    category: 'Debug',
+  },
+  'debug-step-into': {
+    id: 'debug-step-into',
+    label: 'Step Into',
+    description: 'Step into the call on the current line.',
+    category: 'Debug',
+  },
+  'debug-step-out': {
+    id: 'debug-step-out',
+    label: 'Step Out',
+    description: 'Run until the current function returns.',
+    category: 'Debug',
+  },
+  'send-selection-to-agent': {
+    id: 'send-selection-to-agent',
+    label: 'Send Selection to Agent',
+    description: 'Paste the text selected in the active terminal into a running agent CLI.',
+    category: 'Terminal',
+  },
+  'toggle-broadcast-input': {
+    id: 'toggle-broadcast-input',
+    label: 'Toggle Broadcast Input',
+    description: 'Type into every terminal in this workspace at once.',
+    category: 'Terminal',
+  },
+  'next-waiting-agent': {
+    id: 'next-waiting-agent',
+    label: 'Go to Waiting Agent',
+    description: 'Jump to the agent that has been waiting on you the longest.',
+    category: 'AI CLIs',
+  },
   ...(Object.fromEntries(
     LAUNCH_IDS.map((cli) => [
       `launch-${cli}`,
@@ -190,6 +253,15 @@ export const ACTION_ORDER: ActionId[] = [
   'new-scratch',
   'toggle-ssh-panel',
   'toggle-layout-mode',
+  'toggle-markdown-preview',
+  'debug-start-continue',
+  'debug-stop',
+  'debug-step-over',
+  'debug-step-into',
+  'debug-step-out',
+  'send-selection-to-agent',
+  'toggle-broadcast-input',
+  'next-waiting-agent',
   ...LAUNCH_IDS.map((cli) => `launch-${cli}` as LaunchActionId),
   'launch-wingman-pilot',
   'launch-wingman-headless',
@@ -218,6 +290,19 @@ export const DEFAULT_BINDINGS: Record<ActionId, KeyBinding | null> = {
   'new-scratch': { code: 'KeyN', shift: true, alt: false, ...mod() },
   'toggle-ssh-panel': { code: 'KeyS', shift: true, alt: false, ...mod() },
   'toggle-layout-mode': { code: 'KeyL', shift: true, alt: false, ...mod() },
+  // Not ⇧⌘V (VS Code's): on Windows/Linux that is terminal paste, and app
+  // shortcuts are captured before xterm sees the key.
+  'toggle-markdown-preview': { code: 'KeyD', shift: true, alt: false, ...mod() },
+  'debug-start-continue': { code: 'F5', ctrl: false, meta: false, shift: false, alt: false },
+  'debug-stop': { code: 'F5', ctrl: false, meta: false, shift: true, alt: false },
+  'debug-step-over': { code: 'F10', ctrl: false, meta: false, shift: false, alt: false },
+  'debug-step-into': { code: 'F11', ctrl: false, meta: false, shift: false, alt: false },
+  'debug-step-out': { code: 'F11', ctrl: false, meta: false, shift: true, alt: false },
+  // ⌥ rather than ⇧: ⇧⌘A is the JetBrains preset's action palette.
+  'send-selection-to-agent': { code: 'KeyA', shift: false, alt: true, ...mod() },
+  // iTerm's broadcast chord.
+  'toggle-broadcast-input': { code: 'KeyI', shift: false, alt: true, ...mod() },
+  'next-waiting-agent': { code: 'KeyJ', shift: false, alt: true, ...mod() },
   // AI CLI launchers ship unbound by default — users can assign keys via the
   // shortcuts dialog, and they're discoverable through the TabBar dropdown
   // and the new-tab popover regardless.

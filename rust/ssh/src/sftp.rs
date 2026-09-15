@@ -23,19 +23,15 @@
 //!   here uses `/`. The frontend never joins a remote path with a platform
 //!   separator (see `lib/remote.ts`).
 
-use std::path::Path;
 use std::sync::Arc;
 
 use anyhow::{anyhow, Context, Result};
 use dashmap::DashMap;
-use russh::client::{self, Handle};
-use russh::keys::ssh_key::HashAlg;
-use russh::keys::PrivateKeyWithHashAlg;
 use russh_sftp::client::SftpSession;
 use serde::{Deserialize, Serialize};
 use tokio::sync::Mutex;
 
-use crate::{load_key, ClientHandler, HANDSHAKE_TIMEOUT_SECS, HOST_KEY_PROMPT_TIMEOUT_SECS};
+use crate::{dial, Dialed, SshEndpoint};
 
 /// Ceiling on a single remote file read, mirroring the local editor's cap.
 /// Without it a stray click on a multi-gigabyte log pulls the whole thing
@@ -46,11 +42,9 @@ pub const MAX_REMOTE_FILE_BYTES: u64 = 8 * 1024 * 1024;
 /// connect options minus the PTY dimensions — there is no terminal here.
 #[derive(Debug, Clone, Deserialize)]
 pub struct RemoteFsOpts {
-    pub host: String,
-    pub port: u16,
-    pub username: String,
-    pub identity_path: String,
-    pub passphrase: Option<String>,
+    pub target: SshEndpoint,
+    #[serde(default)]
+    pub jump: Option<SshEndpoint>,
 }
 
 /// One entry in a remote directory listing. Mirrors `arc_filesystem::DirEntry`
@@ -66,10 +60,10 @@ pub struct RemoteDirEntry {
 
 struct RemoteSession {
     sftp: SftpSession,
-    /// Kept alive purely so the connection outlives this struct's creation —
-    /// dropping the handle closes the transport out from under the SFTP
-    /// session.
-    _handle: Handle<ClientHandler>,
+    /// Kept alive purely so the connection (and its jump host, if any)
+    /// outlives this struct's creation — dropping the handle closes the
+    /// transport out from under the SFTP session.
+    _conn: Dialed,
 }
 
 /// Remote filesystem connections, keyed by a caller-chosen id (ARC uses the
@@ -104,53 +98,13 @@ impl SftpManager {
         opts: RemoteFsOpts,
         asker: Option<crate::HostKeyAsker>,
     ) -> Result<()> {
-        let key_pair = load_key(
-            Path::new(&opts.identity_path),
-            opts.passphrase.as_deref(),
-        )
-        .context("load identity")?;
-
-        let mut config = client::Config::default();
-        config.inactivity_timeout = None;
         // A file tree can sit idle for a long time between clicks; without a
         // keepalive the connection is quietly reaped by a NAT or the server
         // and the next click fails instead of the tree staying live.
-        config.keepalive_interval = Some(std::time::Duration::from_secs(30));
+        let conn = dial(&opts.target, opts.jump.as_ref(), 30, asker, None).await?;
 
-        let can_prompt = asker.is_some();
-        let handler = ClientHandler::silent(opts.host.clone(), opts.port, asker);
-        let connect_fut = client::connect(Arc::new(config), (opts.host.as_str(), opts.port), handler);
-        // Same reasoning as the shell path: `check_server_key` runs inside
-        // this future, so a pending host-key prompt must not be cut short by
-        // the network budget.
-        let budget = if can_prompt {
-            HANDSHAKE_TIMEOUT_SECS + HOST_KEY_PROMPT_TIMEOUT_SECS
-        } else {
-            HANDSHAKE_TIMEOUT_SECS
-        };
-        let mut handle = tokio::time::timeout(
-            std::time::Duration::from_secs(budget),
-            connect_fut,
-        )
-        .await
-        .map_err(|_| anyhow!("connect timeout after {budget}s"))?
-        .with_context(|| format!("connect {}:{}", opts.host, opts.port))?;
-
-        // SHA-512 for the same reason as the shell path in lib.rs: `None`
-        // signs RSA with SHA-1, which OpenSSH 8.8+ rejects. Ignored for
-        // Ed25519.
-        let authed = handle
-            .authenticate_publickey(
-                &opts.username,
-                PrivateKeyWithHashAlg::new(Arc::new(key_pair), Some(HashAlg::Sha512)),
-            )
-            .await
-            .context("publickey auth")?;
-        if !authed.success() {
-            return Err(anyhow!("authentication failed: publickey rejected"));
-        }
-
-        let channel = handle
+        let channel = conn
+            .handle
             .channel_open_session()
             .await
             .context("open sftp channel")?;
@@ -166,7 +120,7 @@ impl SftpManager {
             id.to_string(),
             Arc::new(Mutex::new(RemoteSession {
                 sftp,
-                _handle: handle,
+                _conn: conn,
             })),
         );
         Ok(())

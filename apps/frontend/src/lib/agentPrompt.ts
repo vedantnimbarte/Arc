@@ -72,3 +72,36 @@ export function problemsPrompt(problems: Problem[]): string {
   lines.push('diagnostic by suppressing it unless there is genuinely nothing to fix.');
   return lines.join('\n');
 }
+
+/** Longest block of pasted output kept in a prompt. Test runners and compilers
+ *  print their useful part at the end, so truncation keeps the tail. */
+const MAX_BLOCK = 8_000;
+
+function tailBlock(text: string, cap = MAX_BLOCK): string {
+  const trimmed = text.replace(/\s+$/, '');
+  return trimmed.length > cap ? `…(earlier output trimmed)\n${trimmed.slice(-cap)}` : trimmed;
+}
+
+/** A failing test: what was run and what the runner printed. */
+export function testFailurePrompt(command: string, output: string): string {
+  return [
+    'This test is failing. Find the cause and fix it — fix the code, not the',
+    'test, unless the test itself is wrong.',
+    '',
+    `Command: ${command}`,
+    '',
+    '```',
+    tailBlock(output) || '(no output)',
+    '```',
+  ].join('\n');
+}
+
+/** One diff hunk the user wants discussed or changed. */
+export function hunkPrompt(file: string, patch: string): string {
+  return [`Look at this change in ${file}:`, '', '```diff', tailBlock(patch), '```', ''].join('\n');
+}
+
+/** Text selected in a terminal — usually an error the user just saw. */
+export function selectionPrompt(text: string): string {
+  return ['From my terminal:', '', '```', tailBlock(text), '```', ''].join('\n');
+}

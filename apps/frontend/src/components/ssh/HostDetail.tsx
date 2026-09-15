@@ -2,7 +2,8 @@ import { useEffect, useState } from 'react';
 import { ChevronLeft, Pencil, Power, Trash2, Zap } from 'lucide-react';
 import { useSsh, type SshSessionState } from '../../state/ssh';
 import { cn } from '../../lib/cn';
-import { chunkFingerprint, statusDotClass, statusLabel, uptime } from './common';
+import { chunkFingerprint, formatForward, statusDotClass, statusLabel, uptime } from './common';
+import { LiveForwards } from './ForwardControls';
 import type { SshHost, SshKey } from '../../lib/tauri';
 import { askConfirm } from '../../state/confirm';
 import { useWorkspace } from '../../state/workspace';
@@ -22,6 +23,9 @@ export function HostDetail({ host, identity, onBack, onEdit }: HostDetailProps) 
   const sessions = useSsh((s) => s.sessions);
   const disconnect = useSsh((s) => s.disconnect);
   const deleteHost = useSsh((s) => s.hostDelete);
+  const jumpHost = useSsh((s) =>
+    host.jump_host_id ? s.hosts.find((h) => h.id === host.jump_host_id) ?? null : null,
+  );
 
   const liveId = liveByHost[host.id];
   const live: SshSessionState | undefined = liveId ? sessions[liveId] : undefined;
@@ -117,6 +121,30 @@ export function HostDetail({ host, identity, onBack, onEdit }: HostDetailProps) 
             </div>
           )}
         </Field>
+
+        {host.jump_host_id && (
+          <Field label="Via">
+            <span className="font-mono text-sm text-fg-base">
+              {jumpHost ? `${jumpHost.name} (${jumpHost.host})` : 'missing jump host'}
+            </span>
+          </Field>
+        )}
+
+        {live?.status === 'connected' ? (
+          <Field label="Port forwards">
+            <LiveForwards sessionId={live.id} />
+          </Field>
+        ) : (
+          host.forwards.length > 0 && (
+            <Field label="Port forwards">
+              {host.forwards.map((f, i) => (
+                <div key={i} className="font-mono text-xs text-fg-base">
+                  {formatForward(f)}
+                </div>
+              ))}
+            </Field>
+          )
+        )}
 
         <Field label="Keepalive">
           <span className="font-mono text-sm text-fg-base">

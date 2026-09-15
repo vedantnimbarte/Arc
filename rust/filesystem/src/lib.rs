@@ -13,7 +13,7 @@ pub mod search;
 pub mod watch;
 
 pub use dir::{read_dir, DirEntry};
-pub use dialog::{pick_files, pick_folder};
+pub use dialog::{pick_files, pick_folder, pick_save_file};
 pub use file::{read_file, write_file, MAX_EDITOR_BYTES};
 pub use listing::{list_files, FileItem};
 pub use paths::{default_root, parent, scratch_file};

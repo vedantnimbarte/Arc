@@ -1,5 +1,6 @@
 pub mod apiclient;
 pub mod claude_code;
+pub mod dap;
 pub mod db;
 pub mod diagnostics;
 pub mod fonts;

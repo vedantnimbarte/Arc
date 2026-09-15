@@ -1,6 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
+  Columns3,
   Database,
+  Download,
+  KeyRound,
   Loader2,
   Play,
   Plug,
@@ -20,16 +23,22 @@ import {
   dbPasswordSet,
   dbPreview,
   dbQuery,
+  dbTableSchema,
   dbTables,
+  fsPickSaveFile,
+  fsWriteFile,
   isTauri,
   type DbBackend,
   type DbConnection,
   type DbQueryResult,
+  type DbTableSchema,
 } from '../lib/tauri';
 import { useWorkspace } from '../state/workspace';
 import { askConfirm } from '../state/confirm';
-import { toastError } from '../state/toast';
+import { toast, toastError } from '../state/toast';
 import { cn } from '../lib/cn';
+import { toCsv, toJson } from '../lib/dbExport';
+import { unsafeStatements } from '../lib/sqlSafety';
 
 interface Props {
   tabId: string;
@@ -105,6 +114,8 @@ export function DbClient({ tabId }: Props) {
   const [tables, setTables] = useState<string[]>([]);
   const [sql, setSql] = useState('');
   const [result, setResult] = useState<DbQueryResult | null>(null);
+  /** When set, the results pane shows this table's structure instead of the grid. */
+  const [schema, setSchema] = useState<{ table: string; data: DbTableSchema } | null>(null);
   const [running, setRunning] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
@@ -136,6 +147,7 @@ export function DbClient({ tabId }: Props) {
       setConnected(false);
       setTables([]);
       setResult(null);
+      setSchema(null);
       setError(null);
       setTabDbConnection(tabId, id ?? undefined, name ?? 'Database');
     },
@@ -173,8 +185,19 @@ export function DbClient({ tabId }: Props) {
       if (!activeId || !connected || running) return;
       const trimmed = text.trim();
       if (!trimmed) return;
+      const risky = unsafeStatements(trimmed, active?.backend);
+      if (risky.length > 0) {
+        const ok = await askConfirm({
+          title: 'Run a destructive statement?',
+          body: `${risky.join(', ')} — this affects every row and can't be undone from here.`,
+          confirmLabel: 'Run anyway',
+          destructive: true,
+        });
+        if (!ok) return;
+      }
       setRunning(true);
       setError(null);
+      setSchema(null);
       try {
         setResult(await dbQuery(activeId, trimmed));
       } catch (e) {
@@ -184,7 +207,37 @@ export function DbClient({ tabId }: Props) {
         setRunning(false);
       }
     },
-    [activeId, connected, running],
+    [activeId, active?.backend, connected, running],
+  );
+
+  const showSchema = useCallback(
+    async (table: string) => {
+      if (!activeId) return;
+      setError(null);
+      try {
+        setSchema({ table, data: await dbTableSchema(activeId, table) });
+      } catch (e) {
+        setError(String(e));
+      }
+    },
+    [activeId],
+  );
+
+  const exportResult = useCallback(
+    async (format: 'csv' | 'json') => {
+      if (!result) return;
+      try {
+        const path = await fsPickSaveFile(`results.${format}`);
+        if (!path) return;
+        const text =
+          format === 'csv' ? toCsv(result.columns, result.rows) : toJson(result.columns, result.rows);
+        await fsWriteFile(path, text);
+        toast(`Saved ${result.rows.length} row${result.rows.length === 1 ? '' : 's'} to ${path}`);
+      } catch (e) {
+        toastError(String(e));
+      }
+    },
+    [result],
   );
 
   const previewTable = useCallback(
@@ -192,6 +245,7 @@ export function DbClient({ tabId }: Props) {
       if (!activeId || running) return;
       setRunning(true);
       setError(null);
+      setSchema(null);
       // Show the query we ran, so the next edit starts from something real.
       setSql(`SELECT * FROM ${table} LIMIT 200`);
       try {
@@ -296,15 +350,30 @@ export function DbClient({ tabId }: Props) {
                 Tables
               </div>
               {tables.map((t) => (
-                <button
+                <div
                   key={t}
-                  type="button"
-                  onClick={() => void previewTable(t)}
-                  className="flex w-full items-center gap-2 px-3 py-1 text-left hover:bg-surface-1"
+                  className={cn(
+                    'group flex items-center gap-2 px-3 py-1',
+                    schema?.table === t ? 'bg-surface-2' : 'hover:bg-surface-1',
+                  )}
                 >
-                  <Table2 size={11} className="shrink-0 text-fg-subtle" />
-                  <span className="truncate font-mono text-xs text-fg-base/85">{t}</span>
-                </button>
+                  <button
+                    type="button"
+                    onClick={() => void previewTable(t)}
+                    className="flex min-w-0 flex-1 items-center gap-2 text-left"
+                  >
+                    <Table2 size={11} className="shrink-0 text-fg-subtle" />
+                    <span className="truncate font-mono text-xs text-fg-base/85">{t}</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void showSchema(t)}
+                    title="Show schema"
+                    className="shrink-0 text-fg-subtle opacity-0 transition hover:text-fg-base group-hover:opacity-100"
+                  >
+                    <Columns3 size={11} />
+                  </button>
+                </div>
               ))}
             </div>
           )}
@@ -420,12 +489,30 @@ export function DbClient({ tabId }: Props) {
                 {result.truncated && ' · truncated'}
               </span>
             )}
+            {result && result.columns.length > 0 && !schema && (
+              <div className="ml-auto flex items-center gap-1">
+                {(['csv', 'json'] as const).map((format) => (
+                  <button
+                    key={format}
+                    type="button"
+                    onClick={() => void exportResult(format)}
+                    title={`Export these rows as ${format.toUpperCase()}`}
+                    className="flex items-center gap-1 rounded px-1.5 py-0.5 font-sans text-2xs uppercase text-fg-muted transition hover:bg-surface-2 hover:text-fg-base"
+                  >
+                    <Download size={10} />
+                    {format}
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
         </div>
 
         {/* ── Results grid ── */}
         <div className="min-h-0 flex-1 overflow-auto">
-          {result && result.columns.length > 0 ? (
+          {schema ? (
+            <SchemaView table={schema.table} schema={schema.data} onClose={() => setSchema(null)} />
+          ) : result && result.columns.length > 0 ? (
             <table className="w-max min-w-full border-collapse text-left">
               <thead className="sticky top-0 bg-bg-chrome">
                 <tr>
@@ -470,6 +557,115 @@ export function DbClient({ tabId }: Props) {
           )}
         </div>
       </div>
+    </div>
+  );
+}
+
+// ─── Schema view ─────────────────────────────────────────────────────────────
+
+const TH =
+  'whitespace-nowrap border-b border-r border-border-hairline px-2.5 py-1 font-sans text-2xs uppercase tracking-widest text-fg-subtle/70';
+const TD =
+  'max-w-md truncate border-b border-r border-border-hairline px-2.5 py-0.5 font-mono text-xs text-fg-base/85';
+
+/** A table's columns, indexes and foreign keys, in the grid's own styling. */
+function SchemaView({
+  table,
+  schema,
+  onClose,
+}: {
+  table: string;
+  schema: DbTableSchema;
+  onClose: () => void;
+}) {
+  const section = (label: string) => (
+    <div className="px-3 pb-1 pt-3 font-sans text-2xs uppercase tracking-widest text-fg-subtle/60">
+      {label}
+    </div>
+  );
+  return (
+    <div className="pb-3">
+      <div className="flex items-center gap-2 border-b border-border-hairline px-3 py-1.5">
+        <Columns3 size={12} className="shrink-0 text-fg-subtle" />
+        <span className="truncate font-mono text-xs text-fg-base">{table}</span>
+        <button
+          type="button"
+          onClick={onClose}
+          title="Back to results"
+          className="ml-auto shrink-0 text-fg-subtle hover:text-fg-base"
+        >
+          <X size={12} />
+        </button>
+      </div>
+
+      {section('Columns')}
+      <table className="w-max min-w-full border-collapse text-left">
+        <thead>
+          <tr>
+            {['Name', 'Type', 'Nullable', 'Default'].map((h) => (
+              <th key={h} className={TH}>
+                {h}
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {schema.columns.map((c) => (
+            <tr key={c.name}>
+              <td className={TD}>
+                <span className="flex items-center gap-1.5">
+                  {c.name}
+                  {c.primary_key && (
+                    <span title="Primary key">
+                      <KeyRound size={10} className="text-accent" />
+                    </span>
+                  )}
+                </span>
+              </td>
+              <td className={TD}>{c.data_type}</td>
+              <td className={TD}>{c.nullable ? 'yes' : 'no'}</td>
+              <td className={TD} title={c.default ?? ''}>
+                {c.default ?? <span className="italic text-fg-subtle/60">—</span>}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+
+      {schema.indexes.length > 0 && (
+        <>
+          {section('Indexes')}
+          <table className="w-max min-w-full border-collapse text-left">
+            <tbody>
+              {schema.indexes.map((ix) => (
+                <tr key={ix.name}>
+                  <td className={TD}>{ix.name}</td>
+                  <td className={TD}>{ix.columns}</td>
+                  <td className={TD}>{ix.unique ? 'unique' : ''}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </>
+      )}
+
+      {schema.foreign_keys.length > 0 && (
+        <>
+          {section('Foreign keys')}
+          <table className="w-max min-w-full border-collapse text-left">
+            <tbody>
+              {schema.foreign_keys.map((fk, i) => (
+                <tr key={`${fk.name}-${i}`}>
+                  {fk.name && <td className={TD}>{fk.name}</td>}
+                  <td className={TD}>
+                    {fk.columns} → {fk.references}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </>
+      )}
     </div>
   );
 }

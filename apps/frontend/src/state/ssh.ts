@@ -170,6 +170,8 @@ export const useSsh = create<SshStateShape>((set, get) => ({
         startup_cmd: input.startup_cmd ?? null,
         created_at: Date.now(),
         last_used_at: null,
+        jump_host_id: input.jump_host_id ?? null,
+        forwards: input.forwards ?? [],
       };
       set((s) => ({ hosts: dedupe([...s.hosts, fake]) }));
       return fake;

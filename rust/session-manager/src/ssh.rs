@@ -35,6 +35,12 @@ pub struct SshHost {
     pub startup_cmd: Option<String>,
     pub created_at: i64,
     pub last_used_at: Option<i64>,
+    /// Another saved host to connect through (ProxyJump).
+    pub jump_host_id: Option<String>,
+    /// Port forwards started with every session. Each is an
+    /// `arc_ssh::ForwardSpec`; this crate stores them without interpreting
+    /// them, and the command layer validates them before they get here.
+    pub forwards: Vec<serde_json::Value>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -63,6 +69,10 @@ pub struct SshHostInput {
     #[serde(default = "default_keepalive")]
     pub keepalive_secs: i64,
     pub startup_cmd: Option<String>,
+    #[serde(default)]
+    pub jump_host_id: Option<String>,
+    #[serde(default)]
+    pub forwards: Vec<serde_json::Value>,
 }
 
 fn default_port() -> i64 {
@@ -161,79 +171,74 @@ pub async fn key_delete(pool: &SqlitePool, id: &str) -> Result<()> {
 
 // ---------- ssh_hosts ------------------------------------------------------
 
+const HOST_COLS: &str = "id, workspace_id, name, host, port, username, identity_id, keepalive_secs, \
+                         startup_cmd, created_at, last_used_at, jump_host_id, forwards_json";
+
+type HostRow = (
+    String,
+    Option<String>,
+    String,
+    String,
+    i64,
+    String,
+    Option<String>,
+    i64,
+    Option<String>,
+    i64,
+    Option<i64>,
+    Option<String>,
+    String,
+);
+
+fn host_from_row(t: HostRow) -> SshHost {
+    SshHost {
+        id: t.0,
+        workspace_id: t.1,
+        name: t.2,
+        host: t.3,
+        port: t.4,
+        username: t.5,
+        identity_id: t.6,
+        keepalive_secs: t.7,
+        startup_cmd: t.8,
+        created_at: t.9,
+        last_used_at: t.10,
+        jump_host_id: t.11,
+        // A row that doesn't parse loses its forwards rather than the host.
+        forwards: serde_json::from_str(&t.12).unwrap_or_default(),
+    }
+}
+
 pub async fn host_list(pool: &SqlitePool, workspace_id: Option<&str>) -> Result<Vec<SshHost>> {
     let rows = if let Some(ws) = workspace_id {
-        sqlx::query_as::<
-            _,
-            (
-                String,
-                Option<String>,
-                String,
-                String,
-                i64,
-                String,
-                Option<String>,
-                i64,
-                Option<String>,
-                i64,
-                Option<i64>,
-            ),
-        >(
-            "SELECT id, workspace_id, name, host, port, username, identity_id, keepalive_secs, startup_cmd, created_at, last_used_at \
+        sqlx::query_as::<_, HostRow>(&format!(
+            "SELECT {HOST_COLS} \
              FROM ssh_hosts WHERE workspace_id = ? OR workspace_id IS NULL \
              ORDER BY COALESCE(last_used_at, created_at) DESC",
-        )
+        ))
         .bind(ws)
         .fetch_all(pool)
         .await?
     } else {
-        sqlx::query_as::<
-            _,
-            (
-                String,
-                Option<String>,
-                String,
-                String,
-                i64,
-                String,
-                Option<String>,
-                i64,
-                Option<String>,
-                i64,
-                Option<i64>,
-            ),
-        >(
-            "SELECT id, workspace_id, name, host, port, username, identity_id, keepalive_secs, startup_cmd, created_at, last_used_at \
+        sqlx::query_as::<_, HostRow>(&format!(
+            "SELECT {HOST_COLS} \
              FROM ssh_hosts ORDER BY COALESCE(last_used_at, created_at) DESC",
-        )
+        ))
         .fetch_all(pool)
         .await?
     };
 
-    Ok(rows
-        .into_iter()
-        .map(|t| SshHost {
-            id: t.0,
-            workspace_id: t.1,
-            name: t.2,
-            host: t.3,
-            port: t.4,
-            username: t.5,
-            identity_id: t.6,
-            keepalive_secs: t.7,
-            startup_cmd: t.8,
-            created_at: t.9,
-            last_used_at: t.10,
-        })
-        .collect())
+    Ok(rows.into_iter().map(host_from_row).collect())
 }
 
 pub async fn host_upsert(pool: &SqlitePool, input: SshHostInput) -> Result<SshHost> {
     let now = now_ms();
+    let forwards_json = serde_json::Value::Array(input.forwards.clone()).to_string();
     if let Some(id) = input.id {
         sqlx::query(
             "UPDATE ssh_hosts SET workspace_id = ?, name = ?, host = ?, port = ?, username = ?, \
-                                  identity_id = ?, keepalive_secs = ?, startup_cmd = ? \
+                                  identity_id = ?, keepalive_secs = ?, startup_cmd = ?, \
+                                  jump_host_id = ?, forwards_json = ? \
              WHERE id = ?",
         )
         .bind(&input.workspace_id)
@@ -244,6 +249,8 @@ pub async fn host_upsert(pool: &SqlitePool, input: SshHostInput) -> Result<SshHo
         .bind(&input.identity_id)
         .bind(input.keepalive_secs)
         .bind(&input.startup_cmd)
+        .bind(&input.jump_host_id)
+        .bind(&forwards_json)
         .bind(&id)
         .execute(pool)
         .await?;
@@ -256,8 +263,9 @@ pub async fn host_upsert(pool: &SqlitePool, input: SshHostInput) -> Result<SshHo
     let id = Uuid::new_v4().to_string();
     sqlx::query(
         "INSERT INTO ssh_hosts (id, workspace_id, name, host, port, username, identity_id, \
-                                keepalive_secs, startup_cmd, created_at, last_used_at) \
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)",
+                                keepalive_secs, startup_cmd, created_at, last_used_at, \
+                                jump_host_id, forwards_json) \
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?)",
     )
     .bind(&id)
     .bind(&input.workspace_id)
@@ -269,6 +277,8 @@ pub async fn host_upsert(pool: &SqlitePool, input: SshHostInput) -> Result<SshHo
     .bind(input.keepalive_secs)
     .bind(&input.startup_cmd)
     .bind(now)
+    .bind(&input.jump_host_id)
+    .bind(&forwards_json)
     .execute(pool)
     .await?;
 
@@ -284,46 +294,20 @@ pub async fn host_upsert(pool: &SqlitePool, input: SshHostInput) -> Result<SshHo
         startup_cmd: input.startup_cmd,
         created_at: now,
         last_used_at: None,
+        jump_host_id: input.jump_host_id,
+        forwards: input.forwards,
     })
 }
 
 pub async fn host_get(pool: &SqlitePool, id: &str) -> Result<Option<SshHost>> {
-    let row = sqlx::query_as::<
-        _,
-        (
-            String,
-            Option<String>,
-            String,
-            String,
-            i64,
-            String,
-            Option<String>,
-            i64,
-            Option<String>,
-            i64,
-            Option<i64>,
-        ),
-    >(
-        "SELECT id, workspace_id, name, host, port, username, identity_id, keepalive_secs, startup_cmd, created_at, last_used_at \
-         FROM ssh_hosts WHERE id = ?",
-    )
+    let row = sqlx::query_as::<_, HostRow>(&format!(
+        "SELECT {HOST_COLS} FROM ssh_hosts WHERE id = ?"
+    ))
     .bind(id)
     .fetch_optional(pool)
     .await?;
 
-    Ok(row.map(|t| SshHost {
-        id: t.0,
-        workspace_id: t.1,
-        name: t.2,
-        host: t.3,
-        port: t.4,
-        username: t.5,
-        identity_id: t.6,
-        keepalive_secs: t.7,
-        startup_cmd: t.8,
-        created_at: t.9,
-        last_used_at: t.10,
-    }))
+    Ok(row.map(host_from_row))
 }
 
 pub async fn host_delete(pool: &SqlitePool, id: &str) -> Result<()> {

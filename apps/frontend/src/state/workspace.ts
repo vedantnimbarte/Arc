@@ -1,12 +1,14 @@
 import { create } from 'zustand';
 import { dwindleSide } from '../lib/paneMetrics';
 import {
+  AI_CLI_COMMANDS,
   fsDefaultRoot,
   fsScratchFile,
   isTauri,
   ptyListAiClis,
   sessionLoad,
   sessionSaveTabs,
+  type AiCliId,
   type AiCliInfo,
   type SshHost,
   type TabInput,
@@ -88,8 +90,18 @@ export interface Tab {
   launchCwd?: string;
   /** Best-effort current working directory of a terminal tab, tracked live
    *  from OSC 7 / cd-sniffing. Powers the per-cell git-branch pill in the
-   *  grid. Transient — not persisted (whitelisted out by `toTabInputs`). */
+   *  grid, and is persisted (terminal blob) so a relaunched tab starts where
+   *  its shell last was — see `restoreCwd`. */
   cwd?: string;
+  /** Directory a tab restored at launch should spawn in: the `cwd` it had
+   *  when ARC closed. Set only by `hydrate`, read once by the spawn, and
+   *  ignored when the directory no longer exists. */
+  restoreCwd?: string;
+  /** Which agent CLI this terminal tab runs, when it was opened from the
+   *  agent launcher. Persisted, unlike `shellOverride` (a binary path that
+   *  may not survive a relaunch), so a restored tab can re-launch the agent
+   *  when `relaunchAgentTabs` is on. */
+  agentCliId?: AiCliId;
   /** Absolute path for editor tabs (read on mount). */
   filePath?: string;
   /** URL loaded by a preview tab. Persisted so the iframe restores on
@@ -284,6 +296,22 @@ interface WorkspaceState {
   closeGroup: (groupId: string) => void;
   setTabPtyId: (id: string, ptyId: string | undefined) => void;
   setTabCwd: (id: string, cwd: string) => void;
+  /** Turn a restored tab back into an agent tab (or, with `agentCliId`
+   *  undefined, forget that it ever was one). Only called before the PTY
+   *  spawns. */
+  setTabAgentLaunch: (
+    id: string,
+    patch: Pick<Tab, 'shellOverride' | 'shellArgs' | 'agentCliId'>,
+  ) => void;
+  /** Agent tabs whose agent has stopped and is waiting on the user — turn
+   *  ended, bell, or gone quiet. Cleared by typing into the tab or by the
+   *  agent printing again. Transient. */
+  agentWaiting: Record<string, { reason: string; at: number }>;
+  setAgentWaiting: (id: string, reason: string | null) => void;
+  /** Mirror keystrokes typed into any terminal of the active workspace into
+   *  all its other terminals (tmux `synchronize-panes`). Transient. */
+  broadcastInput: boolean;
+  toggleBroadcastInput: () => void;
   // ─── Workspaces ─────────────────────────────────────────────────────────
   /** Create a new workspace, switch to it, and open a fresh terminal in it.
    *  Returns the new workspace id. */
@@ -844,6 +872,8 @@ function sanitizeForReopen(tab: Tab): Tab {
     launchCwd: _launchCwd,
     shellOverride: _shellOverride,
     shellArgs: _shellArgs,
+    restoreCwd: _restoreCwd,
+    agentCliId: _agentCliId,
     runCommand: _runCommand,
     sshSessionId: _sshSessionId,
     ...rest
@@ -884,6 +914,8 @@ export const useWorkspace = create<WorkspaceState>()((set, get) => ({
   maximizedPaneId: null,
   tabDirty: {},
   tabRunning: {},
+  agentWaiting: {},
+  broadcastInput: false,
   closedTabs: [],
   tabGroups: [],
   workspaces: [DEFAULT_WORKSPACE],
@@ -904,6 +936,7 @@ export const useWorkspace = create<WorkspaceState>()((set, get) => ({
       return { tabs: [...s.tabs, tab], activeTabId: tab.id, ...placed };
     }),
   closeTab: (id) => {
+    get().setAgentWaiting(id, null);
     set((s) => {
       // Layout-aware close. Every tab is closable, the last one included:
       // closing the last tab in a *leaf* collapses the leaf (its sibling
@@ -1124,6 +1157,19 @@ export const useWorkspace = create<WorkspaceState>()((set, get) => ({
       if (!tab || tab.cwd === cwd) return s; // no-op — avoids churn on repeat OSC 7
       return { tabs: s.tabs.map((t) => (t.id === id ? { ...t, cwd } : t)) };
     }),
+  setTabAgentLaunch: (id, patch) =>
+    set((s) => ({ tabs: s.tabs.map((t) => (t.id === id ? { ...t, ...patch } : t)) })),
+  setAgentWaiting: (id, reason) =>
+    set((s) => {
+      if (reason === null) {
+        if (!s.agentWaiting[id]) return s; // no-op — called on every keystroke
+        const next = { ...s.agentWaiting };
+        delete next[id];
+        return { agentWaiting: next };
+      }
+      return { agentWaiting: { ...s.agentWaiting, [id]: { reason, at: Date.now() } } };
+    }),
+  toggleBroadcastInput: () => set((s) => ({ broadcastInput: !s.broadcastInput })),
 
   // ─── Workspaces ─────────────────────────────────────────────────────────
   createWorkspace: (name) => {
@@ -1452,6 +1498,7 @@ export const useWorkspace = create<WorkspaceState>()((set, get) => ({
       shellOverride: cli.path,
       shellArgs: opts?.args,
       launchCwd: opts?.cwd,
+      agentCliId: cli.id,
     };
     get().addTab(tab);
     return id;
@@ -1848,16 +1895,9 @@ export const useWorkspace = create<WorkspaceState>()((set, get) => ({
             }
           }
           // Terminal tabs use the same blob to remember which profile they
-          // were opened with, so a restored tab respawns the right shell.
-          let profileId: string | undefined;
-          if (t.kind === 'terminal' && t.apiclient_state_json) {
-            try {
-              const parsed = JSON.parse(t.apiclient_state_json) as { profileId?: string };
-              profileId = parsed.profileId;
-            } catch {
-              /* corrupt blob — fall back to the default shell */
-            }
-          }
+          // were opened with, where their shell was, and which agent they ran.
+          const terminal =
+            t.kind === 'terminal' ? decodeTerminalBlob(t.apiclient_state_json) : {};
           return {
             id: t.id,
             title: t.title,
@@ -1871,7 +1911,7 @@ export const useWorkspace = create<WorkspaceState>()((set, get) => ({
             diffScope,
             mergeRoot,
             dbConnectionId,
-            profileId,
+            ...terminal,
           };
         });
         activeTabId =
@@ -2068,10 +2108,49 @@ function toTabInputs(tabs: Tab[]): TabInput[] {
                 ? JSON.stringify({ mergeRoot: t.mergeRoot })
                 : t.kind === 'db' && t.dbConnectionId
                   ? JSON.stringify({ dbConnectionId: t.dbConnectionId })
-                  : t.kind === 'terminal' && t.profileId
-                    ? JSON.stringify({ profileId: t.profileId })
+                  : t.kind === 'terminal'
+                    ? encodeTerminalBlob(t)
                     : null,
     }));
+}
+
+/** A terminal tab's slice of the per-kind JSON blob. Absent fields are left
+ *  out so a plain shell tab still stores `null`, exactly as before. */
+export function encodeTerminalBlob(
+  t: Pick<Tab, 'profileId' | 'cwd' | 'restoreCwd' | 'agentCliId'>,
+): string | null {
+  const blob: { profileId?: string; cwd?: string; agentCliId?: string } = {};
+  if (t.profileId) blob.profileId = t.profileId;
+  // A tab restored but never shown hasn't spawned, so it has no live cwd yet —
+  // keep the one it was restored with rather than forgetting it.
+  const cwd = t.cwd ?? t.restoreCwd;
+  if (cwd && !isRemotePathLike(cwd)) blob.cwd = cwd;
+  if (t.agentCliId) blob.agentCliId = t.agentCliId;
+  return Object.keys(blob).length > 0 ? JSON.stringify(blob) : null;
+}
+
+export function decodeTerminalBlob(
+  json: string | null | undefined,
+): Pick<Tab, 'profileId' | 'restoreCwd' | 'agentCliId'> {
+  if (!json) return {};
+  try {
+    const parsed = JSON.parse(json) as Record<string, unknown>;
+    const str = (v: unknown) => (typeof v === 'string' && v ? v : undefined);
+    const agent = str(parsed.agentCliId);
+    return {
+      profileId: str(parsed.profileId),
+      restoreCwd: str(parsed.cwd),
+      agentCliId: agent && agent in AI_CLI_COMMANDS ? (agent as AiCliId) : undefined,
+    };
+  } catch {
+    return {}; // corrupt blob — a plain default shell
+  }
+}
+
+/** `ssh://…` and similar: a directory on another machine, which a local PTY
+ *  can't start in. */
+function isRemotePathLike(path: string): boolean {
+  return /^[a-z][a-z0-9+.-]*:\/\//i.test(path);
 }
 
 async function persistTabs(
@@ -2102,6 +2181,8 @@ function tabSliceEqual(a: WorkspaceState, b: WorkspaceState): boolean {
       x.mergeRoot !== y.mergeRoot ||
       x.dbConnectionId !== y.dbConnectionId ||
       x.profileId !== y.profileId ||
+      x.cwd !== y.cwd ||
+      x.agentCliId !== y.agentCliId ||
       x.groupId !== y.groupId ||
       x.workspaceId !== y.workspaceId
     ) {

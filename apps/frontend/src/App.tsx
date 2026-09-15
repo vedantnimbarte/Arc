@@ -15,6 +15,7 @@ import { WorkspaceRail } from './components/WorkspaceRail';
 import { useWorkspace } from './state/workspace';
 import { toast } from './state/toast';
 import { useProblems } from './state/problems';
+import { useDebug } from './state/debug';
 import { useDocker } from './state/docker';
 import {
   useFiles,
@@ -65,6 +66,7 @@ import {
 // project-config store fresh. Doesn't render anything itself.
 import './state/projectConfig';
 import { fsPickFolder, ptyListAiClis, settingsWindowOpen, type AiCliId } from './lib/tauri';
+import { CYCLE_MARKDOWN_PREVIEW_EVENT } from './lib/markdownLinks';
 import { PasteWarning } from './components/PasteWarning';
 import { TrustPrompt } from './components/TrustPrompt';
 import { ConfirmDialog } from './components/ConfirmDialog';
@@ -74,6 +76,9 @@ import { useSettings, type TerminalProfile } from './state/settings';
 import { useAi } from './state/ai';
 import { autoConnectWingman, useWingman } from './state/wingman';
 import { useClaudeCode } from './state/claudeCode';
+import { getTerminal } from './lib/terminalRegistry';
+import { sendToAgent } from './lib/sendToAgent';
+import { selectionPrompt } from './lib/agentPrompt';
 
 // Palettes and dialogs mount only while open, so their code loads on first use.
 const CommandPalette = lazy(() =>
@@ -425,6 +430,54 @@ export default function App() {
       case 'toggle-layout-mode':
         useWorkspace.getState().toggleLayoutMode();
         return;
+      case 'toggle-markdown-preview':
+        // The editor owns its view mode; only the one for this tab reacts.
+        if (activeTabId) {
+          window.dispatchEvent(
+            new CustomEvent(CYCLE_MARKDOWN_PREVIEW_EVENT, { detail: activeTabId }),
+          );
+        }
+        return;
+      case 'debug-start-continue': {
+        const debug = useDebug.getState();
+        if (debug.status === 'stopped') void debug.step('continue');
+        else if (!debug.sessionId) {
+          useFiles.getState().showSidebarView('debug');
+          void debug.start();
+        }
+        return;
+      }
+      case 'debug-stop':
+        void useDebug.getState().stop();
+        return;
+      case 'debug-step-over':
+        void useDebug.getState().step('next');
+        return;
+      case 'debug-step-into':
+        void useDebug.getState().step('stepIn');
+        return;
+      case 'debug-step-out':
+        void useDebug.getState().step('stepOut');
+        return;
+      case 'send-selection-to-agent': {
+        const text = activeTabId ? getTerminal(activeTabId)?.selection() : '';
+        if (text?.trim()) sendToAgent(selectionPrompt(text), 'Selection');
+        else toast('Select some terminal output first');
+        return;
+      }
+      case 'toggle-broadcast-input': {
+        const ws = useWorkspace.getState();
+        ws.toggleBroadcastInput();
+        toast(ws.broadcastInput ? 'Broadcast input off' : 'Broadcasting input to every terminal');
+        return;
+      }
+      case 'next-waiting-agent': {
+        const { agentWaiting, setActive } = useWorkspace.getState();
+        const next = Object.entries(agentWaiting).sort((a, b) => a[1].at - b[1].at)[0];
+        if (next) setActive(next[0]);
+        else toast('No agent is waiting on you');
+        return;
+      }
       case 'launch-wingman-pilot':
         void launchWingman('pilot');
         return;
@@ -438,6 +491,11 @@ export default function App() {
     const onKey = (e: KeyboardEvent) => {
       const action = actionFor(e);
       if (!action) return;
+      // Stepping keys are bare F-keys that terminal programs (htop, mc, vim)
+      // use too, so they only belong to the debugger while a session is live.
+      if (action.startsWith('debug-') && action !== 'debug-start-continue' && !useDebug.getState().sessionId) {
+        return;
+      }
       // Capture phase + stopPropagation so app shortcuts win over a focused
       // terminal (xterm) or editor (CodeMirror) — otherwise the terminal eats
       // control chars like Ctrl+P (^P) before the app ever sees them.
@@ -941,11 +999,13 @@ class TabErrorBoundary extends Component<
 }
 
 const CATEGORY_TO_GROUP: Record<
-  'Workspace' | 'Terminal' | 'SSH' | 'AI CLIs' | 'Help',
+  'Workspace' | 'Terminal' | 'Editor' | 'Debug' | 'SSH' | 'AI CLIs' | 'Help',
   CommandGroup
 > = {
   Workspace: 'Workspace',
   Terminal: 'Terminal',
+  Editor: 'Editor',
+  Debug: 'Editor',
   SSH: 'SSH',
   'AI CLIs': 'AI CLIs',
   Help: 'Help',
