@@ -1,5 +1,6 @@
 import {
   Boxes,
+  Bug,
   CircleAlert,
   FlaskConical,
   FolderTree,
@@ -37,6 +38,7 @@ export const SIDEBAR_VIEWS: SidebarViewDef[] = [
   { id: 'outline', label: 'Outline', Icon: ListTree },
   { id: 'problems', label: 'Problems', Icon: CircleAlert, shortcut: 'show-problems' },
   { id: 'tests', label: 'Tests', Icon: FlaskConical },
+  { id: 'debug', label: 'Debug', Icon: Bug, shortcut: 'debug-start-continue' },
   { id: 'docker', label: 'Containers', Icon: Boxes },
   { id: 'ssh', label: 'SSH', Icon: Server, shortcut: 'toggle-ssh-panel' },
   { id: 'agents', label: 'Agents', Icon: Sparkles },

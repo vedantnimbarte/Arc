@@ -15,6 +15,7 @@ import { WorkspaceRail } from './components/WorkspaceRail';
 import { useWorkspace } from './state/workspace';
 import { toast } from './state/toast';
 import { useProblems } from './state/problems';
+import { useDebug } from './state/debug';
 import { useDocker } from './state/docker';
 import {
   useFiles,
@@ -425,6 +426,27 @@ export default function App() {
       case 'toggle-layout-mode':
         useWorkspace.getState().toggleLayoutMode();
         return;
+      case 'debug-start-continue': {
+        const debug = useDebug.getState();
+        if (debug.status === 'stopped') void debug.step('continue');
+        else if (!debug.sessionId) {
+          useFiles.getState().showSidebarView('debug');
+          void debug.start();
+        }
+        return;
+      }
+      case 'debug-stop':
+        void useDebug.getState().stop();
+        return;
+      case 'debug-step-over':
+        void useDebug.getState().step('next');
+        return;
+      case 'debug-step-into':
+        void useDebug.getState().step('stepIn');
+        return;
+      case 'debug-step-out':
+        void useDebug.getState().step('stepOut');
+        return;
       case 'launch-wingman-pilot':
         void launchWingman('pilot');
         return;
@@ -438,6 +460,11 @@ export default function App() {
     const onKey = (e: KeyboardEvent) => {
       const action = actionFor(e);
       if (!action) return;
+      // Stepping keys are bare F-keys that terminal programs (htop, mc, vim)
+      // use too, so they only belong to the debugger while a session is live.
+      if (action.startsWith('debug-') && action !== 'debug-start-continue' && !useDebug.getState().sessionId) {
+        return;
+      }
       // Capture phase + stopPropagation so app shortcuts win over a focused
       // terminal (xterm) or editor (CodeMirror) — otherwise the terminal eats
       // control chars like Ctrl+P (^P) before the app ever sees them.
@@ -941,11 +968,12 @@ class TabErrorBoundary extends Component<
 }
 
 const CATEGORY_TO_GROUP: Record<
-  'Workspace' | 'Terminal' | 'SSH' | 'AI CLIs' | 'Help',
+  'Workspace' | 'Terminal' | 'Debug' | 'SSH' | 'AI CLIs' | 'Help',
   CommandGroup
 > = {
   Workspace: 'Workspace',
   Terminal: 'Terminal',
+  Debug: 'Editor',
   SSH: 'SSH',
   'AI CLIs': 'AI CLIs',
   Help: 'Help',

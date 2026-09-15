@@ -22,6 +22,7 @@ import {
 import { fileIcon, MOCHA } from '../lib/fileIcons';
 import { fsReadFile, fsWriteFile, gitBlame, gitDiff, isTauri, type GitBlameLine } from '../lib/tauri';
 import { changedLinesFromDiff, gitDiffGutter, setGitChanges } from '../lib/gitGutter';
+import { debugGutter } from '../lib/debugGutter';
 import { isRemotePath } from '../lib/remote';
 import { attachLsp, pathToFileUri, type LspAttachment } from '../lib/lspClient';
 import { lspServerFor } from '../lib/lspServers';
@@ -242,6 +243,10 @@ export function Editor({ filePath, tabId }: Props) {
               // list) so its keymap wins over CodeMirror's defaults. Empty
               // until the async loader below fills it when Vim mode is on.
               vimCompartment.current.of([]),
+              // Breakpoint gutter + stopped-line highlight. Ahead of
+              // basicSetup so the breakpoint column sits left of the line
+              // numbers, where every other debugger puts it.
+              debugGutter(filePath),
               basicSetup, // includes history (undo/redo), defaultKeymap
               history(),  // explicit — basicSetup already includes it but
                           // being explicit makes intent clear

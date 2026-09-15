@@ -112,6 +112,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "arc-dap"
+version = "0.10.0"
+dependencies = [
+ "arc-pty",
+ "dashmap",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "arc-db"
 version = "0.10.0"
 dependencies = [
@@ -130,6 +142,7 @@ version = "0.10.0"
 dependencies = [
  "anyhow",
  "arc-claude-code",
+ "arc-dap",
  "arc-db",
  "arc-filesystem",
  "arc-git",

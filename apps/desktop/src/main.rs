@@ -5,6 +5,7 @@
 mod commands;
 
 use arc_session_manager::SessionStore;
+use commands::dap::DapState;
 use commands::fs::WatchState;
 use commands::lsp::LspState;
 use commands::pty::PtyState;
@@ -257,6 +258,9 @@ fn main() {
             commands::lsp::lsp_formatting,
             commands::lsp::lsp_stop,
             commands::lsp::lsp_is_running,
+            commands::dap::dap_start,
+            commands::dap::dap_request,
+            commands::dap::dap_stop,
             commands::proc::proc_run,
             commands::db::db_conn_list,
             commands::db::db_conn_upsert,
@@ -356,6 +360,7 @@ fn main() {
             // The LSP manager needs an AppHandle to emit diagnostics events,
             // so it's built here (not via Default) where the handle is ready.
             app.manage(LspState::new(app.handle().clone()));
+            app.manage(DapState::new(app.handle().clone()));
             tracing::info!("arc desktop started");
             Ok(())
         })
@@ -379,6 +384,9 @@ fn main() {
             // can't be held across the await inside `block_on`.
             let lsp = app_handle.state::<LspState>().manager.clone();
             tauri::async_runtime::block_on(lsp.stop_all());
+            // Debug adapters (and, through them, the debuggees) likewise.
+            let dap = app_handle.state::<DapState>().manager.clone();
+            tauri::async_runtime::block_on(dap.stop_all());
             // Database pools too, so servers see a clean disconnect rather
             // than N abandoned sockets timing out.
             tauri::async_runtime::block_on(

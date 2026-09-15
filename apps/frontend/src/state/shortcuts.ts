@@ -22,6 +22,11 @@ export type ActionId =
   | 'new-scratch'
   | 'toggle-ssh-panel'
   | 'toggle-layout-mode'
+  | 'debug-start-continue'
+  | 'debug-stop'
+  | 'debug-step-over'
+  | 'debug-step-into'
+  | 'debug-step-out'
   /** One launcher per detected CLI, derived from AI_CLIS — see LAUNCH_IDS. */
   | LaunchActionId
   | 'launch-wingman-pilot'
@@ -32,7 +37,7 @@ export type LaunchActionId = `launch-${AiCliId}`;
 
 const LAUNCH_IDS = Object.keys(AI_CLIS) as AiCliId[];
 
-export type ActionCategory = 'Workspace' | 'Terminal' | 'SSH' | 'AI CLIs' | 'Help';
+export type ActionCategory = 'Workspace' | 'Terminal' | 'Debug' | 'SSH' | 'AI CLIs' | 'Help';
 
 export interface ActionMeta {
   id: ActionId;
@@ -148,6 +153,36 @@ export const ACTION_META: Record<ActionId, ActionMeta> = {
     description: 'Cycle this workspace through tiles, tabs and floating.',
     category: 'Workspace',
   },
+  'debug-start-continue': {
+    id: 'debug-start-continue',
+    label: 'Start / Continue Debugging',
+    description: 'Start the selected debug configuration, or continue a paused one.',
+    category: 'Debug',
+  },
+  'debug-stop': {
+    id: 'debug-stop',
+    label: 'Stop Debugging',
+    description: 'End the debug session and its program.',
+    category: 'Debug',
+  },
+  'debug-step-over': {
+    id: 'debug-step-over',
+    label: 'Step Over',
+    description: 'Run to the next line in the current function.',
+    category: 'Debug',
+  },
+  'debug-step-into': {
+    id: 'debug-step-into',
+    label: 'Step Into',
+    description: 'Step into the call on the current line.',
+    category: 'Debug',
+  },
+  'debug-step-out': {
+    id: 'debug-step-out',
+    label: 'Step Out',
+    description: 'Run until the current function returns.',
+    category: 'Debug',
+  },
   ...(Object.fromEntries(
     LAUNCH_IDS.map((cli) => [
       `launch-${cli}`,
@@ -190,6 +225,11 @@ export const ACTION_ORDER: ActionId[] = [
   'new-scratch',
   'toggle-ssh-panel',
   'toggle-layout-mode',
+  'debug-start-continue',
+  'debug-stop',
+  'debug-step-over',
+  'debug-step-into',
+  'debug-step-out',
   ...LAUNCH_IDS.map((cli) => `launch-${cli}` as LaunchActionId),
   'launch-wingman-pilot',
   'launch-wingman-headless',
@@ -218,6 +258,11 @@ export const DEFAULT_BINDINGS: Record<ActionId, KeyBinding | null> = {
   'new-scratch': { code: 'KeyN', shift: true, alt: false, ...mod() },
   'toggle-ssh-panel': { code: 'KeyS', shift: true, alt: false, ...mod() },
   'toggle-layout-mode': { code: 'KeyL', shift: true, alt: false, ...mod() },
+  'debug-start-continue': { code: 'F5', ctrl: false, meta: false, shift: false, alt: false },
+  'debug-stop': { code: 'F5', ctrl: false, meta: false, shift: true, alt: false },
+  'debug-step-over': { code: 'F10', ctrl: false, meta: false, shift: false, alt: false },
+  'debug-step-into': { code: 'F11', ctrl: false, meta: false, shift: false, alt: false },
+  'debug-step-out': { code: 'F11', ctrl: false, meta: false, shift: true, alt: false },
   // AI CLI launchers ship unbound by default — users can assign keys via the
   // shortcuts dialog, and they're discoverable through the TabBar dropdown
   // and the new-tab popover regardless.

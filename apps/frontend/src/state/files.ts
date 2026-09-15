@@ -19,6 +19,7 @@ export type SidebarView =
   | 'outline'
   | 'problems'
   | 'tests'
+  | 'debug'
   | 'docker'
   | 'ssh'
   | 'agents';

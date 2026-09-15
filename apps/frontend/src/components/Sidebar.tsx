@@ -36,6 +36,7 @@ const TestExplorer = lazy(() =>
 const ProblemsPanel = lazy(() =>
   import('./ProblemsPanel').then((m) => ({ default: m.ProblemsPanel })),
 );
+const DebugPanel = lazy(() => import('./DebugPanel').then((m) => ({ default: m.DebugPanel })));
 const DockerPanel = lazy(() => import('./DockerPanel').then((m) => ({ default: m.DockerPanel })));
 const AgentsPanel = lazy(() => import('./AgentsPanel').then((m) => ({ default: m.AgentsPanel })));
 const SshPanel = lazy(() => import('./ssh/SshPanel').then((m) => ({ default: m.SshPanel })));
@@ -136,6 +137,8 @@ export function Sidebar() {
           <ProblemsPanel />
         ) : view === 'tests' ? (
           <TestExplorer />
+        ) : view === 'debug' ? (
+          <DebugPanel />
         ) : view === 'docker' ? (
           <DockerPanel />
         ) : view === 'agents' ? (
