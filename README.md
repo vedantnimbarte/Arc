@@ -58,7 +58,7 @@ it.
   connection is separate from any SSH terminal tab, so closing the shell doesn't take
   the tree down. Local-only features (git, content search, LSP, the task runner) sit out
   rather than misreport — the terminal for that host is an SSH tab.
-- **API Client** — A built-in Postman-style REST client (collections, environments, history).
+- **API Client** — A built-in Postman-style REST client (collections, environments, history, GraphQL bodies, cURL import/copy, OpenAPI 3.x JSON import).
 - **Database Client** — Query PostgreSQL, MySQL, and SQLite from a tab: saved connections,
   a table list, a SQL editor, and a results grid. Passwords go to your OS credential
   vault; only `user@host` is stored alongside the connection.

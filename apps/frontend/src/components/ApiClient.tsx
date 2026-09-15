@@ -2,7 +2,9 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ChevronDown,
   ChevronRight,
+  ClipboardPaste,
   Copy,
+  FileJson,
   Folder,
   History as HistoryIcon,
   Plus,
@@ -36,12 +38,17 @@ import {
   type ApiEnvironment,
   type ApiHistoryEntry,
   type ApiSavedRequest,
+  type ApiSavedRequestInput,
   type HttpBodyDto,
   type HttpHeaderKV,
   type HttpRequestDto,
   type HttpResponseDto,
 } from '../lib/tauri';
 import { askConfirm, askText } from '../state/confirm';
+import { toastError } from '../state/toast';
+import { copyText } from '../lib/clipboard';
+import { parseCurl, toCurl } from '../lib/curl';
+import { parseOpenApi } from '../lib/openapi';
 
 interface Props {
   tabId: string;
@@ -73,7 +80,7 @@ function methodColour(m: string): string {
 
 // ─── Per-tab state shape (serialized to apiClientState JSON) ─────────────
 
-type BodyMode = 'none' | 'json' | 'xml' | 'text' | 'form' | 'multipart';
+type BodyMode = 'none' | 'json' | 'xml' | 'text' | 'form' | 'multipart' | 'graphql';
 
 type AuthMode = 'none' | 'bearer' | 'basic' | 'apikey';
 
@@ -105,7 +112,10 @@ interface RequestDraft {
   params: KV[];
   headers: KV[];
   bodyMode: BodyMode;
+  /** Raw body text; the query in GraphQL mode. */
   bodyText: string;
+  /** GraphQL variables JSON. Optional — older persisted drafts lack it. */
+  graphqlVariables?: string;
   formBody: KV[];
   multipartBody: KV[];
   auth: AuthState;
@@ -270,6 +280,120 @@ function applyAuth(headers: HttpHeaderKV[], queryUrl: string, auth: AuthState): 
     }
   }
   return { headers: next, url };
+}
+
+// ─── Draft → wire request ────────────────────────────────────────────────
+
+/** Compose the wire request, applying env interpolation everywhere. Shared
+ *  by Send and Copy as cURL so both see the same resolved request. Throws
+ *  when GraphQL variables aren't valid JSON. */
+function buildWireRequest(draft: RequestDraft, vars: Record<string, string>): HttpRequestDto {
+  const interpolatedUrl = interpolate(draft.url, vars);
+  const baseHeaders = interpolateKV(draft.headers, vars);
+  const finalParams = interpolateKV(draft.params, vars);
+  // If the URL already has a query, leave it alone; otherwise build
+  // from the Params table. (Users syncing via the Params tab edit the
+  // URL directly via setQueryOnUrl in the Params handler.)
+  const urlWithParams = interpolatedUrl.includes('?')
+    ? interpolatedUrl
+    : finalParams.length > 0
+      ? setQueryOnUrl(
+          interpolatedUrl,
+          finalParams.map((p) => ({ ...p, id: '', enabled: true })),
+        )
+      : interpolatedUrl;
+  const { headers, url } = applyAuth(baseHeaders, urlWithParams, draft.auth);
+
+  let method: string = draft.method;
+  let body: HttpBodyDto = { kind: 'none' };
+  switch (draft.bodyMode) {
+    case 'json':
+      body = {
+        kind: 'raw',
+        text: interpolate(draft.bodyText, vars),
+        content_type: 'application/json',
+      };
+      break;
+    case 'xml':
+      body = {
+        kind: 'raw',
+        text: interpolate(draft.bodyText, vars),
+        content_type: 'application/xml',
+      };
+      break;
+    case 'text':
+      body = {
+        kind: 'raw',
+        text: interpolate(draft.bodyText, vars),
+        content_type: 'text/plain',
+      };
+      break;
+    case 'form':
+      body = { kind: 'formurlencoded', entries: interpolateKV(draft.formBody, vars) };
+      break;
+    case 'multipart':
+      body = { kind: 'multipart', entries: interpolateKV(draft.multipartBody, vars) };
+      break;
+    case 'graphql': {
+      const rawVars = interpolate(draft.graphqlVariables ?? '', vars).trim();
+      let variables: unknown = {};
+      if (rawVars) {
+        try {
+          variables = JSON.parse(rawVars);
+        } catch {
+          throw new Error('GraphQL variables are not valid JSON');
+        }
+      }
+      // GraphQL over HTTP is always a JSON POST, whatever the method picker says.
+      method = 'POST';
+      body = {
+        kind: 'raw',
+        text: JSON.stringify({ query: interpolate(draft.bodyText, vars), variables }),
+        content_type: 'application/json',
+      };
+      break;
+    }
+    default:
+      body = { kind: 'none' };
+  }
+
+  return { method, url, headers, body };
+}
+
+/** Serialize a draft into the saved-request row shape. */
+function draftToSavedInput(
+  d: RequestDraft,
+  name: string,
+  collectionId: string | null,
+  position = 0,
+): ApiSavedRequestInput {
+  return {
+    id: d.savedId ?? undefined,
+    collection_id: collectionId,
+    name,
+    method: d.method,
+    url: d.url,
+    params_json: JSON.stringify(d.params),
+    headers_json: JSON.stringify(d.headers),
+    body_json: JSON.stringify({
+      bodyMode: d.bodyMode,
+      bodyText: d.bodyText,
+      graphqlVariables: d.graphqlVariables ?? '',
+      formBody: d.formBody,
+      multipartBody: d.multipartBody,
+    }),
+    auth_json: JSON.stringify(d.auth),
+    position,
+  };
+}
+
+/** Guess the body mode for an imported raw body from its Content-Type. */
+function bodyModeFor(body: string | null, headers: HttpHeaderKV[]): BodyMode {
+  if (body === null) return 'none';
+  const ct = headers.find((h) => h.name.toLowerCase() === 'content-type')?.value ?? '';
+  if (ct.includes('json')) return 'json';
+  if (ct.includes('xml')) return 'xml';
+  return 'text';
 }
 
 // ─── KV table helpers ────────────────────────────────────────────────────
@@ -515,62 +639,14 @@ export function ApiClient({ tabId }: Props) {
     async (draft: RequestDraft) => {
       if (!draft.url.trim()) return;
 
-      // Compose the wire request applying env interpolation everywhere.
-      const interpolatedUrl = interpolate(draft.url, vars);
-      const baseHeaders = interpolateKV(draft.headers, vars);
-      const finalParams = interpolateKV(draft.params, vars);
-      // If the URL already has a query, leave it alone; otherwise build
-      // from the Params table. (Users syncing via the Params tab edit the
-      // URL directly via setQueryOnUrl in the Params handler.)
-      const urlWithParams = interpolatedUrl.includes('?')
-        ? interpolatedUrl
-        : finalParams.length > 0
-          ? setQueryOnUrl(
-              interpolatedUrl,
-              finalParams.map((p) => ({ ...p, id: '', enabled: true })),
-            )
-          : interpolatedUrl;
-      const { headers, url } = applyAuth(baseHeaders, urlWithParams, draft.auth);
-
-      let body: HttpBodyDto = { kind: 'none' };
-      switch (draft.bodyMode) {
-        case 'json':
-          body = {
-            kind: 'raw',
-            text: interpolate(draft.bodyText, vars),
-            content_type: 'application/json',
-          };
-          break;
-        case 'xml':
-          body = {
-            kind: 'raw',
-            text: interpolate(draft.bodyText, vars),
-            content_type: 'application/xml',
-          };
-          break;
-        case 'text':
-          body = {
-            kind: 'raw',
-            text: interpolate(draft.bodyText, vars),
-            content_type: 'text/plain',
-          };
-          break;
-        case 'form':
-          body = { kind: 'formurlencoded', entries: interpolateKV(draft.formBody, vars) };
-          break;
-        case 'multipart':
-          body = { kind: 'multipart', entries: interpolateKV(draft.multipartBody, vars) };
-          break;
-        default:
-          body = { kind: 'none' };
+      let req: HttpRequestDto;
+      try {
+        req = buildWireRequest(draft, vars);
+      } catch (err) {
+        updateDraft(draft.localId, { error: err instanceof Error ? err.message : String(err) });
+        return;
       }
-
-      const req: HttpRequestDto = {
-        method: draft.method,
-        url,
-        headers,
-        body,
-      };
+      const { url } = req;
 
       updateDraft(draft.localId, { pending: true, error: undefined });
       try {
@@ -579,7 +655,7 @@ export function ApiClient({ tabId }: Props) {
         if (sessionId) {
           try {
             await apiclientAppendHistory(sessionId, {
-              method: draft.method,
+              method: req.method,
               url,
               request_snapshot_json: JSON.stringify(req),
               status: response.status,
@@ -599,7 +675,7 @@ export function ApiClient({ tabId }: Props) {
         if (sessionId) {
           try {
             await apiclientAppendHistory(sessionId, {
-              method: draft.method,
+              method: req.method,
               url,
               request_snapshot_json: JSON.stringify(req),
               status: null,
@@ -676,25 +752,46 @@ export function ApiClient({ tabId }: Props) {
       if (!proposed) return;
       name = proposed.trim() || 'Untitled request';
     }
-    const upserted = await apiclientUpsertRequest(sessionId, {
-      id: active.savedId ?? undefined,
-      collection_id: collectionId ?? null,
-      name,
-      method: active.method,
-      url: active.url,
-      params_json: JSON.stringify(active.params),
-      headers_json: JSON.stringify(active.headers),
-      body_json: JSON.stringify({
-        bodyMode: active.bodyMode,
-        bodyText: active.bodyText,
-        formBody: active.formBody,
-        multipartBody: active.multipartBody,
-      }),
-      auth_json: JSON.stringify(active.auth),
-      position: 0,
-    });
+    const upserted = await apiclientUpsertRequest(
+      sessionId,
+      draftToSavedInput(active, name, collectionId ?? null),
+    );
     updateDraft(active.localId, { savedId: upserted.id, dirty: false, name });
     void refreshAll();
+  };
+
+  // ─── cURL import / export ─────────────────────────────────────────────
+
+  const copyAsCurl = () => {
+    try {
+      copyText(toCurl(buildWireRequest(active, vars)), 'cURL command');
+    } catch (err) {
+      toastError(err instanceof Error ? err.message : String(err));
+    }
+  };
+
+  const importCurl = async () => {
+    const cmd = await askText(
+      'Import from cURL',
+      { label: 'curl command', placeholder: "curl -X POST 'https://…' -H '…' -d '…'", multiline: true },
+      'import',
+    );
+    if (!cmd) return;
+    try {
+      const parsed = parseCurl(cmd);
+      const d = emptyDraft();
+      d.method = (METHODS as readonly string[]).includes(parsed.method)
+        ? (parsed.method as Method)
+        : 'GET';
+      d.url = parsed.url;
+      d.params = urlToParams(parsed.url);
+      d.headers = parsed.headers.map((h) => ({ ...newKV(), name: h.name, value: h.value }));
+      d.bodyMode = bodyModeFor(parsed.body, parsed.headers);
+      d.bodyText = parsed.body ?? '';
+      setState((s) => ({ ...s, drafts: [...s.drafts, d], activeLocalId: d.localId }));
+    } catch (err) {
+      toastError(`Couldn't import cURL: ${err instanceof Error ? err.message : String(err)}`);
+    }
   };
 
   // ─── Render ──────────────────────────────────────────────────────────
@@ -795,6 +892,8 @@ export function ApiClient({ tabId }: Props) {
             onChange={(patch) => updateDraft(active.localId, patch)}
             onSend={() => void send(active)}
             onSave={() => void saveCurrent()}
+            onCopyCurl={copyAsCurl}
+            onImportCurl={() => void importCurl()}
           />
           <ResponseViewer
             draft={active}
@@ -894,6 +993,8 @@ function RequestBuilder({
   onChange,
   onSend,
   onSave,
+  onCopyCurl,
+  onImportCurl,
 }: {
   draft: RequestDraft;
   builderTab: BuilderTab;
@@ -902,6 +1003,8 @@ function RequestBuilder({
   onChange: (patch: Partial<RequestDraft>) => void;
   onSend: () => void;
   onSave: () => void;
+  onCopyCurl: () => void;
+  onImportCurl: () => void;
 }) {
   const [methodOpen, setMethodOpen] = useState(false);
   const methodRef = useRef<HTMLButtonElement>(null);
@@ -978,6 +1081,23 @@ function RequestBuilder({
         >
           <Save size={12} strokeWidth={2} />
         </button>
+        <button
+          onClick={onCopyCurl}
+          disabled={!draft.url.trim()}
+          className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-fg-subtle transition-colors hover:bg-surface-2 hover:text-fg-base disabled:cursor-not-allowed disabled:opacity-40"
+          title="Copy as cURL"
+          aria-label="Copy as cURL"
+        >
+          <Copy size={12} strokeWidth={2} />
+        </button>
+        <button
+          onClick={onImportCurl}
+          className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-fg-subtle transition-colors hover:bg-surface-2 hover:text-fg-base"
+          title="Import from cURL"
+          aria-label="Import from cURL"
+        >
+          <ClipboardPaste size={12} strokeWidth={2} />
+        </button>
       </div>
 
       {/* Builder sub-tab strip */}
@@ -1043,8 +1163,10 @@ function RequestBuilder({
             text={draft.bodyText}
             form={draft.formBody}
             multipart={draft.multipartBody}
-            onMode={(m) => onChange({ bodyMode: m })}
+            graphqlVariables={draft.graphqlVariables ?? ''}
+            onMode={(m) => onChange(m === 'graphql' ? { bodyMode: m, method: 'POST' } : { bodyMode: m })}
             onText={(text) => onChange({ bodyText: text })}
+            onGraphqlVariables={(v) => onChange({ graphqlVariables: v })}
             onForm={(rows) => onChange({ formBody: rows })}
             onMultipart={(rows) => onChange({ multipartBody: rows })}
           />
@@ -1116,17 +1238,21 @@ function BodyEditor({
   text,
   form,
   multipart,
+  graphqlVariables,
   onMode,
   onText,
   onForm,
   onMultipart,
+  onGraphqlVariables,
 }: {
   mode: BodyMode;
   text: string;
   form: KV[];
   multipart: KV[];
+  graphqlVariables: string;
   onMode: (m: BodyMode) => void;
   onText: (s: string) => void;
+  onGraphqlVariables: (s: string) => void;
   onForm: (rows: KV[]) => void;
   onMultipart: (rows: KV[]) => void;
 }) {
@@ -1137,12 +1263,17 @@ function BodyEditor({
     { id: 'text', label: 'Text' },
     { id: 'form', label: 'form-urlencoded' },
     { id: 'multipart', label: 'multipart' },
+    { id: 'graphql', label: 'GraphQL' },
   ];
   const isText = mode === 'json' || mode === 'xml' || mode === 'text';
 
   const prettifyJson = () => {
     const { ok, text: out } = tryPrettyJson(text);
     if (ok) onText(out);
+  };
+  const prettifyVariables = () => {
+    const { ok, text: out } = tryPrettyJson(graphqlVariables);
+    if (ok) onGraphqlVariables(out);
   };
 
   return (
@@ -1162,11 +1293,11 @@ function BodyEditor({
             {r.label}
           </button>
         ))}
-        {mode === 'json' && (
+        {(mode === 'json' || mode === 'graphql') && (
           <button
-            onClick={prettifyJson}
+            onClick={mode === 'json' ? prettifyJson : prettifyVariables}
             className="ml-auto flex items-center gap-1 rounded-sm px-2 py-1 font-display text-xs text-fg-subtle transition-colors hover:bg-surface-1 hover:text-fg-base"
-            title="Format JSON"
+            title={mode === 'json' ? 'Format JSON' : 'Format variables JSON'}
           >
             <Sparkles size={10} strokeWidth={2} />
             Beautify
@@ -1186,6 +1317,34 @@ function BodyEditor({
           className="min-h-[180px] w-full resize-y rounded-md border border-edge-1 bg-scrim-1 p-2.5 font-mono text-sm leading-relaxed text-fg-base outline-none transition-colors focus:border-accent/40"
           spellCheck={false}
         />
+      )}
+      {mode === 'graphql' && (
+        <div className="grid grid-cols-1 gap-2 lg:grid-cols-[3fr_2fr]">
+          <div className="flex flex-col gap-1">
+            <label className="font-display text-2xs uppercase tracking-wider text-fg-subtle/70">
+              Query
+            </label>
+            <textarea
+              value={text}
+              onChange={(e) => onText(e.target.value)}
+              placeholder={'query ($id: ID!) {\n  user(id: $id) { name }\n}'}
+              className="min-h-[180px] w-full resize-y rounded-md border border-edge-1 bg-scrim-1 p-2.5 font-mono text-sm leading-relaxed text-fg-base outline-none transition-colors focus:border-accent/40"
+              spellCheck={false}
+            />
+          </div>
+          <div className="flex flex-col gap-1">
+            <label className="font-display text-2xs uppercase tracking-wider text-fg-subtle/70">
+              Variables (JSON)
+            </label>
+            <textarea
+              value={graphqlVariables}
+              onChange={(e) => onGraphqlVariables(e.target.value)}
+              placeholder={'{ "id": "1" }'}
+              className="min-h-[180px] w-full resize-y rounded-md border border-edge-1 bg-scrim-1 p-2.5 font-mono text-sm leading-relaxed text-fg-base outline-none transition-colors focus:border-accent/40"
+              spellCheck={false}
+            />
+          </div>
+        </div>
       )}
       {mode === 'form' && (
         <KvTable rows={form} onChange={onForm} placeholder={{ name: 'field', value: 'value' }} />
@@ -1553,6 +1712,33 @@ function LeftRail({
     onRefresh();
   };
 
+  const openApiInputRef = useRef<HTMLInputElement>(null);
+
+  /** OpenAPI 3.x (JSON) → a new collection with one saved request per operation. */
+  const importOpenApi = async (file: File) => {
+    if (!sessionId) return;
+    try {
+      const spec = parseOpenApi(await file.text());
+      const collection = await apiclientUpsertCollection(sessionId, {
+        name: spec.name,
+        position: collections.length,
+      });
+      for (const [i, r] of spec.requests.entries()) {
+        const d = emptyDraft(r.name);
+        d.method = r.method as Method;
+        d.url = r.url;
+        if (r.body !== null) {
+          d.bodyMode = 'json';
+          d.bodyText = r.body;
+        }
+        await apiclientUpsertRequest(sessionId, draftToSavedInput(d, r.name, collection.id, i));
+      }
+    } catch (err) {
+      toastError(`Couldn't import OpenAPI: ${err instanceof Error ? err.message : String(err)}`);
+    }
+    onRefresh();
+  };
+
   const removeCollection = async (id: string) => {
     const ok = await askConfirm({
       title: 'Delete this collection?',
@@ -1641,14 +1827,35 @@ function LeftRail({
           open={collectionsOpen}
           onToggle={() => setCollectionsOpen((o) => !o)}
           actions={
-            <button
-              onClick={createCollection}
-              className="flex h-5 w-5 items-center justify-center rounded text-fg-subtle hover:bg-surface-2 hover:text-fg-base"
-              title="New collection"
-              aria-label="New collection"
-            >
-              <Plus size={11} strokeWidth={2.2} />
-            </button>
+            <>
+              <input
+                ref={openApiInputRef}
+                type="file"
+                accept=".json,application/json"
+                hidden
+                onChange={(e) => {
+                  const file = e.target.files?.[0];
+                  e.target.value = '';
+                  if (file) void importOpenApi(file);
+                }}
+              />
+              <button
+                onClick={() => openApiInputRef.current?.click()}
+                className="flex h-5 w-5 items-center justify-center rounded text-fg-subtle hover:bg-surface-2 hover:text-fg-base"
+                title="Import OpenAPI 3.x (JSON)"
+                aria-label="Import OpenAPI"
+              >
+                <FileJson size={11} strokeWidth={2} />
+              </button>
+              <button
+                onClick={createCollection}
+                className="flex h-5 w-5 items-center justify-center rounded text-fg-subtle hover:bg-surface-2 hover:text-fg-base"
+                title="New collection"
+                aria-label="New collection"
+              >
+                <Plus size={11} strokeWidth={2.2} />
+              </button>
+            </>
           }
         >
           {collectionsOpen && (
@@ -2056,6 +2263,7 @@ function savedToDraft(saved: ApiSavedRequest): RequestDraft {
   let headers: KV[] = [];
   let bodyMode: BodyMode = 'none';
   let bodyText = '';
+  let graphqlVariables = '';
   let formBody: KV[] = [];
   let multipartBody: KV[] = [];
   let auth = emptyAuth();
@@ -2074,11 +2282,13 @@ function savedToDraft(saved: ApiSavedRequest): RequestDraft {
       const b = JSON.parse(saved.body_json) as {
         bodyMode: BodyMode;
         bodyText: string;
+        graphqlVariables?: string;
         formBody: KV[];
         multipartBody: KV[];
       };
       bodyMode = b.bodyMode ?? 'none';
       bodyText = b.bodyText ?? '';
+      graphqlVariables = b.graphqlVariables ?? '';
       formBody = b.formBody ?? [];
       multipartBody = b.multipartBody ?? [];
     }
@@ -2100,11 +2310,9 @@ function savedToDraft(saved: ApiSavedRequest): RequestDraft {
     headers,
     bodyMode,
     bodyText,
+    graphqlVariables,
     formBody,
     multipartBody,
     auth,
   };
 }
-
-// silence lint for the imported Copy icon we don't yet use
-void Copy;
