@@ -82,8 +82,10 @@ it.
 - **Debugger** — A Debug Adapter Protocol client that drives adapters you already have
   installed: debugpy (`python -m debugpy.adapter`), `lldb-dap` / `lldb-vscode` for
   C, C++ and Rust, and Delve (`dlv dap`, over TCP) for Go. Reads `.vscode/launch.json`
-  or offers quick configs, with gutter breakpoints, stepping (F5 / F10 / F11), call
-  stack, a lazily expanded variables tree, and a debug console.
+  or offers quick configs (honouring `python` / `pythonPath`), with gutter breakpoints that
+  follow your edits, conditions, hit counts and logpoints (right-click a breakpoint),
+  stepping (F5 / F10 / F11), call stack, a lazily expanded variables tree, watch
+  expressions, and a debug console.
 - **Containers** — Lists Docker containers, running or not, grouped by compose project,
   with start / stop / restart / remove on each row. Logs and `compose up` open a terminal
   tab rather than a cramped pane. Says plainly whether Docker is missing or just not

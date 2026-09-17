@@ -786,7 +786,12 @@ export interface DapStartParams {
   request: 'launch' | 'attach';
   /** The launch configuration, passed through as the request arguments. */
   config: Record<string, unknown>;
-  breakpoints: { path: string; lines: number[] }[];
+  /** DAP `SourceBreakpoint`s per file; options the adapter doesn't support
+   *  are dropped on the Rust side. */
+  breakpoints: {
+    path: string;
+    breakpoints: { line: number; condition?: string; hitCondition?: string; logMessage?: string }[];
+  }[];
 }
 
 export interface DapBreakpoint {

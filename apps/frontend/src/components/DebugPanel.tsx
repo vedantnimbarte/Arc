@@ -7,9 +7,11 @@ import {
   ChevronRight,
   Loader2,
   Pause,
+  Pencil,
   Play,
   RefreshCw,
   Square,
+  X,
 } from 'lucide-react';
 import { useFiles } from '../state/files';
 import { useDebug, type DapStackFrame, type DapVariable } from '../state/debug';
@@ -21,7 +23,8 @@ import { cn } from '../lib/cn';
 /**
  * Debug panel: pick a launch config, run it under the adapter the user has
  * installed, and inspect the program when it stops. The editor gutter owns
- * breakpoints; this panel is the controls, call stack, variables and console.
+ * breakpoints; this panel is the controls, call stack, variables, watches and
+ * console.
  */
 export function DebugPanel() {
   const root = useFiles((s) => s.root);
@@ -141,6 +144,7 @@ export function DebugPanel() {
             </Section>
           </>
         )}
+        <Watch root={root ?? ''} />
       </div>
 
       <Console />
@@ -229,18 +233,102 @@ function FrameRow({ frame, active, onClick }: { frame: DapStackFrame; active: bo
   );
 }
 
+const EMPTY_WATCHES: string[] = [];
+
+/** Watch expressions for this workspace root, evaluated against the selected
+ *  frame each time the program stops (or another frame is picked). */
+function Watch({ root }: { root: string }) {
+  const expressions = useDebug((s) => s.watches[root] ?? EMPTY_WATCHES);
+  const results = useDebug((s) => s.watchResults);
+  const stopped = useDebug((s) => s.status === 'stopped');
+  const { addWatch, editWatch, removeWatch } = useDebug.getState();
+  const [editing, setEditing] = useState<number | null>(null);
+  const [draft, setDraft] = useState('');
+
+  const input = (onDone: (value: string | null) => void, placeholder?: string) => (
+    <input
+      autoFocus
+      value={draft}
+      onChange={(e) => setDraft(e.target.value)}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter') onDone(draft);
+        if (e.key === 'Escape') onDone(null);
+      }}
+      onBlur={() => onDone(null)}
+      placeholder={placeholder}
+      aria-label="Watch expression"
+      className="w-full bg-surface-1 px-3 py-[3px] font-mono text-2xs text-fg-base outline-none placeholder:text-fg-subtle/60"
+    />
+  );
+
+  return (
+    <Section title="Watch">
+      {expressions.map((expression, i) => {
+        if (editing === i) {
+          return (
+            <div key={i}>
+              {input((value) => {
+                if (value !== null) editWatch(i, value);
+                setEditing(null);
+              })}
+            </div>
+          );
+        }
+        const r = stopped ? results[expression] : undefined;
+        return (
+          <div key={i} className="group relative" onDoubleClick={() => (setDraft(expression), setEditing(i))}>
+            <VariableNode
+              key={`${expression}-${r?.variablesReference ?? 0}`}
+              depth={0}
+              variable={{ name: expression, value: r?.error ?? r?.value ?? '', variablesReference: r?.variablesReference ?? 0 }}
+              error={!!r?.error}
+            />
+            <div className="absolute right-1 top-0 hidden items-center bg-surface-1 group-hover:flex">
+              <IconButton label="Edit expression" onClick={() => (setDraft(expression), setEditing(i))}>
+                <Pencil size={10} />
+              </IconButton>
+              <IconButton label="Remove expression" onClick={() => removeWatch(i)}>
+                <X size={10} />
+              </IconButton>
+            </div>
+          </div>
+        );
+      })}
+      {editing === -1 ? (
+        input(
+          (value) => {
+            if (value !== null) addWatch(value);
+            setEditing(null);
+          },
+          'Expression to watch',
+        )
+      ) : (
+        <button
+          type="button"
+          onClick={() => (setDraft(''), setEditing(-1))}
+          className="w-full px-3 py-[3px] text-left font-sans text-2xs text-fg-subtle/70 hover:text-fg-base"
+        >
+          + Add expression
+        </button>
+      )}
+    </Section>
+  );
+}
+
 function VariableNode({
   variable,
   depth,
   defaultOpen = false,
+  error = false,
 }: {
   variable: DapVariable;
   depth: number;
   defaultOpen?: boolean;
+  /** Paint `value` as an error message (a watch that failed to evaluate). */
+  error?: boolean;
 }) {
   const [open, setOpen] = useState(false);
-  const children = useDebug((s) => s.variables[variable.variablesReference]);
-  const loadVariables = useDebug((s) => s.loadVariables);
+  const children = useDebug((s) => s.variables[variable.variablesReference]);  const loadVariables = useDebug((s) => s.loadVariables);
   const expandable = variable.variablesReference > 0;
 
   const toggle = () => {
@@ -273,7 +361,12 @@ function VariableNode({
           {variable.name}
         </span>
         {variable.value && (
-          <span className="min-w-0 flex-1 truncate font-mono text-2xs text-fg-subtle">= {variable.value}</span>
+          <span
+            className={cn('min-w-0 flex-1 truncate font-mono text-2xs', error ? 'text-status-err' : 'text-fg-subtle')}
+            title={error ? variable.value : undefined}
+          >
+            {error ? variable.value : `= ${variable.value}`}
+          </span>
         )}
       </button>
       {open &&
