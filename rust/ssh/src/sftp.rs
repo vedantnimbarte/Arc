@@ -11,7 +11,9 @@
 //!   session's life, so there is no way to open a second channel on it from
 //!   outside. A remote workspace therefore dials its own connection. That is
 //!   also what you want operationally — closing the terminal tab must not
-//!   take the file tree down with it.
+//!   take the file tree down with it. The same connection carries the `exec`
+//!   channels that git, search, tests and language servers run over (see
+//!   [`exec`](crate::exec)), so none of those log in again.
 //!
 //! * **SFTP, not `exec` + `cat`.** Shelling out would mean quoting user paths
 //!   into a remote command line (an injection surface), guessing at `ls`
@@ -58,22 +60,24 @@ pub struct RemoteDirEntry {
     pub size: u64,
 }
 
-struct RemoteSession {
-    sftp: SftpSession,
-    /// Kept alive purely so the connection (and its jump host, if any)
-    /// outlives this struct's creation — dropping the handle closes the
-    /// transport out from under the SFTP session.
-    _conn: Dialed,
+pub(crate) struct RemoteSession {
+    // Mutex rather than RwLock: SftpSession's operations take &self but the
+    // underlying channel is a single multiplexed stream, and serializing
+    // requests is both correct and cheap next to the network round-trip.
+    sftp: Mutex<SftpSession>,
+    /// Owns the transport (and its jump host, if any): dropping it closes the
+    /// SFTP session too. `exec` opens further channels on it, outside the
+    /// SFTP lock, so a long test run doesn't stall the file tree.
+    pub(crate) conn: Dialed,
+    /// The endpoint's host name, for messages like "git isn't installed on …".
+    pub(crate) host: String,
 }
 
 /// Remote filesystem connections, keyed by a caller-chosen id (ARC uses the
 /// SSH host id, so one host is one connection no matter how many tabs).
 #[derive(Default)]
 pub struct SftpManager {
-    // Mutex rather than RwLock: SftpSession's operations take &self but the
-    // underlying channel is a single multiplexed stream, and serializing
-    // requests is both correct and cheap next to the network round-trip.
-    sessions: Arc<DashMap<String, Arc<Mutex<RemoteSession>>>>,
+    sessions: Arc<DashMap<String, Arc<RemoteSession>>>,
 }
 
 impl SftpManager {
@@ -118,10 +122,11 @@ impl SftpManager {
 
         self.sessions.insert(
             id.to_string(),
-            Arc::new(Mutex::new(RemoteSession {
-                sftp,
-                _conn: conn,
-            })),
+            Arc::new(RemoteSession {
+                sftp: Mutex::new(sftp),
+                conn,
+                host: opts.target.host.clone(),
+            }),
         );
         Ok(())
     }
@@ -130,7 +135,7 @@ impl SftpManager {
         self.sessions.remove(id);
     }
 
-    fn session(&self, id: &str) -> Result<Arc<Mutex<RemoteSession>>> {
+    pub(crate) fn session(&self, id: &str) -> Result<Arc<RemoteSession>> {
         self.sessions
             .get(id)
             .map(|e| e.clone())
@@ -141,9 +146,8 @@ impl SftpManager {
     /// and how `.`/`~`-relative starting points become concrete roots.
     pub async fn canonicalize(&self, id: &str, path: &str) -> Result<String> {
         let session = self.session(id)?;
-        let guard = session.lock().await;
+        let guard = session.sftp.lock().await;
         guard
-            .sftp
             .canonicalize(path)
             .await
             .with_context(|| format!("resolve {path}"))
@@ -153,9 +157,8 @@ impl SftpManager {
     /// the same ordering the local tree uses.
     pub async fn read_dir(&self, id: &str, path: &str) -> Result<Vec<RemoteDirEntry>> {
         let session = self.session(id)?;
-        let guard = session.lock().await;
+        let guard = session.sftp.lock().await;
         let dir = guard
-            .sftp
             .read_dir(path)
             .await
             .with_context(|| format!("read remote dir {path}"))?;
@@ -190,10 +193,9 @@ impl SftpManager {
         use tokio::io::AsyncReadExt;
 
         let session = self.session(id)?;
-        let guard = session.lock().await;
+        let guard = session.sftp.lock().await;
 
         let meta = guard
-            .sftp
             .metadata(path)
             .await
             .with_context(|| format!("stat {path}"))?;
@@ -208,7 +210,6 @@ impl SftpManager {
         }
 
         let mut file = guard
-            .sftp
             .open(path)
             .await
             .with_context(|| format!("open {path}"))?;
@@ -238,12 +239,11 @@ impl SftpManager {
         use tokio::io::AsyncWriteExt;
 
         let session = self.session(id)?;
-        let guard = session.lock().await;
+        let guard = session.sftp.lock().await;
 
         let tmp = format!("{path}.arc-tmp");
         {
             let mut file = guard
-                .sftp
                 .create(&tmp)
                 .await
                 .with_context(|| format!("create {tmp}"))?;
@@ -254,14 +254,13 @@ impl SftpManager {
         }
 
         // Best-effort: v3 servers reject a rename onto an existing path.
-        let _ = guard.sftp.remove_file(path).await;
-        match guard.sftp.rename(&tmp, path).await {
+        let _ = guard.remove_file(path).await;
+        match guard.rename(&tmp, path).await {
             Ok(()) => Ok(()),
             Err(err) => {
                 // Don't leave the temp file behind for the user to find.
-                let _ = guard.sftp.remove_file(&tmp).await;
+                let _ = guard.remove_file(&tmp).await;
                 let mut file = guard
-                    .sftp
                     .create(path)
                     .await
                     .with_context(|| format!("create {path} after rename failed: {err}"))?;
@@ -276,9 +275,8 @@ impl SftpManager {
 
     pub async fn create_dir(&self, id: &str, path: &str) -> Result<()> {
         let session = self.session(id)?;
-        let guard = session.lock().await;
+        let guard = session.sftp.lock().await;
         guard
-            .sftp
             .create_dir(path)
             .await
             .with_context(|| format!("mkdir {path}"))
@@ -286,9 +284,8 @@ impl SftpManager {
 
     pub async fn rename(&self, id: &str, from: &str, to: &str) -> Result<()> {
         let session = self.session(id)?;
-        let guard = session.lock().await;
+        let guard = session.sftp.lock().await;
         guard
-            .sftp
             .rename(from, to)
             .await
             .with_context(|| format!("rename {from} -> {to}"))
@@ -299,16 +296,14 @@ impl SftpManager {
     /// undo and no trash to fall back on.
     pub async fn remove(&self, id: &str, path: &str, is_dir: bool) -> Result<()> {
         let session = self.session(id)?;
-        let guard = session.lock().await;
+        let guard = session.sftp.lock().await;
         if is_dir {
             guard
-                .sftp
                 .remove_dir(path)
                 .await
                 .with_context(|| format!("rmdir {path} (is it empty?)"))
         } else {
             guard
-                .sftp
                 .remove_file(path)
                 .await
                 .with_context(|| format!("rm {path}"))
@@ -327,6 +322,26 @@ pub fn posix_join(base: &str, name: &str) -> String {
     } else {
         format!("{base}/{name}")
     }
+}
+
+/// Split ARC's remote URI, `ssh://<hostId>/abs/path`, into host id and
+/// absolute path. `None` for anything else. Mirrors `parseRemotePath` in
+/// `lib/remote.ts`: host ids are UUIDs, so the first `/` ends the host.
+pub fn parse_remote_uri(uri: &str) -> Option<(&str, String)> {
+    let rest = uri.strip_prefix("ssh://")?;
+    let (host, path) = match rest.find('/') {
+        Some(i) => (&rest[..i], &rest[i..]),
+        None => (rest, "/"),
+    };
+    if host.is_empty() {
+        return None;
+    }
+    Some((host, path.to_string()))
+}
+
+/// The inverse of [`parse_remote_uri`].
+pub fn remote_uri(host: &str, path: &str) -> String {
+    format!("ssh://{host}{}", posix_join("/", path))
 }
 
 /// POSIX dirname. Returns "/" for a top-level path — never an empty string,
@@ -350,6 +365,20 @@ mod tests {
         assert_eq!(posix_join("/home/u", "/a.txt"), "/home/u/a.txt");
         assert_eq!(posix_join("/", "a.txt"), "/a.txt");
         assert_eq!(posix_join("", "a.txt"), "/a.txt");
+    }
+
+    #[test]
+    fn remote_uri_round_trips() {
+        assert_eq!(
+            parse_remote_uri("ssh://h1/home/u/a b.txt"),
+            Some(("h1", "/home/u/a b.txt".to_string()))
+        );
+        assert_eq!(parse_remote_uri("ssh://h1"), Some(("h1", "/".to_string())));
+        assert_eq!(parse_remote_uri("ssh:///etc"), None);
+        assert_eq!(parse_remote_uri("/home/u"), None);
+        assert_eq!(parse_remote_uri("C:\\ssh://h1/x"), None);
+        assert_eq!(remote_uri("h1", "/home/u"), "ssh://h1/home/u");
+        assert_eq!(remote_uri("h1", "home/u"), "ssh://h1/home/u");
     }
 
     #[test]

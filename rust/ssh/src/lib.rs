@@ -46,12 +46,15 @@ use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::sync::{mpsc, oneshot, Mutex};
 use uuid::Uuid;
 
+pub mod exec;
 pub mod forward;
 pub mod sftp;
 
+pub use exec::{remote_command, shell_join, shell_quote, ExecEvent, ExecOutput};
 pub use forward::{check_jump, ForwardKind, ForwardSpec};
 pub use sftp::{
-    posix_join, posix_parent, RemoteDirEntry, RemoteFsOpts, SftpManager, MAX_REMOTE_FILE_BYTES,
+    parse_remote_uri, posix_join, posix_parent, remote_uri, RemoteDirEntry, RemoteFsOpts,
+    SftpManager, MAX_REMOTE_FILE_BYTES,
 };
 
 const DATA_CHANNEL_CAP: usize = 256;
