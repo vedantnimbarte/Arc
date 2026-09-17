@@ -20,7 +20,9 @@ import {
   Columns2,
 } from 'lucide-react';
 import { fileIcon, MOCHA } from '../lib/fileIcons';
+import { convertFileSrc } from '@tauri-apps/api/core';
 import {
+  fsAllowAssetDir,
   fsReadFile,
   fsWriteFile,
   gitBlame,
@@ -32,7 +34,7 @@ import {
 import {
   CYCLE_MARKDOWN_PREVIEW_EVENT,
   classifyMarkdownLink,
-  resolveMarkdownPath,
+  previewImageSrc,
 } from '../lib/markdownLinks';
 import { changedLinesFromDiff, gitDiffGutter, setGitChanges } from '../lib/gitGutter';
 import { debugGutter } from '../lib/debugGutter';
@@ -681,10 +683,11 @@ export function Editor({ filePath, tabId }: Props) {
  * `<style>` would restyle the whole app and a `<form>` could navigate the
  * webview, so both go too.
  *
- * Local images become their alt text: the webview can't load disk files
- * without Tauri's asset protocol, which ARC leaves disabled.
- * ponytail: enable `app.security.assetProtocol` (scoped to the workspace) and
- * swap the replacement for `convertFileSrc(local)` to show them.
+ * Local images load over Tauri's asset protocol, whose scope is only the open
+ * workspace root (granted at runtime by `fs_allow_asset_dir`), so each src is
+ * set once that grant has landed. Images outside the root, a remote file's
+ * images and anything the CSP blocks fall back to their alt text. `<img>`
+ * never runs script, so an SVG is as safe here as a PNG.
  */
 function markdownToSafeFragment(md: string, filePath: string): DocumentFragment {
   const rawHtml = marked.parse(md, { async: false, breaks: false, gfm: true }) as string;
@@ -694,11 +697,30 @@ function markdownToSafeFragment(md: string, filePath: string): DocumentFragment 
     RETURN_DOM_FRAGMENT: true,
   });
   for (const img of fragment.querySelectorAll('img')) {
-    if (resolveMarkdownPath(filePath, img.getAttribute('src') ?? '')) {
-      img.replaceWith(img.getAttribute('alt') || '[image]');
+    const alt = () => img.replaceWith(img.getAttribute('alt') || '[image]');
+    const src = isTauri ? previewImageSrc(filePath, img.getAttribute('src') ?? '', convertFileSrc) : null;
+    if (src === null) {
+      alt();
+      continue;
     }
+    img.removeAttribute('src');
+    img.addEventListener('error', alt, { once: true });
+    void assetScopeReady().then(() => img.setAttribute('src', src));
   }
   return fragment;
+}
+
+let assetScope: { root: string; ready: Promise<void> } | null = null;
+
+/** Grant the asset protocol the current workspace root, once per root. */
+function assetScopeReady(): Promise<void> {
+  const root = useFiles.getState().root;
+  if (!root || isRemotePath(root)) return Promise.resolve();
+  if (assetScope?.root !== root) {
+    const ready = fsAllowAssetDir(root).catch((err) => console.warn('[editor] asset scope:', err));
+    assetScope = { root, ready };
+  }
+  return assetScope.ready;
 }
 
 function StatusLabel({ status, dirty }: { status: Status; dirty: boolean }) {

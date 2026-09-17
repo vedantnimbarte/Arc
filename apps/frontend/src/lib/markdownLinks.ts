@@ -43,6 +43,24 @@ export function resolveMarkdownPath(filePath: string, ref: string): string | nul
   return resolveWorkspacePath(dir, target);
 }
 
+/**
+ * What the preview should load for an `<img src>` in the markdown file at
+ * `filePath`. Local paths resolve against the file's directory and go through
+ * `toUrl` (`convertFileSrc`); `data:` and web URLs pass through untouched, and
+ * the CSP decides whether they load. `null` means show the alt text: a remote
+ * file, or a src that resolves to nothing.
+ */
+export function previewImageSrc(
+  filePath: string,
+  src: string,
+  toUrl: (path: string) => string,
+): string | null {
+  const raw = src.trim();
+  if (SCHEME_RE.test(raw) || raw.startsWith('//')) return raw;
+  const path = resolveMarkdownPath(filePath, raw);
+  return path ? toUrl(path) : null;
+}
+
 /** Decide what clicking `href` in the preview of `filePath` should do. */
 export function classifyMarkdownLink(filePath: string, href: string): MarkdownLink {
   const raw = href.trim();

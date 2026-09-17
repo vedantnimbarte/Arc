@@ -411,6 +411,12 @@ export async function fsCreateDir(path: string): Promise<void> {
   await invoke('fs_create_dir', { path });
 }
 
+/** Let the webview load files under a local `path` over the asset protocol
+ *  (`convertFileSrc`). The markdown preview grants the workspace root. */
+export async function fsAllowAssetDir(path: string): Promise<void> {
+  await invoke('fs_allow_asset_dir', { path });
+}
+
 // ----- Network probes ---------------------------------------------------
 
 // Lightweight 127.0.0.1:<port> TCP connect with a 200 ms timeout. Used by the
