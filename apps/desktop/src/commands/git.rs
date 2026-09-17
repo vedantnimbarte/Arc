@@ -7,6 +7,10 @@
 //!   invoke("git_root",           { path })                              -> Option<String>
 //!   invoke("git_log",            { path, limit, options? })             -> Vec<LogEntry>
 //!   invoke("git_diff",           { path, scope, pathFilter? })          -> String
+//!   invoke("git_snapshot_tree",  { path })                              -> String
+//!   invoke("git_diff_trees",     { path, from, to, pathFilter?, numstat }) -> String
+//!   invoke("git_merge_base",     { path, a, b })                        -> String
+//!   invoke("git_rev_count",      { path, from, to })                    -> usize
 //!   invoke("git_blame",          { path, file, startLine?, endLine? })  -> Vec<BlameLine>
 //!   invoke("git_branches",       { path })                              -> Vec<BranchInfo>
 //!   invoke("git_checkout",       { path, name })                        -> CheckoutResult
@@ -105,6 +109,34 @@ pub async fn git_diff(
     arc_git::diff(&path, scope, path_filter.as_deref())
         .await
         .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn git_snapshot_tree(path: String) -> Result<String, String> {
+    arc_git::snapshot_tree(&path).await.map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn git_diff_trees(
+    path: String,
+    from: String,
+    to: String,
+    path_filter: Option<String>,
+    numstat: bool,
+) -> Result<String, String> {
+    arc_git::diff_trees(&path, &from, &to, path_filter.as_deref(), numstat)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn git_merge_base(path: String, a: String, b: String) -> Result<String, String> {
+    arc_git::merge_base(&path, &a, &b).await.map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn git_rev_count(path: String, from: String, to: String) -> Result<usize, String> {
+    arc_git::rev_count(&path, &from, &to).await.map_err(|e| e.to_string())
 }
 
 #[tauri::command]

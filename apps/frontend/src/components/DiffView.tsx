@@ -37,7 +37,7 @@ interface ParsedFileDiff {
   hunks: DiffHunk[];
 }
 
-function parseDiff(text: string): ParsedFileDiff[] {
+export function parseDiff(text: string): ParsedFileDiff[] {
   const result: ParsedFileDiff[] = [];
   const fileChunks = text.split(/(?=^diff --git )/m).filter((s) => s.trim());
 
@@ -319,7 +319,7 @@ interface HunkBlockProps {
   onApply: (patch: string, cached: boolean, reverse: boolean) => void;
 }
 
-function HunkBlock({ hunk, file, scope, busy, onApply }: HunkBlockProps) {
+export function HunkBlock({ hunk, file, scope, busy, onApply }: HunkBlockProps) {
   const [collapsed, setCollapsed] = useState(false);
 
   return (

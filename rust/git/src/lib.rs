@@ -1097,6 +1097,102 @@ pub async fn diff<P: AsRef<Path>>(
     Ok(String::from_utf8_lossy(&output.stdout).into_owned())
 }
 
+// ----- comparing checkouts --------------------------------------------------
+//
+// Racing agents each work in their own worktree, and most of what they did is
+// not committed yet. These let two checkouts be compared as they stand on
+// disk: snapshot each into a tree object, then diff the trees. Worktrees share
+// one object database, so a tree written from one is readable from any.
+
+/// Tree oid of the working tree at `path` exactly as it is on disk: committed,
+/// staged, unstaged and untracked (not ignored) files alike.
+///
+/// Built in a throwaway index seeded from the real one — the real index, and
+/// so the user's staging, is never touched. Seeding keeps the stat cache, so
+/// only files that actually changed are re-hashed.
+pub async fn snapshot_tree<P: AsRef<Path>>(path: P) -> Result<String> {
+    let path = path.as_ref();
+    let index_path = run_git(path, &["rev-parse", "--git-path", "index"]).await?;
+    let real_index = path.join(index_path.trim());
+    let stamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    let temp_index =
+        std::env::temp_dir().join(format!("arc-snapshot-{}-{stamp}.index", std::process::id()));
+    // No index yet (fresh repo) just means every file is hashed.
+    let _ = tokio::fs::copy(&real_index, &temp_index).await;
+
+    let with_temp_index = |args: &[&str]| {
+        let mut cmd = git_cmd();
+        cmd.arg("-C").arg(path).args(args).env("GIT_INDEX_FILE", &temp_index);
+        cmd
+    };
+    let result = async {
+        checked(with_temp_index(&["add", "-A"]).output().await)?;
+        Ok(checked(with_temp_index(&["write-tree"]).output().await)?.trim().to_string())
+    }
+    .await;
+    let _ = tokio::fs::remove_file(&temp_index).await;
+    result
+}
+
+/// `git diff <from> <to>` between any two tree-ish revisions — commits,
+/// branches, or trees from [`snapshot_tree`]. Renames are reported as a delete
+/// plus an add so every path in `--numstat` output is a plain path.
+pub async fn diff_trees<P: AsRef<Path>>(
+    path: P,
+    from: &str,
+    to: &str,
+    path_filter: Option<&str>,
+    numstat: bool,
+) -> Result<String> {
+    reject_option_like(from, "revision")?;
+    reject_option_like(to, "revision")?;
+    let mut args = vec!["--no-pager", "diff", "--no-color", "--no-renames"];
+    if numstat {
+        args.push("--numstat");
+    }
+    args.extend([from, to]);
+    if let Some(p) = path_filter {
+        args.extend(["--", p]);
+    }
+    run_git(path.as_ref(), &args).await
+}
+
+/// Full oid of the best common ancestor of `a` and `b`.
+pub async fn merge_base<P: AsRef<Path>>(path: P, a: &str, b: &str) -> Result<String> {
+    reject_option_like(a, "revision")?;
+    reject_option_like(b, "revision")?;
+    Ok(run_git(path.as_ref(), &["merge-base", a, b]).await?.trim().to_string())
+}
+
+/// How many commits `to` has that `from` does not (`git rev-list --count from..to`).
+pub async fn rev_count<P: AsRef<Path>>(path: P, from: &str, to: &str) -> Result<usize> {
+    reject_option_like(from, "revision")?;
+    reject_option_like(to, "revision")?;
+    let range = format!("{from}..{to}");
+    let out = run_git(path.as_ref(), &["rev-list", "--count", &range]).await?;
+    out.trim()
+        .parse()
+        .map_err(|_| Error::Failed(format!("unexpected rev-list output: {out:?}")))
+}
+
+/// Run git in `path`, returning stdout or failing with stderr.
+async fn run_git(path: &Path, args: &[&str]) -> Result<String> {
+    checked(git_cmd().arg("-C").arg(path).args(args).output().await)
+}
+
+/// Stdout of a finished git process, or its stderr as the error.
+fn checked(output: std::io::Result<std::process::Output>) -> Result<String> {
+    let output = output.map_err(|e| Error::Spawn(e.to_string()))?;
+    if !output.status.success() {
+        let err = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        return Err(Error::Failed(err));
+    }
+    Ok(String::from_utf8_lossy(&output.stdout).into_owned())
+}
+
 // ----- apply ----------------------------------------------------------------
 
 /// Apply a unified-diff patch to the repository.
@@ -3516,6 +3612,71 @@ git bisect skip eeeeeeeeeeeeeeeeeeee
 
         let _ = std::fs::remove_dir_all(&src);
         let _ = std::fs::remove_dir_all(&dest);
+    }
+
+    /// Two racing worktrees: one commits its work, the other leaves it dirty
+    /// and untracked. Both must show up when compared, and the committed one
+    /// must merge back into the base.
+    #[tokio::test]
+    async fn compares_and_merges_racing_worktrees() {
+        use std::process::Command as Sync;
+
+        let stamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0);
+        let root = std::env::temp_dir().join(format!("arc-git-race-{stamp}"));
+        let repo = root.join("repo");
+        let (a, b) = (root.join("a"), root.join("b"));
+        std::fs::create_dir_all(&repo).expect("tempdir");
+
+        let git = |dir: &Path, args: &[&str]| {
+            let out = Sync::new("git").arg("-C").arg(dir).args(args).output().expect("git runs");
+            assert!(out.status.success(), "git {args:?} failed: {}", String::from_utf8_lossy(&out.stderr));
+        };
+        git(&repo, &["init", "--quiet", "-b", "main"]);
+        git(&repo, &["config", "user.email", "test@example.com"]);
+        git(&repo, &["config", "user.name", "Test"]);
+        git(&repo, &["config", "commit.gpgsign", "false"]);
+        git(&repo, &["config", "core.autocrlf", "false"]);
+        std::fs::write(repo.join("shared.txt"), "one
+").expect("write");
+        git(&repo, &["add", "."]);
+        git(&repo, &["commit", "--quiet", "-m", "base"]);
+        worktree_add(&repo, &a.to_string_lossy(), Some("arc/t-1/1"), true, None).await.expect("add a");
+        worktree_add(&repo, &b.to_string_lossy(), Some("arc/t-1/2"), true, None).await.expect("add b");
+
+        std::fs::write(a.join("shared.txt"), "one
+two
+").expect("write");
+        git(&a, &["commit", "--quiet", "-am", "a's work"]);
+        std::fs::write(b.join("shared.txt"), "uno
+").expect("write");
+        std::fs::write(b.join("new.txt"), "fresh
+").expect("write");
+
+        let base = merge_base(&repo, "main", "arc/t-1/2").await.expect("merge-base");
+        let tree_b = snapshot_tree(&b).await.expect("snapshot b");
+        let stat_b = diff_trees(&repo, &base, &tree_b, None, true).await.expect("numstat");
+        assert!(stat_b.contains("new.txt"), "untracked file is in the snapshot: {stat_b}");
+        assert!(stat_b.contains("1	1	shared.txt"), "uncommitted edit counted: {stat_b}");
+        assert!(changes(&b).await.expect("changes").iter().all(|e| e.kind != ChangeKind::Staged), "real index untouched");
+
+        let tree_a = snapshot_tree(&a).await.expect("snapshot a");
+        let a_vs_b = diff_trees(&repo, &tree_a, &tree_b, Some("shared.txt"), false).await.expect("diff");
+        assert!(a_vs_b.contains("-two") && a_vs_b.contains("+uno"), "{a_vs_b}");
+
+        assert_eq!(rev_count(&repo, "main", "arc/t-1/1").await.expect("ahead"), 1);
+        assert_eq!(rev_count(&repo, "arc/t-1/1", "main").await.expect("behind"), 0);
+        let merged = merge(&repo, "arc/t-1/1").await.expect("merge");
+        assert!(!merged.conflicts);
+        assert_eq!(std::fs::read_to_string(repo.join("shared.txt")).expect("read"), "one
+two
+");
+
+        let _ = worktree_remove(&repo, &a.to_string_lossy(), true).await;
+        let _ = worktree_remove(&repo, &b.to_string_lossy(), true).await;
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     #[tokio::test]

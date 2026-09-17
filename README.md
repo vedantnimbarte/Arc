@@ -124,12 +124,20 @@ it.
   so Source Control can narrow to just what the agent changed; staging, diffs and the commit box
   all follow the filter. It reads git rather than the agent's output, so it works identically for
   all thirteen.
+- **Agent Runs** — Agents launched with “Give each its own checkout” race in sibling worktrees.
+  **Agents: Compare runs** in the command palette lists every race with each run's status, files
+  changed, +/− lines and commits ahead, diffs any two runs (or one against the base) side by side
+  with uncommitted work included, and merges the winner into the base branch — committing its
+  leftovers first, conflicts opening in the merge view — then offers to remove the other runs.
 - **Send to Agent** — Hand a terminal selection (⌥⌘A), a problem, a failing test or a diff hunk to
   a running agent CLI: it lands on the agent's input line for you to finish and send, falling back
   to the Claude Code panel or the clipboard. The status bar counts agents waiting on you — turn
   ended, bell, or gone quiet — and ⌥⌘J jumps to the one that has waited longest. The usage popup
   totals spend across every configured agent. Optionally, tabs that were running Claude Code,
   Codex, OpenCode or Aider relaunch and resume their last conversation (**Settings → Terminal**).
+- **Prompt queue** — Queue follow-up prompts on an agent tab (the list icon on its tab, or ⌥⌘U):
+  each time the agent stops and waits, ARC sends the next one. Pause it any time; typing into the
+  agent pauses it for you, so a queued prompt never answers an approval question.
 
 ## Quick Start
 

@@ -845,7 +845,8 @@ export type TabKind =
   | 'github'
   | 'merge'
   | 'wingman-board'
-  | 'wingman-review';
+  | 'wingman-review'
+  | 'agent-runs';
 
 export interface TabInput {
   id: string;
@@ -1277,6 +1278,34 @@ export async function gitDiff(
     scope,
     pathFilter: pathFilter ?? null,
   });
+}
+
+/** Tree oid of the checkout at `path` as it stands on disk — committed,
+ *  uncommitted and untracked files alike. The real index is left alone. */
+export async function gitSnapshotTree(path: string): Promise<string> {
+  return invoke<string>('git_snapshot_tree', { path });
+}
+
+/** `git diff <from> <to>` between any two revisions or snapshot trees, run in
+ *  `path`. `numstat` returns `--numstat` lines instead of a patch. */
+export async function gitDiffTrees(
+  path: string,
+  from: string,
+  to: string,
+  pathFilter: string | null,
+  numstat: boolean,
+): Promise<string> {
+  return invoke<string>('git_diff_trees', { path, from, to, pathFilter, numstat });
+}
+
+/** Full oid of the common ancestor of `a` and `b`. */
+export async function gitMergeBase(path: string, a: string, b: string): Promise<string> {
+  return invoke<string>('git_merge_base', { path, a, b });
+}
+
+/** Commits reachable from `to` but not from `from`. */
+export async function gitRevCount(path: string, from: string, to: string): Promise<number> {
+  return invoke<number>('git_rev_count', { path, from, to });
 }
 
 /** Apply a unified-diff patch to the repo.

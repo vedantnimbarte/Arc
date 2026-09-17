@@ -217,7 +217,7 @@ export function AgentLauncher({ detected, onBack, onDone }: Props) {
       let worktrees: { path: string; branch: string }[] = [];
       if (isolate && root) {
         try {
-          worktrees = await createRaceWorktrees(root, goal || label, count);
+          worktrees = await createRaceWorktrees(root, goal || label, count, label);
         } catch (err) {
           toastError(
             `Could not create isolated checkouts: ${err instanceof Error ? err.message : String(err)}`,

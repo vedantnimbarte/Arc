@@ -1,4 +1,5 @@
-import { gitRoot, gitWorktreeAdd } from './tauri';
+import { gitRoot, gitStatus, gitWorktreeAdd } from './tauri';
+import { parseRaceBranch, saveRaceMeta } from './agentRuns';
 
 /** Where isolated runs live: a sibling of the repo, not a child of it.
  *
@@ -84,11 +85,15 @@ export function raceNames(
  * worktree starts from HEAD. That is the honest behaviour — copying dirty
  * state into four checkouts would make four divergent copies of work the user
  * has not committed.
+ *
+ * `agent` and the branch the race was cut from are remembered alongside it,
+ * so the Agent runs view can say who did what and where a winner merges to.
  */
 export async function createRaceWorktrees(
   root: string,
   label: string,
   count: number,
+  agent = '',
 ): Promise<RaceWorktree[]> {
   const repo = await gitRoot(root);
   if (!repo) throw new Error('Isolated runs need a git repository.');
@@ -97,6 +102,7 @@ export async function createRaceWorktrees(
   const slug = slugify(label, 'run');
   const stamp = Date.now();
   const base = joinPath(parentOf(repo), RACE_DIR);
+  const baseBranch = (await gitStatus(repo))?.branch ?? null;
 
   const made: RaceWorktree[] = [];
   for (let i = 0; i < count; i++) {
@@ -106,6 +112,7 @@ export async function createRaceWorktrees(
     // repo's index lock, and the failure surfaces as a confusing lock error
     // rather than as "one of your agents has nowhere to run".
     await gitWorktreeAdd(repo, path, branch, true, null);
+    if (i === 0) saveRaceMeta(parseRaceBranch(branch)!.runId, { goal: label, agent, baseBranch });
     made.push({ path, branch });
   }
   return made;

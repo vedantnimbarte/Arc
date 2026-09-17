@@ -51,6 +51,7 @@ import {
   CircleAlert,
   FolderOpen,
   FolderTree,
+  GitCompare,
   GitPullRequest,
   Github,
   History,
@@ -77,7 +78,9 @@ import { useAi } from './state/ai';
 import { autoConnectWingman, useWingman } from './state/wingman';
 import { useClaudeCode } from './state/claudeCode';
 import { getTerminal } from './lib/terminalRegistry';
-import { sendToAgent } from './lib/sendToAgent';
+import { pickAgentTab, sendToAgent } from './lib/sendToAgent';
+import { useAgentQueue } from './state/agentQueue';
+import { askText } from './state/confirm';
 import { selectionPrompt } from './lib/agentPrompt';
 
 // Palettes and dialogs mount only while open, so their code loads on first use.
@@ -106,6 +109,9 @@ const Editor = lazy(() =>
 );
 const DiffView = lazy(() =>
   import('./components/DiffView').then((m) => ({ default: m.DiffView })),
+);
+const AgentRuns = lazy(() =>
+  import('./components/AgentRuns').then((m) => ({ default: m.AgentRuns })),
 );
 const MergeView = lazy(() =>
   import('./components/MergeView').then((m) => ({ default: m.MergeView })),
@@ -236,6 +242,10 @@ export default function App() {
       ) : tab.kind === 'wingman-board' ? (
         <Suspense fallback={<EditorFallback />}>
           <WingmanBoard />
+        </Suspense>
+      ) : tab.kind === 'agent-runs' ? (
+        <Suspense fallback={<EditorFallback />}>
+          <AgentRuns />
         </Suspense>
       ) : tab.kind === 'wingman-review' ? (
         <Suspense fallback={<EditorFallback />}>
@@ -478,6 +488,25 @@ export default function App() {
         else toast('No agent is waiting on you');
         return;
       }
+      case 'queue-agent-prompt': {
+        const ws = useWorkspace.getState();
+        const tab = pickAgentTab(ws.tabs, ws.activeTabId, ws.agentWaiting);
+        if (!tab) {
+          toast('No agent is running');
+          return;
+        }
+        void askText(
+          `Queue a prompt for ${tab.title}`,
+          { label: 'Sent the next time the agent stops and waits', multiline: true },
+          'queue',
+        ).then((text) => {
+          if (text && useAgentQueue.getState().add(tab.id, text)) {
+            const n = useAgentQueue.getState().queues[tab.id]?.items.length ?? 0;
+            toast(`Queued for ${tab.title} (${n} waiting)`);
+          }
+        });
+        return;
+      }
       case 'launch-wingman-pilot':
         void launchWingman('pilot');
         return;
@@ -640,6 +669,17 @@ export default function App() {
         run: () => {
           useFiles.getState().setAgentPanelTab('wingman');
           useFiles.getState().showSidebarView('agents');
+        },
+      },
+      {
+        id: 'agents.runs',
+        title: 'Agents: Compare runs',
+        description: 'Compare agents racing in their own worktrees and merge the winner.',
+        group: 'Git',
+        keywords: ['agent', 'race', 'worktree', 'compare', 'diff', 'merge', 'winner', 'runs'],
+        icon: GitCompare,
+        run: () => {
+          useWorkspace.getState().openAgentRuns();
         },
       },
       {

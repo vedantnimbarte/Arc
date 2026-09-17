@@ -71,7 +71,8 @@ export interface Tab {
     | 'github'
     | 'merge'
     | 'wingman-board'
-    | 'wingman-review';
+    | 'wingman-review'
+    | 'agent-runs';
   /** Which workspace this tab belongs to. Every tab has one after hydrate;
    *  new tabs inherit the active workspace (stamped in `addTab`). */
   workspaceId?: string;
@@ -411,6 +412,9 @@ interface WorkspaceState {
   /** Open (or focus) the Wingman review queue tab — agent-authored change
    *  sets across every card, ordered by what needs a decision. */
   openWingmanReview: () => string;
+  /** Open (or focus) the Agent runs tab — isolated agent races, compared
+   *  side by side, with a winner merged back. */
+  openAgentRuns: () => string;
   /** Open a new SSH tab for `host`. The tab spawns an xterm and dials via
    *  the SSH store on mount. Sets `sshHostId` on the tab; `sshSessionId`
    *  is filled once the connect resolves. */
@@ -1620,6 +1624,17 @@ export const useWorkspace = create<WorkspaceState>()((set, get) => ({
     }
     const id = `wingman-review-${Date.now()}`;
     get().addTab({ id, title: 'Review Queue', kind: 'wingman-review' });
+    return id;
+  },
+  openAgentRuns: () => {
+    // It lists every race in the open repo, so a second tab would duplicate it.
+    const existing = get().tabs.find((t) => t.kind === 'agent-runs');
+    if (existing) {
+      get().setActive(existing.id);
+      return existing.id;
+    }
+    const id = `agent-runs-${Date.now()}`;
+    get().addTab({ id, title: 'Agent Runs', kind: 'agent-runs' });
     return id;
   },
   openWingmanBoard: () => {

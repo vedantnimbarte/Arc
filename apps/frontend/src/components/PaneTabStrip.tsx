@@ -22,6 +22,7 @@ import { MoveIcon, WorkspaceFlyout } from './MoveToWorkspace';
 import { TabGroupMenu } from './TabGroupMenu';
 import { groupColorTokens, type GroupColorTokens } from '../lib/tabGroups';
 import { Tooltip } from './Tooltip';
+import { AgentQueueButton } from './AgentQueue';
 
 interface Props {
   paneId: string;
@@ -45,6 +46,7 @@ function iconForKind(kind: Tab['kind']): LucideIcon {
     case 'ssh':
       return Server;
     case 'diff':
+    case 'agent-runs':
       return GitCompare;
     case 'github':
       return Github;
@@ -244,6 +246,8 @@ export function PaneTabStrip({ paneId, variant = 'leaf' }: Props) {
               )}
             />
             <span className="flex-1 truncate text-left">{tab.title}</span>
+            {/* Prompt queue — agent tabs only; renders nothing otherwise. */}
+            <AgentQueueButton tab={tab} className="-mr-1.5" />
             {/* Move to workspace. Shown on the active tab, and on hover for the rest. */}
             <span
               role="button"
