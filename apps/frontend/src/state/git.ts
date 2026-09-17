@@ -1,4 +1,3 @@
-import { isRemotePath } from '../lib/remote';
 import { create } from 'zustand';
 import {
   gitChanges,
@@ -145,24 +144,8 @@ export const useGit = create<GitStoreState>((set) => ({
   loading: false,
   error: null,
   refresh: async (root: string, opts?: { background?: boolean }) => {
-    // Git runs against a local checkout. A remote workspace has none, and
-    // handing an `ssh://` path to the git commands would surface a parse
-    // error on every refresh — present it as "no repo" instead.
-    if (isRemotePath(root)) {
-      lastSnapshot = null;
-      set({
-        info: null,
-        repoRoot: null,
-        entries: [],
-        diffStat: null,
-        statusByPath: new Map(),
-        dirtyDirs: new Map(),
-        ignoredPaths: new Set(),
-        loading: false,
-        error: null,
-      });
-      return;
-    }
+    // A remote root works the same way: the git wrappers run on the host over
+    // SSH (see `gitInvoke` in lib/tauri.ts) and `gitRoot` answers `ssh://`.
     const seq = ++refreshSeq;
     if (!opts?.background) set({ loading: true, error: null });
     try {

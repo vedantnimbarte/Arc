@@ -93,6 +93,7 @@ export function SearchView() {
   const [query, setQuery] = useState('');
   const [rows, setRows] = useState<Row[]>([]);
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -111,12 +112,18 @@ export function SearchView() {
   // A file excluded from one result set means nothing to the next one.
   useEffect(() => setExcluded(new Set()), [query, caseSensitive, replaceOpen]);
 
+  const remote = isRemotePath(root);
+  useEffect(() => {
+    if (remote) setReplaceOpen(false);
+  }, [remote]);
+
   useEffect(() => {
     const q = query.trim();
-    // Search indexes the local disk; a remote workspace has nothing here to
-    // walk. The empty-state below says so rather than spinning forever.
-    if (!q || !root || !isTauri || isRemotePath(root)) {
+    // A remote root searches on its host (`rg`, or `grep` without it); the
+    // results come back as `ssh://` paths like any other.
+    if (!q || !root || !isTauri) {
       setRows([]);
+      setError(null);
       setLoading(false);
       return;
     }
@@ -130,12 +137,20 @@ export function SearchView() {
         ? fsReplaceFind(root, q, caseSensitive, SEARCH_LIMIT, ignoreDirs)
         : fsSearch(root, q, SEARCH_LIMIT, ignoreDirs);
       search
-        .then((r) => setRows(toRows(r)))
-        .catch(() => setRows([]))
+        .then((r) => {
+          setRows(toRows(r));
+          setError(null);
+        })
+        .catch((e) => {
+          setRows([]);
+          // Locally a failed walk is rare and uninteresting; on a remote host
+          // it's a dropped connection, which the user needs to hear about.
+          setError(remote ? String(e) : null);
+        })
         .finally(() => setLoading(false));
     }, DEBOUNCE_MS);
     return () => window.clearTimeout(handle);
-  }, [query, root, ignoreDirs, replaceOpen, caseSensitive]);
+  }, [query, root, remote, ignoreDirs, replaceOpen, caseSensitive]);
 
   const groups = useMemo(() => {
     const m = new Map<string, Row[]>();
@@ -202,11 +217,19 @@ export function SearchView() {
           <button
             type="button"
             onClick={() => setReplaceOpen((v) => !v)}
-            title={replaceOpen ? 'Hide replace' : 'Show replace'}
+            // Search runs on a remote host; replace still rewrites local files only.
+            disabled={remote}
+            title={
+              remote
+                ? "Replace isn't available on remote workspaces yet"
+                : replaceOpen
+                  ? 'Hide replace'
+                  : 'Show replace'
+            }
             aria-label={replaceOpen ? 'Hide replace' : 'Show replace'}
             aria-expanded={replaceOpen}
             className={cn(
-              'shrink-0 rounded p-1 transition-colors',
+              'shrink-0 rounded p-1 transition-colors disabled:opacity-40',
               replaceOpen
                 ? 'bg-surface-2 text-fg-base'
                 : 'text-fg-subtle hover:bg-surface-1 hover:text-fg-muted',
@@ -311,14 +334,12 @@ export function SearchView() {
             desktop app.
           </p>
         )}
-        {isTauri && isRemotePath(root) && (
-          <p className="px-3 py-2 font-display text-xs leading-relaxed text-fg-subtle">
-            <span className="text-status-warn">remote workspace</span> — content search
-            runs against the local index, which doesn&rsquo;t cover remote files. Use{' '}
-            <code className="font-mono text-2xs">grep</code> in an SSH tab.
+        {isTauri && error && (
+          <p className="px-3 py-2 font-display text-xs leading-relaxed text-status-warn">
+            {error}
           </p>
         )}
-        {isTauri && !isRemotePath(root) && !q && (
+        {isTauri && !q && (
           <p className="px-3 py-2 font-display text-xs leading-relaxed text-fg-subtle">
             Type to search file contents across the workspace.
           </p>

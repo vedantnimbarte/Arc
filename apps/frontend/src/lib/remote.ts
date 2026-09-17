@@ -81,6 +81,45 @@ export function remoteDisplayPath(uri: string): string {
   return parseRemotePath(uri)?.path ?? uri;
 }
 
+/** Quote `s` as one POSIX shell word — the frontend twin of `shell_quote` in
+ *  rust/ssh/src/exec.rs. Single quotes make everything literal; an embedded
+ *  `'` is spelled `'\''`. Always quotes, so there is no "safe" heuristic to
+ *  get wrong. */
+export function shellQuote(s: string): string {
+  return `'${s.replace(/'/g, `'\\''`)}'`;
+}
+
+/**
+ * Rewrite a command's arguments for its remote host: every `ssh://` string —
+ * at any depth, in arrays and nested option objects — becomes its POSIX path,
+ * which is what the tools on the host understand. Returns null when
+ * `args.path` isn't remote, meaning the command runs locally as-is.
+ */
+export function toRemoteArgs(
+  args: Record<string, unknown>,
+): { hostId: string; args: Record<string, unknown> } | null {
+  const ref = typeof args.path === 'string' ? parseRemotePath(args.path) : null;
+  if (!ref) return null;
+  const strip = (v: unknown): unknown => {
+    if (typeof v === 'string') return parseRemotePath(v)?.path ?? v;
+    if (Array.isArray(v)) return v.map(strip);
+    if (v && typeof v === 'object') {
+      return Object.fromEntries(Object.entries(v).map(([k, x]) => [k, strip(x)]));
+    }
+    return v;
+  };
+  return { hostId: ref.hostId, args: strip(args) as Record<string, unknown> };
+}
+
+/** Where a checker's reported file lives. Checkers print paths relative to
+ *  the directory they ran in, or absolute ones (eslint); on a remote root an
+ *  absolute path is a path on that host, not on this machine. */
+export function resolveRemoteFile(root: string, file: string): string {
+  const ref = parseRemotePath(root);
+  if (!ref) return file;
+  return file.startsWith('/') ? makeRemotePath(ref.hostId, file) : remoteJoin(root, file);
+}
+
 /** Last path segment of a local or remote path. Handles both separators so
  *  one call works for either kind. */
 export function pathBasename(path: string): string {

@@ -13,6 +13,7 @@ pub mod network;
 pub mod proc;
 pub mod project_config;
 pub mod pty;
+pub mod remote;
 pub mod secrets;
 pub mod session;
 pub mod ssh;

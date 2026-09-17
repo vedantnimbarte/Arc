@@ -7,13 +7,44 @@ import {
   hoverContentsToText,
   locationsToTargets,
   lspEditsToChanges,
+  lspDocumentUri,
   lspItemsToCompletions,
   lspPositionToOffset,
+  lspResultPath,
+  lspSessionKey,
   offsetToLspPosition,
   normalizeUri,
   pathToFileUri,
   workspaceEditToFileEdits,
 } from '../lspClient';
+
+describe('remote URI translation', () => {
+  it('gives a remote document the file URI the server on its host knows', () => {
+    expect(lspDocumentUri('ssh://h1/srv/app/src/a b.ts')).toBe('file:///srv/app/src/a%20b.ts');
+    expect(lspDocumentUri("ssh://h1/srv/it's #1.rs")).toBe("file:///srv/it's%20%231.rs");
+    expect(lspDocumentUri('/home/u/a.ts')).toBe('file:///home/u/a.ts');
+  });
+
+  it('maps server results back onto the host, and leaves local ones alone', () => {
+    const [target] = locationsToTargets({
+      uri: 'file:///srv/app/src/a%20b.ts',
+      range: { start: { line: 3, character: 1 }, end: { line: 3, character: 2 } },
+    });
+    expect(lspResultPath(target!.path, 'h1')).toBe('ssh://h1/srv/app/src/a b.ts');
+    expect(lspResultPath('/home/u/a.ts', null)).toBe('/home/u/a.ts');
+    expect(lspResultPath('C:/Users/u/a.ts', 'h1')).toBe('C:/Users/u/a.ts');
+  });
+
+  it('round-trips a document through both directions', () => {
+    const doc = 'ssh://h1/srv/app/$(x)/ünï.ts';
+    expect(lspResultPath(fileUriToPath(lspDocumentUri(doc)), 'h1')).toBe(doc);
+  });
+
+  it('keys a remote server per host', () => {
+    expect(lspSessionKey('rust-analyzer', 'ssh://h1/srv/a.rs')).toBe('h1:rust-analyzer');
+    expect(lspSessionKey('rust-analyzer', '/home/u/a.rs')).toBe('rust-analyzer');
+  });
+});
 
 describe('pathToFileUri', () => {
   it('builds a POSIX file URI', () => {
