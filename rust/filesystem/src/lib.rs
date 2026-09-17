@@ -18,7 +18,8 @@ pub use file::{read_file, write_file, MAX_EDITOR_BYTES};
 pub use listing::{list_files, FileItem};
 pub use paths::{default_root, parent, scratch_file};
 pub use replace::{find as find_literal, replace_in_files, ReplaceMatch, ReplaceSummary};
-pub use search::{search as search_files, SearchHit};
+pub use search::{grep_args, parse_grep_z, parse_rg_json, rg_args, search as search_files, SearchHit};
+pub use listing::{find_args, rank_remote_listing};
 pub use watch::Watcher;
 
 use thiserror::Error;

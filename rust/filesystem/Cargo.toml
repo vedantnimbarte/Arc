@@ -19,4 +19,5 @@ dirs.workspace = true
 rfd.workspace = true
 notify.workspace = true
 walkdir.workspace = true
+serde_json.workspace = true
 parking_lot.workspace = true
