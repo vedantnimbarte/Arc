@@ -1,8 +1,11 @@
 import { useEffect } from 'react';
 import { Play } from 'lucide-react';
-import { fsReadDir, fsReadFile, isTauri } from '../lib/tauri';
-import { isRemotePath } from '../lib/remote';
+import { fsReadDir, fsReadFile, isTauri, sshWrite } from '../lib/tauri';
+import { isRemotePath, parseRemotePath, shellQuote } from '../lib/remote';
 import { useFiles } from './files';
+import { useRemoteWorkspace } from './remoteWorkspace';
+import { useSsh } from './ssh';
+import { toastError } from './toast';
 import { useCommands, type CommandAction } from './commands';
 import { useWorkspace } from './workspace';
 
@@ -163,10 +166,11 @@ async function readOrNull(path: string): Promise<string | null> {
  *  root has none of those files. */
 export async function loadProjectTasks(root: string): Promise<ProjectTask[]> {
   if (!isTauri) return [];
-  // Remote workspaces have no local manifest to read, and running a local
-  // `pnpm dev` against a remote checkout would be wrong anyway.
-  if (isRemotePath(root)) return [];
   const base = root.replace(/[\\/]+$/, '');
+  // A remote workspace's manifests come over SFTP, and its tasks run in a
+  // POSIX shell on the host — where a name read from that tree is quoted, so
+  // a script called `x; rm -rf ~` stays a name.
+  const q = isRemotePath(root) ? shellQuote : (name: string) => name;
 
   // just and make each accept two spellings of their filename.
   const [pkg, makefile, justfile] = await Promise.all([
@@ -182,18 +186,18 @@ export async function loadProjectTasks(root: string): Promise<ProjectTask[]> {
     if (scripts.length > 0) {
       const manager = await detectManager(base);
       for (const name of scripts) {
-        tasks.push({ name, command: runnerCommand(manager, name), source: 'node' });
+        tasks.push({ name, command: runnerCommand(manager, q(name)), source: 'node' });
       }
     }
   }
   if (makefile) {
     for (const name of parseMakeTargets(makefile)) {
-      tasks.push({ name, command: `make ${name}`, source: 'make' });
+      tasks.push({ name, command: `make ${q(name)}`, source: 'make' });
     }
   }
   if (justfile) {
     for (const name of parseJustRecipes(justfile)) {
-      tasks.push({ name, command: `just ${name}`, source: 'just' });
+      tasks.push({ name, command: `just ${q(name)}`, source: 'just' });
     }
   }
   return tasks;
@@ -204,6 +208,45 @@ export async function loadProjectTasks(root: string): Promise<ProjectTask[]> {
  *  up as two identical rows. */
 export function taskTitle(task: ProjectTask): string {
   return task.source === 'node' ? `Run: ${task.name}` : `Run: ${task.name} (${task.source})`;
+}
+
+/** The line typed into a remote shell to run `command` from `root`. */
+export function remoteTaskLine(root: string, command: string): string | null {
+  const ref = parseRemotePath(root);
+  return ref ? `cd ${shellQuote(ref.path)} && ${command}\r` : null;
+}
+
+/**
+ * Run a task on a remote workspace's host. Locally a task gets a PTY tab; the
+ * remote equivalent is an SSH tab to the same host, so a dev server keeps its
+ * TTY, colours and Ctrl-C. The command goes to that tab's shell once it is
+ * connected — straight away if it already is.
+ *
+ * ponytail: types into an existing SSH tab for the host if there is one, as
+ * a user would; give remote tasks their own tab if that gets in the way.
+ */
+async function runRemoteTask(root: string, task: ProjectTask): Promise<void> {
+  const host = useRemoteWorkspace.getState().host;
+  const line = remoteTaskLine(root, task.command);
+  if (!host || !line) return;
+  const send = (id: string) => void sshWrite(id, line).catch((e) => toastError(String(e)));
+  const connectedId = (s: ReturnType<typeof useSsh.getState>) => {
+    const id = s.liveByHost[host.id];
+    return id && s.sessions[id]?.status === 'connected' ? id : null;
+  };
+  useWorkspace.getState().openSshTab(host);
+  const live = connectedId(useSsh.getState());
+  if (live) return send(live);
+  const unsub = useSsh.subscribe((s) => {
+    const id = connectedId(s);
+    if (!id) return;
+    unsub();
+    clearTimeout(timer);
+    send(id);
+  });
+  // Give up quietly if the tab never connects (host key refused, auth failed
+  // — the tab itself says why).
+  const timer = setTimeout(unsub, 2 * 60 * 1000);
 }
 
 /**
@@ -229,7 +272,10 @@ export function useTaskCommands(): void {
         group: 'Tasks',
         keywords: ['task', 'script', 'run', task.source, task.name, task.command],
         icon: Play,
-        run: () => void useWorkspace.getState().runTask(task.command, task.name),
+        run: () =>
+          void (isRemotePath(root)
+            ? runRemoteTask(root, task)
+            : useWorkspace.getState().runTask(task.command, task.name)),
       }));
       unregister = useCommands.getState().registerMany(actions);
     };

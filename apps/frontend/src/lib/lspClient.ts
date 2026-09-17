@@ -25,10 +25,12 @@ import {
   lspReferences,
   lspRename,
   lspStart,
+  lspStartRemote,
   onLspEvent,
   type LspDiagnostic,
   type LspPublishDiagnostics,
 } from './tauri';
+import { makeRemotePath, parseRemotePath } from './remote';
 import type { LspServerConfig } from './lspServers';
 import { askText } from '../state/confirm';
 import { toast, toastError } from '../state/toast';
@@ -47,6 +49,31 @@ export function pathToFileUri(path: string): string {
     .map((seg) => encodeURIComponent(seg).replace(/%3A/gi, ':'))
     .join('/');
   return 'file://' + encoded;
+}
+
+// A remote file's server runs on its host, where the document is a plain
+// file: ARC's `ssh://<hostId>/srv/app/a.ts` is the server's
+// `file:///srv/app/a.ts`. These two translate across that boundary; the
+// server never sees an `ssh://` URI and the editor never opens a `file://`
+// path that only exists on the host.
+
+/** The URI a language server knows `filePath` by. */
+export function lspDocumentUri(filePath: string): string {
+  const remote = parseRemotePath(filePath);
+  return pathToFileUri(remote ? remote.path : filePath);
+}
+
+/** A path from a server result (already through `fileUriToPath`) back to the
+ *  path ARC opens. `hostId` is set for a remote session. */
+export function lspResultPath(path: string, hostId: string | null): string {
+  return hostId && path.startsWith('/') ? makeRemotePath(hostId, path) : path;
+}
+
+/** Session key for a server. A remote one is per host, so the same language
+ *  on two machines never shares a process. */
+export function lspSessionKey(sessionId: string, filePath: string): string {
+  const remote = parseRemotePath(filePath);
+  return remote ? `${remote.hostId}:${sessionId}` : sessionId;
 }
 
 /** Normalize a file URI for comparison — lowercases the scheme/drive and
@@ -167,6 +194,10 @@ export function lspItemsToCompletions(result: unknown): Completion[] {
  *  language open at once within a window. */
 const starting = new Set<string>();
 
+/** Remote sessions already reported as unavailable, so a missing server on
+ *  the host is said once rather than on every file opened. */
+const warnedRemote = new Set<string>();
+
 /** A handle on a document's LSP attachment. */
 export interface LspAttachment {
   /** CM extensions to install (via a compartment) — lint, hover, completion,
@@ -199,17 +230,26 @@ export async function attachLsp(
   server: LspServerConfig,
   filePath: string,
   rootUri: string | null,
-  navigate: LspNavigator,
+  navigateTo: LspNavigator,
 ): Promise<LspAttachment> {
-  const uri = pathToFileUri(filePath);
-  const sid = server.sessionId;
+  // `rootUri` is already the server-side form (see `lspDocumentUri`).
+  const uri = lspDocumentUri(filePath);
+  const sid = lspSessionKey(server.sessionId, filePath);
+  const hostId = parseRemotePath(filePath)?.hostId ?? null;
+  const navigate: LspNavigator = (t) =>
+    navigateTo({ ...t, path: lspResultPath(t.path, hostId) });
   let version = 1;
 
   try {
     if (!(await lspIsRunning(sid)) && !starting.has(sid)) {
       starting.add(sid);
       try {
-        await lspStart(sid, server.command, server.args, rootUri);
+        if (hostId) {
+          const root = rootUri ? fileUriToPath(rootUri) : '/';
+          await lspStartRemote(hostId, sid, server.command, server.args, root, rootUri ?? 'file:///');
+        } else {
+          await lspStart(sid, server.command, server.args, rootUri);
+        }
       } finally {
         starting.delete(sid);
       }
@@ -219,6 +259,12 @@ export async function attachLsp(
     // Server missing / not on PATH / crashed on init — degrade to a plain
     // editor rather than throwing into the mount path.
     console.warn(`[lsp] ${sid} unavailable:`, err);
+    // Locally that's a setup the user chose; on a remote host it's easy not
+    // to know, so say which server is missing where.
+    if (hostId && !warnedRemote.has(sid)) {
+      warnedRemote.add(sid);
+      toastError(`Language server unavailable: ${err}`);
+    }
     return {
       extensions: [],
       didChange: () => {},

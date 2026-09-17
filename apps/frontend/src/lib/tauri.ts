@@ -8,6 +8,7 @@ import {
   posixJoin,
   posixParent,
   remoteParent,
+  toRemoteArgs,
 } from './remote';
 
 export const isTauri = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
@@ -246,6 +247,28 @@ export async function fsDefaultRoot(): Promise<string> {
 // Remote listings are re-stamped with `ssh://` URIs on the way out, so what
 // the tree hands back to these functions round-trips.
 
+/**
+ * Every `git_*` command goes through here. On a remote root it runs on the
+ * host instead (`ssh_git`, apps/desktop/src/commands/remote.rs), with its
+ * `ssh://` arguments turned into host paths — so Source Control, the gutter
+ * and blame work unchanged. Commands with no remote implementation reject with
+ * a message saying so.
+ */
+async function gitInvoke<T = void>(cmd: string, args: Record<string, unknown>): Promise<T> {
+  const remote = toRemoteArgs(args);
+  if (!remote) return invoke<T>(cmd, args);
+  const out = await invoke<unknown>('ssh_git', {
+    hostId: remote.hostId,
+    command: cmd,
+    args: remote.args,
+  });
+  // The one path-valued result: the tree keys decorations on it.
+  if (cmd === 'git_root' && typeof out === 'string') {
+    return makeRemotePath(remote.hostId, out) as T;
+  }
+  return out as T;
+}
+
 export async function fsParent(path: string): Promise<string | null> {
   if (isRemotePath(path)) return remoteParent(path);
   return invoke<string | null>('fs_parent', { path });
@@ -295,6 +318,17 @@ export async function fsListFiles(
   limit: number,
   ignoreDirs: string[],
 ): Promise<FileItem[]> {
+  const remote = parseRemotePath(root);
+  if (remote) {
+    // `find` on the host; paths come back as `ssh://` URIs.
+    return invoke<FileItem[]>('ssh_list_files', {
+      hostId: remote.hostId,
+      root: remote.path,
+      query,
+      limit,
+      ignoreDirs,
+    });
+  }
   return invoke<FileItem[]>('fs_list_files', { root, query, limit, ignoreDirs });
 }
 
@@ -351,6 +385,17 @@ export async function fsSearch(
   limit: number,
   ignoreDirs: string[],
 ): Promise<SearchHit[]> {
+  const remote = parseRemotePath(root);
+  if (remote) {
+    // `rg --json` (or `grep`) on the host; paths come back as `ssh://` URIs.
+    return invoke<SearchHit[]>('ssh_search', {
+      hostId: remote.hostId,
+      root: remote.path,
+      query,
+      limit,
+      ignoreDirs,
+    });
+  }
   return invoke<SearchHit[]>('fs_search', { root, query, limit, ignoreDirs });
 }
 
@@ -722,6 +767,20 @@ export async function lspStart(
   rootUri?: string | null,
 ): Promise<unknown> {
   return invoke('lsp_start', { id, command, args, rootUri: rootUri ?? null });
+}
+
+/** Start a language server on a remote workspace's host, its stdio piped
+ *  over SSH. `root` is the POSIX root on the host, `rootUri` its `file://`
+ *  form. Every later `lsp*` call on `id` works as for a local server. */
+export async function lspStartRemote(
+  hostId: string,
+  id: string,
+  command: string,
+  args: string[],
+  root: string,
+  rootUri: string,
+): Promise<unknown> {
+  return invoke('lsp_start_remote', { hostId, id, command, args, root, rootUri });
 }
 
 export async function lspDidOpen(
@@ -1222,7 +1281,7 @@ export interface GitInfo {
 
 /** Returns null when `path` isn't inside a git repo (or git is unavailable). */
 export async function gitStatus(path: string): Promise<GitInfo | null> {
-  return invoke<GitInfo | null>('git_status', { path });
+  return gitInvoke<GitInfo | null>('git_status', { path });
 }
 
 export interface GitDiffStat {
@@ -1234,7 +1293,7 @@ export interface GitDiffStat {
 /** Aggregate +/- line counts vs HEAD (staged + unstaged + untracked).
  *  Returns null when `path` isn't inside a git repo. */
 export async function gitDiffStat(path: string): Promise<GitDiffStat | null> {
-  return invoke<GitDiffStat | null>('git_diff_stat', { path });
+  return gitInvoke<GitDiffStat | null>('git_diff_stat', { path });
 }
 
 export type GitChangeKind =
@@ -1259,14 +1318,14 @@ export interface GitChangeEntry {
 
 /** Per-file working-copy status. Returns [] when not in a repo. */
 export async function gitChanges(path: string): Promise<GitChangeEntry[]> {
-  return invoke<GitChangeEntry[]>('git_changes', { path });
+  return gitInvoke<GitChangeEntry[]>('git_changes', { path });
 }
 
 /** Absolute path to the repo root containing `path` (`git rev-parse
  *  --show-toplevel`). `null` when `path` isn't inside a repo. Used to map the
  *  repo-relative paths from `gitChanges` to absolute file-tree paths. */
 export async function gitRoot(path: string): Promise<string | null> {
-  return invoke<string | null>('git_root', { path });
+  return gitInvoke<string | null>('git_root', { path });
 }
 
 export interface GitLogEntry {
@@ -1314,7 +1373,7 @@ export async function gitLog(
     author: o.author ?? null,
     include_merges: o.includeMerges ?? false,
   };
-  return invoke<GitLogEntry[]>('git_log', {
+  return gitInvoke<GitLogEntry[]>('git_log', {
     path,
     limit,
     options: payload,
@@ -1329,7 +1388,7 @@ export async function gitDiff(
   scope: GitDiffScope,
   pathFilter?: string | null,
 ): Promise<string> {
-  return invoke<string>('git_diff', {
+  return gitInvoke<string>('git_diff', {
     path,
     scope,
     pathFilter: pathFilter ?? null,
@@ -1372,7 +1431,7 @@ export async function gitApply(
   cached: boolean,
   reverse: boolean,
 ): Promise<void> {
-  return invoke<void>('git_apply', { path, patch, cached, reverse });
+  return gitInvoke<void>('git_apply', { path, patch, cached, reverse });
 }
 
 // ── Tags ─────────────────────────────────────────────────────────────────────
@@ -1385,7 +1444,7 @@ export interface GitTagInfo {
 }
 
 export async function gitTags(path: string): Promise<GitTagInfo[]> {
-  return invoke<GitTagInfo[]>('git_tags', { path });
+  return gitInvoke<GitTagInfo[]>('git_tags', { path });
 }
 
 /** A `message` makes it annotated; `oid` defaults to HEAD. */
@@ -1395,7 +1454,7 @@ export async function gitTagCreate(
   message?: string | null,
   oid?: string | null,
 ): Promise<void> {
-  await invoke('git_tag_create', {
+  await gitInvoke('git_tag_create', {
     path,
     name,
     message: message ?? null,
@@ -1404,7 +1463,7 @@ export async function gitTagCreate(
 }
 
 export async function gitTagDelete(path: string, name: string): Promise<void> {
-  await invoke('git_tag_delete', { path, name });
+  await gitInvoke('git_tag_delete', { path, name });
 }
 
 export async function gitTagPush(
@@ -1412,21 +1471,21 @@ export async function gitTagPush(
   name: string,
   remote?: string | null,
 ): Promise<GitRemoteOpResult> {
-  return invoke<GitRemoteOpResult>('git_tag_push', { path, name, remote: remote ?? null });
+  return gitInvoke<GitRemoteOpResult>('git_tag_push', { path, name, remote: remote ?? null });
 }
 
 // ── Remote management ────────────────────────────────────────────────────────
 
 export async function gitRemoteAdd(path: string, name: string, url: string): Promise<void> {
-  await invoke('git_remote_add', { path, name, url });
+  await gitInvoke('git_remote_add', { path, name, url });
 }
 
 export async function gitRemoteRemove(path: string, name: string): Promise<void> {
-  await invoke('git_remote_remove', { path, name });
+  await gitInvoke('git_remote_remove', { path, name });
 }
 
 export async function gitRemoteSetUrl(path: string, name: string, url: string): Promise<void> {
-  await invoke('git_remote_set_url', { path, name, url });
+  await gitInvoke('git_remote_set_url', { path, name, url });
 }
 
 // ── Reflog ───────────────────────────────────────────────────────────────────
@@ -1442,7 +1501,7 @@ export interface GitReflogEntry {
 }
 
 export async function gitReflog(path: string, limit?: number): Promise<GitReflogEntry[]> {
-  return invoke<GitReflogEntry[]>('git_reflog', { path, limit: limit ?? 100 });
+  return gitInvoke<GitReflogEntry[]>('git_reflog', { path, limit: limit ?? 100 });
 }
 
 // ── Submodules ───────────────────────────────────────────────────────────────
@@ -1456,7 +1515,7 @@ export interface GitSubmoduleEntry {
 }
 
 export async function gitSubmodules(path: string): Promise<GitSubmoduleEntry[]> {
-  return invoke<GitSubmoduleEntry[]>('git_submodules', { path });
+  return gitInvoke<GitSubmoduleEntry[]>('git_submodules', { path });
 }
 
 // ── Bisect ───────────────────────────────────────────────────────────────────
@@ -1480,22 +1539,22 @@ export interface GitBisectStatus {
 }
 
 export async function gitBisectStatus(path: string): Promise<GitBisectStatus> {
-  return invoke<GitBisectStatus>('git_bisect_status', { path });
+  return gitInvoke<GitBisectStatus>('git_bisect_status', { path });
 }
 
 /** `git bisect start [<bad> [<good>]]`. Resolves to git's own output, which
  *  names the commit to test and how many steps remain. */
 export async function gitBisectStart(path: string, bad?: string, good?: string): Promise<string> {
-  return invoke<string>('git_bisect_start', { path, bad: bad ?? null, good: good ?? null });
+  return gitInvoke<string>('git_bisect_start', { path, bad: bad ?? null, good: good ?? null });
 }
 
 /** Mark the checked-out commit. Resolves to git's output (next commit + steps left). */
 export async function gitBisectMark(path: string, term: 'good' | 'bad' | 'skip'): Promise<string> {
-  return invoke<string>('git_bisect_mark', { path, term });
+  return gitInvoke<string>('git_bisect_mark', { path, term });
 }
 
 export async function gitBisectReset(path: string): Promise<void> {
-  return invoke<void>('git_bisect_reset', { path });
+  return gitInvoke<void>('git_bisect_reset', { path });
 }
 
 // ── Remotes ──────────────────────────────────────────────────────────────────
@@ -1507,7 +1566,7 @@ export interface GitRemoteInfo {
 }
 
 export async function gitRemotes(path: string): Promise<GitRemoteInfo[]> {
-  return invoke<GitRemoteInfo[]>('git_remotes', { path });
+  return gitInvoke<GitRemoteInfo[]>('git_remotes', { path });
 }
 
 export interface GitRemoteOpResult {
@@ -1515,11 +1574,11 @@ export interface GitRemoteOpResult {
 }
 
 export async function gitFetch(path: string, remote?: string | null): Promise<GitRemoteOpResult> {
-  return invoke<GitRemoteOpResult>('git_fetch', { path, remote: remote ?? null });
+  return gitInvoke<GitRemoteOpResult>('git_fetch', { path, remote: remote ?? null });
 }
 
 export async function gitPull(path: string, rebase: boolean): Promise<GitRemoteOpResult> {
-  return invoke<GitRemoteOpResult>('git_pull', { path, rebase });
+  return gitInvoke<GitRemoteOpResult>('git_pull', { path, rebase });
 }
 
 export async function gitPushRemote(
@@ -1529,7 +1588,7 @@ export async function gitPushRemote(
   force?: boolean,
   setUpstream?: boolean,
 ): Promise<GitRemoteOpResult> {
-  return invoke<GitRemoteOpResult>('git_push', {
+  return gitInvoke<GitRemoteOpResult>('git_push', {
     path,
     remote: remote ?? null,
     branch: branch ?? null,
@@ -1547,11 +1606,11 @@ export interface GitStashEntry {
 }
 
 export async function gitStashList(path: string): Promise<GitStashEntry[]> {
-  return invoke<GitStashEntry[]>('git_stash_list', { path });
+  return gitInvoke<GitStashEntry[]>('git_stash_list', { path });
 }
 
 export async function gitStashPush(path: string, message?: string | null): Promise<void> {
-  return invoke<void>('git_stash_push', { path, message: message ?? null });
+  return gitInvoke<void>('git_stash_push', { path, message: message ?? null });
 }
 
 /**
@@ -1562,25 +1621,25 @@ export async function gitStashPush(path: string, message?: string | null): Promi
  * untracked at both ends and survives a restore.
  */
 export async function gitCheckpointCreate(path: string, label: string): Promise<string | null> {
-  return invoke<string | null>('git_checkpoint_create', { path, label });
+  return gitInvoke<string | null>('git_checkpoint_create', { path, label });
 }
 
 /** Put tracked files back as they were at `oid`. Leaves the index alone. */
 export async function gitCheckpointRestore(path: string, oid: string): Promise<void> {
-  return invoke<void>('git_checkpoint_restore', { path, oid });
+  return gitInvoke<void>('git_checkpoint_restore', { path, oid });
 }
 
 /** Release a checkpoint's anchor once it is no longer offered. */
 export async function gitCheckpointForget(path: string, oid: string): Promise<void> {
-  return invoke<void>('git_checkpoint_forget', { path, oid });
+  return gitInvoke<void>('git_checkpoint_forget', { path, oid });
 }
 
 export async function gitStashPop(path: string, index?: number | null): Promise<void> {
-  return invoke<void>('git_stash_pop', { path, index: index ?? null });
+  return gitInvoke<void>('git_stash_pop', { path, index: index ?? null });
 }
 
 export async function gitStashDrop(path: string, index: number): Promise<void> {
-  return invoke<void>('git_stash_drop', { path, index });
+  return gitInvoke<void>('git_stash_drop', { path, index });
 }
 
 // ── Branch management ─────────────────────────────────────────────────────────
@@ -1590,7 +1649,7 @@ export async function gitBranchCreate(
   name: string,
   checkout: boolean,
 ): Promise<void> {
-  return invoke<void>('git_branch_create', { path, name, checkout });
+  return gitInvoke<void>('git_branch_create', { path, name, checkout });
 }
 
 export async function gitBranchRename(
@@ -1598,11 +1657,11 @@ export async function gitBranchRename(
   oldName: string,
   newName: string,
 ): Promise<void> {
-  return invoke<void>('git_branch_rename', { path, oldName, newName });
+  return gitInvoke<void>('git_branch_rename', { path, oldName, newName });
 }
 
 export async function gitBranchDelete(path: string, name: string, force: boolean): Promise<void> {
-  return invoke<void>('git_branch_delete', { path, name, force });
+  return gitInvoke<void>('git_branch_delete', { path, name, force });
 }
 
 export interface GitMergeResult {
@@ -1611,7 +1670,7 @@ export interface GitMergeResult {
 }
 
 export async function gitMerge(path: string, branch: string): Promise<GitMergeResult> {
-  return invoke<GitMergeResult>('git_merge', { path, branch });
+  return gitInvoke<GitMergeResult>('git_merge', { path, branch });
 }
 
 // ── Commit operations ─────────────────────────────────────────────────────────
@@ -1621,7 +1680,7 @@ export async function gitCommitAmend(
   message: string,
   opts?: { sign?: boolean; signoff?: boolean },
 ): Promise<GitCommitResult> {
-  return invoke<GitCommitResult>('git_commit_amend', {
+  return gitInvoke<GitCommitResult>('git_commit_amend', {
     path,
     message,
     sign: opts?.sign ?? false,
@@ -1630,31 +1689,31 @@ export async function gitCommitAmend(
 }
 
 export async function gitRevert(path: string, oid: string): Promise<GitCommitResult> {
-  return invoke<GitCommitResult>('git_revert', { path, oid });
+  return gitInvoke<GitCommitResult>('git_revert', { path, oid });
 }
 
 export async function gitCherryPick(path: string, oid: string): Promise<void> {
-  return invoke<void>('git_cherry_pick', { path, oid });
+  return gitInvoke<void>('git_cherry_pick', { path, oid });
 }
 
 export type GitResetMode = 'soft' | 'mixed' | 'hard';
 
 export async function gitReset(path: string, oid: string, mode: GitResetMode): Promise<void> {
-  return invoke<void>('git_reset', { path, oid, mode });
+  return gitInvoke<void>('git_reset', { path, oid, mode });
 }
 
 export async function gitLastMessage(path: string): Promise<string> {
-  return invoke<string>('git_last_message', { path });
+  return gitInvoke<string>('git_last_message', { path });
 }
 
 // ── Conflict resolution ───────────────────────────────────────────────────────
 
 export async function gitCheckoutOurs(path: string, paths: string[]): Promise<void> {
-  return invoke<void>('git_checkout_ours', { path, paths });
+  return gitInvoke<void>('git_checkout_ours', { path, paths });
 }
 
 export async function gitCheckoutTheirs(path: string, paths: string[]): Promise<void> {
-  return invoke<void>('git_checkout_theirs', { path, paths });
+  return gitInvoke<void>('git_checkout_theirs', { path, paths });
 }
 
 /** Mirrors `arc_git::WorktreeEntry`. */
@@ -1668,7 +1727,7 @@ export interface GitWorktreeEntry {
 }
 
 export async function gitWorktreeList(path: string): Promise<GitWorktreeEntry[]> {
-  return invoke<GitWorktreeEntry[]>('git_worktree_list', { path });
+  return gitInvoke<GitWorktreeEntry[]>('git_worktree_list', { path });
 }
 
 /** Add a new worktree.
@@ -1683,7 +1742,7 @@ export async function gitWorktreeAdd(
   createBranch: boolean,
   startPoint?: string | null,
 ): Promise<void> {
-  await invoke('git_worktree_add', {
+  await gitInvoke('git_worktree_add', {
     path,
     newPath,
     branch,
@@ -1697,7 +1756,7 @@ export async function gitWorktreeRemove(
   targetPath: string,
   force: boolean,
 ): Promise<void> {
-  await invoke('git_worktree_remove', { path, targetPath, force });
+  await gitInvoke('git_worktree_remove', { path, targetPath, force });
 }
 
 /** Mirrors `arc_git::RebaseAction`. */
@@ -1720,15 +1779,15 @@ export async function gitRebaseInteractive(
   base: string,
   entries: GitRebaseTodoEntry[],
 ): Promise<void> {
-  await invoke('git_rebase_interactive', { path, base, entries });
+  await gitInvoke('git_rebase_interactive', { path, base, entries });
 }
 
 export async function gitRebaseAbort(path: string): Promise<void> {
-  await invoke('git_rebase_abort', { path });
+  await gitInvoke('git_rebase_abort', { path });
 }
 
 export async function gitRebaseContinue(path: string): Promise<void> {
-  await invoke('git_rebase_continue', { path });
+  await gitInvoke('git_rebase_continue', { path });
 }
 
 // ─── Git host (GitHub PRs) ────────────────────────────────────────────────
@@ -2233,7 +2292,7 @@ export async function gitBlame(
   file: string,
   range?: { start: number; end: number } | null,
 ): Promise<GitBlameLine[]> {
-  return invoke<GitBlameLine[]>('git_blame', {
+  return gitInvoke<GitBlameLine[]>('git_blame', {
     path,
     file,
     startLine: range?.start ?? null,
@@ -2260,7 +2319,7 @@ export interface GitBranchInfo {
 
 /** List local + remote branches, sorted by recency. Empty when not a repo. */
 export async function gitBranches(path: string): Promise<GitBranchInfo[]> {
-  return invoke<GitBranchInfo[]>('git_branches', { path });
+  return gitInvoke<GitBranchInfo[]>('git_branches', { path });
 }
 
 export interface GitCheckoutResult {
@@ -2270,7 +2329,7 @@ export interface GitCheckoutResult {
 
 /** Switch to `name`. Remote short names ("origin/foo") create a tracking local. */
 export async function gitCheckout(path: string, name: string): Promise<GitCheckoutResult> {
-  return invoke<GitCheckoutResult>('git_checkout', { path, name });
+  return gitInvoke<GitCheckoutResult>('git_checkout', { path, name });
 }
 
 export interface GitAuthorInfo {
@@ -2281,7 +2340,7 @@ export interface GitAuthorInfo {
 
 /** Every committer reachable from any ref, ranked by commit count desc. */
 export async function gitAuthors(path: string): Promise<GitAuthorInfo[]> {
-  return invoke<GitAuthorInfo[]>('git_authors', { path });
+  return gitInvoke<GitAuthorInfo[]>('git_authors', { path });
 }
 
 /** Open (or focus, if already open) the standalone Git history window. */
@@ -2291,12 +2350,12 @@ export async function gitWindowOpen(): Promise<void> {
 
 /** Stage repository-relative paths. Empty array no-ops. */
 export async function gitStage(path: string, paths: string[]): Promise<void> {
-  await invoke('git_stage', { path, paths });
+  await gitInvoke('git_stage', { path, paths });
 }
 
 /** Unstage repository-relative paths (reset to working tree). */
 export async function gitUnstage(path: string, paths: string[]): Promise<void> {
-  await invoke('git_unstage', { path, paths });
+  await gitInvoke('git_unstage', { path, paths });
 }
 
 export interface GitCommitResult {
@@ -2311,7 +2370,7 @@ export async function gitCommit(
   message: string,
   opts?: { sign?: boolean; signoff?: boolean },
 ): Promise<GitCommitResult> {
-  return invoke<GitCommitResult>('git_commit', {
+  return gitInvoke<GitCommitResult>('git_commit', {
     path,
     message,
     sign: opts?.sign ?? false,
@@ -2328,7 +2387,7 @@ export async function gitDiscard(
   trackedPaths: string[],
   untrackedPaths: string[],
 ): Promise<void> {
-  await invoke('git_discard', {
+  await gitInvoke('git_discard', {
     path,
     trackedPaths,
     untrackedPaths,
@@ -3065,7 +3124,25 @@ export async function procRun(
   program: string,
   args: string[],
   timeoutMs?: number,
+  /** Output as it arrives. Only a remote run streams; a local one reports
+   *  everything at the end. */
+  onData?: (chunk: Uint8Array) => void,
 ): Promise<ProcOutput> {
+  const remote = parseRemotePath(cwd);
+  if (remote) {
+    // Runs on the host over an exec channel (`ssh_exec`). A program that
+    // isn't installed there rejects with "<program> isn't installed on <host>".
+    const channel = new Channel<ArrayBuffer>();
+    channel.onmessage = (message) => onData?.(new Uint8Array(message));
+    return invoke<ProcOutput>('ssh_exec', {
+      hostId: remote.hostId,
+      cwd: remote.path,
+      program,
+      args,
+      timeoutMs: timeoutMs ?? null,
+      onData: channel,
+    });
+  }
   return invoke<ProcOutput>('proc_run', {
     cwd,
     program,

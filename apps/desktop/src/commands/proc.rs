@@ -21,12 +21,12 @@ use tokio::process::Command;
 
 /// Cap on captured output per stream. A runner that dumps a gigabyte of logs
 /// must not take the app's memory with it.
-const MAX_CAPTURE: usize = 2 * 1024 * 1024;
+pub(crate) const MAX_CAPTURE: usize = 2 * 1024 * 1024;
 
 /// Ceiling on the caller-supplied timeout — 10 minutes is longer than any
 /// test suite anyone will sit and watch inside a side panel.
-const MAX_TIMEOUT_MS: u64 = 10 * 60 * 1000;
-const DEFAULT_TIMEOUT_MS: u64 = 120_000;
+pub(crate) const MAX_TIMEOUT_MS: u64 = 10 * 60 * 1000;
+pub(crate) const DEFAULT_TIMEOUT_MS: u64 = 120_000;
 
 #[derive(Debug, Serialize)]
 pub struct ProcOutput {

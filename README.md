@@ -67,8 +67,13 @@ it.
 - **Remote Workspaces** — Mount a saved SSH host's filesystem as the workspace root over
   SFTP: browse the remote tree, open files, and save straight back. The file-tree
   connection is separate from any SSH terminal tab, so closing the shell doesn't take
-  the tree down. Local-only features (git, content search, LSP, the task runner) sit out
-  rather than misreport — the terminal for that host is an SSH tab.
+  the tree down. The development tools run on the host itself, over SSH exec channels on
+  that same connection (nothing to install beyond the tools): Source Control (status,
+  diff, stage/unstage and hunk staging, commit, branches, log, blame and the diff gutter),
+  content search (`rg`, falling back to `grep`), language servers (diagnostics, hover,
+  completion, go-to-definition), the Test Explorer, the Problems checkers, and tasks,
+  which run in an SSH tab from the workspace root. A tool the host doesn't have is named
+  as missing rather than failing silently.
 - **API Client** — A built-in Postman-style REST client (collections, environments, history, GraphQL, form-urlencoded and multipart bodies with file upload, cURL import/copy, OpenAPI 3.x JSON/YAML import with query and header parameters, and post-response rules that set environment variables from a JSON path, header or status).
 - **Database Client** — Query PostgreSQL, MySQL, and SQLite from a tab: saved connections,
   a table list with a per-table schema view (columns, indexes, foreign keys), a SQL editor,

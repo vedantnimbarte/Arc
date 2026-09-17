@@ -16,7 +16,7 @@ import { allProblems, useProblems } from '../state/problems';
 import { problemsPrompt } from '../lib/agentPrompt';
 import { sendToAgent as sendPrompt } from '../lib/sendToAgent';
 import { countBySeverity, groupByFile, type Problem, type Severity } from '../lib/problemMatchers';
-import { isRemotePath } from '../lib/remote';
+import { isRemotePath, resolveRemoteFile } from '../lib/remote';
 import { fileIcon } from '../lib/fileIcons';
 import { isTauri } from '../lib/tauri';
 import { cn } from '../lib/cn';
@@ -60,8 +60,13 @@ export function ProblemsPanel() {
   const open = (p: Problem) => {
     if (!p.file || !root) return;
     // Checkers print paths relative to the directory they ran in — the
-    // workspace root — except eslint, which prints absolute ones.
-    const absolute = isAbsolute(p.file) ? p.file : joinPath(root, p.file);
+    // workspace root — except eslint, which prints absolute ones. On a remote
+    // root either kind is a path on the host.
+    const absolute = isRemotePath(root)
+      ? resolveRemoteFile(root, p.file)
+      : isAbsolute(p.file)
+        ? p.file
+        : joinPath(root, p.file);
     openFile(absolute, undefined, p.line > 0 ? { line: p.line } : undefined);
   };
 
@@ -184,10 +189,7 @@ export function ProblemsPanel() {
 
       <div className="min-h-0 flex-1 overflow-y-auto">
         {!root && <Empty>Open a folder to check it.</Empty>}
-        {root && isRemotePath(root) && (
-          <Empty>Checkers run locally — a remote workspace has no toolchain here.</Empty>
-        )}
-        {root && !isRemotePath(root) && checkers.length === 0 && !scanning && (
+        {root && checkers.length === 0 && !scanning && (
           <Empty>
             No checkers found. ARC looks for tsconfig.json, Cargo.toml, an ESLint config,
             pyproject.toml or go.mod at the workspace root.

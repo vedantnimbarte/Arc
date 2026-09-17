@@ -39,7 +39,7 @@ import {
 import { changedLinesFromDiff, gitDiffGutter, setGitChanges } from '../lib/gitGutter';
 import { debugGutter } from '../lib/debugGutter';
 import { isRemotePath } from '../lib/remote';
-import { attachLsp, pathToFileUri, type LspAttachment } from '../lib/lspClient';
+import { attachLsp, lspDocumentUri, type LspAttachment } from '../lib/lspClient';
 import { lspServerFor } from '../lib/lspServers';
 import { useFiles } from '../state/files';
 import { useSettings } from '../state/settings';
@@ -178,9 +178,8 @@ export function Editor({ filePath, tabId }: Props) {
     const view = viewRef.current;
     if (!view) return;
     const root = useFiles.getState().root;
-    if (!root) return;
-    // git runs against a local checkout — a remote file has none.
-    if (isRemotePath(root) || isRemotePath(filePath)) return;
+    // git runs where the file lives, so the root and the file must agree.
+    if (!root || isRemotePath(root) !== isRemotePath(filePath)) return;
     try {
       const diff = await gitDiff(root, 'head', filePath);
       view.dispatch({ effects: setGitChanges.of(changedLinesFromDiff(diff)) });
@@ -194,7 +193,7 @@ export function Editor({ filePath, tabId }: Props) {
   const refreshBlame = useCallback(async () => {
     if (!isTauri) return;
     const root = useFiles.getState().root;
-    if (!root || isRemotePath(root) || isRemotePath(filePath)) {
+    if (!root || isRemotePath(root) !== isRemotePath(filePath)) {
       setBlameLines(new Map());
       return;
     }
@@ -384,14 +383,16 @@ export function Editor({ filePath, tabId }: Props) {
         // Attach a language server if LSP is enabled and one is registered for
         // this file's language. Failures degrade to a plain editor (attachLsp
         // returns an empty attachment).
-        // LSP servers run against local paths; a remote file has none. (A
-        // remote language server would mean running one on the host and
-        // tunnelling it — a separate feature, not a flag on this one.)
-        if (!disposed && isTauri && !isRemotePath(filePath) && useSettings.getState().editorLsp) {
+        // A remote file's server runs on its host, piped over SSH (attachLsp
+        // routes it and translates URIs).
+        if (!disposed && isTauri && useSettings.getState().editorLsp) {
           const server = lspServerFor(pathToLanguageId(filePath));
           if (server && viewRef.current) {
             const root = useFiles.getState().root;
-            const rootUri = root ? pathToFileUri(root) : null;
+            // The root only means something to the server if it's on the same
+            // machine as the file.
+            const rootUri =
+              root && isRemotePath(root) === isRemotePath(filePath) ? lspDocumentUri(root) : null;
             // Jump targets can land in a different file, so navigation goes
             // through the workspace rather than moving this editor's cursor.
             // `openFile` on the file already open just reveals the line.
