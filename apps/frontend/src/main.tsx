@@ -3,11 +3,26 @@ import ReactDOM from 'react-dom/client';
 import App from './App';
 import { Splash } from './components/Splash';
 import { rehydrateSettingsFromBroadcast, useSettings } from './state/settings';
-import { onSettingsChanged } from './lib/tauri';
+import { onSettingsChanged, sessionLoad } from './lib/tauri';
 import { installErrorLog } from './lib/errorLog';
+import { getTerminal } from './lib/terminalRegistry';
+import { useFiles } from './state/files';
+import { useWorkspace } from './state/workspace';
 import './index.css';
 
 installErrorLog();
+
+// Test hook for apps/e2e. `VITE_ARC_E2E` is inlined at build time and only the
+// e2e build sets it, so in every other bundle this branch is dead code and the
+// imports it names are already part of the main chunk.
+if (import.meta.env.VITE_ARC_E2E === '1') {
+  (window as unknown as { __arcTest: unknown }).__arcTest = {
+    useWorkspace,
+    useFiles,
+    getTerminal,
+    sessionLoad,
+  };
+}
 
 // Settings and Git are separate windows — each boots this same bundle with a
 // `view` param, so neither belongs in the main window's entry chunk.

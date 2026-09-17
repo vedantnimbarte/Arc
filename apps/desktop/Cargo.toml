@@ -6,12 +6,17 @@ license.workspace = true
 authors.workspace = true
 rust-version.workspace = true
 description = "ARC — terminal, editor & developer workspace (Tauri shell)"
+# Two binaries live here (`src/bin/arc-ptyhost.rs` is the other); `cargo run`
+# and `tauri dev` need to be told which one is the app.
+default-run = "arc-desktop"
 
 [build-dependencies]
 tauri-build = { workspace = true }
 
 [dependencies]
-tauri = { workspace = true }
+# `protocol-asset`: the markdown preview loads local images (scoped at runtime,
+# see `fs_allow_asset_dir`).
+tauri = { workspace = true, features = ["protocol-asset"] }
 tauri-plugin-autostart = { workspace = true }
 tauri-plugin-window-state = { workspace = true }
 tauri-plugin-notification = { workspace = true }
@@ -26,6 +31,7 @@ anyhow = { workspace = true }
 dirs = { workspace = true }
 
 arc-pty = { workspace = true }
+arc-ptyhost = { workspace = true }
 arc-session-manager = { workspace = true }
 arc-filesystem = { workspace = true }
 arc-git = { workspace = true }

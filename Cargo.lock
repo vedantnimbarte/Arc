@@ -101,7 +101,7 @@ dependencies = [
 
 [[package]]
 name = "arc-claude-code"
-version = "0.11.0"
+version = "0.12.0"
 dependencies = [
  "anyhow",
  "arc-pty",
@@ -113,7 +113,7 @@ dependencies = [
 
 [[package]]
 name = "arc-dap"
-version = "0.11.0"
+version = "0.12.0"
 dependencies = [
  "arc-pty",
  "dashmap",
@@ -125,12 +125,13 @@ dependencies = [
 
 [[package]]
 name = "arc-db"
-version = "0.11.0"
+version = "0.12.0"
 dependencies = [
  "anyhow",
  "dashmap",
  "futures-util",
  "serde",
+ "serde_json",
  "sqlx",
  "tokio",
  "tracing",
@@ -138,7 +139,7 @@ dependencies = [
 
 [[package]]
 name = "arc-desktop"
-version = "0.11.0"
+version = "0.12.0"
 dependencies = [
  "anyhow",
  "arc-claude-code",
@@ -151,6 +152,7 @@ dependencies = [
  "arc-lsp",
  "arc-project-config",
  "arc-pty",
+ "arc-ptyhost",
  "arc-session-manager",
  "arc-ssh",
  "arc-wingman",
@@ -178,7 +180,7 @@ dependencies = [
 
 [[package]]
 name = "arc-filesystem"
-version = "0.11.0"
+version = "0.12.0"
 dependencies = [
  "anyhow",
  "dirs 5.0.1",
@@ -186,6 +188,7 @@ dependencies = [
  "parking_lot",
  "rfd",
  "serde",
+ "serde_json",
  "thiserror 1.0.69",
  "tokio",
  "tracing",
@@ -194,7 +197,7 @@ dependencies = [
 
 [[package]]
 name = "arc-git"
-version = "0.11.0"
+version = "0.12.0"
 dependencies = [
  "anyhow",
  "serde",
@@ -204,7 +207,7 @@ dependencies = [
 
 [[package]]
 name = "arc-git-host"
-version = "0.11.0"
+version = "0.12.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -218,7 +221,7 @@ dependencies = [
 
 [[package]]
 name = "arc-http-client"
-version = "0.11.0"
+version = "0.12.0"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -231,7 +234,7 @@ dependencies = [
 
 [[package]]
 name = "arc-lsp"
-version = "0.11.0"
+version = "0.12.0"
 dependencies = [
  "arc-pty",
  "dashmap",
@@ -243,7 +246,7 @@ dependencies = [
 
 [[package]]
 name = "arc-project-config"
-version = "0.11.0"
+version = "0.12.0"
 dependencies = [
  "anyhow",
  "serde",
@@ -254,7 +257,7 @@ dependencies = [
 
 [[package]]
 name = "arc-pty"
-version = "0.11.0"
+version = "0.12.0"
 dependencies = [
  "anyhow",
  "dashmap",
@@ -268,8 +271,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "arc-ptyhost"
+version = "0.12.0"
+dependencies = [
+ "anyhow",
+ "arc-pty",
+ "dirs 5.0.1",
+ "libc",
+ "parking_lot",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tracing",
+ "windows-sys 0.59.0",
+]
+
+[[package]]
 name = "arc-session-manager"
-version = "0.11.0"
+version = "0.12.0"
 dependencies = [
  "anyhow",
  "chrono",
@@ -286,7 +305,7 @@ dependencies = [
 
 [[package]]
 name = "arc-ssh"
-version = "0.11.0"
+version = "0.12.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -299,6 +318,7 @@ dependencies = [
  "russh",
  "russh-sftp",
  "serde",
+ "serde_json",
  "thiserror 1.0.69",
  "tokio",
  "tracing",
@@ -307,7 +327,7 @@ dependencies = [
 
 [[package]]
 name = "arc-wingman"
-version = "0.11.0"
+version = "0.12.0"
 dependencies = [
  "anyhow",
  "futures",
@@ -2600,6 +2620,12 @@ dependencies = [
  "http-body",
  "pin-project-lite",
 ]
+
+[[package]]
+name = "http-range"
+version = "0.1.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "21dec9db110f5f872ed9699c3ecf50cf16f423502706ba5c72462e28d3157573"
 
 [[package]]
 name = "httparse"
@@ -6256,6 +6282,7 @@ dependencies = [
  "gtk",
  "heck 0.5.0",
  "http",
+ "http-range",
  "jni 0.21.1",
  "libc",
  "log",

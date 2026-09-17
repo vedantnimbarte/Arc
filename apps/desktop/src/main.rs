@@ -59,6 +59,21 @@ fn main() {
         .with_target(true)
         .init();
 
+    // `ARC_DATA_DIR` (the e2e suite) must also isolate what Tauri keeps
+    // outside our data dir: saved window geometry lives in the app config dir,
+    // and the WebView2 profile (localStorage) under local app data.
+    let mut window_state = WindowStateBuilder::default();
+    if let Some(dir) = arc_session_manager::data_dir_override() {
+        // An absolute filename replaces the plugin's config-dir prefix.
+        window_state = window_state.with_filename(dir.join(".window-state.json").to_string_lossy());
+        // msedgedriver already points this at its own temp profile (and
+        // expects DevToolsActivePort there), so only fill it in when unset.
+        #[cfg(windows)]
+        if std::env::var_os("WEBVIEW2_USER_DATA_FOLDER").is_none() {
+            std::env::set_var("WEBVIEW2_USER_DATA_FOLDER", dir.join("webview"));
+        }
+    }
+
     let app = tauri::Builder::default()
         // Auto-launch at login (toggleable from Settings → Appearance).
         // The plugin only flips OS-level autostart when the frontend calls
@@ -83,7 +98,7 @@ fn main() {
         // The settings & git popups are excluded — they have their own
         // sensible defaults and we don't want them migrating around.
         .plugin(
-            WindowStateBuilder::default()
+            window_state
                 .with_state_flags(WINDOW_STATE_FLAGS)
                 .with_denylist(&["settings", "git"])
                 .skip_initial_state("main")
@@ -103,6 +118,10 @@ fn main() {
             commands::pty::pty_kill,
             commands::pty::pty_list_shells,
             commands::pty::pty_list_ai_clis,
+            // Persistent terminals (arc-ptyhost).
+            commands::pty::pty_attach,
+            commands::pty::pty_host_list,
+            commands::pty::pty_host_end_all,
             commands::fs::fs_default_root,
             commands::fs::fs_parent,
             commands::fs::fs_read_dir,
@@ -121,6 +140,7 @@ fn main() {
             commands::fs::fs_delete,
             commands::fs::fs_reveal,
             commands::fs::fs_create_dir,
+            commands::fs::fs_allow_asset_dir,
             commands::session::session_load,
             commands::session::session_save_tabs,
             commands::session::session_set_workspace,
@@ -188,6 +208,10 @@ fn main() {
             commands::git::git_bisect_start,
             commands::git::git_bisect_mark,
             commands::git::git_bisect_reset,
+            commands::git::git_snapshot_tree,
+            commands::git::git_diff_trees,
+            commands::git::git_merge_base,
+            commands::git::git_rev_count,
             commands::git_host::git_host_detect,
             commands::git_host::git_host_device_login_available,
             commands::git_host::git_host_device_login,
@@ -246,6 +270,11 @@ fn main() {
             commands::ssh::ssh_fs_create_dir,
             commands::ssh::ssh_fs_rename,
             commands::ssh::ssh_fs_remove,
+            commands::remote::ssh_git,
+            commands::remote::ssh_search,
+            commands::remote::ssh_list_files,
+            commands::remote::ssh_exec,
+            commands::remote::lsp_start_remote,
             commands::ssh::ssh_forward_list,
             commands::ssh::ssh_forward_add,
             commands::ssh::ssh_forward_set_active,
@@ -279,6 +308,12 @@ fn main() {
             // Database client: schema view + results export.
             commands::db::db_table_schema,
             commands::fs::fs_pick_save_file,
+            // Database client: full-result export + query history.
+            commands::db::db_export,
+            commands::db::db_export_cancel,
+            commands::db::db_history_list,
+            commands::db::db_history_delete,
+            commands::db::db_history_clear,
             commands::network::network_probe_port,
             commands::network::shell_open_external,
             commands::fonts::fonts_list_system,
@@ -384,6 +419,9 @@ fn main() {
     // safe.
     app.run(|app_handle, event| match event {
         tauri::RunEvent::ExitRequested { .. } | tauri::RunEvent::Exit => {
+            // In-process shells only. Persistent terminals live in arc-ptyhost
+            // and are left running: exiting drops our connection, which the
+            // host treats as a detach.
             app_handle.state::<PtyState>().manager.kill_all();
             // Same reasoning for language servers: `kill_on_drop` never runs
             // under `process::exit`, so rust-analyzer & friends (each with its

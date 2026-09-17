@@ -36,18 +36,14 @@ const FRONTEND_LOG_TAIL_BYTES: usize = 16 * 1024;
 const FRONTEND_ENTRY_MAX_BYTES: usize = 4 * 1024;
 
 fn crash_log_path() -> Option<PathBuf> {
-    let mut dir = dirs::data_dir()?;
-    dir.push("arc");
-    Some(dir.join("crash.log"))
+    Some(arc_session_manager::data_dir()?.join("crash.log"))
 }
 
 /// Uncaught errors and `console.error`s from the webview. A panic only
 /// covers Rust; most of what goes wrong in ARC happens in the frontend, and
 /// until this file existed it vanished with the devtools console.
 fn frontend_log_path() -> Option<PathBuf> {
-    let mut dir = dirs::data_dir()?;
-    dir.push("arc");
-    Some(dir.join("frontend.log"))
+    Some(arc_session_manager::data_dir()?.join("frontend.log"))
 }
 
 /// The last `max` bytes of `log`, cut on a char boundary.
@@ -204,11 +200,8 @@ pub fn diagnostics_collect() -> String {
     let _ = writeln!(
         out,
         "data:    {}",
-        dirs::data_dir()
-            .map(|mut d| {
-                d.push("arc");
-                d.display().to_string()
-            })
+        arc_session_manager::data_dir()
+            .map(|d| d.display().to_string())
             .unwrap_or_else(|| "<unavailable>".to_string())
     );
 

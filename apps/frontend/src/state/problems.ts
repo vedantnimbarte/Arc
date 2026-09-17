@@ -1,7 +1,6 @@
 import { create } from 'zustand';
 import { notifyEvent } from '../lib/notifyEvent';
 import { fsReadDir, isTauri, procRun } from '../lib/tauri';
-import { isRemotePath } from '../lib/remote';
 import {
   checkerCommand,
   detectCheckers,
@@ -92,13 +91,8 @@ export const useProblems = create<ProblemsState>((set, get) => ({
       set({ root, checkers: [], results: {}, scanError: null });
       return;
     }
-    // Checkers run as local processes against a local path — a remote
-    // workspace has neither. The panel says so rather than running the local
-    // toolchain against a path that doesn't exist here.
-    if (isRemotePath(root)) {
-      set({ root, checkers: [], results: {}, scanError: null });
-      return;
-    }
+    // A remote root is detected over SFTP and its checkers run on the host
+    // (`procRun` routes an `ssh://` cwd there), so nothing here differs.
     set({ scanning: true, scanError: null });
     try {
       const { checkers, manager } = await detectAt(root);

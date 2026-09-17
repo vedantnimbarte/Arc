@@ -26,14 +26,16 @@ it.
   rules that colour matching output and can notify ("ERROR", "listening on :3000"), and
   broadcast input to type into every terminal in a workspace at once (⌥⌘I). Restored tabs
   reopen in the folder their shell was last in; keys typed while a shell is still starting
-  are kept, not dropped.
+  are kept, not dropped. Opt in to background terminals (**Settings → Terminal**) and
+  shells keep running after ARC closes — reopening reattaches each tab to its live shell,
+  an agent mid-conversation included.
 - **Scratch Buffers** — Open a throwaway file to jot in without naming or placing it
   (⇧⌘N, or pick a language from the palette). They're real files under the app data dir,
   so they save, highlight and restore like anything else.
 - **Code Editor** — CodeMirror 6 with syntax highlighting, multi-cursor, optional Vim mode,
   optional LSP (diagnostics, hover, completion, go-to-definition, find references, rename,
   and format-on-save), real-time file watching, and a live Markdown preview (source,
-  side-by-side or rendered; ⇧⌘D).
+  side-by-side or rendered; ⇧⌘D) that shows images from the open workspace.
 - **File Tree & Search** — Browse, open, and manage files with git status decorations, plus
   BM25 full-text search backed by a tantivy index and a literal find-and-replace across
   the workspace (previewed per file before anything is written).
@@ -57,20 +59,29 @@ it.
   conflicts open in a three-way view that resolves one hunk at a time — take ours,
   theirs, both, or hand-edit the result — then writes and stages the file.
 - **SSH Client** — Pure-Rust SSH (russh) with saved hosts, key generation/import, and
-  per-session logs. Local (`-L`) and remote (`-R`) port forwards can be saved per host
-  to start on connect, or added and stopped on a live session; a host can connect
-  through one jump host (ProxyJump), for SSH tabs and remote workspaces alike.
+  per-session logs. Local (`-L`), remote (`-R`) and dynamic SOCKS5 (`-D`) port forwards
+  can be saved per host to start on connect (and optionally with remote workspaces), or
+  added, stopped and saved back to the host from a live session, with live status and
+  connection counts; a host can connect through one jump host (ProxyJump), for SSH tabs
+  and remote workspaces alike.
 - **Remote Workspaces** — Mount a saved SSH host's filesystem as the workspace root over
   SFTP: browse the remote tree, open files, and save straight back. The file-tree
   connection is separate from any SSH terminal tab, so closing the shell doesn't take
-  the tree down. Local-only features (git, content search, LSP, the task runner) sit out
-  rather than misreport — the terminal for that host is an SSH tab.
-- **API Client** — A built-in Postman-style REST client (collections, environments, history, GraphQL bodies, cURL import/copy, OpenAPI 3.x JSON import).
+  the tree down. The development tools run on the host itself, over SSH exec channels on
+  that same connection (nothing to install beyond the tools): Source Control (status,
+  diff, stage/unstage and hunk staging, commit, branches, log, blame and the diff gutter),
+  content search (`rg`, falling back to `grep`), language servers (diagnostics, hover,
+  completion, go-to-definition), the Test Explorer, the Problems checkers, and tasks,
+  which run in an SSH tab from the workspace root. A tool the host doesn't have is named
+  as missing rather than failing silently.
+- **API Client** — A built-in Postman-style REST client (collections, environments, history, GraphQL, form-urlencoded and multipart bodies with file upload, cURL import/copy, OpenAPI 3.x JSON/YAML import with query and header parameters, and post-response rules that set environment variables from a JSON path, header or status).
 - **Database Client** — Query PostgreSQL, MySQL, and SQLite from a tab: saved connections,
   a table list with a per-table schema view (columns, indexes, foreign keys), a SQL editor,
-  and a results grid you can export to CSV or JSON. `DROP`, `TRUNCATE`, and `UPDATE`/`DELETE`
-  without a `WHERE` ask before they run. Passwords go to your OS credential vault; only
-  `user@host` is stored alongside the connection.
+  and a results grid you can export to CSV or JSON — or export the full result, streamed to
+  disk past the grid's 20,000-row cap. Per-connection query history, and an EXPLAIN plan tree
+  (optionally ANALYZE on Postgres) with the expensive nodes highlighted. `DROP`, `TRUNCATE`,
+  and `UPDATE`/`DELETE` without a `WHERE` ask before they run. Passwords go to your OS
+  credential vault; only `user@host` is stored alongside the connection.
 - **Problems Panel** — Runs the project's own checkers — `tsc`, `cargo check`, ESLint,
   Ruff, `go vet` — and turns what they print into rows that open the file at the offending
   line. Whichever apply are detected from the workspace root; run them all or one at a
@@ -82,8 +93,10 @@ it.
 - **Debugger** — A Debug Adapter Protocol client that drives adapters you already have
   installed: debugpy (`python -m debugpy.adapter`), `lldb-dap` / `lldb-vscode` for
   C, C++ and Rust, and Delve (`dlv dap`, over TCP) for Go. Reads `.vscode/launch.json`
-  or offers quick configs, with gutter breakpoints, stepping (F5 / F10 / F11), call
-  stack, a lazily expanded variables tree, and a debug console.
+  or offers quick configs (honouring `python` / `pythonPath`), with gutter breakpoints that
+  follow your edits, conditions, hit counts and logpoints (right-click a breakpoint),
+  stepping (F5 / F10 / F11), call stack, a lazily expanded variables tree, watch
+  expressions, and a debug console.
 - **Containers** — Lists Docker containers, running or not, grouped by compose project,
   with start / stop / restart / remove on each row. Logs and `compose up` open a terminal
   tab rather than a cramped pane. Says plainly whether Docker is missing or just not
@@ -124,12 +137,20 @@ it.
   so Source Control can narrow to just what the agent changed; staging, diffs and the commit box
   all follow the filter. It reads git rather than the agent's output, so it works identically for
   all thirteen.
+- **Agent Runs** — Agents launched with “Give each its own checkout” race in sibling worktrees.
+  **Agents: Compare runs** in the command palette lists every race with each run's status, files
+  changed, +/− lines and commits ahead, diffs any two runs (or one against the base) side by side
+  with uncommitted work included, and merges the winner into the base branch — committing its
+  leftovers first, conflicts opening in the merge view — then offers to remove the other runs.
 - **Send to Agent** — Hand a terminal selection (⌥⌘A), a problem, a failing test or a diff hunk to
   a running agent CLI: it lands on the agent's input line for you to finish and send, falling back
   to the Claude Code panel or the clipboard. The status bar counts agents waiting on you — turn
   ended, bell, or gone quiet — and ⌥⌘J jumps to the one that has waited longest. The usage popup
   totals spend across every configured agent. Optionally, tabs that were running Claude Code,
   Codex, OpenCode or Aider relaunch and resume their last conversation (**Settings → Terminal**).
+- **Prompt queue** — Queue follow-up prompts on an agent tab (the list icon on its tab, or ⌥⌘U):
+  each time the agent stops and waits, ARC sends the next one. Pause it any time; typing into the
+  agent pauses it for you, so a queued prompt never answers an approval question.
 
 ## Quick Start
 

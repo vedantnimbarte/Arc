@@ -20,7 +20,9 @@ import {
   Columns2,
 } from 'lucide-react';
 import { fileIcon, MOCHA } from '../lib/fileIcons';
+import { convertFileSrc } from '@tauri-apps/api/core';
 import {
+  fsAllowAssetDir,
   fsReadFile,
   fsWriteFile,
   gitBlame,
@@ -32,12 +34,12 @@ import {
 import {
   CYCLE_MARKDOWN_PREVIEW_EVENT,
   classifyMarkdownLink,
-  resolveMarkdownPath,
+  previewImageSrc,
 } from '../lib/markdownLinks';
 import { changedLinesFromDiff, gitDiffGutter, setGitChanges } from '../lib/gitGutter';
 import { debugGutter } from '../lib/debugGutter';
 import { isRemotePath } from '../lib/remote';
-import { attachLsp, pathToFileUri, type LspAttachment } from '../lib/lspClient';
+import { attachLsp, lspDocumentUri, type LspAttachment } from '../lib/lspClient';
 import { lspServerFor } from '../lib/lspServers';
 import { useFiles } from '../state/files';
 import { useSettings } from '../state/settings';
@@ -176,9 +178,8 @@ export function Editor({ filePath, tabId }: Props) {
     const view = viewRef.current;
     if (!view) return;
     const root = useFiles.getState().root;
-    if (!root) return;
-    // git runs against a local checkout — a remote file has none.
-    if (isRemotePath(root) || isRemotePath(filePath)) return;
+    // git runs where the file lives, so the root and the file must agree.
+    if (!root || isRemotePath(root) !== isRemotePath(filePath)) return;
     try {
       const diff = await gitDiff(root, 'head', filePath);
       view.dispatch({ effects: setGitChanges.of(changedLinesFromDiff(diff)) });
@@ -192,7 +193,7 @@ export function Editor({ filePath, tabId }: Props) {
   const refreshBlame = useCallback(async () => {
     if (!isTauri) return;
     const root = useFiles.getState().root;
-    if (!root || isRemotePath(root) || isRemotePath(filePath)) {
+    if (!root || isRemotePath(root) !== isRemotePath(filePath)) {
       setBlameLines(new Map());
       return;
     }
@@ -382,14 +383,16 @@ export function Editor({ filePath, tabId }: Props) {
         // Attach a language server if LSP is enabled and one is registered for
         // this file's language. Failures degrade to a plain editor (attachLsp
         // returns an empty attachment).
-        // LSP servers run against local paths; a remote file has none. (A
-        // remote language server would mean running one on the host and
-        // tunnelling it — a separate feature, not a flag on this one.)
-        if (!disposed && isTauri && !isRemotePath(filePath) && useSettings.getState().editorLsp) {
+        // A remote file's server runs on its host, piped over SSH (attachLsp
+        // routes it and translates URIs).
+        if (!disposed && isTauri && useSettings.getState().editorLsp) {
           const server = lspServerFor(pathToLanguageId(filePath));
           if (server && viewRef.current) {
             const root = useFiles.getState().root;
-            const rootUri = root ? pathToFileUri(root) : null;
+            // The root only means something to the server if it's on the same
+            // machine as the file.
+            const rootUri =
+              root && isRemotePath(root) === isRemotePath(filePath) ? lspDocumentUri(root) : null;
             // Jump targets can land in a different file, so navigation goes
             // through the workspace rather than moving this editor's cursor.
             // `openFile` on the file already open just reveals the line.
@@ -681,10 +684,11 @@ export function Editor({ filePath, tabId }: Props) {
  * `<style>` would restyle the whole app and a `<form>` could navigate the
  * webview, so both go too.
  *
- * Local images become their alt text: the webview can't load disk files
- * without Tauri's asset protocol, which ARC leaves disabled.
- * ponytail: enable `app.security.assetProtocol` (scoped to the workspace) and
- * swap the replacement for `convertFileSrc(local)` to show them.
+ * Local images load over Tauri's asset protocol, whose scope is only the open
+ * workspace root (granted at runtime by `fs_allow_asset_dir`), so each src is
+ * set once that grant has landed. Images outside the root, a remote file's
+ * images and anything the CSP blocks fall back to their alt text. `<img>`
+ * never runs script, so an SVG is as safe here as a PNG.
  */
 function markdownToSafeFragment(md: string, filePath: string): DocumentFragment {
   const rawHtml = marked.parse(md, { async: false, breaks: false, gfm: true }) as string;
@@ -694,11 +698,30 @@ function markdownToSafeFragment(md: string, filePath: string): DocumentFragment 
     RETURN_DOM_FRAGMENT: true,
   });
   for (const img of fragment.querySelectorAll('img')) {
-    if (resolveMarkdownPath(filePath, img.getAttribute('src') ?? '')) {
-      img.replaceWith(img.getAttribute('alt') || '[image]');
+    const alt = () => img.replaceWith(img.getAttribute('alt') || '[image]');
+    const src = isTauri ? previewImageSrc(filePath, img.getAttribute('src') ?? '', convertFileSrc) : null;
+    if (src === null) {
+      alt();
+      continue;
     }
+    img.removeAttribute('src');
+    img.addEventListener('error', alt, { once: true });
+    void assetScopeReady().then(() => img.setAttribute('src', src));
   }
   return fragment;
+}
+
+let assetScope: { root: string; ready: Promise<void> } | null = null;
+
+/** Grant the asset protocol the current workspace root, once per root. */
+function assetScopeReady(): Promise<void> {
+  const root = useFiles.getState().root;
+  if (!root || isRemotePath(root)) return Promise.resolve();
+  if (assetScope?.root !== root) {
+    const ready = fsAllowAssetDir(root).catch((err) => console.warn('[editor] asset scope:', err));
+    assetScope = { root, ready };
+  }
+  return assetScope.ready;
 }
 
 function StatusLabel({ status, dirty }: { status: Status; dirty: boolean }) {

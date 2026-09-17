@@ -9,7 +9,58 @@ import {
   remoteDisplayPath,
   remoteJoin,
   remoteParent,
+  resolveRemoteFile,
+  shellQuote,
+  toRemoteArgs,
 } from '../remote';
+
+describe('shellQuote', () => {
+  it('makes hostile names a single literal word', () => {
+    expect(shellQuote('plain')).toBe("'plain'");
+    expect(shellQuote('')).toBe("''");
+    expect(shellQuote("it's")).toBe("'it'\\''s'");
+    expect(shellQuote('$(rm -rf ~)')).toBe("'$(rm -rf ~)'");
+    expect(shellQuote('a\nb')).toBe("'a\nb'");
+    expect(shellQuote('-rf')).toBe("'-rf'");
+  });
+});
+
+describe('toRemoteArgs', () => {
+  it('is null for a local command', () => {
+    expect(toRemoteArgs({ path: '/home/u/repo' })).toBeNull();
+    expect(toRemoteArgs({ root: 'ssh://h/x' })).toBeNull();
+  });
+
+  it('strips the scheme at every depth and leaves everything else alone', () => {
+    const out = toRemoteArgs({
+      path: 'ssh://h1/srv/app',
+      file: "ssh://h1/srv/app/it's.ts",
+      paths: ['src/a.ts', 'ssh://h1/srv/app/b.ts'],
+      options: { path_filter: 'ssh://h1/srv/app/c', include_merges: true },
+      limit: 5,
+      scope: null,
+    });
+    expect(out).toEqual({
+      hostId: 'h1',
+      args: {
+        path: '/srv/app',
+        file: "/srv/app/it's.ts",
+        paths: ['src/a.ts', '/srv/app/b.ts'],
+        options: { path_filter: '/srv/app/c', include_merges: true },
+        limit: 5,
+        scope: null,
+      },
+    });
+  });
+});
+
+describe('resolveRemoteFile', () => {
+  it('maps relative and absolute checker paths onto the host', () => {
+    expect(resolveRemoteFile('ssh://h1/srv/app', 'src/a.rs')).toBe('ssh://h1/srv/app/src/a.rs');
+    expect(resolveRemoteFile('ssh://h1/srv/app', '/srv/app/b.ts')).toBe('ssh://h1/srv/app/b.ts');
+    expect(resolveRemoteFile('/local', '/local/x')).toBe('/local/x');
+  });
+});
 
 // Every remote file read, write, and delete is addressed through these. A
 // dropped leading slash or a doubled separator silently targets the wrong

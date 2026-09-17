@@ -11,6 +11,10 @@
 //! The crate is intentionally Tauri-agnostic: it knows nothing about events or
 //! windows. The desktop command layer owns the channel and re-emits each
 //! [`LspEvent`] on a Tauri topic.
+//!
+//! The transport is any byte stream pair: [`LspManager::start`] spawns a local
+//! process, [`LspManager::start_io`] takes a reader and writer — how a remote
+//! workspace drives a server running on its host over an SSH exec channel.
 
 use std::process::Stdio;
 use std::sync::atomic::{AtomicI64, Ordering};
@@ -19,10 +23,12 @@ use std::sync::Arc;
 use dashmap::DashMap;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
-use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
-use tokio::process::{Child, ChildStdin, ChildStdout, Command};
+use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, BufReader};
+use tokio::process::{Child, Command};
 use tokio::sync::{mpsc, oneshot, Mutex};
 use tokio::task::JoinHandle;
+
+type Writer = Box<dyn AsyncWrite + Send + Unpin>;
 
 /// Errors cross the boundary as `String` — the desktop command layer maps to
 /// the same shape, and the language-server failure modes (spawn failed, server
@@ -39,9 +45,10 @@ pub struct LspEvent {
 
 /// One running language server.
 struct Session {
-    child: Mutex<Child>,
+    /// `None` for a stream transport, which closes when the session drops.
+    child: Mutex<Option<Child>>,
     /// Shared with the reader task so it can reply to server→client requests.
-    stdin: Arc<Mutex<ChildStdin>>,
+    stdin: Arc<Mutex<Writer>>,
     /// Request id → oneshot for the matching response.
     pending: Arc<DashMap<i64, oneshot::Sender<Value>>>,
     next_id: AtomicI64,
@@ -141,11 +148,46 @@ impl LspManager {
             .stdout
             .take()
             .ok_or_else(|| "language server has no stdout".to_string())?;
+        self.start_session(id, stdout, Box::new(stdin), Some(child), root_uri)
+            .await
+    }
 
-        let stdin = Arc::new(Mutex::new(stdin));
+    /// Run the initialize handshake over an already-connected transport — a
+    /// server's stdout as `reader` and its stdin as `writer` — and register
+    /// the session under `id`. Restarts any session already under `id`.
+    pub async fn start_io<R, W>(
+        &self,
+        id: &str,
+        reader: R,
+        writer: W,
+        root_uri: Option<&str>,
+    ) -> LspResult<Value>
+    where
+        R: AsyncRead + Send + Unpin + 'static,
+        W: AsyncWrite + Send + Unpin + 'static,
+    {
+        if self.sessions.contains_key(id) {
+            let _ = self.stop(id).await;
+        }
+        self.start_session(id, reader, Box::new(writer), None, root_uri)
+            .await
+    }
+
+    async fn start_session<R>(
+        &self,
+        id: &str,
+        reader: R,
+        writer: Writer,
+        child: Option<Child>,
+        root_uri: Option<&str>,
+    ) -> LspResult<Value>
+    where
+        R: AsyncRead + Send + Unpin + 'static,
+    {
+        let stdin = Arc::new(Mutex::new(writer));
         let pending: Arc<DashMap<i64, oneshot::Sender<Value>>> = Arc::new(DashMap::new());
         let reader = spawn_reader(
-            stdout,
+            reader,
             Arc::clone(&pending),
             Arc::clone(&stdin),
             self.events.clone(),
@@ -339,8 +381,9 @@ impl LspManager {
         if let Some(handle) = session.reader.lock().await.take() {
             handle.abort();
         }
-        let mut child = session.child.lock().await;
-        let _ = child.kill().await;
+        if let Some(child) = session.child.lock().await.as_mut() {
+            let _ = child.kill().await;
+        }
         Ok(())
     }
 
@@ -358,7 +401,9 @@ impl LspManager {
                 if let Some(handle) = session.reader.lock().await.take() {
                     handle.abort();
                 }
-                let _ = session.child.lock().await.start_kill();
+                if let Some(child) = session.child.lock().await.as_mut() {
+                    let _ = child.start_kill();
+                }
             }
         }
         if n > 0 {
@@ -374,10 +419,10 @@ const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 /// Demux loop: responses resolve pending requests, server→client requests get
 /// a null reply (so servers that expect one don't stall), and notifications
 /// are forwarded to the host.
-fn spawn_reader(
-    stdout: ChildStdout,
+fn spawn_reader<R: AsyncRead + Send + Unpin + 'static>(
+    stdout: R,
     pending: Arc<DashMap<i64, oneshot::Sender<Value>>>,
-    stdin: Arc<Mutex<ChildStdin>>,
+    stdin: Arc<Mutex<Writer>>,
     events: mpsc::UnboundedSender<LspEvent>,
     session_id: String,
 ) -> JoinHandle<()> {
@@ -469,7 +514,7 @@ fn position_params(uri: &str, line: u32, character: u32) -> Value {
     })
 }
 
-async fn write_framed(stdin: &mut ChildStdin, msg: &Value) -> LspResult<()> {
+async fn write_framed(stdin: &mut Writer, msg: &Value) -> LspResult<()> {
     let body = serde_json::to_vec(msg).map_err(|e| format!("encode: {e}"))?;
     let header = format!("Content-Length: {}\r\n\r\n", body.len());
     stdin
@@ -485,7 +530,7 @@ async fn write_framed(stdin: &mut ChildStdin, msg: &Value) -> LspResult<()> {
 }
 
 /// Read one Content-Length-framed message from the server's stdout.
-async fn read_frame(stdout: &mut BufReader<ChildStdout>) -> LspResult<Vec<u8>> {
+async fn read_frame<R: AsyncRead + Unpin>(stdout: &mut BufReader<R>) -> LspResult<Vec<u8>> {
     let mut content_len: Option<usize> = None;
     loop {
         let mut line = String::new();
@@ -511,4 +556,57 @@ async fn read_frame(stdout: &mut BufReader<ChildStdout>) -> LspResult<Vec<u8>> {
         .await
         .map_err(|e| format!("body: {e}"))?;
     Ok(buf)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The stream transport end to end, against a fake server on an in-memory
+    /// pipe: the handshake completes, a server→client request gets answered,
+    /// and a notification reaches the event channel.
+    #[tokio::test]
+    async fn stream_transport_handshakes_and_forwards_notifications() {
+        let (client_io, server_io) = tokio::io::duplex(64 * 1024);
+        let (client_r, client_w) = tokio::io::split(client_io);
+        let (server_r, server_w) = tokio::io::split(server_io);
+
+        let server = tokio::spawn(async move {
+            let mut r = BufReader::new(server_r);
+            let mut w: Writer = Box::new(server_w);
+            let frame = |b: Vec<u8>| serde_json::from_slice::<Value>(&b).unwrap();
+            let init = frame(read_frame(&mut r).await.unwrap());
+            assert_eq!(init["method"], "initialize");
+            assert_eq!(init["params"]["rootUri"], "file:///srv/app");
+            let reply = json!({ "jsonrpc": "2.0", "id": init["id"], "result": { "capabilities": { "hoverProvider": true } } });
+            write_framed(&mut w, &reply).await.unwrap();
+            assert_eq!(frame(read_frame(&mut r).await.unwrap())["method"], "initialized");
+            // A request of our own; the client must answer it.
+            let ask = json!({ "jsonrpc": "2.0", "id": 99, "method": "workspace/configuration", "params": {} });
+            write_framed(&mut w, &ask).await.unwrap();
+            assert_eq!(frame(read_frame(&mut r).await.unwrap())["id"], 99);
+            let diags = json!({ "jsonrpc": "2.0", "method": "textDocument/publishDiagnostics", "params": { "uri": "file:///srv/app/a.rs", "diagnostics": [] } });
+            write_framed(&mut w, &diags).await.unwrap();
+            // Hold the pipe open until the client has read everything.
+            tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+        });
+
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        let manager = LspManager::new(tx);
+        let caps = manager
+            .start_io("remote", client_r, client_w, Some("file:///srv/app"))
+            .await
+            .expect("handshake");
+        assert_eq!(caps["hoverProvider"], true);
+        assert!(manager.is_running("remote"));
+
+        let ev = tokio::time::timeout(std::time::Duration::from_secs(5), rx.recv())
+            .await
+            .expect("event in time")
+            .expect("event");
+        assert_eq!(ev.session_id, "remote");
+        assert_eq!(ev.method, "textDocument/publishDiagnostics");
+        assert_eq!(ev.params["uri"], "file:///srv/app/a.rs");
+        server.abort();
+    }
 }

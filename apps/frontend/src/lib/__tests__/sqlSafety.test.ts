@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { unsafeStatements } from '../sqlSafety';
+import { isSelectLike, unsafeStatements } from '../sqlSafety';
 
 describe('unsafeStatements', () => {
   it('passes filtered writes and plain reads', () => {
@@ -61,5 +61,24 @@ describe('unsafeStatements', () => {
       'DELETE without WHERE',
     ]);
     expect(unsafeStatements('WITH x AS (SELECT 1) SELECT * FROM x')).toEqual([]);
+  });
+});
+
+describe('isSelectLike', () => {
+  it('accepts one read-only statement', () => {
+    expect(isSelectLike('SELECT * FROM t;')).toBe(true);
+    expect(isSelectLike('-- all\nselect a from t where b = 1')).toBe(true);
+    expect(isSelectLike('WITH x AS (SELECT 1) SELECT * FROM x')).toBe(true);
+    expect(isSelectLike('(SELECT 1) UNION (SELECT 2)')).toBe(true);
+    expect(isSelectLike("SELECT 'delete'")).toBe(true);
+    expect(isSelectLike('SHOW TABLES', 'mysql')).toBe(true);
+  });
+
+  it('rejects writes, DDL, empty input and multiple statements', () => {
+    expect(isSelectLike('DELETE FROM t')).toBe(false);
+    expect(isSelectLike('CREATE TABLE t (a int)')).toBe(false);
+    expect(isSelectLike('WITH d AS (DELETE FROM t RETURNING *) SELECT * FROM d')).toBe(false);
+    expect(isSelectLike('SELECT 1; SELECT 2')).toBe(false);
+    expect(isSelectLike('  ')).toBe(false);
   });
 });

@@ -23,6 +23,7 @@ import { gitStatus, isTauri } from '../lib/tauri';
 import { useFiles } from '../state/files';
 import { useGit } from '../state/git';
 import { Tooltip } from './Tooltip';
+import { AgentQueueButton } from './AgentQueue';
 import { MoveIcon, WorkspaceFlyout } from './MoveToWorkspace';
 import { cn } from '../lib/cn';
 
@@ -56,6 +57,7 @@ export function iconForKind(kind: Tab['kind']): LucideIcon {
     case 'ssh':
       return Server;
     case 'diff':
+    case 'agent-runs':
       return GitCompare;
     case 'github':
       return Github;
@@ -231,6 +233,8 @@ export function PaneHeader({ paneId }: Props) {
             </HeaderButton>
           ))
         )}
+
+        <AgentQueueButton tab={tab} size={12} className="h-[22px] rounded" />
 
         <HeaderButton
           label="Move to workspace"

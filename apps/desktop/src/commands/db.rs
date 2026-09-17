@@ -14,15 +14,29 @@
 //!   invoke("db_tables",        { id })                -> string[]
 //!   invoke("db_preview",       { id, table, limit })  -> QueryResult
 //!   invoke("db_table_schema",  { id, table })         -> TableSchema
+//!   invoke("db_export",        { id, sql, format, path, exportId }) -> u64
+//!   invoke("db_export_cancel", { exportId })          -> ()
+//!   invoke("db_history_list",  { id })                -> DbQueryHistoryEntry[]
+//!   invoke("db_history_delete", { historyId })        -> ()
+//!   invoke("db_history_clear", { id })                -> ()
+//!
+//! Emitted events:
+//!   "db://export/<exportId>" -> u64 rows written so far
 //!
 //! Passwords live in the OS credential vault, never in the database or in the
 //! stored URL — see `migrations/0015_db_and_merge_tabs.sql`. They are put back
 //! into the URL only in `db_connect`, in memory, on the way to sqlx.
 
-use arc_db::{Backend, DbManager, QueryResult, TableSchema};
-use arc_session_manager::{db, DbConnection, DbConnectionInput, SessionStore};
+use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
+use std::time::Instant;
+
+use arc_db::{Backend, DbManager, ExportFormat, QueryResult, TableSchema};
+use arc_session_manager::{db, DbConnection, DbConnectionInput, DbQueryHistoryEntry, SessionStore};
+use dashmap::DashMap;
 use keyring::Entry;
-use tauri::State;
+use tauri::{AppHandle, Emitter, State};
 
 /// Keyring service for database passwords. Distinct from the SSH and user
 /// secret services so a vault audit can tell them apart.
@@ -31,6 +45,8 @@ const KEYRING_SERVICE: &str = "dev.arc.terminal.db";
 #[derive(Default)]
 pub struct DbState {
     pub manager: DbManager,
+    /// Cancel flags of running exports, keyed by the frontend's export id.
+    exports: DashMap<String, Arc<AtomicBool>>,
 }
 
 fn str_err<E: std::fmt::Display>(e: E) -> String {
@@ -164,17 +180,31 @@ pub async fn db_is_connected(state: State<'_, DbState>, id: String) -> Result<bo
     Ok(state.manager.is_connected(&id))
 }
 
+/// Run `sql` and record it in the connection's query history, success or not.
 #[tauri::command]
 pub async fn db_query(
+    store: State<'_, SessionStore>,
     state: State<'_, DbState>,
     id: String,
     sql: String,
 ) -> Result<QueryResult, String> {
-    state.manager.query(&id, &sql).await.map_err(|e| {
+    let started = Instant::now();
+    let res = state.manager.query(&id, &sql).await.map_err(|e| {
         // anyhow's Display drops the source chain, and for a SQL error the
         // source *is* the message the user needs ("column x does not exist").
         format!("{e:#}")
-    })
+    });
+    let (rows, error) = match &res {
+        Ok(r) if r.columns.is_empty() => (Some(r.rows_affected as i64), None),
+        Ok(r) => (Some(r.rows.len() as i64), None),
+        Err(e) => (None, Some(e.as_str())),
+    };
+    let duration = started.elapsed().as_millis() as i64;
+    // History is a convenience — failing to write it must not fail the query.
+    if let Err(e) = db::history_add(store.pool(), &id, &sql, duration, rows, error).await {
+        tracing::warn!(%e, "db query history write failed");
+    }
+    res
 }
 
 #[tauri::command]
@@ -207,6 +237,61 @@ pub async fn db_table_schema(
         .schema(&id, &table)
         .await
         .map_err(|e| format!("{e:#}"))
+}
+
+/// Stream the full result of `sql` into `path`, past the grid's row cap.
+/// Emits the running row count on `db://export/<export_id>`.
+#[tauri::command]
+pub async fn db_export(
+    app: AppHandle,
+    state: State<'_, DbState>,
+    id: String,
+    sql: String,
+    format: ExportFormat,
+    path: PathBuf,
+    export_id: String,
+) -> Result<u64, String> {
+    let cancel = Arc::new(AtomicBool::new(false));
+    state.exports.insert(export_id.clone(), cancel.clone());
+    let topic = format!("db://export/{export_id}");
+    let res = state
+        .manager
+        .export(&id, &sql, format, &path, &cancel, |n| {
+            let _ = app.emit(&topic, n);
+        })
+        .await
+        .map_err(|e| format!("{e:#}"));
+    state.exports.remove(&export_id);
+    res
+}
+
+#[tauri::command]
+pub async fn db_export_cancel(state: State<'_, DbState>, export_id: String) -> Result<(), String> {
+    if let Some(flag) = state.exports.get(&export_id) {
+        flag.store(true, Ordering::Relaxed);
+    }
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn db_history_list(
+    store: State<'_, SessionStore>,
+    id: String,
+) -> Result<Vec<DbQueryHistoryEntry>, String> {
+    db::history_list(store.pool(), &id).await.map_err(str_err)
+}
+
+#[tauri::command]
+pub async fn db_history_delete(
+    store: State<'_, SessionStore>,
+    history_id: i64,
+) -> Result<(), String> {
+    db::history_delete(store.pool(), history_id).await.map_err(str_err)
+}
+
+#[tauri::command]
+pub async fn db_history_clear(store: State<'_, SessionStore>, id: String) -> Result<(), String> {
+    db::history_clear(store.pool(), &id).await.map_err(str_err)
 }
 
 #[cfg(test)]

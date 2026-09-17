@@ -1,6 +1,5 @@
 import { create } from 'zustand';
 import { fsListFiles, fsReadDir, fsReadFile, isTauri, procRun } from '../lib/tauri';
-import { isRemotePath } from '../lib/remote';
 import {
   detectFrameworks,
   isTestFile,
@@ -126,12 +125,9 @@ export const useTests = create<TestsState>((set, get) => ({
       get().reset();
       return;
     }
-    // A remote workspace has no local checkout to run tests against, and
-    // running the local `pytest` over an SFTP path would be nonsense.
-    if (isRemotePath(root)) {
-      set({ root, frameworks: [], files: [], error: null, scanning: false });
-      return;
-    }
+    // A remote root needs nothing special: manifests and test sources are
+    // read over SFTP, the file walk is `find` on the host, and runs execute
+    // there too — every call below routes on the `ssh://` prefix.
     set({ scanning: true, error: null });
     const base = root.replace(/[\\/]+$/, '');
 

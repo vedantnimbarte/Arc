@@ -9,9 +9,11 @@ import '@xterm/xterm/css/xterm.css';
 import {
   fsDefaultRoot,
   fsReadDir,
+  isPersistentPtyId,
   isTauri,
   onPtyExit,
   projectConfigLoad,
+  ptyAttach,
   ptyListAiClis,
   ptyKill,
   ptyResize,
@@ -20,6 +22,7 @@ import {
   sessionCommandFinish,
   sessionCommandLog,
   type PtyId,
+  type PtySpawnOptions,
 } from '../lib/tauri';
 import { createPathLinkProvider, osc7Path } from '../lib/links';
 import { isRemotePath } from '../lib/remote';
@@ -120,6 +123,15 @@ export function Terminal({ sessionKey }: Props) {
 
     let unlistens: Array<() => void> = [];
     let ptyId: PtyId | null = null;
+    // Closing the tab ends its shell. A background one is left alone while the
+    // tab still exists: an unmount that isn't a close (Strict Mode's double
+    // effect, a hot reload) must not kill a session meant to outlive ARC.
+    const releasePty = (id: PtyId) => {
+      if (isPersistentPtyId(id) && useWorkspace.getState().tabs.some((t) => t.id === sessionKey)) {
+        return;
+      }
+      void ptyKill(id).catch(() => {});
+    };
     let disposed = false;
     let stopAgentIdleTimer: (() => void) | null = null;
 
@@ -460,6 +472,12 @@ export function Terminal({ sessionKey }: Props) {
       paste: (text) => term.paste(text),
       selection: () => term.getSelection(),
       focus: () => term.focus(),
+      text: () => {
+        const buf = term.buffer.active;
+        const lines: string[] = [];
+        for (let i = 0; i < buf.length; i++) lines.push(buf.getLine(i)?.translateToString(true) ?? '');
+        return lines.join('\n');
+      },
     });
     const earlyInput: string[] = [];
     const forwardInput = term.onData((data) => {
@@ -698,13 +716,42 @@ export function Terminal({ sessionKey }: Props) {
         // restored at launch can get here before the stored row has loaded.
         // Bounded so a settings failure can never stop a terminal starting.
         await Promise.race([settingsReady, new Promise((r) => setTimeout(r, 3000))]);
+        // Unmounted while waiting (Strict Mode's double effect): attaching or
+        // spawning now would only race the mount that replaced this one.
+        if (disposed) return;
         let tab = useWorkspace.getState().tabs.find((t) => t.id === sessionKey);
         const settings = useSettings.getState();
+        // A shell the last ARC left running in the background host: reattach
+        // to it — no new shell, no agent relaunch. This never starts the host,
+        // so without background sessions it costs one failed connect.
+        let replayPending = true;
+        ptyId = await ptyAttach(sessionKey, term.cols, term.rows, (chunk) => {
+          // The first chunk is history whose OSC markers and notifications
+          // already fired in the ARC that printed them: draw it, nothing more.
+          if (replayPending) {
+            replayPending = false;
+            sawAnyData = true;
+            write(decoder.decode(chunk, { stream: true }));
+            return;
+          }
+          onPtyChunk(chunk);
+        }).catch(() => null);
+        if (ptyId && tab?.agentCliId && !tab.shellOverride) {
+          // Still running its agent, so it stays an agent tab.
+          const cliId = tab.agentCliId;
+          const cli = (await ptyListAiClis().catch(() => [])).find((c) => c.id === cliId);
+          useWorkspace.getState().setTabAgentLaunch(sessionKey, {
+            agentCliId: cliId,
+            shellOverride: cli?.path ?? cliId,
+            shellArgs: undefined,
+          });
+          tab = useWorkspace.getState().tabs.find((t) => t.id === sessionKey);
+        }
         // A tab that ran an agent when ARC closed comes back as a plain shell
         // unless the user asked for agents to be relaunched. Either way the
         // decision is made once: a tab left as a shell forgets its agent, so
         // turning the setting on later doesn't resurrect weeks-old sessions.
-        if (tab?.agentCliId && !tab.shellOverride) {
+        if (!ptyId && tab?.agentCliId && !tab.shellOverride) {
           const cliId = tab.agentCliId;
           const cli = settings.relaunchAgentTabs
             ? (await ptyListAiClis().catch(() => [])).find((c) => c.id === cliId)
@@ -723,7 +770,7 @@ export function Terminal({ sessionKey }: Props) {
         );
         const chosenShell =
           tab?.shellOverride ?? (profile && profile.shell ? profile.shell : settings.defaultShell);
-        pendingRunCommand = tab?.runCommand ?? null;
+        if (!ptyId) pendingRunCommand = tab?.runCommand ?? null;
         // Layer any `.arc/config.toml` env for the terminal's actual cwd on
         // top of the inherited process env. Loaded per-cwd (not from the
         // file-tree-keyed store) so it's race-free against the home reset.
@@ -758,24 +805,34 @@ export function Terminal({ sessionKey }: Props) {
           profile?.env || projectEnv
             ? { ...(projectEnv ?? {}), ...(profile?.env ?? {}) }
             : null;
+        const spawnOpts: PtySpawnOptions = {
+          shell: chosenShell && chosenShell.length > 0 ? chosenShell : null,
+          cwd: cwd ?? null,
+          cols: term.cols,
+          rows: term.rows,
+          env,
+          args: tab?.shellArgs ?? profile?.args ?? null,
+        };
         // `onPtyChunk` is wired to the output channel *inside* ptySpawn
         // before the pty_spawn command runs, so no early output is dropped.
-        ptyId = await ptySpawn(
-          {
-            shell: chosenShell && chosenShell.length > 0 ? chosenShell : null,
-            cwd: cwd ?? null,
-            cols: term.cols,
-            rows: term.rows,
-            env,
-            args: tab?.shellArgs ?? profile?.args ?? null,
-          },
-          onPtyChunk,
-        );
+        // With background terminals on, the shell runs in the session host
+        // under the tab's id; if the host can't take it, the tab still gets
+        // an ordinary shell.
+        if (!ptyId && settings.persistentTerminals) {
+          ptyId = await ptySpawn({ ...spawnOpts, persistentId: sessionKey }, onPtyChunk).catch(
+            (err) => {
+              writeln(`\x1b[2m  background session unavailable: ${err}\x1b[0m`);
+              writeln(`\x1b[2m  this tab won't keep running after ARC closes.\x1b[0m`);
+              return null;
+            },
+          );
+        }
+        ptyId ??= await ptySpawn(spawnOpts, onPtyChunk);
         if (disposed) {
           // Cleanup already ran, so nothing will clear the timer this boot
           // started — clear it here or every discarded mount leaks one.
           stopAgentIdleTimer?.();
-          if (ptyId) await ptyKill(ptyId).catch(() => {});
+          releasePty(ptyId);
           return;
         }
         if (earlyInput.length > 0) {
@@ -1091,7 +1148,7 @@ export function Terminal({ sessionKey }: Props) {
       }
       unsubAppearance();
       unlistens.forEach((u) => u());
-      if (ptyId) void ptyKill(ptyId).catch(() => {});
+      if (ptyId) releasePty(ptyId);
       useWorkspace.getState().setTabPtyId(sessionKey, undefined);
       try {
         term.dispose();

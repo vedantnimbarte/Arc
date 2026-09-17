@@ -1,11 +1,20 @@
-//! Tauri command surface for [`arc_pty::PtyManager`].
+//! Tauri command surface for [`arc_pty::PtyManager`] and the persistent
+//! session host ([`arc_ptyhost`]).
 //!
 //! Frontend contract (see apps/frontend/src/lib/tauri.ts):
-//!   invoke("pty_spawn",       { opts: PtySpawnOpts, onData: Channel }) -> id
-//!   invoke("pty_write",       { id, data })             -> ()
-//!   invoke("pty_resize",      { id, cols, rows })       -> ()
-//!   invoke("pty_kill",        { id })                   -> ()
-//!   invoke("pty_list_shells", {})                       -> Vec<ShellInfo>
+//!   invoke("pty_spawn",        { opts: PtySpawnOpts, onData: Channel }) -> id
+//!   invoke("pty_attach",       { key, cols, rows, onData: Channel })   -> id | null
+//!   invoke("pty_write",        { id, data })             -> ()
+//!   invoke("pty_resize",       { id, cols, rows })       -> ()
+//!   invoke("pty_kill",         { id })                   -> ()
+//!   invoke("pty_list_shells",  {})                       -> Vec<ShellInfo>
+//!   invoke("pty_host_list",    {})                       -> Vec<String>
+//!   invoke("pty_host_end_all", {})                       -> ()
+//!
+//! A spawn with `persistentId` (the tab id) runs in the `arc-ptyhost` process
+//! instead of this one, so it survives ARC closing; its id is
+//! `persist:<tab id>`. Every other command routes on that prefix, so the
+//! frontend treats both kinds of terminal the same.
 //!
 //! Shell output is streamed to the frontend over a per-spawn
 //! `tauri::ipc::Channel` carrying **raw bytes** (`InvokeResponseBody::Raw`).
@@ -22,13 +31,30 @@
 use std::sync::Arc;
 
 use arc_pty::{discover_ai_clis, discover_shells, AiCliInfo, PtyManager, ShellInfo, SpawnOptions};
+use arc_ptyhost::client::HostClient;
 use serde::{Deserialize, Serialize};
 use tauri::ipc::{Channel, InvokeResponseBody};
 use tauri::{AppHandle, Emitter, State};
+use tokio::sync::{mpsc, oneshot};
 
-#[derive(Default)]
+const PERSIST_PREFIX: &str = "persist:";
+
 pub struct PtyState {
     pub manager: Arc<PtyManager>,
+    pub host: Arc<HostClient>,
+}
+
+impl Default for PtyState {
+    fn default() -> Self {
+        // Bundled next to the main executable (see src/bin/arc-ptyhost.rs).
+        let exe = std::env::current_exe().ok().map(|p| {
+            p.with_file_name(format!("arc-ptyhost{}", std::env::consts::EXE_SUFFIX))
+        });
+        Self {
+            manager: Arc::default(),
+            host: Arc::new(HostClient::new(exe, None)),
+        }
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -39,6 +65,10 @@ pub struct PtySpawnOpts {
     pub rows: u16,
     pub env: Option<std::collections::HashMap<String, String>>,
     pub args: Option<Vec<String>>,
+    /// Tab id to run this terminal under in the session host, so it outlives
+    /// ARC. `None` spawns in-process as before.
+    #[serde(rename = "persistentId", default)]
+    pub persistent_id: Option<String>,
 }
 
 #[derive(Debug, Serialize, Clone)]
@@ -54,60 +84,80 @@ pub async fn pty_spawn(
     opts: PtySpawnOpts,
     on_data: Channel<InvokeResponseBody>,
 ) -> Result<String, String> {
-    let result = state
-        .manager
-        .spawn(SpawnOptions {
-            shell: opts.shell,
-            cwd: opts.cwd,
-            cols: opts.cols,
-            rows: opts.rows,
-            env: opts.env,
-            args: opts.args,
-        })
-        .map_err(|e| format!("{e:#}"))?;
+    let spawn = SpawnOptions {
+        shell: opts.shell,
+        cwd: opts.cwd,
+        cols: opts.cols,
+        rows: opts.rows,
+        env: opts.env,
+        args: opts.args,
+    };
+    let (id, data_rx, exit_rx) = match opts.persistent_id {
+        Some(key) => {
+            let a = state.host.spawn(&key, spawn).await.map_err(|e| format!("{e:#}"))?;
+            (format!("{PERSIST_PREFIX}{key}"), a.data_rx, a.exit_rx)
+        }
+        None => {
+            let r = state.manager.spawn(spawn).map_err(|e| format!("{e:#}"))?;
+            (r.id, r.data_rx, r.exit_rx)
+        }
+    };
+    stream(app, id.clone(), data_rx, exit_rx, on_data);
+    Ok(id)
+}
 
-    let id = result.id;
-    let exit_topic = format!("pty://exit/{id}");
+/// Reattach to a persistent session left running by a previous ARC. Returns
+/// the id to use from here on, or `null` when there is nothing to attach to —
+/// the caller then spawns a fresh shell. The first chunk on `onData` is the
+/// session's recent output.
+#[tauri::command]
+pub async fn pty_attach(
+    app: AppHandle,
+    state: State<'_, PtyState>,
+    key: String,
+    cols: u16,
+    rows: u16,
+    on_data: Channel<InvokeResponseBody>,
+) -> Result<Option<String>, String> {
+    let Some(a) = state.host.attach(&key, cols, rows).await.map_err(|e| format!("{e:#}"))? else {
+        return Ok(None);
+    };
+    let id = format!("{PERSIST_PREFIX}{key}");
+    stream(app, id.clone(), a.data_rx, a.exit_rx, on_data);
+    Ok(Some(id))
+}
 
+/// Pump a terminal's output onto its IPC channel and its exit onto the bus.
+fn stream(
+    app: AppHandle,
+    id: String,
+    mut data_rx: mpsc::Receiver<Vec<u8>>,
+    exit_rx: oneshot::Receiver<Option<i32>>,
+    channel: Channel<InvokeResponseBody>,
+) {
     // Drain the data channel straight onto the per-spawn IPC channel as raw
     // bytes. `on_data` is registered on the JS side before this command even
     // runs, so there's no spawn→listen race (the old event path had one).
-    {
-        let mut rx = result.data_rx;
-        let channel = on_data;
-        let id_for_data = id.clone();
-        tokio::spawn(async move {
-            while let Some(bytes) = rx.recv().await {
-                if channel.send(InvokeResponseBody::Raw(bytes)).is_err() {
-                    // Webview/channel gone — stop draining; the reader thread
-                    // and shell are torn down when `pty_kill` runs.
-                    break;
-                }
+    let id_for_data = id.clone();
+    tokio::spawn(async move {
+        while let Some(bytes) = data_rx.recv().await {
+            if channel.send(InvokeResponseBody::Raw(bytes)).is_err() {
+                // Webview/channel gone — stop draining; the reader thread
+                // and shell are torn down when `pty_kill` runs.
+                break;
             }
-            tracing::debug!(id = %id_for_data, "pty data stream closed");
-        });
-    }
+        }
+        tracing::debug!(id = %id_for_data, "pty data stream closed");
+    });
 
     // Drain exit channel exactly once. Single low-frequency event — the
     // global bus is fine here.
-    {
-        let rx = result.exit_rx;
-        let id_for_exit = id.clone();
-        tokio::spawn(async move {
-            if let Ok(code) = rx.await {
-                let _ = app.emit(
-                    &exit_topic,
-                    PtyExitEvent {
-                        id: id_for_exit.clone(),
-                        code,
-                    },
-                );
-                tracing::debug!(id = %id_for_exit, code = ?code, "pty exited");
-            }
-        });
-    }
-
-    Ok(id)
+    tokio::spawn(async move {
+        if let Ok(code) = exit_rx.await {
+            let _ = app.emit(&format!("pty://exit/{id}"), PtyExitEvent { id: id.clone(), code });
+            tracing::debug!(id = %id, code = ?code, "pty exited");
+        }
+    });
 }
 
 // PTY writes/resizes/kills hit blocking syscalls (writing to the shell's
@@ -116,6 +166,7 @@ pub async fn pty_spawn(
 // worker thread — and once enough are parked, *no* async command can be
 // scheduled, so `pty_spawn` (open a tab) and `pty_kill` (close a tab / quit)
 // silently hang. Offloading to the blocking pool keeps the async runtime free.
+// Persistent sessions only queue a frame for the host, which is async already.
 
 #[tauri::command]
 pub async fn pty_write(
@@ -123,6 +174,9 @@ pub async fn pty_write(
     id: String,
     data: String,
 ) -> Result<(), String> {
+    if let Some(key) = id.strip_prefix(PERSIST_PREFIX) {
+        return state.host.write(key, data.as_bytes()).await.map_err(|e| format!("{e:#}"));
+    }
     let manager = state.manager.clone();
     tauri::async_runtime::spawn_blocking(move || manager.write(&id, data.as_bytes()))
         .await
@@ -137,6 +191,9 @@ pub async fn pty_resize(
     cols: u16,
     rows: u16,
 ) -> Result<(), String> {
+    if let Some(key) = id.strip_prefix(PERSIST_PREFIX) {
+        return state.host.resize(key, cols, rows).await.map_err(|e| format!("{e:#}"));
+    }
     let manager = state.manager.clone();
     tauri::async_runtime::spawn_blocking(move || manager.resize(&id, cols, rows))
         .await
@@ -146,11 +203,28 @@ pub async fn pty_resize(
 
 #[tauri::command]
 pub async fn pty_kill(state: State<'_, PtyState>, id: String) -> Result<(), String> {
+    if let Some(key) = id.strip_prefix(PERSIST_PREFIX) {
+        return state.host.kill(key).await.map_err(|e| format!("{e:#}"));
+    }
     let manager = state.manager.clone();
     tauri::async_runtime::spawn_blocking(move || manager.kill(&id))
         .await
         .map_err(|e| format!("pty kill task failed: {e}"))?
         .map_err(|e| format!("{e:#}"))
+}
+
+/// Tab ids of the sessions running in the background host. Empty when no host
+/// is running; an error when one from another ARC version is (end it with
+/// `pty_host_end_all`).
+#[tauri::command]
+pub async fn pty_host_list(state: State<'_, PtyState>) -> Result<Vec<String>, String> {
+    state.host.list().await.map_err(|e| format!("{e:#}"))
+}
+
+/// End every background session and stop the host, whatever its version.
+#[tauri::command]
+pub async fn pty_host_end_all(state: State<'_, PtyState>) -> Result<(), String> {
+    state.host.shutdown().await.map_err(|e| format!("{e:#}"))
 }
 
 /// Enumerate shells the picker can offer. The OS default is flagged via

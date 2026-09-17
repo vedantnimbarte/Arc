@@ -3,9 +3,19 @@ import {
   parseJustRecipes,
   parseMakeTargets,
   parsePackageScripts,
+  remoteTaskLine,
   runnerCommand,
   taskTitle,
 } from '../tasks';
+
+describe('remoteTaskLine', () => {
+  it('runs from the quoted remote root', () => {
+    expect(remoteTaskLine("ssh://h1/srv/it's app", "make 'build'")).toBe(
+      "cd '/srv/it'\\''s app' && make 'build'\r",
+    );
+    expect(remoteTaskLine('/local/root', 'make build')).toBeNull();
+  });
+});
 
 describe('parsePackageScripts', () => {
   it('returns the script names', () => {

@@ -87,12 +87,7 @@ pub async fn status<P: AsRef<Path>>(path: P) -> Result<Option<GitInfo>> {
     let output = git_cmd()
         .arg("-C")
         .arg(path)
-        .args([
-            "status",
-            "--porcelain=v2",
-            "--branch",
-            "--untracked-files=normal",
-        ])
+        .args(STATUS_ARGS)
         .output()
         .await
         .map_err(|e| Error::Spawn(e.to_string()))?;
@@ -103,12 +98,17 @@ pub async fn status<P: AsRef<Path>>(path: P) -> Result<Option<GitInfo>> {
     }
 
     let stdout = String::from_utf8_lossy(&output.stdout);
-    let mut info = parse_porcelain_v2(&stdout);
+    let mut info = parse_status(&stdout);
     if let Some(dir) = git_dir(path).await {
-        info.in_progress = in_progress_op(&dir);
+        info.in_progress = in_progress_op(|name| dir.join(name).exists());
     }
     Ok(Some(info))
 }
+
+/// Arguments for [`status`]. Public, like the other `*_ARGS` / `*_args`
+/// here, so a remote workspace runs the exact same git command over SSH and
+/// feeds the output to the same parser.
+pub const STATUS_ARGS: &[&str] = &["status", "--porcelain=v2", "--branch", "--untracked-files=normal"];
 
 /// Absolute path to the repo's git dir — a real directory for a normal
 /// clone, the linked worktree's own dir for a worktree. `None` when `path`
@@ -132,10 +132,20 @@ async fn git_dir(path: &Path) -> Option<std::path::PathBuf> {
     }
 }
 
+/// The marker files [`in_progress_op`] looks for, relative to the git dir.
+pub const IN_PROGRESS_MARKERS: &[&str] = &[
+    "rebase-merge",
+    "rebase-apply",
+    "CHERRY_PICK_HEAD",
+    "REVERT_HEAD",
+    "MERGE_HEAD",
+    "BISECT_LOG",
+];
+
 /// git leaves a marker per multi-step operation. Order matters: a conflicted
 /// rebase also writes MERGE_HEAD, and the rebase is the more useful label.
-fn in_progress_op(git_dir: &Path) -> Option<String> {
-    let marker = |name: &str| git_dir.join(name).exists();
+/// `marker` says whether a name from [`IN_PROGRESS_MARKERS`] exists.
+pub fn in_progress_op(marker: impl Fn(&str) -> bool) -> Option<String> {
     if marker("rebase-merge") || marker("rebase-apply") {
         Some("rebase".into())
     } else if marker("CHERRY_PICK_HEAD") {
@@ -151,7 +161,8 @@ fn in_progress_op(git_dir: &Path) -> Option<String> {
     }
 }
 
-fn parse_porcelain_v2(out: &str) -> GitInfo {
+/// Parse `git status --porcelain=v2 --branch` (see [`STATUS_ARGS`]).
+pub fn parse_status(out: &str) -> GitInfo {
     let mut info = GitInfo {
         branch: None,
         head_short: None,
@@ -273,16 +284,7 @@ pub async fn changes<P: AsRef<Path>>(path: P) -> Result<Vec<ChangeEntry>> {
     let output = git_cmd()
         .arg("-C")
         .arg(path)
-        .args([
-            "status",
-            "--porcelain=v2",
-            "--untracked-files=normal",
-            // Ignored paths drive the file tree's dimming. The default
-            // (traditional) mode collapses an ignored directory into a single
-            // record instead of listing every file under `node_modules/`.
-            "--ignored",
-            "-z",
-        ])
+        .args(CHANGES_ARGS)
         .output()
         .await
         .map_err(|e| Error::Spawn(e.to_string()))?;
@@ -290,12 +292,27 @@ pub async fn changes<P: AsRef<Path>>(path: P) -> Result<Vec<ChangeEntry>> {
     if !output.status.success() {
         return Ok(Vec::new());
     }
+    Ok(parse_changes(&output.stdout))
+}
 
+/// Arguments for [`changes`].
+pub const CHANGES_ARGS: &[&str] = &[
+    "status",
+    "--porcelain=v2",
+    "--untracked-files=normal",
+    // Ignored paths drive the file tree's dimming. The default
+    // (traditional) mode collapses an ignored directory into a single
+    // record instead of listing every file under `node_modules/`.
+    "--ignored",
+    "-z",
+];
+
+/// Parse `git status --porcelain=v2 -z` (see [`CHANGES_ARGS`]).
+pub fn parse_changes(bytes: &[u8]) -> Vec<ChangeEntry> {
     // `-z` produces NUL-terminated records. Rename/copy ("2") entries use
     // NUL to separate the new path and origin path as well, so we have to
     // parse sequentially rather than splitting once.
     let mut out = Vec::new();
-    let bytes = &output.stdout[..];
     let mut i = 0;
     while i < bytes.len() {
         let end = bytes[i..]
@@ -360,7 +377,7 @@ pub async fn changes<P: AsRef<Path>>(path: P) -> Result<Vec<ChangeEntry>> {
         }
     }
 
-    Ok(out)
+    out
 }
 
 /// Absolute path to the repository root containing `path`
@@ -541,16 +558,10 @@ pub async fn commit<P: AsRef<Path>>(
         return Err(Error::Failed("empty commit message".into()));
     }
     let path = path.as_ref();
-    let mut cmd = git_cmd();
-    cmd.arg("-C").arg(path).arg("commit");
-    if sign {
-        cmd.arg("-S");
-    }
-    if signoff {
-        cmd.arg("-s");
-    }
-    let output = cmd
-        .args(["-m", msg])
+    let output = git_cmd()
+        .arg("-C")
+        .arg(path)
+        .args(commit_args(msg, sign, signoff))
         .output()
         .await
         .map_err(|e| Error::Spawn(e.to_string()))?;
@@ -572,21 +583,51 @@ pub async fn commit<P: AsRef<Path>>(
     let probe = git_cmd()
         .arg("-C")
         .arg(path)
-        .args(["log", "-1", "--format=%h%n%s"])
+        .args(COMMIT_PROBE_ARGS)
         .output()
         .await
         .map_err(|e| Error::Spawn(e.to_string()))?;
-    let (short, subject) = if probe.status.success() {
-        let s = String::from_utf8_lossy(&probe.stdout);
-        let mut it = s.lines();
-        (
-            it.next().unwrap_or("").to_string(),
-            it.next().unwrap_or("").to_string(),
-        )
-    } else {
-        (String::new(), msg.to_string())
-    };
-    Ok(CommitResult { short, subject })
+    let probed = probe
+        .status
+        .success()
+        .then(|| String::from_utf8_lossy(&probe.stdout).into_owned());
+    Ok(parse_commit_probe(probed.as_deref(), msg))
+}
+
+/// `git commit` arguments for a message that is already trimmed and non-empty.
+/// `-m` takes the message as its own argument, so a message starting with `-`
+/// is still a message.
+pub fn commit_args(msg: &str, sign: bool, signoff: bool) -> Vec<String> {
+    let mut args = vec!["commit".to_string()];
+    if sign {
+        args.push("-S".into());
+    }
+    if signoff {
+        args.push("-s".into());
+    }
+    args.push("-m".into());
+    args.push(msg.into());
+    args
+}
+
+/// Run after a successful commit to report what landed.
+pub const COMMIT_PROBE_ARGS: &[&str] = &["log", "-1", "--format=%h%n%s"];
+
+/// `probe` is [`COMMIT_PROBE_ARGS`]' stdout, or `None` if it failed.
+pub fn parse_commit_probe(probe: Option<&str>, msg: &str) -> CommitResult {
+    match probe {
+        Some(s) => {
+            let mut it = s.lines();
+            CommitResult {
+                short: it.next().unwrap_or("").to_string(),
+                subject: it.next().unwrap_or("").to_string(),
+            }
+        }
+        None => CommitResult {
+            short: String::new(),
+            subject: msg.to_string(),
+        },
+    }
 }
 
 /// Discard local changes for the given repository-relative paths.
@@ -677,25 +718,10 @@ pub struct BranchInfo {
 /// Returns `Ok(vec![])` when `path` is not inside a git repo.
 pub async fn branches<P: AsRef<Path>>(path: P) -> Result<Vec<BranchInfo>> {
     let path = path.as_ref();
-    // Fields, US-separated:
-    //   refname:short, HEAD (`*` or ` `), refname (full),
-    //   objectname (full), committerdate:unix, contents:subject,
-    //   upstream:short
-    const US: &str = "\u{1f}";
-    let format = format!(
-        "%(refname:short){US}%(HEAD){US}%(refname){US}%(objectname){US}%(committerdate:unix){US}%(contents:subject){US}%(upstream:short)"
-    );
-
     let output = git_cmd()
         .arg("-C")
         .arg(path)
-        .args([
-            "for-each-ref",
-            "--sort=-committerdate",
-            &format!("--format={format}"),
-            "refs/heads",
-            "refs/remotes",
-        ])
+        .args(branches_args())
         .output()
         .await
         .map_err(|e| Error::Spawn(e.to_string()))?;
@@ -703,8 +729,33 @@ pub async fn branches<P: AsRef<Path>>(path: P) -> Result<Vec<BranchInfo>> {
     if !output.status.success() {
         return Ok(Vec::new());
     }
+    Ok(parse_branches(&String::from_utf8_lossy(&output.stdout)))
+}
 
-    let stdout = String::from_utf8_lossy(&output.stdout);
+const BRANCH_US: &str = "\u{1f}";
+
+/// Arguments for [`branches`].
+pub fn branches_args() -> Vec<String> {
+    // Fields, US-separated:
+    //   refname:short, HEAD (`*` or ` `), refname (full),
+    //   objectname (full), committerdate:unix, contents:subject,
+    //   upstream:short
+    const US: &str = BRANCH_US;
+    let format = format!(
+        "%(refname:short){US}%(HEAD){US}%(refname){US}%(objectname){US}%(committerdate:unix){US}%(contents:subject){US}%(upstream:short)"
+    );
+    vec![
+        "for-each-ref".into(),
+        "--sort=-committerdate".into(),
+        format!("--format={format}"),
+        "refs/heads".into(),
+        "refs/remotes".into(),
+    ]
+}
+
+/// Parse the output of [`branches_args`].
+pub fn parse_branches(stdout: &str) -> Vec<BranchInfo> {
+    const US: &str = BRANCH_US;
     let mut out = Vec::new();
     for line in stdout.lines() {
         if line.is_empty() {
@@ -738,7 +789,7 @@ pub async fn branches<P: AsRef<Path>>(path: P) -> Result<Vec<BranchInfo>> {
             time,
         });
     }
-    Ok(out)
+    out
 }
 
 // ----- checkout -------------------------------------------------------------
@@ -884,38 +935,10 @@ pub async fn log<P: AsRef<Path>>(
     opts: &LogOptions,
 ) -> Result<Vec<LogEntry>> {
     let path = path.as_ref();
-    let limit = limit.clamp(1, 5000);
-    // SOH (\x01) prefixes each commit record so we can cleanly separate the
-    // per-commit format line from the --numstat block that follows it.
-    // Fields: <SOH>%H<US>%h<US>%an<US>%ae<US>%at<US>%P<US>%s
-    const US: char = '\u{1f}';
-    const SOH: char = '\u{01}';
-    let format = format!("{SOH}%H{US}%h{US}%an{US}%ae{US}%at{US}%P{US}%s");
-
-    let mut cmd = git_cmd();
-    cmd.arg("-C").arg(path).args([
-        "log",
-        &format!("-n{limit}"),
-        &format!("--format={format}"),
-        "--numstat",
-    ]);
-    if !opts.include_merges {
-        cmd.arg("--no-merges");
-    }
-    if let Some(ts) = opts.since {
-        cmd.arg(format!("--since={ts}"));
-    }
-    if let Some(ts) = opts.until {
-        cmd.arg(format!("--until={ts}"));
-    }
-    if let Some(a) = opts.author.as_deref().filter(|s| !s.is_empty()) {
-        cmd.arg("-i").arg(format!("--author={a}"));
-    }
-    if let Some(p) = opts.path_filter.as_deref().filter(|s| !s.is_empty()) {
-        cmd.arg("--").arg(p);
-    }
-
-    let output = cmd
+    let output = git_cmd()
+        .arg("-C")
+        .arg(path)
+        .args(log_args(limit, opts))
         .output()
         .await
         .map_err(|e| Error::Spawn(e.to_string()))?;
@@ -923,14 +946,58 @@ pub async fn log<P: AsRef<Path>>(
         let err = String::from_utf8_lossy(&output.stderr).trim().to_string();
         return Err(Error::Failed(err));
     }
+    Ok(parse_log(&String::from_utf8_lossy(&output.stdout)))
+}
 
+const LOG_US: char = '\u{1f}';
+const LOG_SOH: char = '\u{01}';
+
+/// Arguments for [`log`].
+pub fn log_args(limit: usize, opts: &LogOptions) -> Vec<String> {
+    let limit = limit.clamp(1, 5000);
+    // SOH (\x01) prefixes each commit record so we can cleanly separate the
+    // per-commit format line from the --numstat block that follows it.
+    // Fields: <SOH>%H<US>%h<US>%an<US>%ae<US>%at<US>%P<US>%s
+    const US: char = LOG_US;
+    const SOH: char = LOG_SOH;
+    let format = format!("{SOH}%H{US}%h{US}%an{US}%ae{US}%at{US}%P{US}%s");
+
+    let mut args = vec![
+        "log".to_string(),
+        format!("-n{limit}"),
+        format!("--format={format}"),
+        "--numstat".into(),
+    ];
+    if !opts.include_merges {
+        args.push("--no-merges".into());
+    }
+    if let Some(ts) = opts.since {
+        args.push(format!("--since={ts}"));
+    }
+    if let Some(ts) = opts.until {
+        args.push(format!("--until={ts}"));
+    }
+    if let Some(a) = opts.author.as_deref().filter(|s| !s.is_empty()) {
+        args.push("-i".into());
+        args.push(format!("--author={a}"));
+    }
+    if let Some(p) = opts.path_filter.as_deref().filter(|s| !s.is_empty()) {
+        args.push("--".into());
+        args.push(p.into());
+    }
+    args
+}
+
+/// Parse the output of [`log_args`].
+pub fn parse_log(stdout: &str) -> Vec<LogEntry> {
+    const US: char = LOG_US;
+    const SOH: char = LOG_SOH;
     // Each block starts with SOH; splitting on it gives one segment per commit.
     // Segment structure (after trimming outer blank lines):
     //   Line 0 : commit fields (SOH already consumed by the split)
     //   Line 1 : blank
     //   Lines 2+: numstat rows  "<ins>\t<del>\t<path>"
     //             binary files show "-\t-\t<path>" and are skipped
-    let stdout = String::from_utf8_lossy(&output.stdout);
     let mut entries = Vec::new();
     for block in stdout.split(SOH) {
         let block = block.trim_matches(|c: char| c == '\n' || c == '\r');
@@ -987,7 +1054,7 @@ pub async fn log<P: AsRef<Path>>(
             deletions,
         });
     }
-    Ok(entries)
+    entries
 }
 
 // ----- authors --------------------------------------------------------------
@@ -1067,26 +1134,10 @@ pub async fn diff<P: AsRef<Path>>(
     path_filter: Option<&str>,
 ) -> Result<String> {
     let path = path.as_ref();
-    let mut cmd = git_cmd();
-    cmd.arg("-C")
+    let output = git_cmd()
+        .arg("-C")
         .arg(path)
-        .arg("--no-pager")
-        .arg("diff")
-        .arg("--no-color");
-    match scope {
-        DiffScope::Worktree => {}
-        DiffScope::Staged => {
-            cmd.arg("--cached");
-        }
-        DiffScope::Head => {
-            cmd.arg("HEAD");
-        }
-    }
-    if let Some(p) = path_filter {
-        cmd.arg("--").arg(p);
-    }
-
-    let output = cmd
+        .args(diff_args(scope, path_filter))
         .output()
         .await
         .map_err(|e| Error::Spawn(e.to_string()))?;
@@ -1095,6 +1146,117 @@ pub async fn diff<P: AsRef<Path>>(
         return Err(Error::Failed(err));
     }
     Ok(String::from_utf8_lossy(&output.stdout).into_owned())
+}
+
+// ----- comparing checkouts --------------------------------------------------
+//
+// Racing agents each work in their own worktree, and most of what they did is
+// not committed yet. These let two checkouts be compared as they stand on
+// disk: snapshot each into a tree object, then diff the trees. Worktrees share
+// one object database, so a tree written from one is readable from any.
+
+/// Tree oid of the working tree at `path` exactly as it is on disk: committed,
+/// staged, unstaged and untracked (not ignored) files alike.
+///
+/// Built in a throwaway index seeded from the real one — the real index, and
+/// so the user's staging, is never touched. Seeding keeps the stat cache, so
+/// only files that actually changed are re-hashed.
+pub async fn snapshot_tree<P: AsRef<Path>>(path: P) -> Result<String> {
+    let path = path.as_ref();
+    let index_path = run_git(path, &["rev-parse", "--git-path", "index"]).await?;
+    let real_index = path.join(index_path.trim());
+    let stamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    let temp_index =
+        std::env::temp_dir().join(format!("arc-snapshot-{}-{stamp}.index", std::process::id()));
+    // No index yet (fresh repo) just means every file is hashed.
+    let _ = tokio::fs::copy(&real_index, &temp_index).await;
+
+    let with_temp_index = |args: &[&str]| {
+        let mut cmd = git_cmd();
+        cmd.arg("-C").arg(path).args(args).env("GIT_INDEX_FILE", &temp_index);
+        cmd
+    };
+    let result = async {
+        checked(with_temp_index(&["add", "-A"]).output().await)?;
+        Ok(checked(with_temp_index(&["write-tree"]).output().await)?.trim().to_string())
+    }
+    .await;
+    let _ = tokio::fs::remove_file(&temp_index).await;
+    result
+}
+
+/// `git diff <from> <to>` between any two tree-ish revisions — commits,
+/// branches, or trees from [`snapshot_tree`]. Renames are reported as a delete
+/// plus an add so every path in `--numstat` output is a plain path.
+pub async fn diff_trees<P: AsRef<Path>>(
+    path: P,
+    from: &str,
+    to: &str,
+    path_filter: Option<&str>,
+    numstat: bool,
+) -> Result<String> {
+    reject_option_like(from, "revision")?;
+    reject_option_like(to, "revision")?;
+    let mut args = vec!["--no-pager", "diff", "--no-color", "--no-renames"];
+    if numstat {
+        args.push("--numstat");
+    }
+    args.extend([from, to]);
+    if let Some(p) = path_filter {
+        args.extend(["--", p]);
+    }
+    run_git(path.as_ref(), &args).await
+}
+
+/// Full oid of the best common ancestor of `a` and `b`.
+pub async fn merge_base<P: AsRef<Path>>(path: P, a: &str, b: &str) -> Result<String> {
+    reject_option_like(a, "revision")?;
+    reject_option_like(b, "revision")?;
+    Ok(run_git(path.as_ref(), &["merge-base", a, b]).await?.trim().to_string())
+}
+
+/// How many commits `to` has that `from` does not (`git rev-list --count from..to`).
+pub async fn rev_count<P: AsRef<Path>>(path: P, from: &str, to: &str) -> Result<usize> {
+    reject_option_like(from, "revision")?;
+    reject_option_like(to, "revision")?;
+    let range = format!("{from}..{to}");
+    let out = run_git(path.as_ref(), &["rev-list", "--count", &range]).await?;
+    out.trim()
+        .parse()
+        .map_err(|_| Error::Failed(format!("unexpected rev-list output: {out:?}")))
+}
+
+/// Run git in `path`, returning stdout or failing with stderr.
+async fn run_git(path: &Path, args: &[&str]) -> Result<String> {
+    checked(git_cmd().arg("-C").arg(path).args(args).output().await)
+}
+
+/// Stdout of a finished git process, or its stderr as the error.
+fn checked(output: std::io::Result<std::process::Output>) -> Result<String> {
+    let output = output.map_err(|e| Error::Spawn(e.to_string()))?;
+    if !output.status.success() {
+        let err = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        return Err(Error::Failed(err));
+    }
+    Ok(String::from_utf8_lossy(&output.stdout).into_owned())
+}
+
+/// Arguments for [`diff`].
+pub fn diff_args(scope: DiffScope, path_filter: Option<&str>) -> Vec<String> {
+    let mut args = vec!["--no-pager".to_string(), "diff".into(), "--no-color".into()];
+    match scope {
+        DiffScope::Worktree => {}
+        DiffScope::Staged => args.push("--cached".into()),
+        DiffScope::Head => args.push("HEAD".into()),
+    }
+    if let Some(p) = path_filter {
+        args.push("--".into());
+        args.push(p.into());
+    }
+    args
 }
 
 // ----- apply ----------------------------------------------------------------
@@ -1196,18 +1358,7 @@ pub async fn diff_stat<P: AsRef<Path>>(path: P) -> Result<Option<DiffStat>> {
         .await
         .map_err(|e| Error::Spawn(e.to_string()))?;
     if numstat.status.success() {
-        for line in String::from_utf8_lossy(&numstat.stdout).lines() {
-            // Format: "<ins>\t<del>\t<path>"  (binary files use "-\t-")
-            let mut parts = line.splitn(3, '\t');
-            let ins = parts.next().unwrap_or("");
-            let del = parts.next().unwrap_or("");
-            if parts.next().is_none() {
-                continue;
-            }
-            stat.files_changed += 1;
-            stat.insertions += ins.parse::<usize>().unwrap_or(0);
-            stat.deletions += del.parse::<usize>().unwrap_or(0);
-        }
+        add_numstat(&mut stat, &String::from_utf8_lossy(&numstat.stdout));
     }
 
     // Untracked files — counted as additions of their full line count.
@@ -1247,6 +1398,22 @@ pub async fn diff_stat<P: AsRef<Path>>(path: P) -> Result<Option<DiffStat>> {
     Ok(Some(stat))
 }
 
+/// Fold `git diff --numstat` output into `stat`.
+pub fn add_numstat(stat: &mut DiffStat, numstat: &str) {
+    for line in numstat.lines() {
+        // Format: "<ins>\t<del>\t<path>"  (binary files use "-\t-")
+        let mut parts = line.splitn(3, '\t');
+        let ins = parts.next().unwrap_or("");
+        let del = parts.next().unwrap_or("");
+        if parts.next().is_none() {
+            continue;
+        }
+        stat.files_changed += 1;
+        stat.insertions += ins.parse::<usize>().unwrap_or(0);
+        stat.deletions += del.parse::<usize>().unwrap_or(0);
+    }
+}
+
 fn bytecount_lines(bytes: &[u8]) -> usize {
     if bytes.is_empty() {
         return 0;
@@ -1281,18 +1448,10 @@ pub async fn blame<P: AsRef<Path>>(
     range: Option<(usize, usize)>,
 ) -> Result<Vec<BlameLine>> {
     let path = path.as_ref();
-    let mut cmd = git_cmd();
-    cmd.arg("-C")
+    let output = git_cmd()
+        .arg("-C")
         .arg(path)
-        .arg("--no-pager")
-        .arg("blame")
-        .arg("--porcelain");
-    if let Some((start, end)) = range {
-        cmd.arg(format!("-L{start},{end}"));
-    }
-    cmd.arg("--").arg(file);
-
-    let output = cmd
+        .args(blame_args(file, range))
         .output()
         .await
         .map_err(|e| Error::Spawn(e.to_string()))?;
@@ -1304,7 +1463,19 @@ pub async fn blame<P: AsRef<Path>>(
     Ok(parse_blame_porcelain(&raw))
 }
 
-fn parse_blame_porcelain(out: &str) -> Vec<BlameLine> {
+/// Arguments for [`blame`].
+pub fn blame_args(file: &str, range: Option<(usize, usize)>) -> Vec<String> {
+    let mut args = vec!["--no-pager".to_string(), "blame".into(), "--porcelain".into()];
+    if let Some((start, end)) = range {
+        args.push(format!("-L{start},{end}"));
+    }
+    args.push("--".into());
+    args.push(file.into());
+    args
+}
+
+/// Parse `git blame --porcelain` (see [`blame_args`]).
+pub fn parse_blame_porcelain(out: &str) -> Vec<BlameLine> {
     // The porcelain format is a sequence of records. Each record starts with:
     //   <oid> <orig-lineno> <final-lineno> [<group-size>]
     // ... followed by header lines like `author <name>`, `author-time <secs>`,
@@ -3126,7 +3297,7 @@ mod tests {
 # branch.upstream origin/main
 # branch.ab +0 -0
 ";
-        let info = parse_porcelain_v2(raw);
+        let info = parse_status(raw);
         assert_eq!(info.branch.as_deref(), Some("main"));
         assert_eq!(info.head_short.as_deref(), Some("abc1234"));
         assert_eq!(info.upstream.as_deref(), Some("origin/main"));
@@ -3147,7 +3318,7 @@ mod tests {
 ? new.txt
 u UU N... 100644 100644 100644 100644 eee fff ggg conflict.rs
 ";
-        let info = parse_porcelain_v2(raw);
+        let info = parse_status(raw);
         assert_eq!(info.ahead, 3);
         assert_eq!(info.behind, 2);
         assert_eq!(info.staged, 1);
@@ -3163,11 +3334,96 @@ u UU N... 100644 100644 100644 100644 eee fff ggg conflict.rs
 # branch.oid (initial)
 # branch.head (detached)
 ";
-        let info = parse_porcelain_v2(raw);
+        let info = parse_status(raw);
         assert!(info.branch.is_none());
         assert!(info.head_short.is_none());
         assert!(info.upstream.is_none());
         assert!(!info.dirty);
+    }
+
+    /// `git status --porcelain=v2 --ignored -z` as git prints it, with the
+    /// names a remote tree can throw at the parser: spaces, quotes, a leading
+    /// dash, shell syntax, and a newline — which only `-z` keeps parseable.
+    #[test]
+    fn parses_changes_z_with_hostile_names() {
+        let h = "0123456789012345678901234567890123456789";
+        let raw = format!(
+            "1 .M N... 100644 100644 100644 {h} {h} keep.rs\0\
+             2 R. N... 100644 100644 100644 {h} {h} R100 new $(rm -rf ~).txt\0old name.txt\0\
+             1 A. N... 000000 100644 100644 {h} {h} line\nbreak.txt\0\
+             u UU N... 100644 100644 100644 100644 {h} {h} {h} conflict file.rs\0\
+             ? it's -rf.txt\0\
+             ! node_modules/\0"
+        );
+        let entries = parse_changes(raw.as_bytes());
+        let summary: Vec<(&str, Option<&str>, &ChangeKind, &str)> = entries
+            .iter()
+            .map(|e| (e.path.as_str(), e.orig_path.as_deref(), &e.kind, e.status.as_str()))
+            .collect();
+        assert_eq!(
+            summary,
+            vec![
+                ("keep.rs", None, &ChangeKind::Unstaged, "M"),
+                ("new $(rm -rf ~).txt", Some("old name.txt"), &ChangeKind::Staged, "R"),
+                ("line\nbreak.txt", None, &ChangeKind::Staged, "A"),
+                ("conflict file.rs", None, &ChangeKind::Conflict, "U"),
+                ("it's -rf.txt", None, &ChangeKind::Untracked, "?"),
+                ("node_modules/", None, &ChangeKind::Ignored, "!"),
+            ]
+        );
+    }
+
+    #[test]
+    fn parses_log_records_with_numstat() {
+        let raw = "\u{1}aaaa1111\u{1f}aaaa111\u{1f}Ann\u{1f}ann@x\u{1f}1700000000\u{1f}bbbb2222 cccc3333\u{1f}Merge: it's done\n\n3\t1\tsrc/a.rs\n-\t-\tlogo.png\n\u{1}bbbb2222\u{1f}bbbb222\u{1f}Bob\u{1f}bob@x\u{1f}1690000000\u{1f}\u{1f}root\n";
+        let log = parse_log(raw);
+        assert_eq!(log.len(), 2);
+        assert_eq!(log[0].subject, "Merge: it's done");
+        assert_eq!(log[0].parents, vec!["bbbb2222", "cccc3333"]);
+        assert_eq!((log[0].additions, log[0].deletions), (3, 1));
+        assert!(log[1].parents.is_empty());
+        assert_eq!(log[1].time, 1690000000);
+    }
+
+    #[test]
+    fn log_args_keep_filters_after_the_separator() {
+        let opts = LogOptions {
+            path_filter: Some("-rf".into()),
+            author: Some("x".into()),
+            ..Default::default()
+        };
+        let args = log_args(10, &opts);
+        assert_eq!(&args[args.len() - 2..], &["--", "-rf"]);
+        assert!(args.contains(&"--author=x".to_string()));
+        assert_eq!(&diff_args(DiffScope::Staged, Some("-a"))[2..], &["--no-color", "--cached", "--", "-a"]);
+        assert_eq!(commit_args("-m oops", false, true), vec!["commit", "-s", "-m", "-m oops"]);
+    }
+
+    #[test]
+    fn parses_branch_refs() {
+        let raw = "main\u{1f}*\u{1f}refs/heads/main\u{1f}abcdef1234\u{1f}1700000000\u{1f}subject\u{1f}origin/main\n\
+                   origin/HEAD\u{1f} \u{1f}refs/remotes/origin/HEAD\u{1f}abcdef1234\u{1f}1700000000\u{1f}subject\u{1f}\n\
+                   origin/feat\u{1f} \u{1f}refs/remotes/origin/feat\u{1f}1234567890\u{1f}1600000000\u{1f}\u{1f}\n";
+        let b = parse_branches(raw);
+        assert_eq!(b.len(), 2);
+        assert!(b[0].current && !b[0].remote);
+        assert_eq!(b[0].upstream.as_deref(), Some("origin/main"));
+        assert_eq!(b[0].head_short.as_deref(), Some("abcdef1"));
+        assert!(b[1].remote && b[1].subject.is_none());
+    }
+
+    #[test]
+    fn in_progress_prefers_rebase_over_merge() {
+        assert_eq!(in_progress_op(|m| m == "MERGE_HEAD" || m == "rebase-merge").as_deref(), Some("rebase"));
+        assert_eq!(in_progress_op(|m| m == "BISECT_LOG").as_deref(), Some("bisect"));
+        assert_eq!(in_progress_op(|_| false), None);
+    }
+
+    #[test]
+    fn numstat_totals_skip_binary_line_counts() {
+        let mut stat = DiffStat::default();
+        add_numstat(&mut stat, "3\t1\ta.rs\n-\t-\tlogo.png\n");
+        assert_eq!((stat.files_changed, stat.insertions, stat.deletions), (2, 3, 1));
     }
 
     #[test]
@@ -3516,6 +3772,71 @@ git bisect skip eeeeeeeeeeeeeeeeeeee
 
         let _ = std::fs::remove_dir_all(&src);
         let _ = std::fs::remove_dir_all(&dest);
+    }
+
+    /// Two racing worktrees: one commits its work, the other leaves it dirty
+    /// and untracked. Both must show up when compared, and the committed one
+    /// must merge back into the base.
+    #[tokio::test]
+    async fn compares_and_merges_racing_worktrees() {
+        use std::process::Command as Sync;
+
+        let stamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0);
+        let root = std::env::temp_dir().join(format!("arc-git-race-{stamp}"));
+        let repo = root.join("repo");
+        let (a, b) = (root.join("a"), root.join("b"));
+        std::fs::create_dir_all(&repo).expect("tempdir");
+
+        let git = |dir: &Path, args: &[&str]| {
+            let out = Sync::new("git").arg("-C").arg(dir).args(args).output().expect("git runs");
+            assert!(out.status.success(), "git {args:?} failed: {}", String::from_utf8_lossy(&out.stderr));
+        };
+        git(&repo, &["init", "--quiet", "-b", "main"]);
+        git(&repo, &["config", "user.email", "test@example.com"]);
+        git(&repo, &["config", "user.name", "Test"]);
+        git(&repo, &["config", "commit.gpgsign", "false"]);
+        git(&repo, &["config", "core.autocrlf", "false"]);
+        std::fs::write(repo.join("shared.txt"), "one
+").expect("write");
+        git(&repo, &["add", "."]);
+        git(&repo, &["commit", "--quiet", "-m", "base"]);
+        worktree_add(&repo, &a.to_string_lossy(), Some("arc/t-1/1"), true, None).await.expect("add a");
+        worktree_add(&repo, &b.to_string_lossy(), Some("arc/t-1/2"), true, None).await.expect("add b");
+
+        std::fs::write(a.join("shared.txt"), "one
+two
+").expect("write");
+        git(&a, &["commit", "--quiet", "-am", "a's work"]);
+        std::fs::write(b.join("shared.txt"), "uno
+").expect("write");
+        std::fs::write(b.join("new.txt"), "fresh
+").expect("write");
+
+        let base = merge_base(&repo, "main", "arc/t-1/2").await.expect("merge-base");
+        let tree_b = snapshot_tree(&b).await.expect("snapshot b");
+        let stat_b = diff_trees(&repo, &base, &tree_b, None, true).await.expect("numstat");
+        assert!(stat_b.contains("new.txt"), "untracked file is in the snapshot: {stat_b}");
+        assert!(stat_b.contains("1	1	shared.txt"), "uncommitted edit counted: {stat_b}");
+        assert!(changes(&b).await.expect("changes").iter().all(|e| e.kind != ChangeKind::Staged), "real index untouched");
+
+        let tree_a = snapshot_tree(&a).await.expect("snapshot a");
+        let a_vs_b = diff_trees(&repo, &tree_a, &tree_b, Some("shared.txt"), false).await.expect("diff");
+        assert!(a_vs_b.contains("-two") && a_vs_b.contains("+uno"), "{a_vs_b}");
+
+        assert_eq!(rev_count(&repo, "main", "arc/t-1/1").await.expect("ahead"), 1);
+        assert_eq!(rev_count(&repo, "arc/t-1/1", "main").await.expect("behind"), 0);
+        let merged = merge(&repo, "arc/t-1/1").await.expect("merge");
+        assert!(!merged.conflicts);
+        assert_eq!(std::fs::read_to_string(repo.join("shared.txt")).expect("read"), "one
+two
+");
+
+        let _ = worktree_remove(&repo, &a.to_string_lossy(), true).await;
+        let _ = worktree_remove(&repo, &b.to_string_lossy(), true).await;
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     #[tokio::test]

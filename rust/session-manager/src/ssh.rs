@@ -41,6 +41,9 @@ pub struct SshHost {
     /// `arc_ssh::ForwardSpec`; this crate stores them without interpreting
     /// them, and the command layer validates them before they get here.
     pub forwards: Vec<serde_json::Value>,
+    /// Also start `forwards` when the host is opened as a remote workspace.
+    #[serde(default)]
+    pub remote_workspace_forwards: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -73,6 +76,8 @@ pub struct SshHostInput {
     pub jump_host_id: Option<String>,
     #[serde(default)]
     pub forwards: Vec<serde_json::Value>,
+    #[serde(default)]
+    pub remote_workspace_forwards: bool,
 }
 
 fn default_port() -> i64 {
@@ -190,7 +195,43 @@ type HostRow = (
     String,
 );
 
+/// `forwards_json` is a bare array of specs or, once a host opts its remote
+/// workspaces in, `{"forwards": [...], "remote_workspaces": true}`. The bare
+/// array is still written while the option is off, so rows stay readable by
+/// builds that predate it. Anything that doesn't parse loses its forwards
+/// rather than the host.
+fn decode_forwards(raw: &str) -> (Vec<serde_json::Value>, bool) {
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum Stored {
+        Bare(Vec<serde_json::Value>),
+        Wrapped {
+            #[serde(default)]
+            forwards: Vec<serde_json::Value>,
+            #[serde(default)]
+            remote_workspaces: bool,
+        },
+    }
+    match serde_json::from_str(raw) {
+        Ok(Stored::Bare(forwards)) => (forwards, false),
+        Ok(Stored::Wrapped {
+            forwards,
+            remote_workspaces,
+        }) => (forwards, remote_workspaces),
+        Err(_) => (Vec::new(), false),
+    }
+}
+
+fn encode_forwards(forwards: &[serde_json::Value], remote_workspaces: bool) -> String {
+    if remote_workspaces {
+        serde_json::json!({ "forwards": forwards, "remote_workspaces": true }).to_string()
+    } else {
+        serde_json::Value::Array(forwards.to_vec()).to_string()
+    }
+}
+
 fn host_from_row(t: HostRow) -> SshHost {
+    let (forwards, remote_workspace_forwards) = decode_forwards(&t.12);
     SshHost {
         id: t.0,
         workspace_id: t.1,
@@ -204,8 +245,8 @@ fn host_from_row(t: HostRow) -> SshHost {
         created_at: t.9,
         last_used_at: t.10,
         jump_host_id: t.11,
-        // A row that doesn't parse loses its forwards rather than the host.
-        forwards: serde_json::from_str(&t.12).unwrap_or_default(),
+        forwards,
+        remote_workspace_forwards,
     }
 }
 
@@ -233,7 +274,7 @@ pub async fn host_list(pool: &SqlitePool, workspace_id: Option<&str>) -> Result<
 
 pub async fn host_upsert(pool: &SqlitePool, input: SshHostInput) -> Result<SshHost> {
     let now = now_ms();
-    let forwards_json = serde_json::Value::Array(input.forwards.clone()).to_string();
+    let forwards_json = encode_forwards(&input.forwards, input.remote_workspace_forwards);
     if let Some(id) = input.id {
         sqlx::query(
             "UPDATE ssh_hosts SET workspace_id = ?, name = ?, host = ?, port = ?, username = ?, \
@@ -296,6 +337,7 @@ pub async fn host_upsert(pool: &SqlitePool, input: SshHostInput) -> Result<SshHo
         last_used_at: None,
         jump_host_id: input.jump_host_id,
         forwards: input.forwards,
+        remote_workspace_forwards: input.remote_workspace_forwards,
     })
 }
 
@@ -378,4 +420,31 @@ pub async fn log_load_recent(
         .collect();
     out.reverse(); // newest-last for natural read order
     Ok(out)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn forwards_json_reads_both_formats() {
+        let spec = serde_json::json!({"kind": "local", "bind_port": 8080, "dest_host": "db", "dest_port": 5432});
+
+        // The array every existing row holds.
+        let (forwards, remote) = decode_forwards(&format!("[{spec}]"));
+        assert_eq!(forwards, vec![spec.clone()]);
+        assert!(!remote);
+
+        // Off: still written as the bare array.
+        let off = encode_forwards(&[spec.clone()], false);
+        assert!(off.starts_with('['), "{off}");
+        assert_eq!(decode_forwards(&off), (vec![spec.clone()], false));
+
+        // On: the object wrapper, round-tripped.
+        let on = encode_forwards(&[spec.clone()], true);
+        assert_eq!(decode_forwards(&on), (vec![spec], true));
+
+        assert_eq!(decode_forwards("[]"), (vec![], false));
+        assert_eq!(decode_forwards("not json"), (vec![], false));
+    }
 }

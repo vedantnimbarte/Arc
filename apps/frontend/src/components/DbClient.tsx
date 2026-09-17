@@ -1,9 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
+  ChevronRight,
   Columns3,
   Database,
   Download,
+  History,
   KeyRound,
+  ListTree,
   Loader2,
   Play,
   Plug,
@@ -20,6 +23,11 @@ import {
   dbConnUpsert,
   dbConnect,
   dbDisconnect,
+  dbExport,
+  dbExportCancel,
+  dbHistoryClear,
+  dbHistoryDelete,
+  dbHistoryList,
   dbPasswordSet,
   dbPreview,
   dbQuery,
@@ -30,6 +38,7 @@ import {
   isTauri,
   type DbBackend,
   type DbConnection,
+  type DbQueryHistoryEntry,
   type DbQueryResult,
   type DbTableSchema,
 } from '../lib/tauri';
@@ -38,7 +47,8 @@ import { askConfirm } from '../state/confirm';
 import { toast, toastError } from '../state/toast';
 import { cn } from '../lib/cn';
 import { toCsv, toJson } from '../lib/dbExport';
-import { unsafeStatements } from '../lib/sqlSafety';
+import { isSelectLike, unsafeStatements } from '../lib/sqlSafety';
+import { explainSql, hotNodes, parsePlan, type PlanNode } from '../lib/explainPlan';
 
 interface Props {
   tabId: string;
@@ -119,6 +129,14 @@ export function DbClient({ tabId }: Props) {
   const [running, setRunning] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
+  /** The statement behind `result`, re-run by the full export. */
+  const [resultSql, setResultSql] = useState('');
+  /** When set, the results pane shows this query plan instead of the grid. */
+  const [plan, setPlan] = useState<{ roots: PlanNode[]; analyze: boolean } | null>(null);
+  const [analyze, setAnalyze] = useState(false);
+  const [exporting, setExporting] = useState<{ id: string; rows: number } | null>(null);
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const [history, setHistory] = useState<DbQueryHistoryEntry[]>([]);
 
   const active = useMemo(
     () => connections.find((c) => c.id === activeId) ?? null,
@@ -148,6 +166,8 @@ export function DbClient({ tabId }: Props) {
       setTables([]);
       setResult(null);
       setSchema(null);
+      setPlan(null);
+      setHistory([]);
       setError(null);
       setTabDbConnection(tabId, id ?? undefined, name ?? 'Database');
     },
@@ -178,6 +198,34 @@ export function DbClient({ tabId }: Props) {
     setTables([]);
   }, [activeId]);
 
+  const reloadHistory = useCallback(async () => {
+    if (!activeId) return;
+    try {
+      setHistory(await dbHistoryList(activeId));
+    } catch (e) {
+      toastError(String(e));
+    }
+  }, [activeId]);
+
+  useEffect(() => {
+    if (historyOpen) void reloadHistory();
+  }, [historyOpen, reloadHistory]);
+
+  /** Ask before a destructive statement runs. True when it may proceed. */
+  const confirmSafe = useCallback(
+    async (text: string, action: string) => {
+      const risky = unsafeStatements(text, active?.backend);
+      if (risky.length === 0) return true;
+      return askConfirm({
+        title: `${action} a destructive statement?`,
+        body: `${risky.join(', ')} — this affects every row and can't be undone from here.`,
+        confirmLabel: `${action} anyway`,
+        destructive: true,
+      });
+    },
+    [active?.backend],
+  );
+
   // Queries are serialized by `running`, so a slow one can't have its results
   // overwritten by a fast one started after it.
   const run = useCallback(
@@ -185,29 +233,77 @@ export function DbClient({ tabId }: Props) {
       if (!activeId || !connected || running) return;
       const trimmed = text.trim();
       if (!trimmed) return;
-      const risky = unsafeStatements(trimmed, active?.backend);
-      if (risky.length > 0) {
-        const ok = await askConfirm({
-          title: 'Run a destructive statement?',
-          body: `${risky.join(', ')} — this affects every row and can't be undone from here.`,
-          confirmLabel: 'Run anyway',
-          destructive: true,
-        });
-        if (!ok) return;
-      }
+      if (!(await confirmSafe(trimmed, 'Run'))) return;
       setRunning(true);
       setError(null);
       setSchema(null);
+      setPlan(null);
       try {
         setResult(await dbQuery(activeId, trimmed));
+        setResultSql(trimmed);
       } catch (e) {
         setResult(null);
         setError(String(e));
       } finally {
         setRunning(false);
+        // The backend recorded the statement either way.
+        if (historyOpen) void reloadHistory();
       }
     },
-    [activeId, active?.backend, connected, running],
+    [activeId, confirmSafe, connected, running, historyOpen, reloadHistory],
+  );
+
+  /** EXPLAIN the editor's statement and show the plan tree. ANALYZE executes
+   *  the statement, so the destructive-statement check applies to it. */
+  const explain = useCallback(
+    async (text: string) => {
+      if (!activeId || !active || !connected || running) return;
+      const trimmed = text.trim();
+      if (!trimmed) return;
+      const withAnalyze = analyze && active.backend === 'postgres';
+      if (withAnalyze && !(await confirmSafe(trimmed, 'Execute'))) return;
+      setRunning(true);
+      setError(null);
+      setSchema(null);
+      try {
+        const res = await dbQuery(activeId, explainSql(active.backend, trimmed, withAnalyze));
+        setPlan({ roots: parsePlan(active.backend, res), analyze: withAnalyze });
+      } catch (e) {
+        setPlan(null);
+        setError(String(e));
+      } finally {
+        setRunning(false);
+        if (historyOpen) void reloadHistory();
+      }
+    },
+    [activeId, active, analyze, confirmSafe, connected, running, historyOpen, reloadHistory],
+  );
+
+  /** Re-run the result's statement in Rust and stream every row to a file. */
+  const exportFull = useCallback(
+    async (format: 'csv' | 'json') => {
+      if (!activeId || exporting || !resultSql) return;
+      if (!isSelectLike(resultSql, active?.backend)) {
+        toastError('Only a single SELECT-like statement can be exported in full.');
+        return;
+      }
+      if (!(await confirmSafe(resultSql, 'Export'))) return;
+      const path = await fsPickSaveFile(`results.${format}`);
+      if (!path) return;
+      const id = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+      setExporting({ id, rows: 0 });
+      try {
+        const rows = await dbExport(activeId, resultSql, format, path, id, (n) =>
+          setExporting((x) => (x ? { ...x, rows: n } : x)),
+        );
+        toast(`Saved ${rows} row${rows === 1 ? '' : 's'} to ${path}`);
+      } catch (e) {
+        toastError(String(e));
+      } finally {
+        setExporting(null);
+      }
+    },
+    [activeId, active?.backend, confirmSafe, exporting, resultSql],
   );
 
   const showSchema = useCallback(
@@ -246,10 +342,13 @@ export function DbClient({ tabId }: Props) {
       setRunning(true);
       setError(null);
       setSchema(null);
+      setPlan(null);
       // Show the query we ran, so the next edit starts from something real.
-      setSql(`SELECT * FROM ${table} LIMIT 200`);
+      const shown = `SELECT * FROM ${table} LIMIT 200`;
+      setSql(shown);
       try {
         setResult(await dbPreview(activeId, table, 200));
+        setResultSql(shown);
       } catch (e) {
         setResult(null);
         setError(String(e));
@@ -427,6 +526,19 @@ export function DbClient({ tabId }: Props) {
                 <RefreshCw size={12} />
               </button>
             )}
+            {active && (
+              <button
+                type="button"
+                onClick={() => setHistoryOpen((o) => !o)}
+                title="Query history"
+                className={cn(
+                  'flex h-6 w-6 items-center justify-center rounded transition hover:bg-surface-2 hover:text-fg-base',
+                  historyOpen ? 'bg-surface-2 text-fg-base' : 'text-fg-muted',
+                )}
+              >
+                <History size={12} />
+              </button>
+            )}
           </div>
         </div>
 
@@ -479,7 +591,32 @@ export function DbClient({ tabId }: Props) {
               {running ? <Loader2 size={11} className="animate-spin" /> : <Play size={11} />}
               Run
             </button>
-            {result && (
+            <button
+              type="button"
+              onClick={() => void explain(sql)}
+              disabled={!connected || running || !sql.trim()}
+              title="Show the query plan"
+              className="flex items-center gap-1 rounded-lg px-2.5 py-1 font-sans text-xs text-fg-muted transition-colors hover:bg-surface-2 hover:text-fg-base disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              <ListTree size={11} />
+              Explain
+            </button>
+            {active?.backend === 'postgres' && (
+              <label
+                className="flex items-center gap-1 font-sans text-xs text-fg-subtle"
+                title="EXPLAIN ANALYZE executes the statement — writes included — to measure real rows and timings."
+              >
+                <input
+                  type="checkbox"
+                  checked={analyze}
+                  onChange={(e) => setAnalyze(e.target.checked)}
+                  className="h-3 w-3 accent-accent"
+                />
+                Analyze
+                {analyze && <span className="text-status-warn">(executes the query)</span>}
+              </label>
+            )}
+            {result && !plan && (
               <span className="font-sans text-xs text-fg-subtle">
                 {result.columns.length > 0
                   ? `${result.rows.length} row${result.rows.length === 1 ? '' : 's'}`
@@ -489,21 +626,51 @@ export function DbClient({ tabId }: Props) {
                 {result.truncated && ' · truncated'}
               </span>
             )}
-            {result && result.columns.length > 0 && !schema && (
-              <div className="ml-auto flex items-center gap-1">
-                {(['csv', 'json'] as const).map((format) => (
-                  <button
-                    key={format}
-                    type="button"
-                    onClick={() => void exportResult(format)}
-                    title={`Export these rows as ${format.toUpperCase()}`}
-                    className="flex items-center gap-1 rounded px-1.5 py-0.5 font-sans text-2xs uppercase text-fg-muted transition hover:bg-surface-2 hover:text-fg-base"
-                  >
-                    <Download size={10} />
-                    {format}
-                  </button>
-                ))}
+            {exporting ? (
+              <div className="ml-auto flex items-center gap-1.5 font-sans text-xs text-fg-subtle">
+                <Loader2 size={11} className="animate-spin" />
+                Exporting… {exporting.rows.toLocaleString()} rows
+                <button
+                  type="button"
+                  onClick={() => void dbExportCancel(exporting.id)}
+                  className="rounded px-1.5 py-0.5 text-fg-muted transition hover:bg-surface-2 hover:text-fg-base"
+                >
+                  Cancel
+                </button>
               </div>
+            ) : (
+              result &&
+              result.columns.length > 0 &&
+              !schema &&
+              !plan && (
+                <div className="ml-auto flex items-center gap-1">
+                  {(['csv', 'json'] as const).map((format) => (
+                    <button
+                      key={format}
+                      type="button"
+                      onClick={() => void exportResult(format)}
+                      title={`Export these rows as ${format.toUpperCase()}`}
+                      className="flex items-center gap-1 rounded px-1.5 py-0.5 font-sans text-2xs uppercase text-fg-muted transition hover:bg-surface-2 hover:text-fg-base"
+                    >
+                      <Download size={10} />
+                      {format}
+                    </button>
+                  ))}
+                  <span className="mx-0.5 h-3 w-px bg-border-hairline" />
+                  {(['csv', 'json'] as const).map((format) => (
+                    <button
+                      key={format}
+                      type="button"
+                      onClick={() => void exportFull(format)}
+                      title={`Export full result as ${format.toUpperCase()} — re-runs the query and streams every row to the file, past the grid's cap`}
+                      className="flex items-center gap-1 rounded px-1.5 py-0.5 font-sans text-2xs uppercase text-fg-muted transition hover:bg-surface-2 hover:text-fg-base"
+                    >
+                      <Download size={10} />
+                      full {format}
+                    </button>
+                  ))}
+                </div>
+              )
             )}
           </div>
         </div>
@@ -512,6 +679,8 @@ export function DbClient({ tabId }: Props) {
         <div className="min-h-0 flex-1 overflow-auto">
           {schema ? (
             <SchemaView table={schema.table} schema={schema.data} onClose={() => setSchema(null)} />
+          ) : plan ? (
+            <PlanView roots={plan.roots} analyze={plan.analyze} onClose={() => setPlan(null)} />
           ) : result && result.columns.length > 0 ? (
             <table className="w-max min-w-full border-collapse text-left">
               <thead className="sticky top-0 bg-bg-chrome">
@@ -557,7 +726,227 @@ export function DbClient({ tabId }: Props) {
           )}
         </div>
       </div>
+
+      {historyOpen && activeId && (
+        <HistoryPanel
+          entries={history}
+          onLoad={(h) => setSql(h.sql)}
+          onDelete={async (h) => {
+            try {
+              await dbHistoryDelete(h.id);
+              setHistory((list) => list.filter((x) => x.id !== h.id));
+            } catch (e) {
+              toastError(String(e));
+            }
+          }}
+          onClear={async () => {
+            const ok = await askConfirm({
+              title: 'Clear query history?',
+              body: `Every recorded statement for “${active?.name ?? 'this connection'}” is removed.`,
+              confirmLabel: 'Clear',
+              destructive: true,
+            });
+            if (!ok) return;
+            try {
+              await dbHistoryClear(activeId);
+              setHistory([]);
+            } catch (e) {
+              toastError(String(e));
+            }
+          }}
+          onClose={() => setHistoryOpen(false)}
+        />
+      )}
     </div>
+  );
+}
+
+// ─── Query history ───────────────────────────────────────────────────────────
+
+/** The connection's recorded statements, newest first. Click one to load it. */
+function HistoryPanel({
+  entries,
+  onLoad,
+  onDelete,
+  onClear,
+  onClose,
+}: {
+  entries: DbQueryHistoryEntry[];
+  onLoad: (h: DbQueryHistoryEntry) => void;
+  onDelete: (h: DbQueryHistoryEntry) => void;
+  onClear: () => void;
+  onClose: () => void;
+}) {
+  const [query, setQuery] = useState('');
+  const shown = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    return q ? entries.filter((h) => h.sql.toLowerCase().includes(q)) : entries;
+  }, [entries, query]);
+
+  return (
+    <div className="flex w-72 shrink-0 flex-col border-l border-border-hairline bg-bg-panel/40">
+      <div className="flex items-center gap-1.5 px-3 py-2">
+        <span className="flex-1 font-sans text-2xs uppercase tracking-widest text-fg-subtle/60">
+          History
+        </span>
+        {entries.length > 0 && (
+          <button
+            type="button"
+            onClick={onClear}
+            title="Clear history"
+            className="flex h-5 w-5 items-center justify-center rounded text-fg-muted transition hover:bg-surface-2 hover:text-status-err"
+          >
+            <Trash2 size={11} />
+          </button>
+        )}
+        <button
+          type="button"
+          onClick={onClose}
+          title="Close"
+          className="flex h-5 w-5 items-center justify-center rounded text-fg-muted transition hover:bg-surface-2 hover:text-fg-base"
+        >
+          <X size={12} />
+        </button>
+      </div>
+      <div className="px-3 pb-2">
+        <input
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder="Search"
+          spellCheck={false}
+          className="w-full rounded-lg border border-border-subtle bg-bg-base/60 px-2.5 py-1 font-sans text-xs text-fg-base placeholder:text-fg-subtle focus:border-accent/45 focus:outline-none"
+        />
+      </div>
+      <div className="min-h-0 flex-1 overflow-auto pb-2">
+        {shown.length === 0 && (
+          <p className="px-3 py-2 font-sans text-xs text-fg-subtle">
+            {entries.length === 0 ? 'No queries run yet.' : 'No matches.'}
+          </p>
+        )}
+        {shown.map((h) => (
+          <div key={h.id} className="group flex items-start gap-2 px-3 py-1.5 hover:bg-surface-1">
+            <button
+              type="button"
+              onClick={() => onLoad(h)}
+              title={h.error ?? 'Load into the editor'}
+              className="min-w-0 flex-1 text-left"
+            >
+              <span className="line-clamp-2 break-all font-mono text-xs text-fg-base/85">{h.sql}</span>
+              <span className="mt-0.5 flex gap-1.5 font-sans text-2xs text-fg-subtle/70">
+                <span>{new Date(h.executed_at).toLocaleString()}</span>
+                <span>{h.duration_ms} ms</span>
+                {h.error ? (
+                  <span className="text-status-err">error</span>
+                ) : (
+                  <span>
+                    {h.row_count} row{h.row_count === 1 ? '' : 's'}
+                  </span>
+                )}
+              </span>
+            </button>
+            <button
+              type="button"
+              onClick={() => onDelete(h)}
+              title="Delete"
+              className="mt-0.5 shrink-0 text-fg-subtle opacity-0 transition hover:text-status-err group-hover:opacity-100"
+            >
+              <X size={11} />
+            </button>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ─── Plan view ───────────────────────────────────────────────────────────────
+
+/** A query plan as a collapsible tree, with the expensive nodes marked. */
+function PlanView({
+  roots,
+  analyze,
+  onClose,
+}: {
+  roots: PlanNode[];
+  analyze: boolean;
+  onClose: () => void;
+}) {
+  const hot = useMemo(() => hotNodes(roots), [roots]);
+  return (
+    <div className="pb-3">
+      <div className="flex items-center gap-2 border-b border-border-hairline px-3 py-1.5">
+        <ListTree size={12} className="shrink-0 text-fg-subtle" />
+        <span className="font-sans text-xs text-fg-base">
+          {analyze ? 'Query plan (analyzed)' : 'Query plan'}
+        </span>
+        <span className="font-sans text-2xs text-status-warn">■ most expensive</span>
+        <button
+          type="button"
+          onClick={onClose}
+          title="Back to results"
+          className="ml-auto shrink-0 text-fg-subtle hover:text-fg-base"
+        >
+          <X size={12} />
+        </button>
+      </div>
+      {roots.length === 0 && (
+        <p className="px-3 py-2 font-sans text-xs text-fg-subtle">The plan is empty.</p>
+      )}
+      {roots.map((n, i) => (
+        <PlanNodeRow key={i} node={n} depth={0} hot={hot} />
+      ))}
+    </div>
+  );
+}
+
+function PlanNodeRow({ node, depth, hot }: { node: PlanNode; depth: number; hot: Set<PlanNode> }) {
+  const [open, setOpen] = useState(true);
+  const isHot = hot.has(node);
+  const fmt = (n: number) => n.toLocaleString(undefined, { maximumFractionDigits: 2 });
+  const stats = [
+    node.estRows !== undefined && `est ${fmt(node.estRows)} rows`,
+    node.estCost !== undefined && `cost ${fmt(node.estCost)}`,
+    node.actualRows !== undefined && `actual ${fmt(node.actualRows)} rows`,
+    node.actualMs !== undefined && `${fmt(node.actualMs)} ms`,
+  ].filter(Boolean);
+  return (
+    <>
+      <div
+        className={cn(
+          'flex items-center gap-1.5 py-0.5 pr-3 hover:bg-surface-1',
+          isHot && 'bg-status-warn/10',
+        )}
+        style={{ paddingLeft: 12 + depth * 16 }}
+      >
+        <button
+          type="button"
+          onClick={() => setOpen((o) => !o)}
+          className={cn(
+            'flex h-4 w-4 shrink-0 items-center justify-center text-fg-subtle',
+            node.children.length === 0 && 'invisible',
+          )}
+        >
+          <ChevronRight size={10} className={cn('transition-transform', open && 'rotate-90')} />
+        </button>
+        <span className={cn('font-mono text-xs', isHot ? 'text-status-warn' : 'text-fg-base')}>
+          {node.label}
+        </span>
+        {node.relation && !node.label.includes(node.relation) && (
+          <span className="font-mono text-xs text-accent">{node.relation}</span>
+        )}
+        {node.detail && (
+          <span className="truncate font-mono text-2xs text-fg-subtle" title={node.detail}>
+            {node.detail}
+          </span>
+        )}
+        {stats.length > 0 && (
+          <span className="ml-auto shrink-0 pl-3 font-sans text-2xs text-fg-subtle/80">
+            {stats.join(' · ')}
+          </span>
+        )}
+      </div>
+      {open && node.children.map((c, i) => <PlanNodeRow key={i} node={c} depth={depth + 1} hot={hot} />)}
+    </>
   );
 }
 

@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import type { ChangeDesc, Text } from '@codemirror/state';
 import {
   dapRequest,
   dapStart,
@@ -20,7 +21,7 @@ import { useWorkspace } from './workspace';
 // turns its events into something the panel and editor gutter can render.
 //
 // ponytail: one session at a time in the UI (the Rust side already keys by
-// id), no watch expressions, no conditional breakpoints, no multi-root.
+// id), no multi-root.
 
 // ─── Launch configs (pure — see state/__tests__/debug.test.ts) ─────────────
 
@@ -105,17 +106,23 @@ export interface AdapterSpec {
   install: string;
 }
 
-/** Map a launch config's `type` to the adapter ARC spawns for it. */
-export function adapterFor(type: string): AdapterSpec | null {
+/** Map a launch config's `type` to the adapter ARC spawns for it. `config`
+ *  (already substituted) can pick the interpreter: debugpy's `python`, or the
+ *  older `pythonPath`, runs the adapter instead of `python` from PATH. */
+export function adapterFor(type: string, config?: Record<string, unknown>): AdapterSpec | null {
   switch (type) {
     case 'python':
-    case 'debugpy':
+    case 'debugpy': {
+      const python = [config?.python, config?.pythonPath].find(
+        (p): p is string => typeof p === 'string' && p.trim() !== '',
+      );
       return {
-        commands: ['python'],
+        commands: [python ?? 'python'],
         args: ['-m', 'debugpy.adapter'],
         transport: 'stdio',
         install: 'debugpy (pip install debugpy)',
       };
+    }
     case 'lldb':
     case 'lldb-dap':
     case 'lldb-vscode':
@@ -147,6 +154,73 @@ export function pathKey(path: string): string {
   return /^[a-zA-Z]:\//.test(p) ? p.toLowerCase() : p;
 }
 
+// ─── Breakpoints (pure) ─────────────────────────────────────────────────────
+
+export interface Breakpoint {
+  /** 1-based. */
+  line: number;
+  condition?: string;
+  hitCondition?: string;
+  logMessage?: string;
+  /** The adapter's verdict, for the current session only. */
+  verified?: boolean;
+}
+
+export type BreakpointOption = 'condition' | 'hitCondition' | 'logMessage';
+
+/** Each option, the capability an adapter must advertise before it's sent,
+ *  and how the console note names it. `arc-dap` gates the breakpoints sent
+ *  during the start handshake with the same table. */
+export const BREAKPOINT_OPTIONS: Record<BreakpointOption, { capability: string; label: string }> = {
+  condition: { capability: 'supportsConditionalBreakpoints', label: 'conditions' },
+  hitCondition: { capability: 'supportsHitConditionalBreakpoints', label: 'hit counts' },
+  logMessage: { capability: 'supportsLogPoints', label: 'log messages' },
+};
+
+/** The `breakpoints` of a `setBreakpoints` request, leaving out options the
+ *  adapter's `caps` don't cover (`null`: not known yet, send them all).
+ *  `dropped` lists the options that were set but left out. */
+export function breakpointsPayload(
+  bps: Breakpoint[],
+  caps: Record<string, unknown> | null,
+): { breakpoints: Omit<Breakpoint, 'verified'>[]; dropped: BreakpointOption[] } {
+  const dropped = new Set<BreakpointOption>();
+  const breakpoints = bps.map((bp) => {
+    const out: Omit<Breakpoint, 'verified'> = { line: bp.line };
+    for (const option of Object.keys(BREAKPOINT_OPTIONS) as BreakpointOption[]) {
+      if (!bp[option]) continue;
+      if (caps && caps[BREAKPOINT_OPTIONS[option].capability] !== true) dropped.add(option);
+      else out[option] = bp[option];
+    }
+    return out;
+  });
+  return { breakpoints, dropped: [...dropped] };
+}
+
+/** Carry breakpoints through an edit from `before` to `after`: each follows
+ *  the start of its line, and one whose line was deleted outright (text and
+ *  line break) is dropped. Two landing on one line keep the first. */
+export function mapBreakpoints<T extends { line: number }>(
+  bps: T[],
+  changes: ChangeDesc,
+  before: Text,
+  after: Text,
+): T[] {
+  const out = new Map<number, T>();
+  for (const bp of bps) {
+    if (bp.line < 1 || bp.line > before.lines) continue;
+    const { from, to } = before.line(bp.line);
+    let deleted = false;
+    changes.iterChangedRanges((fromA, toA) => {
+      if (fromA <= from && toA >= to && (fromA < from || toA > to)) deleted = true;
+    });
+    if (deleted) continue;
+    const line = after.lineAt(changes.mapPos(from, 1)).number;
+    if (!out.has(line)) out.set(line, { ...bp, line });
+  }
+  return [...out.values()].sort((a, b) => a.line - b.line);
+}
+
 // ─── Store ──────────────────────────────────────────────────────────────────
 
 export interface DapThread {
@@ -173,9 +247,14 @@ export interface DapVariable {
 export interface BreakpointFile {
   /** As first toggled — the spelling sent to the adapter. */
   path: string;
-  lines: number[];
-  /** line → adapter verdict, for the current session only. */
-  verified: Record<number, boolean>;
+  /** Sorted by line. */
+  breakpoints: Breakpoint[];
+}
+
+export interface WatchResult {
+  value?: string;
+  error?: string;
+  variablesReference: number;
 }
 
 export type DebugStatus = 'idle' | 'starting' | 'running' | 'stopped';
@@ -188,8 +267,14 @@ interface DebugState {
   selected: number;
   status: DebugStatus;
   sessionId: string | null;
+  /** What the live adapter answered `initialize` with. */
+  capabilities: Record<string, unknown> | null;
   /** Keyed by `pathKey`. Kept for the app session, across debug sessions. */
   breakpoints: Record<string, BreakpointFile>;
+  /** Watch expressions by workspace root, kept for the app session. */
+  watches: Record<string, string[]>;
+  /** By expression, for the selected frame. */
+  watchResults: Record<string, WatchResult>;
   threads: DapThread[];
   threadId: number | null;
   frames: DapStackFrame[];
@@ -208,27 +293,50 @@ interface DebugState {
   /** continue / next / stepIn / stepOut / pause on the current thread. */
   step: (command: 'continue' | 'next' | 'stepIn' | 'stepOut' | 'pause') => Promise<void>;
   toggleBreakpoint: (path: string, line: number) => void;
+  /** Set (or with `''`, clear) options on the breakpoint at `line`, adding
+   *  one there if there isn't one. */
+  editBreakpoint: (path: string, line: number, options: Partial<Record<BreakpointOption, string>>) => void;
+  /** Follow an edit to `path` — see `mapBreakpoints`. */
+  moveBreakpoints: (path: string, changes: ChangeDesc, before: Text, after: Text) => void;
   selectFrame: (frame: DapStackFrame) => Promise<void>;
   loadVariables: (ref: number) => Promise<void>;
   evaluate: (expression: string) => Promise<void>;
+  /** Watch list edits apply to the current workspace root's list. */
+  addWatch: (expression: string) => void;
+  editWatch: (index: number, expression: string) => void;
+  removeWatch: (index: number) => void;
+  /** Evaluate every watch against the selected frame. */
+  refreshWatches: () => Promise<void>;
 }
 
 const OUTPUT_CAP = 2000;
+/** How long edits settle before moved breakpoints are resent. */
+const RESEND_DELAY_MS = 500;
 
-/** Session-scoped fields, reset whenever a session ends. */
-const IDLE = {
-  status: 'idle' as DebugStatus,
-  sessionId: null,
-  threads: [],
-  threadId: null,
+/** Frame-scoped fields, cleared whenever the debuggee runs again. */
+const RUNNING = {
   frames: [],
   frameId: null,
   scopes: [],
   variables: {},
   location: null,
+  watchResults: {},
+};
+
+/** Session-scoped fields, reset whenever a session ends. */
+const IDLE = {
+  ...RUNNING,
+  status: 'idle' as DebugStatus,
+  sessionId: null,
+  capabilities: null,
+  threads: [],
+  threadId: null,
 };
 
 let unlisten: (() => void) | null = null;
+const resendTimers = new Map<string, ReturnType<typeof setTimeout>>();
+
+const watchRoot = () => useFiles.getState().root ?? '';
 
 function activeEditorPath(): string | null {
   const ws = useWorkspace.getState();
@@ -255,10 +363,26 @@ export const useDebug = create<DebugState>((set, get) => {
       const key = pathKey(path);
       const file = s.breakpoints[key];
       if (!file) return s;
-      const verified: Record<number, boolean> = {};
-      file.lines.forEach((line, i) => (verified[line] = bps?.[i]?.verified ?? false));
-      return { breakpoints: { ...s.breakpoints, [key]: { ...file, verified } } };
+      const breakpoints = file.breakpoints.map((bp, i) => ({ ...bp, verified: bps?.[i]?.verified ?? false }));
+      return { breakpoints: { ...s.breakpoints, [key]: { ...file, breakpoints } } };
     });
+
+  /** A console note for options the live adapter can't take. */
+  const noteDropped = (dropped: BreakpointOption[]) => {
+    if (dropped.length === 0) return;
+    const what = dropped.map((o) => BREAKPOINT_OPTIONS[o].label).join(', ');
+    log(`This debug adapter doesn't support breakpoint ${what}; those breakpoints break unconditionally.\n`, 'stderr');
+  };
+
+  const setFile = (key: string, file: BreakpointFile) =>
+    set((s) => ({ breakpoints: { ...s.breakpoints, [key]: file } }));
+
+  /** Edit the current root's watch list, then re-evaluate it. */
+  const updateWatches = (edit: (list: string[]) => string[]) => {
+    const root = watchRoot();
+    set((s) => ({ watches: { ...s.watches, [root]: edit(s.watches[root] ?? []) } }));
+    void get().refreshWatches();
+  };
 
   const sendBreakpoints = async (file: BreakpointFile) => {
     const id = get().sessionId;
@@ -266,7 +390,7 @@ export const useDebug = create<DebugState>((set, get) => {
     try {
       const body = await dapRequest<{ breakpoints?: DapBreakpoint[] }>(id, 'setBreakpoints', {
         source: { path: file.path },
-        breakpoints: file.lines.map((line) => ({ line })),
+        breakpoints: breakpointsPayload(file.breakpoints, get().capabilities).breakpoints,
       });
       applyVerdict(file.path, body.breakpoints);
     } catch (err) {
@@ -278,11 +402,16 @@ export const useDebug = create<DebugState>((set, get) => {
     const id = get().sessionId;
     unlisten?.();
     unlisten = null;
+    for (const timer of resendTimers.values()) clearTimeout(timer);
+    resendTimers.clear();
     set((s) => ({
       ...IDLE,
       // Verdicts belong to the session that gave them.
       breakpoints: Object.fromEntries(
-        Object.entries(s.breakpoints).map(([k, f]) => [k, { ...f, verified: {} }]),
+        Object.entries(s.breakpoints).map(([k, f]) => [
+          k,
+          { ...f, breakpoints: f.breakpoints.map((bp) => ({ ...bp, verified: undefined })) },
+        ]),
       ),
     }));
     if (id) await dapStop(id).catch(() => {});
@@ -316,7 +445,7 @@ export const useDebug = create<DebugState>((set, get) => {
         void onStopped(id, body.threadId ?? get().threadId);
         return;
       case 'continued':
-        set({ status: 'running', frames: [], frameId: null, scopes: [], variables: {}, location: null });
+        set({ status: 'running', ...RUNNING });
         return;
       case 'output':
         if (body.category !== 'telemetry' && typeof body.output === 'string') {
@@ -329,13 +458,9 @@ export const useDebug = create<DebugState>((set, get) => {
         if (!bp || !path || bp.line === undefined) return;
         set((s) => {
           const file = s.breakpoints[pathKey(path)];
-          if (!file || !file.lines.includes(bp.line!)) return s;
-          return {
-            breakpoints: {
-              ...s.breakpoints,
-              [pathKey(path)]: { ...file, verified: { ...file.verified, [bp.line!]: bp.verified } },
-            },
-          };
+          if (!file || !file.breakpoints.some((b) => b.line === bp.line)) return s;
+          const breakpoints = file.breakpoints.map((b) => (b.line === bp.line ? { ...b, verified: bp.verified } : b));
+          return { breakpoints: { ...s.breakpoints, [pathKey(path)]: { ...file, breakpoints } } };
         });
         return;
       }
@@ -356,6 +481,7 @@ export const useDebug = create<DebugState>((set, get) => {
     selected: 0,
     ...IDLE,
     breakpoints: {},
+    watches: {},
     output: [],
 
     loadConfigs: async (root) => {
@@ -394,20 +520,19 @@ export const useDebug = create<DebugState>((set, get) => {
       if (get().sessionId) return;
       const raw = get().configs[get().selected];
       if (!raw) return;
-      const adapter = adapterFor(raw.type);
+      const root = useFiles.getState().root ?? '';
+      const file = activeEditorPath() ?? '';
+      const config = substituteVars(raw, { workspaceFolder: root, file, fileDirname: file ? dirname(file) : root });
+      const adapter = adapterFor(config.type, config);
       if (!adapter) {
         log(`Debug type "${raw.type}" is not supported. ARC drives debugpy, lldb-dap and dlv.\n`, 'stderr');
         return;
       }
-      const root = useFiles.getState().root ?? '';
-      const file = activeEditorPath() ?? '';
-      let config: LaunchConfig = { ...raw };
       if (config.program === PICK_EXECUTABLE) {
         const [picked] = await fsPickFiles(root || null);
         if (!picked) return;
         config.program = picked;
       }
-      config = substituteVars(config, { workspaceFolder: root, file, fileDirname: file ? dirname(file) : root });
       // ARC answers runInTerminal with "unsupported", so ask debugpy for its
       // internal console up front rather than have the launch fail.
       if (adapter.args.includes('debugpy.adapter')) config.console = 'internalConsole';
@@ -415,7 +540,7 @@ export const useDebug = create<DebugState>((set, get) => {
       const id = `dbg-${Date.now()}`;
       set({ ...IDLE, status: 'starting', sessionId: id, output: [] });
       unlisten = await onDapEvent(id, handleEvent);
-      const files = Object.values(get().breakpoints).filter((f) => f.lines.length > 0);
+      const files = Object.values(get().breakpoints).filter((f) => f.breakpoints.length > 0);
       const cwd = typeof config.cwd === 'string' && config.cwd ? config.cwd : root || null;
 
       for (const [i, command] of adapter.commands.entries()) {
@@ -428,9 +553,15 @@ export const useDebug = create<DebugState>((set, get) => {
             transport: adapter.transport,
             request: config.request,
             config,
-            breakpoints: files.map((f) => ({ path: f.path, lines: f.lines })),
+            // Unfiltered: `arc-dap` drops what the adapter can't take once
+            // `initialize` has said what that is.
+            breakpoints: files.map((f) => ({ path: f.path, breakpoints: breakpointsPayload(f.breakpoints, null).breakpoints })),
           });
           if (get().sessionId !== id) return; // stopped while starting
+          set({ capabilities: result.capabilities });
+          noteDropped([
+            ...new Set(files.flatMap((f) => breakpointsPayload(f.breakpoints, result.capabilities).dropped)),
+          ]);
           for (const r of result.breakpoints) applyVerdict(r.path, r.breakpoints);
           if (get().status === 'starting') set({ status: 'running' });
           return;
@@ -454,9 +585,7 @@ export const useDebug = create<DebugState>((set, get) => {
       const tid = threadId ?? get().threads[0]?.id;
       try {
         await dapRequest(id, command, { threadId: tid ?? 0 });
-        if (command !== 'pause') {
-          set({ status: 'running', frames: [], frameId: null, scopes: [], variables: {}, location: null });
-        }
+        if (command !== 'pause') set({ status: 'running', ...RUNNING });
       } catch (err) {
         log(`${command} failed: ${err}\n`, 'stderr');
       }
@@ -464,13 +593,51 @@ export const useDebug = create<DebugState>((set, get) => {
 
     toggleBreakpoint: (path, line) => {
       const key = pathKey(path);
-      const file = get().breakpoints[key] ?? { path, lines: [], verified: {} };
-      const lines = file.lines.includes(line)
-        ? file.lines.filter((l) => l !== line)
-        : [...file.lines, line].sort((a, b) => a - b);
-      const next = { ...file, lines };
-      set((s) => ({ breakpoints: { ...s.breakpoints, [key]: next } }));
+      const file = get().breakpoints[key] ?? { path, breakpoints: [] };
+      const breakpoints = file.breakpoints.some((bp) => bp.line === line)
+        ? file.breakpoints.filter((bp) => bp.line !== line)
+        : [...file.breakpoints, { line }].sort((a, b) => a.line - b.line);
+      const next = { ...file, breakpoints };
+      setFile(key, next);
       void sendBreakpoints(next);
+    },
+
+    editBreakpoint: (path, line, options) => {
+      const key = pathKey(path);
+      const file = get().breakpoints[key] ?? { path, breakpoints: [] };
+      const current = file.breakpoints.find((bp) => bp.line === line) ?? { line };
+      const edited: Breakpoint = { ...current };
+      for (const [option, value] of Object.entries(options) as [BreakpointOption, string][]) {
+        edited[option] = value.trim() || undefined;
+      }
+      const next = {
+        ...file,
+        breakpoints: [...file.breakpoints.filter((bp) => bp.line !== line), edited].sort((a, b) => a.line - b.line),
+      };
+      setFile(key, next);
+      if (get().capabilities) noteDropped(breakpointsPayload([edited], get().capabilities).dropped);
+      void sendBreakpoints(next);
+    },
+
+    moveBreakpoints: (path, changes, before, after) => {
+      const key = pathKey(path);
+      const file = get().breakpoints[key];
+      if (!file || file.breakpoints.length === 0) return;
+      const moved = mapBreakpoints(file.breakpoints, changes, before, after);
+      if (moved.length === file.breakpoints.length && moved.every((bp, i) => bp.line === file.breakpoints[i]!.line)) {
+        return;
+      }
+      setFile(key, { ...file, breakpoints: moved });
+      if (!get().sessionId) return;
+      clearTimeout(resendTimers.get(key));
+      resendTimers.set(
+        key,
+        setTimeout(() => {
+          resendTimers.delete(key);
+          const latest = get().breakpoints[key];
+          if (latest) void sendBreakpoints(latest);
+        }, RESEND_DELAY_MS),
+      );
     },
 
     selectFrame: async (frame) => {
@@ -479,6 +646,7 @@ export const useDebug = create<DebugState>((set, get) => {
       const path = frame.source?.path;
       set({ frameId: frame.id, location: path ? { path, line: frame.line } : null, scopes: [], variables: {} });
       if (path) openAt(path, frame.line);
+      void get().refreshWatches();
       try {
         const { scopes } = await dapRequest<{ scopes: DapScope[] }>(id, 'scopes', { frameId: frame.id });
         set({ scopes });
@@ -514,6 +682,43 @@ export const useDebug = create<DebugState>((set, get) => {
       } catch (err) {
         log(`${err}\n`, 'stderr');
       }
+    },
+
+    addWatch: (expression) => {
+      if (!expression.trim()) return;
+      updateWatches((list) => [...list, expression.trim()]);
+    },
+
+    editWatch: (index, expression) =>
+      updateWatches((list) =>
+        expression.trim()
+          ? list.map((e, i) => (i === index ? expression.trim() : e))
+          : list.filter((_, i) => i !== index),
+      ),
+
+    removeWatch: (index) => updateWatches((list) => list.filter((_, i) => i !== index)),
+
+    refreshWatches: async () => {
+      const { sessionId: id, frameId } = get();
+      const expressions = get().watches[watchRoot()] ?? [];
+      if (!id || frameId === null || expressions.length === 0) return;
+      const results = await Promise.all(
+        expressions.map(async (expression): Promise<[string, WatchResult]> => {
+          try {
+            const body = await dapRequest<{ result: string; variablesReference?: number }>(id, 'evaluate', {
+              expression,
+              frameId,
+              context: 'watch',
+            });
+            return [expression, { value: body.result, variablesReference: body.variablesReference ?? 0 }];
+          } catch (err) {
+            return [expression, { error: String(err).replace(/^evaluate: /, ''), variablesReference: 0 }];
+          }
+        }),
+      );
+      // Stale if the debuggee moved on or another frame was picked meanwhile.
+      if (get().sessionId !== id || get().frameId !== frameId) return;
+      set({ watchResults: Object.fromEntries(results) });
     },
   };
 });

@@ -15,7 +15,10 @@ Grab the installer for your platform from the
 
 **ARC's installers are not code-signed.** Signing certificates cost money per year
 from Apple and from a Windows CA, and this project doesn't have them yet. Both
-operating systems will therefore warn you the first time you run it.
+operating systems will therefore warn you the first time you run it. (The release
+pipeline is ready to sign once certificates exist — see
+[docs/CODE_SIGNING.md](docs/CODE_SIGNING.md). Each release's notes say whether
+that release is signed.)
 
 That warning means "nobody paid a certificate authority to vouch for this binary."
 It does not mean the binary was tampered with — see [Verifying a

@@ -23,7 +23,7 @@ pub mod tabs;
 pub mod workspaces;
 
 pub use commands::CommandRecord;
-pub use db::{DbConnection, DbConnectionInput};
+pub use db::{DbConnection, DbConnectionInput, DbQueryHistoryEntry};
 pub use ssh::{SshHost, SshHostInput, SshKey, SshSessionLogEntry};
 // Re-export so downstream crates (e.g. apps/desktop) that hold a
 // `&SessionStore` can name the pool type without taking a direct sqlx dep.
@@ -45,6 +45,23 @@ pub enum Error {
 
 pub type Result<T, E = Error> = std::result::Result<T, E>;
 
+/// Env var that relocates every file ARC writes for itself (database, logs,
+/// scratch buffers, window geometry, webview profile). The e2e suite points it
+/// at a temp dir so a test run never touches the user's real data.
+pub const DATA_DIR_ENV: &str = "ARC_DATA_DIR";
+
+/// `$ARC_DATA_DIR`, if set and non-empty.
+pub fn data_dir_override() -> Option<PathBuf> {
+    std::env::var_os(DATA_DIR_ENV)
+        .filter(|v| !v.is_empty())
+        .map(PathBuf::from)
+}
+
+/// Where ARC keeps its own files: `$ARC_DATA_DIR`, else `<data_dir>/arc`.
+pub fn data_dir() -> Option<PathBuf> {
+    data_dir_override().or_else(|| dirs::data_dir().map(|d| d.join("arc")))
+}
+
 #[derive(Debug, Clone)]
 pub struct SessionStore {
     pool: SqlitePool,
@@ -56,8 +73,7 @@ impl SessionStore {
     ///   macOS:   ~/Library/Application Support/arc/arc.db
     ///   Windows: %APPDATA%\arc\arc.db
     pub async fn open_default() -> Result<Self> {
-        let mut dir = dirs::data_dir().ok_or(Error::NoDataDir)?;
-        dir.push("arc");
+        let dir = data_dir().ok_or(Error::NoDataDir)?;
         tokio::fs::create_dir_all(&dir).await?;
         let path = dir.join("arc.db");
         tracing::info!(?path, "opening session store");
@@ -70,8 +86,7 @@ impl SessionStore {
     /// rather than panic. Returns the path we moved aside, if any, so the
     /// caller can tell the user their local history was reset.
     pub async fn open_default_or_recover() -> Result<(Self, Option<PathBuf>)> {
-        let mut dir = dirs::data_dir().ok_or(Error::NoDataDir)?;
-        dir.push("arc");
+        let dir = data_dir().ok_or(Error::NoDataDir)?;
         tokio::fs::create_dir_all(&dir).await?;
         let path = dir.join("arc.db");
         match Self::open_at(&path).await {
@@ -187,6 +202,16 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn concurrent_first_loads_share_one_session() {
+        let store = fresh_store().await;
+        let (a, b) = tokio::join!(
+            tabs::current_or_create(store.pool()),
+            tabs::current_or_create(store.pool()),
+        );
+        assert_eq!(a.expect("a").session.id, b.expect("b").session.id);
+    }
+
+    #[tokio::test]
     async fn ssh_host_jump_and_forwards_roundtrip() {
         let store = fresh_store().await;
         let input = |name: &str, jump: Option<String>, forwards| SshHostInput {
@@ -201,6 +226,7 @@ mod tests {
             startup_cmd: None,
             jump_host_id: jump,
             forwards,
+            remote_workspace_forwards: false,
         };
         let bastion = ssh::host_upsert(store.pool(), input("bastion", None, vec![]))
             .await
@@ -215,11 +241,68 @@ mod tests {
 
         let got = ssh::host_get(store.pool(), &app.id).await.unwrap().unwrap();
         assert_eq!(got.jump_host_id.as_deref(), Some(bastion.id.as_str()));
+        assert_eq!(got.forwards, vec![fwd.clone()]);
+        assert!(!got.remote_workspace_forwards);
+
+        // Opting remote workspaces in keeps the forwards.
+        let mut opted = input("app", Some(bastion.id.clone()), vec![fwd.clone()]);
+        opted.id = Some(app.id.clone());
+        opted.remote_workspace_forwards = true;
+        ssh::host_upsert(store.pool(), opted).await.expect("opt in");
+        let got = ssh::host_get(store.pool(), &app.id).await.unwrap().unwrap();
         assert_eq!(got.forwards, vec![fwd]);
+        assert!(got.remote_workspace_forwards);
 
         // Deleting the jump host leaves the dependent host connectable directly.
         ssh::host_delete(store.pool(), &bastion.id).await.unwrap();
         let got = ssh::host_get(store.pool(), &app.id).await.unwrap().unwrap();
         assert_eq!(got.jump_host_id, None);
+    }
+
+    #[tokio::test]
+    async fn db_query_history_caps_and_deletes() {
+        let store = fresh_store().await;
+        let pool = store.pool();
+        let conn = |name: &str| DbConnectionInput {
+            id: None,
+            name: name.into(),
+            backend: "sqlite".into(),
+            url: "sqlite::memory:".into(),
+            has_password: false,
+        };
+        let a = db::upsert(pool, conn("a")).await.unwrap();
+        let b = db::upsert(pool, conn("b")).await.unwrap();
+
+        for i in 0..db::HISTORY_CAP + 5 {
+            db::history_add(pool, &a.id, &format!("SELECT {i}"), 3, Some(1), None)
+                .await
+                .unwrap();
+        }
+        db::history_add(pool, &b.id, "SELEC oops", 1, None, Some("syntax error"))
+            .await
+            .unwrap();
+
+        let list = db::history_list(pool, &a.id).await.unwrap();
+        assert_eq!(list.len() as i64, db::HISTORY_CAP);
+        // Newest first; the five oldest were pruned.
+        assert_eq!(list[0].sql, format!("SELECT {}", db::HISTORY_CAP + 4));
+        assert_eq!(list.last().unwrap().sql, "SELECT 5");
+
+        let failed = db::history_list(pool, &b.id).await.unwrap();
+        assert_eq!(failed.len(), 1, "the cap is per connection");
+        assert_eq!(failed[0].error.as_deref(), Some("syntax error"));
+        assert_eq!(failed[0].row_count, None);
+
+        db::history_delete(pool, list[0].id).await.unwrap();
+        assert_eq!(
+            db::history_list(pool, &a.id).await.unwrap().len() as i64,
+            db::HISTORY_CAP - 1
+        );
+        db::history_clear(pool, &a.id).await.unwrap();
+        assert!(db::history_list(pool, &a.id).await.unwrap().is_empty());
+
+        // Deleting a connection takes its history with it.
+        db::delete(pool, &b.id).await.unwrap();
+        assert!(db::history_list(pool, &b.id).await.unwrap().is_empty());
     }
 }

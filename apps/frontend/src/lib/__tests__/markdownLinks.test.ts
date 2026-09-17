@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { classifyMarkdownLink, resolveMarkdownPath } from '../markdownLinks';
+import { classifyMarkdownLink, previewImageSrc, resolveMarkdownPath } from '../markdownLinks';
 
 describe('resolveMarkdownPath', () => {
   it('resolves against the file directory', () => {
@@ -23,6 +23,26 @@ describe('resolveMarkdownPath', () => {
     expect(resolveMarkdownPath('/repo/a.md', 'data:image/png;base64,AA')).toBeNull();
     expect(resolveMarkdownPath('/repo/a.md', '//cdn.dev/a.png')).toBeNull();
     expect(resolveMarkdownPath('ssh://h/repo/a.md', 'b.png')).toBeNull();
+  });
+});
+
+describe('previewImageSrc', () => {
+  const toUrl = (p: string) => `asset://${p}`;
+
+  it('converts relative and absolute local paths against the file directory', () => {
+    expect(previewImageSrc('/repo/docs/a.md', './img/x.png', toUrl)).toBe('asset:///repo/docs/img/x.png');
+    expect(previewImageSrc('/repo/docs/a.md', '/abs/y.svg', toUrl)).toBe('asset:///abs/y.svg');
+    expect(previewImageSrc('C:\\repo\\docs\\a.md', '..\\shot%201.png', toUrl)).toBe('asset://C:\\repo\\shot 1.png');
+  });
+
+  it('leaves data: and web URLs for the CSP to decide', () => {
+    expect(previewImageSrc('/repo/a.md', 'data:image/png;base64,AA', toUrl)).toBe('data:image/png;base64,AA');
+    expect(previewImageSrc('/repo/a.md', 'https://x.dev/a.png', toUrl)).toBe('https://x.dev/a.png');
+  });
+
+  it('falls back to alt text for remote files and empty srcs', () => {
+    expect(previewImageSrc('ssh://h/repo/a.md', 'b.png', toUrl)).toBeNull();
+    expect(previewImageSrc('/repo/a.md', '  ', toUrl)).toBeNull();
   });
 });
 

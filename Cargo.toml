@@ -3,6 +3,7 @@ resolver = "2"
 members = [
     "apps/desktop",
     "rust/pty",
+    "rust/ptyhost",
     "rust/session-manager",
     "rust/filesystem",
     "rust/git",
@@ -18,7 +19,7 @@ members = [
 ]
 
 [workspace.package]
-version = "0.11.0"
+version = "0.12.0"
 edition = "2021"
 rust-version = "1.80"
 license = "MIT"
@@ -127,6 +128,7 @@ tauri-plugin-process = "2"
 
 # Internal crates
 arc-pty = { path = "rust/pty" }
+arc-ptyhost = { path = "rust/ptyhost" }
 arc-session-manager = { path = "rust/session-manager" }
 arc-filesystem = { path = "rust/filesystem" }
 arc-git = { path = "rust/git" }

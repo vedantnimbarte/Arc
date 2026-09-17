@@ -31,6 +31,7 @@ export type ActionId =
   | 'send-selection-to-agent'
   | 'toggle-broadcast-input'
   | 'next-waiting-agent'
+  | 'queue-agent-prompt'
   /** One launcher per detected CLI, derived from AI_CLIS — see LAUNCH_IDS. */
   | LaunchActionId
   | 'launch-wingman-pilot'
@@ -211,6 +212,12 @@ export const ACTION_META: Record<ActionId, ActionMeta> = {
     description: 'Jump to the agent that has been waiting on you the longest.',
     category: 'AI CLIs',
   },
+  'queue-agent-prompt': {
+    id: 'queue-agent-prompt',
+    label: 'Queue Prompt for Agent…',
+    description: 'Queue a follow-up prompt, sent the next time the agent stops and waits.',
+    category: 'AI CLIs',
+  },
   ...(Object.fromEntries(
     LAUNCH_IDS.map((cli) => [
       `launch-${cli}`,
@@ -262,6 +269,7 @@ export const ACTION_ORDER: ActionId[] = [
   'send-selection-to-agent',
   'toggle-broadcast-input',
   'next-waiting-agent',
+  'queue-agent-prompt',
   ...LAUNCH_IDS.map((cli) => `launch-${cli}` as LaunchActionId),
   'launch-wingman-pilot',
   'launch-wingman-headless',
@@ -303,6 +311,8 @@ export const DEFAULT_BINDINGS: Record<ActionId, KeyBinding | null> = {
   // iTerm's broadcast chord.
   'toggle-broadcast-input': { code: 'KeyI', shift: false, alt: true, ...mod() },
   'next-waiting-agent': { code: 'KeyJ', shift: false, alt: true, ...mod() },
+  // Not Q: AltGr+Q is @ on German layouts, and AltGr arrives as Ctrl+Alt.
+  'queue-agent-prompt': { code: 'KeyU', shift: false, alt: true, ...mod() },
   // AI CLI launchers ship unbound by default — users can assign keys via the
   // shortcuts dialog, and they're discoverable through the TabBar dropdown
   // and the new-tab popover regardless.

@@ -13,6 +13,7 @@
 //!   invoke("fs_watch_start", { path })     -> String (watchId)
 //!   invoke("fs_watch_stop",  { watchId })  -> ()
 //!   invoke("fs_scratch_file", { ext })    -> String (path)
+//!   invoke("fs_allow_asset_dir", { path }) -> ()
 //!
 //! Emitted events:
 //!   "fs://change/<watchId>" -> ()  (one per debounced ~150 ms batch)
@@ -21,7 +22,7 @@ use std::sync::Arc;
 
 use arc_filesystem::{DirEntry, FileItem, ReplaceMatch, ReplaceSummary, SearchHit, Watcher};
 use dashmap::DashMap;
-use tauri::{AppHandle, Emitter, State};
+use tauri::{AppHandle, Emitter, Manager, State};
 use uuid::Uuid;
 
 /// Per-app state: live watchers keyed by their generated watch id. Dropping
@@ -61,7 +62,10 @@ pub async fn fs_write_file(path: String, content: String) -> Result<(), String> 
 /// like any other file — see `arc_filesystem::scratch_file`.
 #[tauri::command]
 pub async fn fs_scratch_file(ext: String) -> Result<String, String> {
-    arc_filesystem::scratch_file(&ext).map_err(|e| e.to_string())
+    let dir = arc_session_manager::data_dir()
+        .ok_or("could not resolve user data directory")?
+        .join("scratch");
+    arc_filesystem::scratch_file(&dir, &ext).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -205,6 +209,19 @@ pub async fn fs_reveal(path: String) -> Result<(), String> {
 #[tauri::command]
 pub async fn fs_create_dir(path: String) -> Result<(), String> {
     tokio::fs::create_dir_all(&path).await.map_err(|e| e.to_string())
+}
+
+/// Let the webview load files under `path` over the asset protocol (the
+/// markdown preview's local images). The static scope in tauri.conf.json is
+/// empty on purpose: a glob can't say "the open workspace", and an
+/// image-extension glob would expose every image on disk. Roots accumulate
+/// for the app session — a forbid can't be undone, so there's no revoke.
+/// This grants no more than `fs_read_file` already does.
+#[tauri::command]
+pub fn fs_allow_asset_dir(app: AppHandle, path: String) -> Result<(), String> {
+    app.asset_protocol_scope()
+        .allow_directory(&path, true)
+        .map_err(|e| e.to_string())
 }
 
 // ─── find & replace across the workspace ─────────────────────────────────
