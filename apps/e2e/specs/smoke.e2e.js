@@ -96,8 +96,19 @@ describe('ARC smoke', () => {
     // Quit through the window's own close button, then start a new session:
     // tauri-driver launches a fresh process on the same ARC_DATA_DIR.
     const startedAt = await browser.execute(() => performance.timeOrigin);
-    await $('button[aria-label="Close window"]').click();
-    await browser.reloadSession();
+    // Click from inside the page on a timer rather than with a WebDriver click:
+    // the app quits before a WebDriver click can answer, and WebKitWebDriver
+    // (Linux) then reports the whole session as crashed. This way the command
+    // returns first and the quit happens after.
+    await $('button[aria-label="Close window"]').waitForExist();
+    await browser.execute(() => {
+      setTimeout(() => document.querySelector('button[aria-label="Close window"]').click(), 200);
+    });
+    // The old session died with the app; deleting it may fail, which is fine.
+    await browser.pause(3_000);
+    await browser.reloadSession().catch(async () => {
+      await browser.reloadSession();
+    });
     await hydrated();
     assert.notEqual(await browser.execute(() => performance.timeOrigin), startedAt, 'app did not relaunch');
     await assertNoCrash();
