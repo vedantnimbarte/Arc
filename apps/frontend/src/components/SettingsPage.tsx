@@ -77,6 +77,8 @@ import { useSidebarLayout } from '../state/sidebarLayout';
 import { normalizeOrder, PINNED_VIEW, SIDEBAR_VIEW_BY_ID } from '../lib/sidebarViews';
 import {
   isTauri,
+  ptyHostEndAll,
+  ptyHostList,
   ptyListShells,
   secretDelete,
   secretGet,
@@ -1626,6 +1628,13 @@ function TerminalPane({
         <RelaunchAgentsRow />
       </Group>
 
+      <Group
+        title="Background terminals"
+        hint="Terminals reattach where you left them — an agent mid-conversation included. A tab you close ends its shell; quitting ARC does not."
+      >
+        <BackgroundTerminalsRows />
+      </Group>
+
       <HighlightRulesSection />
 
       <Group
@@ -1688,6 +1697,60 @@ function RelaunchAgentsRow() {
         hint="Off: those tabs come back as a plain shell in the same folder."
         checked={on}
         onChange={() => setOn(!on)}
+      />
+    </Rows>
+  );
+}
+
+/** The persistent-terminals switch, and what is running in the background
+ *  host right now — including sessions left over from before the switch was
+ *  turned off, which "End all" is the way to get rid of. */
+function BackgroundTerminalsRows() {
+  const on = useSettings((s) => s.persistentTerminals);
+  const setOn = useSettings((s) => s.setPersistentTerminals);
+  // null while loading; a string when the host can't be listed (another ARC
+  // version holds it — End all still works).
+  const [running, setRunning] = useState<number | string | null>(null);
+  const [ending, setEnding] = useState(false);
+  const refresh = () => {
+    if (!isTauri) return;
+    ptyHostList().then(
+      (ids) => setRunning(ids.length),
+      (err) => setRunning(String(err)),
+    );
+  };
+  useEffect(refresh, []);
+  const endAll = async () => {
+    setEnding(true);
+    try {
+      await ptyHostEndAll();
+    } catch (err) {
+      toastError(`Couldn't end background sessions: ${err}`);
+    } finally {
+      setEnding(false);
+      refresh();
+    }
+  };
+  return (
+    <Rows>
+      <ToggleRow
+        label="Keep terminals running after ARC closes"
+        hint="Applies to new local terminals. Their shells, and whatever runs in them, keep running and using memory and CPU in the background until you close the tab or end them here."
+        checked={on}
+        onChange={() => setOn(!on)}
+      />
+      <Row
+        label={`Running background sessions: ${typeof running === 'number' ? running : '—'}`}
+        hint={typeof running === 'string' ? running : undefined}
+        control={
+          <button
+            onClick={() => void endAll()}
+            disabled={ending || running === 0 || running === null}
+            className="shrink-0 rounded-md border border-edge-2 px-3 py-1.5 font-display text-xs font-medium text-fg-base transition-colors hover:bg-surface-2 disabled:opacity-50"
+          >
+            {ending ? 'Ending…' : 'End all'}
+          </button>
+        }
       />
     </Rows>
   );

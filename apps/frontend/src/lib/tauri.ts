@@ -25,6 +25,9 @@ export interface PtySpawnOptions {
   /** Extra arguments passed to the spawned program — used by AI CLI
    *  launchers that run a subcommand (e.g. `wingman pilot run <goal>`). */
   args?: string[] | null;
+  /** Run the shell in the background session host under this id (the tab
+   *  id), so it keeps running after ARC closes. */
+  persistentId?: string | null;
 }
 
 export interface PtyExitEvent {
@@ -51,6 +54,38 @@ export async function ptySpawn(
     onData(new Uint8Array(message));
   };
   return invoke<PtyId>('pty_spawn', { opts, onData: channel });
+}
+
+/**
+ * Reattach to a terminal session a previous ARC left running in the background
+ * host. Resolves to the PTY id, or `null` when there is no such session. The
+ * first chunk delivered to `onData` is the session's recent output.
+ */
+export async function ptyAttach(
+  key: string,
+  cols: number,
+  rows: number,
+  onData: (chunk: Uint8Array) => void,
+): Promise<PtyId | null> {
+  const channel = new Channel<ArrayBuffer>();
+  channel.onmessage = (message) => onData(new Uint8Array(message));
+  return invoke<PtyId | null>('pty_attach', { key, cols, rows, onData: channel });
+}
+
+/** True for a PTY that lives in the background host rather than in ARC. */
+export function isPersistentPtyId(id: PtyId): boolean {
+  return id.startsWith('persist:');
+}
+
+/** Tab ids of the sessions running in the background host. Rejects when the
+ *  host belongs to a different ARC version. */
+export async function ptyHostList(): Promise<string[]> {
+  return invoke<string[]>('pty_host_list');
+}
+
+/** End every background session and stop the host. */
+export async function ptyHostEndAll(): Promise<void> {
+  await invoke('pty_host_end_all');
 }
 
 export async function ptyWrite(id: PtyId, data: string): Promise<void> {
@@ -1002,6 +1037,9 @@ export interface PersistedSettings {
   /** Re-launch agent CLIs (resuming their last conversation) in tabs that
    *  were running one when ARC closed. */
   relaunchAgentTabs?: boolean;
+  /** Run new terminals in the background session host so they survive ARC
+   *  closing. */
+  persistentTerminals?: boolean;
 }
 
 /** Returns the stored settings blob, or `null` on first launch. */

@@ -103,6 +103,10 @@ fn main() {
             commands::pty::pty_kill,
             commands::pty::pty_list_shells,
             commands::pty::pty_list_ai_clis,
+            // Persistent terminals (arc-ptyhost).
+            commands::pty::pty_attach,
+            commands::pty::pty_host_list,
+            commands::pty::pty_host_end_all,
             commands::fs::fs_default_root,
             commands::fs::fs_parent,
             commands::fs::fs_read_dir,
@@ -384,6 +388,9 @@ fn main() {
     // safe.
     app.run(|app_handle, event| match event {
         tauri::RunEvent::ExitRequested { .. } | tauri::RunEvent::Exit => {
+            // In-process shells only. Persistent terminals live in arc-ptyhost
+            // and are left running: exiting drops our connection, which the
+            // host treats as a detach.
             app_handle.state::<PtyState>().manager.kill_all();
             // Same reasoning for language servers: `kill_on_drop` never runs
             // under `process::exit`, so rust-analyzer & friends (each with its

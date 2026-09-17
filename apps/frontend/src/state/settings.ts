@@ -255,6 +255,10 @@ export interface Settings {
    *  in tabs that were running an agent when ARC closed. Off by default: an
    *  agent resuming by itself is surprising unless asked for. */
   relaunchAgentTabs: boolean;
+  /** New local terminals run in the background session host and keep running
+   *  after ARC closes; restored tabs reattach to them. Off by default: shells
+   *  left running use resources nobody sees. */
+  persistentTerminals: boolean;
   /** True once hydrateSettings() has applied stored values. */
   settingsHydrated: boolean;
   setDefaultShell: (shell: string | null) => void;
@@ -303,6 +307,7 @@ export interface Settings {
   setAiModel: (model: string) => void;
   setHighlightRules: (rules: HighlightRule[]) => void;
   setRelaunchAgentTabs: (on: boolean) => void;
+  setPersistentTerminals: (on: boolean) => void;
   hydrateSettings: () => Promise<void>;
 }
 
@@ -343,6 +348,7 @@ const DEFAULTS = {
   aiModel: DEFAULT_AI_MODEL,
   highlightRules: [] as HighlightRule[],
   relaunchAgentTabs: false,
+  persistentTerminals: false,
 };
 
 const MIN_NOTIFY_SECS = 5;
@@ -455,6 +461,7 @@ export const useSettings = create<Settings>()((set, get) => ({
   setAiModel: (model) => set({ aiModel: model.trim() || DEFAULT_AI_MODEL }),
   setHighlightRules: (rules) => set({ highlightRules: rules }),
   setRelaunchAgentTabs: (on) => set({ relaunchAgentTabs: on }),
+  setPersistentTerminals: (on) => set({ persistentTerminals: on }),
 
   hydrateSettings: async () => {
     if (get().settingsHydrated) return;
@@ -641,6 +648,10 @@ function applyStored(current: Settings, stored: Partial<PersistedSettings>): Par
       typeof stored.relaunchAgentTabs === 'boolean'
         ? stored.relaunchAgentTabs
         : current.relaunchAgentTabs,
+    persistentTerminals:
+      typeof stored.persistentTerminals === 'boolean'
+        ? stored.persistentTerminals
+        : current.persistentTerminals,
   };
 }
 
@@ -676,6 +687,7 @@ function toPersistedSettings(s: Settings): PersistedSettings {
     aiModel: s.aiModel,
     highlightRules: s.highlightRules,
     relaunchAgentTabs: s.relaunchAgentTabs,
+    persistentTerminals: s.persistentTerminals,
   };
 }
 
