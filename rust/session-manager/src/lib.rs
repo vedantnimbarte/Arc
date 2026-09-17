@@ -23,7 +23,7 @@ pub mod tabs;
 pub mod workspaces;
 
 pub use commands::CommandRecord;
-pub use db::{DbConnection, DbConnectionInput};
+pub use db::{DbConnection, DbConnectionInput, DbQueryHistoryEntry};
 pub use ssh::{SshHost, SshHostInput, SshKey, SshSessionLogEntry};
 // Re-export so downstream crates (e.g. apps/desktop) that hold a
 // `&SessionStore` can name the pool type without taking a direct sqlx dep.
@@ -232,5 +232,52 @@ mod tests {
         ssh::host_delete(store.pool(), &bastion.id).await.unwrap();
         let got = ssh::host_get(store.pool(), &app.id).await.unwrap().unwrap();
         assert_eq!(got.jump_host_id, None);
+    }
+
+    #[tokio::test]
+    async fn db_query_history_caps_and_deletes() {
+        let store = fresh_store().await;
+        let pool = store.pool();
+        let conn = |name: &str| DbConnectionInput {
+            id: None,
+            name: name.into(),
+            backend: "sqlite".into(),
+            url: "sqlite::memory:".into(),
+            has_password: false,
+        };
+        let a = db::upsert(pool, conn("a")).await.unwrap();
+        let b = db::upsert(pool, conn("b")).await.unwrap();
+
+        for i in 0..db::HISTORY_CAP + 5 {
+            db::history_add(pool, &a.id, &format!("SELECT {i}"), 3, Some(1), None)
+                .await
+                .unwrap();
+        }
+        db::history_add(pool, &b.id, "SELEC oops", 1, None, Some("syntax error"))
+            .await
+            .unwrap();
+
+        let list = db::history_list(pool, &a.id).await.unwrap();
+        assert_eq!(list.len() as i64, db::HISTORY_CAP);
+        // Newest first; the five oldest were pruned.
+        assert_eq!(list[0].sql, format!("SELECT {}", db::HISTORY_CAP + 4));
+        assert_eq!(list.last().unwrap().sql, "SELECT 5");
+
+        let failed = db::history_list(pool, &b.id).await.unwrap();
+        assert_eq!(failed.len(), 1, "the cap is per connection");
+        assert_eq!(failed[0].error.as_deref(), Some("syntax error"));
+        assert_eq!(failed[0].row_count, None);
+
+        db::history_delete(pool, list[0].id).await.unwrap();
+        assert_eq!(
+            db::history_list(pool, &a.id).await.unwrap().len() as i64,
+            db::HISTORY_CAP - 1
+        );
+        db::history_clear(pool, &a.id).await.unwrap();
+        assert!(db::history_list(pool, &a.id).await.unwrap().is_empty());
+
+        // Deleting a connection takes its history with it.
+        db::delete(pool, &b.id).await.unwrap();
+        assert!(db::history_list(pool, &b.id).await.unwrap().is_empty());
     }
 }

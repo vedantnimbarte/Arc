@@ -20,16 +20,30 @@
 //! paths that don't apply today; they're two lines each and keep a future
 //! prepared-statement path from rendering `<binary>` everywhere.
 
+use std::path::Path;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
-use anyhow::{anyhow, Context, Result};
+use anyhow::{anyhow, bail, Context, Result};
 use dashmap::DashMap;
 use futures_util::TryStreamExt;
 use serde::{Deserialize, Serialize};
 use sqlx::{
     mysql::MySqlPoolOptions, postgres::PgPoolOptions, sqlite::SqlitePoolOptions, Column, Either,
-    MySqlPool, PgPool, Row, SqlitePool, ValueRef,
+    MySqlPool, PgPool, Row, SqlitePool, TypeInfo, ValueRef,
 };
+use tokio::io::{AsyncWriteExt, BufWriter};
+
+/// File format for [`DbManager::export`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ExportFormat {
+    Csv,
+    Json,
+}
+
+/// How many rows between progress callbacks during an export.
+const PROGRESS_EVERY: u64 = 1_000;
 
 /// Hard cap on rows held in memory for one query. The grid is not a data
 /// export tool; anything past this is truncated and flagged in the result.
@@ -442,6 +456,43 @@ impl DbManager {
         })
     }
 
+    /// Re-run `sql` and stream every row straight into `path` as CSV or JSON,
+    /// ignoring [`MAX_ROWS`]. Rows are written as they arrive, so memory stays
+    /// flat however big the result is. `progress` gets the running row count
+    /// every [`PROGRESS_EVERY`] rows; setting `cancel` stops the export. On
+    /// any failure (cancel included) the partial file is removed.
+    ///
+    /// Only SELECT-like statements are accepted — an export must never be
+    /// the thing that runs someone's DELETE a second time.
+    pub async fn export(
+        &self,
+        id: &str,
+        sql: &str,
+        format: ExportFormat,
+        path: &Path,
+        cancel: &AtomicBool,
+        progress: impl FnMut(u64),
+    ) -> Result<u64> {
+        if !is_select_like(sql) {
+            bail!("only SELECT-like statements can be exported");
+        }
+        let pool = self.clone_pool(id)?;
+        let file = tokio::fs::File::create(path)
+            .await
+            .with_context(|| format!("could not create {}", path.display()))?;
+        let mut out = BufWriter::new(file);
+        let res = export_to(&pool, sql, format, &mut out, cancel, progress).await;
+        let res = match res {
+            Ok(n) => out.shutdown().await.map(|_| n).map_err(Into::into),
+            Err(e) => Err(e),
+        };
+        if res.is_err() {
+            drop(out);
+            let _ = tokio::fs::remove_file(path).await;
+        }
+        res
+    }
+
     fn clone_pool(&self, id: &str) -> Result<Pool> {
         let entry = self
             .pools
@@ -578,9 +629,289 @@ async fn run(pool: &Pool, sql: &str) -> Result<QueryResult> {
     })
 }
 
+/// True when `sql` starts (after comments, whitespace and parens) with a
+/// read-only verb. A first-word check, not a parser: the frontend's
+/// `sqlSafety` lexer does the careful single-statement check before this.
+pub fn is_select_like(sql: &str) -> bool {
+    let mut s = sql.trim_start();
+    loop {
+        if let Some(rest) = s.strip_prefix("--") {
+            s = rest.split_once('\n').map_or("", |(_, r)| r).trim_start();
+        } else if let Some(rest) = s.strip_prefix("/*") {
+            s = rest.split_once("*/").map_or("", |(_, r)| r).trim_start();
+        } else if let Some(rest) = s.strip_prefix('(') {
+            s = rest.trim_start();
+        } else {
+            break;
+        }
+    }
+    let word: String = s
+        .chars()
+        .take_while(|c| c.is_ascii_alphabetic())
+        .collect::<String>()
+        .to_ascii_lowercase();
+    matches!(word.as_str(), "select" | "with" | "values" | "table" | "show")
+}
+
+/// One CSV field, quoted per RFC 4180 — the same rules as the frontend's
+/// `toCsv`: NULL is an empty unquoted field, the empty string is `""`.
+fn csv_field(v: Option<&str>) -> String {
+    match v {
+        None => String::new(),
+        Some(s) if s.is_empty() || s.contains(['"', ',', '\r', '\n']) => {
+            format!("\"{}\"", s.replace('"', "\"\""))
+        }
+        Some(s) => s.to_string(),
+    }
+}
+
+/// A cell's JSON value. The text arrives server-formatted (see the module
+/// docs); the column's type name says whether it's really a number or bool.
+/// Anything that doesn't parse cleanly — NUMERIC past f64, NaN, an unsigned
+/// bigint — stays a string rather than losing precision.
+fn json_value(type_name: &str, text: Option<String>) -> serde_json::Value {
+    use serde_json::Value;
+    let Some(text) = text else {
+        return Value::Null;
+    };
+    let base = type_name.trim_end_matches(" UNSIGNED");
+    match base {
+        "INT2" | "INT4" | "INT8" | "OID" | "INT" | "INTEGER" | "BIGINT" | "SMALLINT"
+        | "TINYINT" | "MEDIUMINT" => {
+            if let Ok(n) = text.parse::<i64>() {
+                return n.into();
+            }
+            if let Ok(n) = text.parse::<u64>() {
+                return n.into();
+            }
+        }
+        "FLOAT4" | "FLOAT8" | "REAL" | "FLOAT" | "DOUBLE" => {
+            if let Some(n) = text.parse::<f64>().ok().and_then(serde_json::Number::from_f64) {
+                return Value::Number(n);
+            }
+        }
+        "BOOL" | "BOOLEAN" => match text.as_str() {
+            "t" | "true" | "1" => return Value::Bool(true),
+            "f" | "false" | "0" => return Value::Bool(false),
+            _ => {}
+        },
+        _ => {}
+    }
+    Value::String(text)
+}
+
+/// Disambiguate duplicate column names (a join's two `id`s) with `_2`, `_3`,
+/// matching the frontend's grid export.
+fn dedupe_keys(columns: &[String]) -> Vec<String> {
+    let mut seen = std::collections::HashMap::<&str, u32>::new();
+    columns
+        .iter()
+        .map(|c| {
+            let n = seen.entry(c).or_insert(0);
+            *n += 1;
+            if *n == 1 {
+                c.clone()
+            } else {
+                format!("{c}_{n}")
+            }
+        })
+        .collect()
+}
+
+/// The streaming half of [`DbManager::export`]; a macro per backend for the
+/// same reason as [`drain!`].
+macro_rules! export_rows {
+    ($sql:expr, $pool:expr, $format:expr, $out:expr, $cancel:expr, $progress:expr) => {{
+        let mut stream = sqlx::raw_sql($sql).fetch($pool);
+        let mut n: u64 = 0;
+        let mut keys: Vec<String> = Vec::new();
+        while let Some(row) = stream.try_next().await? {
+            if $cancel.load(Ordering::Relaxed) {
+                bail!("export cancelled");
+            }
+            let width = row.columns().len();
+            let mut line = String::new();
+            if n == 0 {
+                let names: Vec<String> =
+                    row.columns().iter().map(|c| c.name().to_string()).collect();
+                match $format {
+                    ExportFormat::Csv => {
+                        let header: Vec<String> =
+                            names.iter().map(|c| csv_field(Some(c))).collect();
+                        line.push_str(&header.join(","));
+                        line.push_str("\r\n");
+                    }
+                    ExportFormat::Json => line.push_str("[\n"),
+                }
+                keys = dedupe_keys(&names);
+            } else if $format == ExportFormat::Json {
+                line.push_str(",\n");
+            }
+            match $format {
+                ExportFormat::Csv => {
+                    let cells: Vec<String> =
+                        (0..width).map(|i| csv_field(cell(&row, i).as_deref())).collect();
+                    line.push_str(&cells.join(","));
+                    line.push_str("\r\n");
+                }
+                ExportFormat::Json => {
+                    line.push('{');
+                    for i in 0..width {
+                        if i > 0 {
+                            line.push(',');
+                        }
+                        let type_name = row
+                            .try_get_raw(i)
+                            .map(|v| v.type_info().name().to_ascii_uppercase())
+                            .unwrap_or_default();
+                        let value = json_value(&type_name, cell(&row, i));
+                        line.push_str(&serde_json::to_string(&keys[i])?);
+                        line.push(':');
+                        line.push_str(&serde_json::to_string(&value)?);
+                    }
+                    line.push('}');
+                }
+            }
+            $out.write_all(line.as_bytes()).await?;
+            n += 1;
+            if n % PROGRESS_EVERY == 0 {
+                $progress(n);
+            }
+        }
+        n
+    }};
+}
+
+async fn export_to<W: tokio::io::AsyncWrite + Unpin>(
+    pool: &Pool,
+    sql: &str,
+    format: ExportFormat,
+    out: &mut W,
+    cancel: &AtomicBool,
+    mut progress: impl FnMut(u64),
+) -> Result<u64> {
+    // ponytail: with zero rows there are no column names to read from the row
+    // stream, so an empty CSV has no header. Describe the statement first if
+    // that ever matters.
+    let n = match pool {
+        Pool::Postgres(p) => {
+            fn cell(row: &sqlx::postgres::PgRow, i: usize) -> Option<String> {
+                cell_body!(row, i)
+            }
+            export_rows!(sql, p, format, out, cancel, progress)
+        }
+        Pool::Mysql(p) => {
+            fn cell(row: &sqlx::mysql::MySqlRow, i: usize) -> Option<String> {
+                cell_body!(row, i)
+            }
+            export_rows!(sql, p, format, out, cancel, progress)
+        }
+        Pool::Sqlite(p) => {
+            fn cell(row: &sqlx::sqlite::SqliteRow, i: usize) -> Option<String> {
+                cell_body!(row, i)
+            }
+            export_rows!(sql, p, format, out, cancel, progress)
+        }
+    };
+    if format == ExportFormat::Json {
+        out.write_all(if n == 0 { b"[]\n" as &[u8] } else { b"\n]\n" }).await?;
+    }
+    progress(n);
+    Ok(n)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn select_like_statements() {
+        assert!(is_select_like("SELECT 1"));
+        assert!(is_select_like("  -- note\n/* c */ (select 1) union (select 2)"));
+        assert!(is_select_like("WITH x AS (SELECT 1) SELECT * FROM x"));
+        assert!(!is_select_like("DELETE FROM t"));
+        assert!(!is_select_like("-- SELECT\nDROP TABLE t"));
+        assert!(!is_select_like(""));
+    }
+
+    #[test]
+    fn typed_json_values() {
+        use serde_json::json;
+        assert_eq!(json_value("INT8", Some("42".into())), json!(42));
+        assert_eq!(json_value("BIGINT UNSIGNED", Some("18446744073709551615".into())), json!(u64::MAX));
+        assert_eq!(json_value("FLOAT8", Some("1.5".into())), json!(1.5));
+        assert_eq!(json_value("FLOAT8", Some("NaN".into())), json!("NaN"));
+        assert_eq!(json_value("BOOL", Some("t".into())), json!(true));
+        assert_eq!(json_value("NUMERIC", Some("1.10".into())), json!("1.10"));
+        assert_eq!(json_value("TEXT", None), serde_json::Value::Null);
+        assert_eq!(csv_field(Some("a,\"b\"")), "\"a,\"\"b\"\"\"");
+        assert_eq!(csv_field(Some("")), "\"\"");
+        assert_eq!(csv_field(None), "");
+        assert_eq!(
+            dedupe_keys(&["id".into(), "id".into(), "x".into()]),
+            vec!["id", "id_2", "x"]
+        );
+    }
+
+    /// Streams well past MAX_ROWS to disk, with real JSON types, and cleans up
+    /// after a cancel.
+    #[tokio::test]
+    async fn sqlite_export_beyond_cap() {
+        const N: usize = MAX_ROWS + 5_000;
+        let mgr = DbManager::new();
+        mgr.connect("e", "sqlite::memory:").await.unwrap();
+        mgr.query(
+            "e",
+            &format!(
+                "CREATE TABLE t (a INTEGER, b TEXT, c REAL, d TEXT); \
+                 WITH RECURSIVE s(x) AS (SELECT 1 UNION ALL SELECT x + 1 FROM s WHERE x < {N}) \
+                 INSERT INTO t SELECT x, 'n,' || x, x * 0.5, NULL FROM s;"
+            ),
+        )
+        .await
+        .unwrap();
+
+        let dir = std::env::temp_dir();
+        let json_path = dir.join(format!("arc-db-export-{}.json", std::process::id()));
+        let csv_path = dir.join(format!("arc-db-export-{}.csv", std::process::id()));
+        let cancel = AtomicBool::new(false);
+
+        let mut ticks = 0;
+        let n = mgr
+            .export("e", "SELECT * FROM t ORDER BY a", ExportFormat::Json, &json_path, &cancel, |_| ticks += 1)
+            .await
+            .unwrap();
+        assert_eq!(n as usize, N);
+        assert!(ticks >= N / PROGRESS_EVERY as usize);
+        let parsed: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&json_path).unwrap()).unwrap();
+        let rows = parsed.as_array().unwrap();
+        assert_eq!(rows.len(), N);
+        assert_eq!(rows[0], serde_json::json!({"a": 1, "b": "n,1", "c": 0.5, "d": null}));
+        assert_eq!(rows[N - 1]["a"], serde_json::json!(N));
+
+        let n = mgr
+            .export("e", "SELECT a, b FROM t", ExportFormat::Csv, &csv_path, &cancel, |_| {})
+            .await
+            .unwrap();
+        assert_eq!(n as usize, N);
+        let csv = std::fs::read_to_string(&csv_path).unwrap();
+        assert_eq!(csv.lines().count(), N + 1);
+        assert!(csv.starts_with("a,b\r\n1,\"n,1\"\r\n"));
+
+        assert!(mgr
+            .export("e", "DELETE FROM t", ExportFormat::Csv, &csv_path, &cancel, |_| {})
+            .await
+            .is_err());
+
+        cancel.store(true, Ordering::Relaxed);
+        assert!(mgr
+            .export("e", "SELECT * FROM t", ExportFormat::Csv, &csv_path, &cancel, |_| {})
+            .await
+            .is_err());
+        assert!(!csv_path.exists(), "a cancelled export leaves no partial file");
+        let _ = std::fs::remove_file(&json_path);
+    }
 
     #[test]
     fn scheme_classification() {

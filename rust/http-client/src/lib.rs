@@ -41,8 +41,18 @@ pub enum HttpBody {
     Raw { text: String, content_type: String },
     /// application/x-www-form-urlencoded — key/value pairs.
     FormUrlEncoded { entries: Vec<HeaderKV> },
-    /// multipart/form-data — only text fields for v1 (no file uploads).
-    Multipart { entries: Vec<HeaderKV> },
+    /// multipart/form-data — text fields and file uploads.
+    Multipart { entries: Vec<FormEntry> },
+}
+
+/// One multipart field. When `file` is set, `value` is a local path: the file
+/// is streamed from disk here, never shipped over IPC.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FormEntry {
+    pub name: String,
+    pub value: String,
+    #[serde(default)]
+    pub file: bool,
 }
 
 impl Default for HttpBody {
@@ -143,7 +153,14 @@ pub async fn execute(req: HttpRequest) -> Result<HttpResponse> {
         HttpBody::Multipart { entries } => {
             let mut form = multipart::Form::new();
             for e in entries {
-                form = form.text(e.name.clone(), e.value.clone());
+                form = if e.file {
+                    // Filename and Content-Type come from the path, as curl's `-F name=@path`.
+                    form.file(e.name.clone(), &e.value)
+                        .await
+                        .with_context(|| format!("reading file for field '{}': {}", e.name, e.value))?
+                } else {
+                    form.text(e.name.clone(), e.value.clone())
+                };
             }
             builder = builder.multipart(form);
         }
@@ -197,4 +214,79 @@ pub async fn execute(req: HttpRequest) -> Result<HttpResponse> {
         truncated,
         final_url,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    /// A multipart body with a text field and a file field read from disk,
+    /// checked against what a bare TCP server actually receives.
+    #[tokio::test]
+    async fn multipart_uploads_file_from_disk() {
+        let path = std::env::temp_dir().join(format!("arc-upload-{}.txt", std::process::id()));
+        std::fs::write(&path, "hello from disk").unwrap();
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            let (mut sock, _) = listener.accept().await.unwrap();
+            let mut buf = Vec::new();
+            let mut chunk = [0u8; 4096];
+            // Read until the closing multipart boundary arrives.
+            while !String::from_utf8_lossy(&buf).ends_with("--\r\n") {
+                let n = sock.read(&mut chunk).await.unwrap();
+                if n == 0 {
+                    break;
+                }
+                buf.extend_from_slice(&chunk[..n]);
+            }
+            sock.write_all(b"HTTP/1.1 200 OK\r\ncontent-length: 0\r\n\r\n").await.unwrap();
+            String::from_utf8(buf).unwrap()
+        });
+
+        let res = execute(HttpRequest {
+            method: "POST".into(),
+            url: format!("http://{addr}/upload"),
+            headers: vec![],
+            body: HttpBody::Multipart {
+                entries: vec![
+                    FormEntry { name: "note".into(), value: "hi".into(), file: false },
+                    FormEntry {
+                        name: "doc".into(),
+                        value: path.to_string_lossy().into_owned(),
+                        file: true,
+                    },
+                ],
+            },
+            timeout_ms: Some(5_000),
+        })
+        .await
+        .unwrap();
+        assert_eq!(res.status, 200);
+
+        let raw = server.await.unwrap();
+        let file_name = path.file_name().unwrap().to_string_lossy().into_owned();
+        assert!(raw.contains("multipart/form-data; boundary="));
+        assert!(raw.contains("name=\"note\"\r\n\r\nhi\r\n"));
+        assert!(raw.contains(&format!("name=\"doc\"; filename=\"{file_name}\"")));
+        assert!(raw.contains("Content-Type: text/plain"));
+        assert!(raw.contains("hello from disk"));
+
+        // A missing file is a clear error, not an empty part.
+        let err = execute(HttpRequest {
+            method: "POST".into(),
+            url: format!("http://{addr}/upload"),
+            headers: vec![],
+            body: HttpBody::Multipart {
+                entries: vec![FormEntry { name: "doc".into(), value: "/no/such/file".into(), file: true }],
+            },
+            timeout_ms: Some(1_000),
+        })
+        .await
+        .unwrap_err();
+        assert!(format!("{err:#}").contains("reading file for field 'doc'"));
+        let _ = std::fs::remove_file(&path);
+    }
 }

@@ -1,12 +1,18 @@
+import { parse as parseYaml } from 'yaml';
+import type { HttpHeaderKV } from './tauri';
+
 /**
- * OpenAPI 3.x → API Client collection. Pure; JSON documents only (there is
- * no YAML parser in the dependency tree).
+ * OpenAPI 3.x → API Client collection. Pure; JSON or YAML documents.
  */
 
 export interface ImportedRequest {
   name: string;
   method: string;
   url: string;
+  /** Query parameters, valued with the spec's example or default ('' if none). */
+  params: HttpHeaderKV[];
+  /** Header parameters, valued the same way. */
+  headers: HttpHeaderKV[];
   /** Pretty-printed JSON example body, when the spec provides one. */
   body: string | null;
 }
@@ -52,6 +58,35 @@ function exampleBody(doc: Obj, op: Obj): string | null {
   return example === undefined ? null : JSON.stringify(example, null, 2);
 }
 
+/**
+ * Query and header parameters of one operation. Operation-level entries
+ * override path-level ones with the same name and location, as the spec says.
+ * The value is the first of `example`, `examples`, `schema.example`,
+ * `schema.default`; objects and arrays are JSON-encoded.
+ */
+function parameters(doc: Obj, pathItem: Obj, op: Obj): { params: HttpHeaderKV[]; headers: HttpHeaderKV[] } {
+  const byKey = new Map<string, Obj>();
+  for (const list of [pathItem.parameters, op.parameters]) {
+    if (!Array.isArray(list)) continue;
+    for (const raw of list) {
+      const p = deref(doc, raw);
+      if (p && typeof p.name === 'string' && (p.in === 'query' || p.in === 'header')) {
+        byKey.set(`${p.in}:${p.name}`, p);
+      }
+    }
+  }
+  const params: HttpHeaderKV[] = [];
+  const headers: HttpHeaderKV[] = [];
+  for (const p of byKey.values()) {
+    const schema = deref(doc, p.schema) ?? {};
+    const firstExample = isObj(p.examples) ? deref(doc, Object.values(p.examples)[0])?.value : undefined;
+    const v = [p.example, firstExample, schema.example, schema.default].find((x) => x !== undefined);
+    const value = v === undefined || v === null ? '' : typeof v === 'object' ? JSON.stringify(v) : String(v);
+    (p.in === 'query' ? params : headers).push({ name: p.name as string, value });
+  }
+  return { params, headers };
+}
+
 function baseUrl(doc: Obj): string {
   const server = Array.isArray(doc.servers) && isObj(doc.servers[0]) ? doc.servers[0] : undefined;
   if (!server || typeof server.url !== 'string') return '';
@@ -69,9 +104,14 @@ export function parseOpenApi(text: string): OpenApiImport {
   try {
     doc = JSON.parse(text);
   } catch {
-    throw new Error('Not valid JSON — only JSON OpenAPI documents are supported');
+    try {
+      doc = parseYaml(text);
+    } catch (e) {
+      throw new Error(`Not valid JSON or YAML: ${e instanceof Error ? e.message : String(e)}`);
+    }
   }
-  if (!isObj(doc) || typeof doc.openapi !== 'string' || !doc.openapi.startsWith('3')) {
+  // YAML reads an unquoted `openapi: 3.1` as a number.
+  if (!isObj(doc) || !String(doc.openapi ?? '').startsWith('3')) {
     throw new Error('Not an OpenAPI 3.x document');
   }
   const base = baseUrl(doc);
@@ -92,6 +132,7 @@ export function parseOpenApi(text: string): OpenApiImport {
         method,
         // Path params become {{name}} so an environment can fill them.
         url: base + path.replace(/\{([^}]+)\}/g, '{{$1}}'),
+        ...parameters(doc, item, op),
         body: exampleBody(doc, op),
       });
     }
