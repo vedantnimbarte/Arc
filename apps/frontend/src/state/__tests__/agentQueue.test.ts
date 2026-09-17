@@ -15,8 +15,8 @@ const { registerTerminal } = await import('../../lib/terminalRegistry');
 // and sending into a plain shell that would run the text as a command.
 
 const pasted: string[] = [];
-registerTerminal('agent', { paste: (t) => pasted.push(t), selection: () => '', focus: () => {} });
-registerTerminal('shell', { paste: (t) => pasted.push(t), selection: () => '', focus: () => {} });
+registerTerminal('agent', { paste: (t) => pasted.push(t), selection: () => '', text: () => '', focus: () => {} });
+registerTerminal('shell', { paste: (t) => pasted.push(t), selection: () => '', text: () => '', focus: () => {} });
 
 const q = () => useAgentQueue.getState();
 const waiting = (id: string, on: boolean) => useWorkspace.getState().setAgentWaiting(id, on ? 'done' : null);
