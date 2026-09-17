@@ -4,6 +4,7 @@ import { cn } from '../../lib/cn';
 import { Select } from '../Select';
 import type { SshForwardSpec, SshHost } from '../../lib/tauri';
 import { ForwardInput, ForwardRow } from './ForwardControls';
+import { withForward } from './common';
 
 interface HostEditDialogProps {
   /** Existing host, or null when creating a new one. */
@@ -29,6 +30,9 @@ export function HostEditDialog({ existing, onClose }: HostEditDialogProps) {
   const [startupCmd, setStartupCmd] = useState(existing?.startup_cmd ?? '');
   const [jumpHostId, setJumpHostId] = useState(existing?.jump_host_id ?? '');
   const [forwards, setForwards] = useState<SshForwardSpec[]>(existing?.forwards ?? []);
+  const [remoteWorkspaceForwards, setRemoteWorkspaceForwards] = useState(
+    existing?.remote_workspace_forwards ?? false,
+  );
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
@@ -52,6 +56,7 @@ export function HostEditDialog({ existing, onClose }: HostEditDialogProps) {
         startup_cmd: startupCmd.trim() ? startupCmd : null,
         jump_host_id: jumpHostId || null,
         forwards,
+        remote_workspace_forwards: remoteWorkspaceForwards,
       });
       setDetail(saved.id);
       onClose();
@@ -131,7 +136,19 @@ export function HostEditDialog({ existing, onClose }: HostEditDialogProps) {
               onRemove={() => setForwards((list) => list.filter((_, j) => j !== i))}
             />
           ))}
-          <ForwardInput onAdd={(spec) => setForwards((list) => [...list, spec])} />
+          <ForwardInput onAdd={(spec) => setForwards((list) => withForward(list, spec))} />
+          <label
+            className="mt-1.5 flex items-center gap-1.5 font-display text-xs text-fg-muted"
+            title="Off by default: a terminal tab to this host usually holds the same local ports."
+          >
+            <input
+              type="checkbox"
+              checked={remoteWorkspaceForwards}
+              onChange={(e) => setRemoteWorkspaceForwards(e.target.checked)}
+              className="accent-accent"
+            />
+            Also start forwards for remote workspaces
+          </label>
         </FormRow>
         <FormRow label="Keepalive (seconds)">
           <Input

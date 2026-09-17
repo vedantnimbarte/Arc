@@ -22,7 +22,7 @@
 //! to the jump host, opens a `direct-tcpip` channel to the target and runs the
 //! target's handshake over that channel. Shell sessions and SFTP both dial
 //! through it, so both get jump hosts. Live shell sessions also carry port
-//! forwards — see [`forward`].
+//! forwards, and remote workspaces can too — see [`forward`].
 //!
 //! V1 caveats:
 //!   * Authentication is publickey-only.
@@ -43,13 +43,14 @@ use russh::keys::{known_hosts, PrivateKeyWithHashAlg, PublicKeyOrCertificate};
 use russh::{Channel, ChannelMsg};
 use serde::{Deserialize, Serialize};
 use tokio::io::{AsyncRead, AsyncWrite};
-use tokio::sync::{mpsc, oneshot, Mutex};
+use tokio::sync::{mpsc, oneshot};
 use uuid::Uuid;
 
 pub mod forward;
 pub mod sftp;
 
-pub use forward::{check_jump, ForwardKind, ForwardSpec};
+use forward::{describe_forward, RemoteForwards, SessionForwards};
+pub use forward::{check_jump, ConnError, ForwardInfo, ForwardKind, ForwardSpec, ForwardState};
 pub use sftp::{
     posix_join, posix_parent, RemoteDirEntry, RemoteFsOpts, SftpManager, MAX_REMOTE_FILE_BYTES,
 };
@@ -140,199 +141,12 @@ pub struct GeneratedKey {
     pub bits: u32,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "lowercase")]
-pub enum ForwardState {
-    Active,
-    Stopped,
-    Failed,
-}
-
-/// A forward on a live session and how it is doing.
-#[derive(Debug, Clone, Serialize)]
-pub struct ForwardInfo {
-    pub id: String,
-    #[serde(flatten)]
-    pub spec: ForwardSpec,
-    pub state: ForwardState,
-    /// Why it failed, e.g. the port is already in use.
-    pub error: Option<String>,
-}
-
-struct ForwardEntry {
-    info: ForwardInfo,
-    /// Local forwards only: the accept loop. Aborting it drops the listener
-    /// and, through its JoinSet, every connection it is still piping.
-    task: Option<tokio::task::JoinHandle<()>>,
-}
-
-impl Drop for ForwardEntry {
-    fn drop(&mut self) {
-        if let Some(task) = &self.task {
-            task.abort();
-        }
-    }
-}
-
-/// Server port -> local `host:port` for the session's active `-R` forwards.
-/// Shared with the [`ClientHandler`], which is where the server's
-/// `forwarded-tcpip` channels arrive.
-pub(crate) type RemoteForwards = Arc<DashMap<u32, (String, u16)>>;
-
-/// Remote forwards bind the server's loopback, never all interfaces.
-const REMOTE_BIND_ADDR: &str = "localhost";
-
-/// The forwards on one live session. Dropped with the session entry, which
-/// aborts every local listener.
-struct SessionForwards {
-    handle: Arc<Handle<ClientHandler>>,
-    remote: RemoteForwards,
-    list: Mutex<Vec<ForwardEntry>>,
-}
-
-impl SessionForwards {
-    async fn start(&self, entry: &mut ForwardEntry) {
-        if entry.info.state == ForwardState::Active {
-            return;
-        }
-        match open_forward(&self.handle, &self.remote, &entry.info.spec).await {
-            Ok(task) => {
-                entry.task = task;
-                entry.info.state = ForwardState::Active;
-                entry.info.error = None;
-            }
-            Err(err) => {
-                entry.info.state = ForwardState::Failed;
-                entry.info.error = Some(format!("{err:#}"));
-            }
-        }
-    }
-
-    async fn stop(&self, entry: &mut ForwardEntry) {
-        if let Some(task) = entry.task.take() {
-            task.abort();
-        }
-        let spec = &entry.info.spec;
-        if spec.kind == ForwardKind::Remote && entry.info.state == ForwardState::Active {
-            self.remote.remove(&(spec.bind_port as u32));
-            let _ = self
-                .handle
-                .cancel_tcpip_forward(REMOTE_BIND_ADDR, spec.bind_port as u32)
-                .await;
-        }
-        entry.info.state = ForwardState::Stopped;
-        entry.info.error = None;
-    }
-
-    async fn add(&self, spec: ForwardSpec) -> ForwardInfo {
-        let mut entry = ForwardEntry {
-            info: ForwardInfo {
-                id: Uuid::new_v4().to_string(),
-                spec,
-                state: ForwardState::Stopped,
-                error: None,
-            },
-            task: None,
-        };
-        self.start(&mut entry).await;
-        let info = entry.info.clone();
-        self.list.lock().await.push(entry);
-        info
-    }
-
-    async fn snapshot(&self) -> Vec<ForwardInfo> {
-        self.list.lock().await.iter().map(|e| e.info.clone()).collect()
-    }
-}
-
-/// Open one forward. Returns the accept-loop task for a local forward.
-async fn open_forward(
-    handle: &Arc<Handle<ClientHandler>>,
-    remote: &RemoteForwards,
-    spec: &ForwardSpec,
-) -> Result<Option<tokio::task::JoinHandle<()>>> {
-    spec.validate()?;
-    match spec.kind {
-        ForwardKind::Local => {
-            let listener = tokio::net::TcpListener::bind(("127.0.0.1", spec.bind_port))
-                .await
-                .with_context(|| format!("listen on 127.0.0.1:{}", spec.bind_port))?;
-            let handle = handle.clone();
-            let dest_host = spec.dest_host.clone();
-            let dest_port = spec.dest_port;
-            Ok(Some(tokio::spawn(async move {
-                let mut conns = tokio::task::JoinSet::new();
-                loop {
-                    let (mut sock, peer) = match listener.accept().await {
-                        Ok(v) => v,
-                        Err(err) => {
-                            // e.g. out of file descriptors; back off rather
-                            // than spin, and keep listening.
-                            tracing::warn!(?err, "forward accept");
-                            tokio::time::sleep(std::time::Duration::from_millis(200)).await;
-                            continue;
-                        }
-                    };
-                    while conns.try_join_next().is_some() {}
-                    let handle = handle.clone();
-                    let dest_host = dest_host.clone();
-                    conns.spawn(async move {
-                        match handle
-                            .channel_open_direct_tcpip(
-                                dest_host.as_str(),
-                                dest_port as u32,
-                                peer.ip().to_string(),
-                                peer.port() as u32,
-                            )
-                            .await
-                        {
-                            Ok(channel) => {
-                                let mut stream = channel.into_stream();
-                                let _ = tokio::io::copy_bidirectional(&mut sock, &mut stream).await;
-                            }
-                            Err(err) => {
-                                tracing::debug!(?err, %dest_host, dest_port, "direct-tcpip refused");
-                            }
-                        }
-                    });
-                }
-            })))
-        }
-        ForwardKind::Remote => {
-            let port = spec.bind_port as u32;
-            if remote.contains_key(&port) {
-                return Err(anyhow!("server port {port} is already forwarded"));
-            }
-            // Registered before the request so a connection that lands the
-            // moment the server starts listening already has somewhere to go.
-            remote.insert(port, (spec.dest_host.clone(), spec.dest_port));
-            if let Err(err) = handle.tcpip_forward(REMOTE_BIND_ADDR, port).await {
-                remote.remove(&port);
-                return Err(anyhow!("server refused to listen on port {port}: {err}"));
-            }
-            Ok(None)
-        }
-    }
-}
-
-fn describe_forward(spec: &ForwardSpec) -> String {
-    match spec.kind {
-        ForwardKind::Local => format!(
-            "-L 127.0.0.1:{} -> {}:{}",
-            spec.bind_port, spec.dest_host, spec.dest_port
-        ),
-        ForwardKind::Remote => format!(
-            "-R server:{} -> {}:{}",
-            spec.bind_port, spec.dest_host, spec.dest_port
-        ),
-    }
-}
-
 /// A logged-in transport, plus the jump-host connection it rides on. The jump
 /// connection must outlive the target's, since every target byte flows
 /// through one of its channels.
 pub(crate) struct Dialed {
-    pub(crate) handle: Handle<ClientHandler>,
+    /// Shared so forwards can open channels while a driver owns the session.
+    pub(crate) handle: Arc<Handle<ClientHandler>>,
     pub(crate) jump: Option<Handle<ClientHandler>>,
     pub(crate) remote_forwards: RemoteForwards,
 }
@@ -398,7 +212,7 @@ pub(crate) async fn dial(
         }
     };
     Ok(Dialed {
-        handle,
+        handle: Arc::new(handle),
         jump: jump_handle,
         remote_forwards,
     })
@@ -596,14 +410,7 @@ impl SshManager {
             let _ = channel.data(line.as_bytes()).await;
         }
 
-        // Shared so local forwards can open channels while the driver task
-        // owns the shell.
-        let handle = Arc::new(handle);
-        let forwards = Arc::new(SessionForwards {
-            handle: handle.clone(),
-            remote: remote_forwards,
-            list: Mutex::new(Vec::new()),
-        });
+        let forwards = Arc::new(SessionForwards::new(handle.clone(), remote_forwards));
         for spec in opts.forwards {
             let desc = describe_forward(&spec);
             let info = forwards.add(spec).await;
@@ -683,6 +490,13 @@ impl SshManager {
         Ok(self.forwards(id)?.snapshot().await)
     }
 
+    /// Wakes whenever a forward on the session changes: started, stopped,
+    /// failed, or a connection through it opened, closed or failed. Ends with
+    /// the session.
+    pub fn forward_watch(&self, id: &str) -> Result<tokio::sync::watch::Receiver<()>> {
+        Ok(self.forwards(id)?.subscribe())
+    }
+
     /// Add a forward to a live session and start it. A forward that can't
     /// start is still added, as failed, so the user sees why.
     pub async fn forward_add(&self, id: &str, spec: ForwardSpec) -> Result<Vec<ForwardInfo>> {
@@ -699,30 +513,13 @@ impl SshManager {
         active: bool,
     ) -> Result<Vec<ForwardInfo>> {
         let forwards = self.forwards(id)?;
-        {
-            let mut list = forwards.list.lock().await;
-            let entry = list
-                .iter_mut()
-                .find(|e| e.info.id == forward_id)
-                .context("unknown forward")?;
-            if active {
-                forwards.start(entry).await;
-            } else {
-                forwards.stop(entry).await;
-            }
-        }
+        forwards.set_active(forward_id, active).await?;
         Ok(forwards.snapshot().await)
     }
 
     pub async fn forward_remove(&self, id: &str, forward_id: &str) -> Result<Vec<ForwardInfo>> {
         let forwards = self.forwards(id)?;
-        {
-            let mut list = forwards.list.lock().await;
-            if let Some(pos) = list.iter().position(|e| e.info.id == forward_id) {
-                let mut entry = list.remove(pos);
-                forwards.stop(&mut entry).await;
-            }
-        }
+        forwards.remove(forward_id).await;
         Ok(forwards.snapshot().await)
     }
 }
@@ -876,10 +673,8 @@ impl ClientHandler {
 impl client::Handler for ClientHandler {
     type Error = russh::Error;
 
-    /// A connection to one of our `-R` forwards. Returning without accepting
-    /// drops `reply`, which rejects — the answer for a port we never asked
-    /// for. The local connect runs in its own task: this callback sits on the
-    /// session's event loop, and a slow local service mustn't stall the shell.
+    /// A connection to one of our `-R` forwards — see
+    /// [`forward::accept_forwarded`].
     async fn server_channel_open_forwarded_tcpip(
         &mut self,
         channel: Channel<Msg>,
@@ -890,23 +685,7 @@ impl client::Handler for ClientHandler {
         reply: client::ChannelOpenHandle,
         _session: &mut client::Session,
     ) -> Result<(), Self::Error> {
-        let Some((host, port)) = self.remote_forwards.get(&connected_port).map(|d| d.clone())
-        else {
-            return Ok(());
-        };
-        reply.accept().await;
-        tokio::spawn(async move {
-            match tokio::net::TcpStream::connect((host.as_str(), port)).await {
-                Ok(mut sock) => {
-                    let mut stream = channel.into_stream();
-                    let _ = tokio::io::copy_bidirectional(&mut sock, &mut stream).await;
-                }
-                Err(err) => {
-                    tracing::debug!(?err, %host, port, "remote forward: local connect");
-                    let _ = channel.close().await;
-                }
-            }
-        });
+        forward::accept_forwarded(&self.remote_forwards, channel, connected_port, reply).await;
         Ok(())
     }
 

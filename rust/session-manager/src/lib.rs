@@ -201,6 +201,7 @@ mod tests {
             startup_cmd: None,
             jump_host_id: jump,
             forwards,
+            remote_workspace_forwards: false,
         };
         let bastion = ssh::host_upsert(store.pool(), input("bastion", None, vec![]))
             .await
@@ -215,7 +216,17 @@ mod tests {
 
         let got = ssh::host_get(store.pool(), &app.id).await.unwrap().unwrap();
         assert_eq!(got.jump_host_id.as_deref(), Some(bastion.id.as_str()));
+        assert_eq!(got.forwards, vec![fwd.clone()]);
+        assert!(!got.remote_workspace_forwards);
+
+        // Opting remote workspaces in keeps the forwards.
+        let mut opted = input("app", Some(bastion.id.clone()), vec![fwd.clone()]);
+        opted.id = Some(app.id.clone());
+        opted.remote_workspace_forwards = true;
+        ssh::host_upsert(store.pool(), opted).await.expect("opt in");
+        let got = ssh::host_get(store.pool(), &app.id).await.unwrap().unwrap();
         assert_eq!(got.forwards, vec![fwd]);
+        assert!(got.remote_workspace_forwards);
 
         // Deleting the jump host leaves the dependent host connectable directly.
         ssh::host_delete(store.pool(), &bastion.id).await.unwrap();

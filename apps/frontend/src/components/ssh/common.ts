@@ -91,19 +91,27 @@ export function liveSessionFor(
 }
 
 /** Parse `8080:localhost:80` — ssh's own `-L` / `-R` argument order: the
- *  listen port, then where connections go. Returns an error sentence instead
+ *  listen port, then where connections go. A dynamic (`-D`) forward is just
+ *  the listen port: `1080` or `-D 1080`. Returns an error sentence instead
  *  of throwing so a form can show it inline. The Rust side validates again;
  *  this is for the message, not the trust boundary. */
 export function parseForward(
   kind: SshForwardSpec['kind'],
   text: string,
 ): SshForwardSpec | string {
+  const okPort = (p: number) => Number.isInteger(p) && p >= 1 && p <= 65535;
+  if (kind === 'dynamic') {
+    const d = /^\s*(?:-D\s*)?(\d+)\s*$/.exec(text);
+    if (!d) return 'use a listen port, e.g. 1080';
+    const bind = Number(d[1]);
+    if (!okPort(bind)) return 'listen port must be 1-65535';
+    return { kind, bind_port: bind, dest_host: '', dest_port: 0 };
+  }
   const m = /^\s*(\d+):(.+):(\d+)\s*$/.exec(text);
   if (!m) return 'use listenPort:host:port, e.g. 8080:localhost:80';
   const bind = Number(m[1]);
   const host = (m[2] ?? '').trim().replace(/^\[(.*)\]$/, '$1');
   const dest = Number(m[3]);
-  const okPort = (p: number) => Number.isInteger(p) && p >= 1 && p <= 65535;
   if (!okPort(bind)) return 'listen port must be 1-65535';
   if (!okPort(dest)) return 'destination port must be 1-65535';
   if (!host || /\s/.test(host)) return 'destination host is required, without spaces';
@@ -112,6 +120,23 @@ export function parseForward(
 
 /** `L 8080 → localhost:80`, for lists. */
 export function formatForward(f: SshForwardSpec): string {
+  if (f.kind === 'dynamic') return `D ${f.bind_port} → SOCKS5`;
   const host = f.dest_host.includes(':') ? `[${f.dest_host}]` : f.dest_host;
   return `${f.kind === 'local' ? 'L' : 'R'} ${f.bind_port} → ${host}:${f.dest_port}`;
+}
+
+/** Same forward, ignoring any live-session fields (id, state, counters). */
+export function sameForward(a: SshForwardSpec, b: SshForwardSpec): boolean {
+  return (
+    a.kind === b.kind &&
+    a.bind_port === b.bind_port &&
+    (a.kind === 'dynamic' || (a.dest_host === b.dest_host && a.dest_port === b.dest_port))
+  );
+}
+
+/** `list` with `spec` appended, as a bare spec, unless it's already there. */
+export function withForward(list: SshForwardSpec[], spec: SshForwardSpec): SshForwardSpec[] {
+  if (list.some((f) => sameForward(f, spec))) return list;
+  const { kind, bind_port, dest_host, dest_port } = spec;
+  return [...list, { kind, bind_port, dest_host, dest_port }];
 }

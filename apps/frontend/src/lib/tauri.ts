@@ -2310,12 +2310,15 @@ export interface SshHost {
   jump_host_id: string | null;
   /** Started automatically with every session to this host. */
   forwards: SshForwardSpec[];
+  /** Also start `forwards` when the host is opened as a remote workspace. */
+  remote_workspace_forwards: boolean;
 }
 
 /** `local` = `-L` (listen on 127.0.0.1 here), `remote` = `-R` (listen on the
- *  server's loopback). */
+ *  server's loopback), `dynamic` = `-D` (SOCKS5 on 127.0.0.1 here; the
+ *  destination fields are unused, `''` and `0`). */
 export interface SshForwardSpec {
-  kind: 'local' | 'remote';
+  kind: 'local' | 'remote' | 'dynamic';
   bind_port: number;
   dest_host: string;
   dest_port: number;
@@ -2325,7 +2328,14 @@ export interface SshForwardSpec {
 export interface SshForwardInfo extends SshForwardSpec {
   id: string;
   state: 'active' | 'stopped' | 'failed';
+  /** Why it failed to start. */
   error: string | null;
+  /** Connections being piped right now. */
+  active_conns: number;
+  /** Connections accepted since the forward was added. */
+  total_conns: number;
+  /** The latest connection that failed after the forward started. */
+  last_error: { at: number; msg: string } | null;
 }
 
 export interface SshHostInput {
@@ -2340,6 +2350,7 @@ export interface SshHostInput {
   startup_cmd?: string | null;
   jump_host_id?: string | null;
   forwards?: SshForwardSpec[];
+  remote_workspace_forwards?: boolean;
 }
 
 export interface SshKey {
@@ -2446,6 +2457,18 @@ export async function sshForwardSetActive(
 
 export async function sshForwardRemove(id: SshId, forwardId: string): Promise<SshForwardInfo[]> {
   return invoke<SshForwardInfo[]>('ssh_forward_remove', { id, forwardId });
+}
+
+/** `ssh://forward/<id>`: the session's whole forward list, pushed whenever a
+ *  forward starts, stops or fails, or a connection through one opens, closes
+ *  or fails. */
+export async function onSshForwards(
+  id: SshId,
+  handler: (forwards: SshForwardInfo[]) => void,
+): Promise<UnlistenFn> {
+  return listen<{ id: SshId; forwards: SshForwardInfo[] }>(`ssh://forward/${id}`, (event) => {
+    handler(event.payload.forwards);
+  });
 }
 
 // ─── Host key verification ───────────────────────────────────────────────

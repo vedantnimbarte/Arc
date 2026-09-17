@@ -172,6 +172,7 @@ export const useSsh = create<SshStateShape>((set, get) => ({
         last_used_at: null,
         jump_host_id: input.jump_host_id ?? null,
         forwards: input.forwards ?? [],
+        remote_workspace_forwards: input.remote_workspace_forwards ?? false,
       };
       set((s) => ({ hosts: dedupe([...s.hosts, fake]) }));
       return fake;
