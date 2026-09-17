@@ -33,7 +33,7 @@ it.
 - **Code Editor** — CodeMirror 6 with syntax highlighting, multi-cursor, optional Vim mode,
   optional LSP (diagnostics, hover, completion, go-to-definition, find references, rename,
   and format-on-save), real-time file watching, and a live Markdown preview (source,
-  side-by-side or rendered; ⇧⌘D).
+  side-by-side or rendered; ⇧⌘D) that shows images from the open workspace.
 - **File Tree & Search** — Browse, open, and manage files with git status decorations, plus
   BM25 full-text search backed by a tantivy index and a literal find-and-replace across
   the workspace (previewed per file before anything is written).
@@ -82,8 +82,10 @@ it.
 - **Debugger** — A Debug Adapter Protocol client that drives adapters you already have
   installed: debugpy (`python -m debugpy.adapter`), `lldb-dap` / `lldb-vscode` for
   C, C++ and Rust, and Delve (`dlv dap`, over TCP) for Go. Reads `.vscode/launch.json`
-  or offers quick configs, with gutter breakpoints, stepping (F5 / F10 / F11), call
-  stack, a lazily expanded variables tree, and a debug console.
+  or offers quick configs (honouring `python` / `pythonPath`), with gutter breakpoints that
+  follow your edits, conditions, hit counts and logpoints (right-click a breakpoint),
+  stepping (F5 / F10 / F11), call stack, a lazily expanded variables tree, watch
+  expressions, and a debug console.
 - **Containers** — Lists Docker containers, running or not, grouped by compose project,
   with start / stop / restart / remove on each row. Logs and `compose up` open a terminal
   tab rather than a cramped pane. Says plainly whether Docker is missing or just not

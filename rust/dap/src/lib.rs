@@ -56,11 +56,13 @@ pub enum Transport {
     Tcp,
 }
 
-/// Breakpoint lines (1-based) for one source file.
+/// Breakpoints for one source file, as DAP `SourceBreakpoint`s (`line`, plus
+/// optional `condition` / `hitCondition` / `logMessage`). Options the adapter
+/// doesn't advertise support for are dropped before they're sent.
 #[derive(Debug, Clone, Deserialize)]
 pub struct SourceBreakpoints {
     pub path: String,
-    pub lines: Vec<u32>,
+    pub breakpoints: Vec<Value>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -336,7 +338,10 @@ async fn handshake(
     for bp in &p.breakpoints {
         // One file's breakpoints failing shouldn't sink the whole session.
         let body = s
-            .request("setBreakpoints", set_breakpoints_args(&bp.path, &bp.lines))
+            .request(
+                "setBreakpoints",
+                set_breakpoints_args(&bp.path, &bp.breakpoints, &caps),
+            )
             .await
             .unwrap_or(Value::Null);
         breakpoints.push(json!({ "path": bp.path, "breakpoints": body.get("breakpoints") }));
@@ -368,8 +373,31 @@ fn initialize_args(adapter_id: &str) -> Value {
     })
 }
 
-fn set_breakpoints_args(path: &str, lines: &[u32]) -> Value {
-    let bps: Vec<Value> = lines.iter().map(|l| json!({ "line": l })).collect();
+/// `SourceBreakpoint` options and the capability that allows sending each.
+/// The frontend gates its own mid-session `setBreakpoints` the same way
+/// (`breakpointsPayload` in state/debug.ts); only here are the capabilities
+/// not known to it yet.
+const BREAKPOINT_OPTIONS: [(&str, &str); 3] = [
+    ("condition", "supportsConditionalBreakpoints"),
+    ("hitCondition", "supportsHitConditionalBreakpoints"),
+    ("logMessage", "supportsLogPoints"),
+];
+
+fn set_breakpoints_args(path: &str, breakpoints: &[Value], caps: &Value) -> Value {
+    let bps: Vec<Value> = breakpoints
+        .iter()
+        .cloned()
+        .map(|mut bp| {
+            if let Some(bp) = bp.as_object_mut() {
+                for (option, cap) in BREAKPOINT_OPTIONS {
+                    if caps.get(cap).and_then(Value::as_bool) != Some(true) {
+                        bp.remove(option);
+                    }
+                }
+            }
+            bp
+        })
+        .collect();
     json!({ "source": { "path": path }, "breakpoints": bps })
 }
 
@@ -578,6 +606,22 @@ mod tests {
         );
     }
 
+    #[test]
+    fn breakpoint_options_need_capabilities() {
+        let bps = [
+            json!({ "line": 3, "condition": "i == 2", "hitCondition": "2", "logMessage": "i={i}" }),
+        ];
+        let args = set_breakpoints_args(
+            "a.py",
+            &bps,
+            &json!({ "supportsConditionalBreakpoints": true, "supportsLogPoints": false }),
+        );
+        assert_eq!(
+            args,
+            json!({ "source": { "path": "a.py" }, "breakpoints": [{ "line": 3, "condition": "i == 2" }] })
+        );
+    }
+
     /// Real run against debugpy: `ARC_DAP_PYTHON=<python with debugpy>
     /// cargo test -p arc-dap -- --ignored`.
     #[tokio::test]
@@ -587,7 +631,11 @@ mod tests {
         let dir = std::env::temp_dir().join("arc-dap-smoke");
         std::fs::create_dir_all(&dir).unwrap();
         let script = dir.join("hello.py");
-        std::fs::write(&script, "x = 1\ny = x + 1\nprint(y)\n").unwrap();
+        std::fs::write(
+            &script,
+            "x = 1\ny = x + 1\nfor i in range(5):\n    z = i * 2\nprint(y, z)\n",
+        )
+        .unwrap();
         let script = script.to_string_lossy().to_string();
 
         let (tx, mut rx) = mpsc::unbounded_channel();
@@ -607,7 +655,10 @@ mod tests {
                     }),
                     breakpoints: vec![SourceBreakpoints {
                         path: script.clone(),
-                        lines: vec![2],
+                        breakpoints: vec![
+                            json!({ "line": 2 }),
+                            json!({ "line": 4, "condition": "i == 3" }),
+                        ],
                     }],
                 },
             )
@@ -615,16 +666,19 @@ mod tests {
             .expect("start");
         println!("start: {started}");
 
-        let stopped = tokio::time::timeout(Duration::from_secs(30), async {
-            while let Some(ev) = rx.recv().await {
-                if ev.event == "stopped" {
-                    return ev.body;
+        async fn next_stop(rx: &mut mpsc::UnboundedReceiver<DapEvent>) -> Value {
+            tokio::time::timeout(Duration::from_secs(30), async {
+                while let Some(ev) = rx.recv().await {
+                    if ev.event == "stopped" {
+                        return ev.body;
+                    }
                 }
-            }
-            panic!("event channel closed");
-        })
-        .await
-        .expect("stopped event");
+                panic!("event channel closed");
+            })
+            .await
+            .expect("stopped event")
+        }
+        let stopped = next_stop(&mut rx).await;
         let thread_id = stopped["threadId"].as_i64().expect("threadId");
         let stack = mgr
             .request("smoke", "stackTrace", json!({ "threadId": thread_id }))
@@ -632,6 +686,27 @@ mod tests {
             .expect("stackTrace");
         println!("stack: {stack}");
         assert_eq!(stack["stackFrames"][0]["line"], 2);
+
+        // The conditional breakpoint on line 4 only fires once `i == 3`.
+        mgr.request("smoke", "continue", json!({ "threadId": thread_id }))
+            .await
+            .expect("continue");
+        next_stop(&mut rx).await;
+        let stack = mgr
+            .request("smoke", "stackTrace", json!({ "threadId": thread_id }))
+            .await
+            .expect("stackTrace");
+        let frame = &stack["stackFrames"][0];
+        assert_eq!(frame["line"], 4);
+        let i = mgr
+            .request(
+                "smoke",
+                "evaluate",
+                json!({ "expression": "i", "frameId": frame["id"], "context": "watch" }),
+            )
+            .await
+            .expect("evaluate");
+        assert_eq!(i["result"], "3");
         mgr.stop("smoke").await.unwrap();
     }
 }

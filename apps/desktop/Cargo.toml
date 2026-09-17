@@ -11,7 +11,9 @@ description = "ARC — terminal, editor & developer workspace (Tauri shell)"
 tauri-build = { workspace = true }
 
 [dependencies]
-tauri = { workspace = true }
+# `protocol-asset`: the markdown preview loads local images (scoped at runtime,
+# see `fs_allow_asset_dir`).
+tauri = { workspace = true, features = ["protocol-asset"] }
 tauri-plugin-autostart = { workspace = true }
 tauri-plugin-window-state = { workspace = true }
 tauri-plugin-notification = { workspace = true }

@@ -121,6 +121,7 @@ fn main() {
             commands::fs::fs_delete,
             commands::fs::fs_reveal,
             commands::fs::fs_create_dir,
+            commands::fs::fs_allow_asset_dir,
             commands::session::session_load,
             commands::session::session_save_tabs,
             commands::session::session_set_workspace,
