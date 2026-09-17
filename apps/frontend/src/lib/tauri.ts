@@ -3058,3 +3058,53 @@ export interface DbTableSchema {
 export async function dbTableSchema(id: string, table: string): Promise<DbTableSchema> {
   return invoke<DbTableSchema>('db_table_schema', { id, table });
 }
+
+/**
+ * Re-run `sql` in Rust and stream every row into `path`, past the grid's
+ * 20,000-row cap. Resolves with the row count; `onProgress` gets the running
+ * count. SELECT-like statements only. Cancel with `dbExportCancel(exportId)`.
+ */
+export async function dbExport(
+  id: string,
+  sql: string,
+  format: 'csv' | 'json',
+  path: string,
+  exportId: string,
+  onProgress: (rows: number) => void,
+): Promise<number> {
+  const unlisten = await listen<number>(`db://export/${exportId}`, (e) => onProgress(e.payload));
+  try {
+    return await invoke<number>('db_export', { id, sql, format, path, exportId });
+  } finally {
+    unlisten();
+  }
+}
+
+export async function dbExportCancel(exportId: string): Promise<void> {
+  await invoke('db_export_cancel', { exportId });
+}
+
+/** One statement from a connection's query history. Mirrors `arc_session_manager::DbQueryHistoryEntry`. */
+export interface DbQueryHistoryEntry {
+  id: number;
+  connection_id: string;
+  sql: string;
+  executed_at: number;
+  duration_ms: number;
+  /** Rows returned or affected; null when the statement failed. */
+  row_count: number | null;
+  error: string | null;
+}
+
+/** Newest first, at most 500 per connection. */
+export async function dbHistoryList(id: string): Promise<DbQueryHistoryEntry[]> {
+  return invoke<DbQueryHistoryEntry[]>('db_history_list', { id });
+}
+
+export async function dbHistoryDelete(historyId: number): Promise<void> {
+  await invoke('db_history_delete', { historyId });
+}
+
+export async function dbHistoryClear(id: string): Promise<void> {
+  await invoke('db_history_clear', { id });
+}

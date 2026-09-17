@@ -68,9 +68,11 @@ it.
 - **API Client** — A built-in Postman-style REST client (collections, environments, history, GraphQL bodies, cURL import/copy, OpenAPI 3.x JSON import).
 - **Database Client** — Query PostgreSQL, MySQL, and SQLite from a tab: saved connections,
   a table list with a per-table schema view (columns, indexes, foreign keys), a SQL editor,
-  and a results grid you can export to CSV or JSON. `DROP`, `TRUNCATE`, and `UPDATE`/`DELETE`
-  without a `WHERE` ask before they run. Passwords go to your OS credential vault; only
-  `user@host` is stored alongside the connection.
+  and a results grid you can export to CSV or JSON — or export the full result, streamed to
+  disk past the grid's 20,000-row cap. Per-connection query history, and an EXPLAIN plan tree
+  (optionally ANALYZE on Postgres) with the expensive nodes highlighted. `DROP`, `TRUNCATE`,
+  and `UPDATE`/`DELETE` without a `WHERE` ask before they run. Passwords go to your OS
+  credential vault; only `user@host` is stored alongside the connection.
 - **Problems Panel** — Runs the project's own checkers — `tsc`, `cargo check`, ESLint,
   Ruff, `go vet` — and turns what they print into rows that open the file at the offending
   line. Whichever apply are detected from the workspace root; run them all or one at a

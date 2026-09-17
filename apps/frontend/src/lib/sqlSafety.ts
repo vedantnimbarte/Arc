@@ -14,14 +14,41 @@ import type { DbBackend } from './tauri';
  * missed one. `backend` picks MySQL's backslash escapes and `#` comments.
  */
 export function unsafeStatements(sql: string, backend?: DbBackend): string[] {
+  return statements(sql, backend)
+    .map(verdict)
+    .filter((r): r is string => r !== null);
+}
+
+/**
+ * True when `sql` is exactly one read-only statement — SELECT, VALUES, TABLE,
+ * SHOW, or a WITH whose own verb is SELECT — with no INSERT/UPDATE/DELETE/MERGE
+ * anywhere inside it (Postgres allows those in a CTE). Gates the full-result
+ * export, which re-runs the statement.
+ */
+export function isSelectLike(sql: string, backend?: DbBackend): boolean {
+  const all = statements(sql, backend);
+  if (all.length !== 1) return false;
+  const words = all[0]!;
+  if (words.some((w) => WRITES.has(w.word))) return false;
+  const top = words.filter((w) => w.depth === 0).map((w) => w.word);
+  // `(SELECT …) UNION (SELECT …)` has no top-level verb; its first word is.
+  const first = words[0]!.depth === 0 ? top[0] : words[0]!.word;
+  const verb = first === 'with' ? top.find((w) => VERBS.has(w)) : first;
+  return verb === 'select' || verb === 'values' || verb === 'table' || verb === 'show';
+}
+
+type Word = { word: string; depth: number };
+
+/** Lex `sql` into its `;`-separated statements, each a list of bare words
+ *  with their paren depth. Empty statements are dropped. */
+function statements(sql: string, backend?: DbBackend): Word[][] {
   const mysql = backend === 'mysql';
-  const reasons: string[] = [];
-  let words: Array<{ word: string; depth: number }> = [];
+  const out: Word[][] = [];
+  let words: Word[] = [];
   let depth = 0;
 
   const flush = () => {
-    const reason = verdict(words);
-    if (reason) reasons.push(reason);
+    if (words.length > 0) out.push(words);
     words = [];
     depth = 0;
   };
@@ -75,12 +102,13 @@ export function unsafeStatements(sql: string, backend?: DbBackend): string[] {
     }
   }
   flush();
-  return reasons;
+  return out;
 }
 
 const VERBS = new Set(['select', 'insert', 'update', 'delete', 'merge', 'values']);
+const WRITES = new Set(['insert', 'update', 'delete', 'merge']);
 
-function verdict(words: Array<{ word: string; depth: number }>): string | null {
+function verdict(words: Word[]): string | null {
   const top = words.filter((w) => w.depth === 0).map((w) => w.word);
   const first = top[0];
   if (first === 'drop' || first === 'truncate') return first.toUpperCase();

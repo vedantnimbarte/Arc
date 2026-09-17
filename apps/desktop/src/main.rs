@@ -279,6 +279,12 @@ fn main() {
             // Database client: schema view + results export.
             commands::db::db_table_schema,
             commands::fs::fs_pick_save_file,
+            // Database client: full-result export + query history.
+            commands::db::db_export,
+            commands::db::db_export_cancel,
+            commands::db::db_history_list,
+            commands::db::db_history_delete,
+            commands::db::db_history_clear,
             commands::network::network_probe_port,
             commands::network::shell_open_external,
             commands::fonts::fonts_list_system,
