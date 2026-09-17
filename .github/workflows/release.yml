@@ -17,11 +17,11 @@ name: release
 # it does not survive a build matrix, and both v0.4.0 and v0.5.0 published
 # themselves the moment their last platform finished.
 #
-# Code signing (a separate thing) is not wired up yet — the produced installers are UNSIGNED, so macOS
-# Gatekeeper and Windows SmartScreen will warn on first run (see INSTALLATION.md
-# for the bypass). To sign later, add the secrets tauri-action documents
-# (APPLE_CERTIFICATE / APPLE_SIGNING_IDENTITY / notarization creds; Windows
-# WINDOWS_CERTIFICATE) and they flow through automatically.
+# Code signing (a separate thing) switches itself on per platform once its
+# secrets exist — docs/CODE_SIGNING.md has the secret names and how to make
+# each value. Until then the installers are UNSIGNED, so macOS Gatekeeper and
+# Windows SmartScreen warn on first run (INSTALLATION.md has the bypass), and
+# the release notes say so.
 on:
   push:
     tags: ['v*']
@@ -47,6 +47,11 @@ jobs:
             target: ''
             args: ''
     runs-on: ${{ matrix.platform }}
+    # Only whether the signing secrets exist, never their values: the steps
+    # that need a value read it themselves.
+    env:
+      HAS_APPLE_SIGNING: ${{ secrets.APPLE_CERTIFICATE != '' }}
+      HAS_WINDOWS_SIGNING: ${{ secrets.WINDOWS_CERTIFICATE != '' }}
     steps:
       - uses: actions/checkout@v4
 
@@ -78,6 +83,61 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
 
+      # The bundler treats a macOS signing variable that is *set* as present,
+      # and a secret that doesn't exist still arrives as an empty string — so
+      # export only the ones with a value. With none, this does nothing and
+      # the build stays unsigned.
+      - name: Export macOS signing env
+        if: runner.os == 'macOS'
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+          # Contents of AuthKey_<key id>.p8; the bundler wants a file path.
+          APPLE_API_PRIVATE_KEY: ${{ secrets.APPLE_API_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          for v in APPLE_CERTIFICATE APPLE_CERTIFICATE_PASSWORD APPLE_SIGNING_IDENTITY \
+                   APPLE_ID APPLE_PASSWORD APPLE_TEAM_ID APPLE_API_ISSUER APPLE_API_KEY; do
+            if [ -n "${!v}" ]; then
+              { echo "$v<<__ARC_EOF__"; echo "${!v}"; echo "__ARC_EOF__"; } >> "$GITHUB_ENV"
+            fi
+          done
+          if [ -n "$APPLE_API_PRIVATE_KEY" ]; then
+            key="$RUNNER_TEMP/AuthKey_${APPLE_API_KEY}.p8"
+            printf '%s\n' "$APPLE_API_PRIVATE_KEY" > "$key"
+            echo "APPLE_API_KEY_PATH=$key" >> "$GITHUB_ENV"
+          fi
+
+      # Windows: import the PFX into the user store and point the bundler at it
+      # through a config overlay (`tauri build --config`), so tauri.conf.json
+      # carries no thumbprint and an unsigned build needs no special case.
+      - name: Import Windows signing certificate
+        id: wincert
+        if: runner.os == 'Windows' && env.HAS_WINDOWS_SIGNING == 'true'
+        shell: pwsh
+        env:
+          WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
+          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+        run: |
+          $pfx = Join-Path $env:RUNNER_TEMP 'certificate.pfx'
+          [IO.File]::WriteAllBytes($pfx, [Convert]::FromBase64String($env:WINDOWS_CERTIFICATE))
+          $password = ConvertTo-SecureString -String $env:WINDOWS_CERTIFICATE_PASSWORD -Force -AsPlainText
+          $cert = Import-PfxCertificate -FilePath $pfx -CertStoreLocation Cert:\CurrentUser\My -Password $password
+          Remove-Item $pfx
+          $overlay = Join-Path $env:RUNNER_TEMP 'windows-signing.json'
+          @{ bundle = @{ windows = @{
+            certificateThumbprint = $cert.Thumbprint
+            digestAlgorithm = 'sha256'
+            timestampUrl = 'http://timestamp.digicert.com'
+          } } } | ConvertTo-Json -Depth 4 | Set-Content -Encoding utf8 $overlay
+          "args=--config $overlay" >> $env:GITHUB_OUTPUT
+
       - uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -89,10 +149,16 @@ jobs:
           projectPath: apps/desktop
           tagName: ${{ github.ref_name }}
           releaseName: ARC ${{ github.ref_name }}
-          releaseBody: 'Unsigned builds — see INSTALLATION.md for the macOS/Windows first-run bypass.'
+          # Every matrix job computes the same text; whichever one creates the
+          # release sets it.
+          releaseBody: >-
+            ${{ env.HAS_APPLE_SIGNING == 'true' && env.HAS_WINDOWS_SIGNING == 'true' && 'Signed builds — macOS builds are signed and notarized, Windows builds are Authenticode-signed.'
+            || env.HAS_APPLE_SIGNING == 'true' && 'macOS builds are signed and notarized. Windows builds are unsigned — see INSTALLATION.md for the first-run bypass.'
+            || env.HAS_WINDOWS_SIGNING == 'true' && 'Windows builds are Authenticode-signed. macOS builds are unsigned — see INSTALLATION.md for the first-run bypass.'
+            || 'Unsigned builds — see INSTALLATION.md for the macOS/Windows first-run bypass.' }}
           releaseDraft: true
           prerelease: false
-          args: ${{ matrix.args }}
+          args: ${{ matrix.args }} ${{ steps.wincert.outputs.args }}
 
   # Put the release back into draft once every platform has uploaded.
   #
