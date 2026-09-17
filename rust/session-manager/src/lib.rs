@@ -45,6 +45,23 @@ pub enum Error {
 
 pub type Result<T, E = Error> = std::result::Result<T, E>;
 
+/// Env var that relocates every file ARC writes for itself (database, logs,
+/// scratch buffers, window geometry, webview profile). The e2e suite points it
+/// at a temp dir so a test run never touches the user's real data.
+pub const DATA_DIR_ENV: &str = "ARC_DATA_DIR";
+
+/// `$ARC_DATA_DIR`, if set and non-empty.
+pub fn data_dir_override() -> Option<PathBuf> {
+    std::env::var_os(DATA_DIR_ENV)
+        .filter(|v| !v.is_empty())
+        .map(PathBuf::from)
+}
+
+/// Where ARC keeps its own files: `$ARC_DATA_DIR`, else `<data_dir>/arc`.
+pub fn data_dir() -> Option<PathBuf> {
+    data_dir_override().or_else(|| dirs::data_dir().map(|d| d.join("arc")))
+}
+
 #[derive(Debug, Clone)]
 pub struct SessionStore {
     pool: SqlitePool,
@@ -56,8 +73,7 @@ impl SessionStore {
     ///   macOS:   ~/Library/Application Support/arc/arc.db
     ///   Windows: %APPDATA%\arc\arc.db
     pub async fn open_default() -> Result<Self> {
-        let mut dir = dirs::data_dir().ok_or(Error::NoDataDir)?;
-        dir.push("arc");
+        let dir = data_dir().ok_or(Error::NoDataDir)?;
         tokio::fs::create_dir_all(&dir).await?;
         let path = dir.join("arc.db");
         tracing::info!(?path, "opening session store");
@@ -70,8 +86,7 @@ impl SessionStore {
     /// rather than panic. Returns the path we moved aside, if any, so the
     /// caller can tell the user their local history was reset.
     pub async fn open_default_or_recover() -> Result<(Self, Option<PathBuf>)> {
-        let mut dir = dirs::data_dir().ok_or(Error::NoDataDir)?;
-        dir.push("arc");
+        let dir = data_dir().ok_or(Error::NoDataDir)?;
         tokio::fs::create_dir_all(&dir).await?;
         let path = dir.join("arc.db");
         match Self::open_at(&path).await {
@@ -184,6 +199,16 @@ mod tests {
             .expect("reload");
         assert_eq!(again.tabs.len(), 2);
         assert_eq!(again.session.active_tab_id.as_deref(), Some("t2"));
+    }
+
+    #[tokio::test]
+    async fn concurrent_first_loads_share_one_session() {
+        let store = fresh_store().await;
+        let (a, b) = tokio::join!(
+            tabs::current_or_create(store.pool()),
+            tabs::current_or_create(store.pool()),
+        );
+        assert_eq!(a.expect("a").session.id, b.expect("b").session.id);
     }
 
     #[tokio::test]
