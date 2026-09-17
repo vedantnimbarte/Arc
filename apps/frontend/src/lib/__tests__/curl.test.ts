@@ -106,4 +106,67 @@ describe('toCurl', () => {
       }),
     ).toBe(`curl https://x.test -X POST \\\n  --data-urlencode 'a=b c'`);
   });
+
+  it('round-trips multipart text and file fields', () => {
+    const cmd = toCurl({
+      method: 'POST',
+      url: 'https://x.test/up',
+      headers: [],
+      body: {
+        kind: 'multipart',
+        entries: [
+          { name: 'note', value: '@not a file' },
+          { name: 'doc', value: 'C:/Users/me/My Report.pdf', file: true },
+        ],
+      },
+    });
+    expect(cmd).toBe(
+      `curl https://x.test/up -X POST \\\n  --form-string 'note=@not a file' \\\n  -F 'doc=@C:/Users/me/My Report.pdf'`,
+    );
+    expect(parseCurl(cmd)).toEqual({
+      method: 'POST',
+      url: 'https://x.test/up',
+      headers: [],
+      body: null,
+      form: [
+        { name: 'note', value: '@not a file', file: false },
+        { name: 'doc', value: 'C:/Users/me/My Report.pdf', file: true },
+      ],
+    });
+  });
+
+  it('round-trips form-urlencoded rows', () => {
+    const cmd = toCurl({
+      method: 'POST',
+      url: 'https://x.test',
+      headers: [],
+      body: { kind: 'formurlencoded', entries: [{ name: 'q', value: 'a&b=c' }, { name: 'n', value: '' }] },
+    });
+    expect(parseCurl(cmd)).toMatchObject({
+      method: 'POST',
+      urlencoded: [
+        { name: 'q', value: 'a&b=c' },
+        { name: 'n', value: '' },
+      ],
+    });
+  });
+});
+
+describe('parseCurl forms', () => {
+  it('reads -F, --form and glued -F with part options', () => {
+    const r = parseCurl(`curl https://x.test -F 'a=1' --form 'f=@./pic.png;type=image/png' -Fb=@c.txt`);
+    expect(r.method).toBe('POST');
+    expect(r.body).toBeNull();
+    expect(r.form).toEqual([
+      { name: 'a', value: '1', file: false },
+      { name: 'f', value: './pic.png', file: true },
+      { name: 'b', value: 'c.txt', file: true },
+    ]);
+  });
+
+  it('keeps a mixed -d / --data-urlencode body as raw text', () => {
+    const r = parseCurl('curl https://x.test -d a=1 --data-urlencode b=2');
+    expect(r.body).toBe('a=1&b=2');
+    expect(r.urlencoded).toBeUndefined();
+  });
 });

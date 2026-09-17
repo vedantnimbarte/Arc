@@ -445,7 +445,14 @@ export type HttpBodyDto =
   | { kind: 'none' }
   | { kind: 'raw'; text: string; content_type: string }
   | { kind: 'formurlencoded'; entries: HttpHeaderKV[] }
-  | { kind: 'multipart'; entries: HttpHeaderKV[] };
+  | { kind: 'multipart'; entries: HttpFormEntry[] };
+
+/** A multipart field. With `file`, `value` is a local path Rust reads from disk. */
+export interface HttpFormEntry {
+  name: string;
+  value: string;
+  file?: boolean;
+}
 
 export interface HttpRequestDto {
   method: string;

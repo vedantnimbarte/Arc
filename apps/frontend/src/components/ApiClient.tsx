@@ -14,6 +14,7 @@ import {
   Trash2,
   X,
   Globe,
+  Paperclip,
   Sparkles,
 } from 'lucide-react';
 import { cn } from '../lib/cn';
@@ -33,6 +34,7 @@ import {
   apiclientListRequests,
   apiclientUpsertCollection,
   apiclientUpsertRequest,
+  fsPickFiles,
   httpRequest,
   type ApiCollection,
   type ApiEnvironment,
@@ -49,6 +51,7 @@ import { toastError } from '../state/toast';
 import { copyText } from '../lib/clipboard';
 import { parseCurl, toCurl } from '../lib/curl';
 import { parseOpenApi } from '../lib/openapi';
+import { extractVariables, type PostVarResult, type PostVarRule } from '../lib/responseVars';
 
 interface Props {
   tabId: string;
@@ -89,6 +92,8 @@ interface KV {
   name: string;
   value: string;
   enabled: boolean;
+  /** Multipart rows only: `value` is a local file path, uploaded by Rust. */
+  file?: boolean;
 }
 
 interface AuthState {
@@ -119,10 +124,15 @@ interface RequestDraft {
   formBody: KV[];
   multipartBody: KV[];
   auth: AuthState;
+  /** Post-response rules that set environment variables. Optional — older
+   *  persisted drafts lack it. */
+  postVars?: PostVarRule[];
   /** True while a Send is in flight. Transient — not persisted. */
   pending?: boolean;
   /** Last response received in this sub-tab. Transient — not persisted. */
   response?: HttpResponseDto;
+  /** What the post-response rules did with `response`. Transient. */
+  setVars?: PostVarResult[];
   /** Send error string when the last attempt failed. Transient. */
   error?: string;
   /** Dirty since the last save into the linked saved request. */
@@ -137,7 +147,7 @@ interface TabState {
   builderTab: BuilderTab;
 }
 
-type BuilderTab = 'params' | 'headers' | 'body' | 'auth';
+type BuilderTab = 'params' | 'headers' | 'body' | 'auth' | 'post';
 type ResponseTab = 'pretty' | 'raw' | 'headers' | 'preview';
 
 // ─── State helpers ───────────────────────────────────────────────────────
@@ -199,6 +209,7 @@ function parseTabState(raw: string | undefined): TabState {
       pending: false,
       response: undefined,
       error: undefined,
+      setVars: undefined,
     }));
     return {
       drafts,
@@ -219,7 +230,9 @@ function parseTabState(raw: string | undefined): TabState {
 function serializeTabState(state: TabState): string {
   return JSON.stringify({
     ...state,
-    drafts: state.drafts.map(({ pending: _p, response: _r, error: _e, ...rest }) => rest),
+    drafts: state.drafts.map(
+      ({ pending: _p, response: _r, error: _e, setVars: _v, ...rest }) => rest,
+    ),
   });
 }
 
@@ -332,7 +345,16 @@ function buildWireRequest(draft: RequestDraft, vars: Record<string, string>): Ht
       body = { kind: 'formurlencoded', entries: interpolateKV(draft.formBody, vars) };
       break;
     case 'multipart':
-      body = { kind: 'multipart', entries: interpolateKV(draft.multipartBody, vars) };
+      body = {
+        kind: 'multipart',
+        entries: draft.multipartBody
+          .filter((kv) => kv.enabled && kv.name.trim().length > 0)
+          .map((kv) => ({
+            name: interpolate(kv.name, vars),
+            value: interpolate(kv.value, vars),
+            file: !!kv.file,
+          })),
+      };
       break;
     case 'graphql': {
       const rawVars = interpolate(draft.graphqlVariables ?? '', vars).trim();
@@ -381,6 +403,9 @@ function draftToSavedInput(
       graphqlVariables: d.graphqlVariables ?? '',
       formBody: d.formBody,
       multipartBody: d.multipartBody,
+      // Rides in body_json so saved requests keep their rules without a
+      // schema change.
+      postVars: d.postVars ?? [],
     }),
     auth_json: JSON.stringify(d.auth),
     position,
@@ -408,23 +433,40 @@ function KvTable({
   onChange,
   nameSuggestions,
   placeholder,
+  allowFiles,
 }: {
   rows: KV[];
   onChange: (next: KV[]) => void;
   nameSuggestions?: string[];
   placeholder?: { name?: string; value?: string };
+  /** Multipart: each row can switch its value to a file picked from disk. */
+  allowFiles?: boolean;
 }) {
   const update = (id: string, patch: Partial<KV>) =>
     onChange(rows.map((r) => (r.id === id ? { ...r, ...patch } : r)));
   const remove = (id: string) => onChange(rows.filter((r) => r.id !== id));
   const append = () => onChange([...rows, newKV()]);
+  const toggleFile = async (row: KV) => {
+    if (row.file) {
+      update(row.id, { file: false, value: '' });
+      return;
+    }
+    try {
+      const [path] = await fsPickFiles();
+      if (path) update(row.id, { file: true, value: path });
+    } catch (err) {
+      toastError(err instanceof Error ? err.message : String(err));
+    }
+  };
+  const cols = allowFiles ? 'grid-cols-[20px_1fr_1fr_24px_24px]' : 'grid-cols-[20px_1fr_1fr_24px]';
 
   return (
     <div className="overflow-hidden rounded-md border border-edge-1">
-      <div className="grid grid-cols-[20px_1fr_1fr_24px] items-center gap-2 border-b border-edge-1 bg-scrim-1 px-2 py-1.5 font-display text-2xs uppercase tracking-wider text-fg-subtle/70">
+      <div className={cn('grid items-center gap-2 border-b border-edge-1 bg-scrim-1 px-2 py-1.5 font-display text-2xs uppercase tracking-wider text-fg-subtle/70', cols)}>
         <span />
         <span>Key</span>
         <span>Value</span>
+        {allowFiles && <span />}
         <span />
       </div>
       {rows.length === 0 && (
@@ -435,7 +477,7 @@ function KvTable({
       {rows.map((row) => (
         <div
           key={row.id}
-          className="grid grid-cols-[20px_1fr_1fr_24px] items-center gap-2 border-b border-edge-1 px-2 py-1.5 last:border-b-0 hover:bg-surface-1"
+          className={cn('grid items-center gap-2 border-b border-edge-1 px-2 py-1.5 last:border-b-0 hover:bg-surface-1', cols)}
         >
           <input
             type="checkbox"
@@ -461,9 +503,27 @@ function KvTable({
           <input
             value={row.value}
             onChange={(e) => update(row.id, { value: e.target.value })}
+            readOnly={row.file}
+            title={row.file ? row.value : undefined}
             placeholder={placeholder?.value ?? 'value'}
-            className="bg-transparent font-mono text-sm text-fg-base outline-none placeholder:text-fg-subtle/50"
+            className={cn(
+              'bg-transparent font-mono text-sm text-fg-base outline-none placeholder:text-fg-subtle/50',
+              row.file && 'text-accent',
+            )}
           />
+          {allowFiles && (
+            <button
+              onClick={() => void toggleFile(row)}
+              className={cn(
+                'flex h-5 w-5 items-center justify-center rounded transition-colors hover:bg-surface-2',
+                row.file ? 'text-accent' : 'text-fg-subtle/70 hover:text-fg-base',
+              )}
+              aria-label={row.file ? 'Use a text value' : 'Pick a file'}
+              title={row.file ? 'File — click to use a text value instead' : 'Pick a file to upload'}
+            >
+              <Paperclip size={11} strokeWidth={2} />
+            </button>
+          )}
           <button
             onClick={() => remove(row.id)}
             className="flex h-5 w-5 items-center justify-center rounded text-fg-subtle/70 transition-colors hover:bg-surface-2 hover:text-rose-300"
@@ -633,6 +693,42 @@ export function ApiClient({ tabId }: Props) {
     void refreshAll();
   }, [refreshAll]);
 
+  // ─── Post-response variables ──────────────────────────────────────────
+
+  /** Run a draft's post-response rules and write what they found into the
+   *  active environment — the same layer `{{var}}` reads from, so the next
+   *  request sees it. Returns per-rule results for the response pane. */
+  const applyPostVars = useCallback(
+    async (rules: PostVarRule[], response: HttpResponseDto): Promise<PostVarResult[]> => {
+      const results = extractVariables(rules, response);
+      const found = results.filter((r) => r.value !== undefined);
+      if (found.length === 0) return results;
+      const env = envs.find((e) => e.is_active);
+      const fail = (error: string) =>
+        results.map((r) => (r.value === undefined ? r : { variable: r.variable, error }));
+      if (!sessionId || !env) return fail('no active environment');
+      try {
+        let current: Record<string, unknown> = {};
+        try {
+          current = JSON.parse(env.vars_json) as Record<string, unknown>;
+        } catch {
+          // Unreadable vars are replaced, same as saving the editor would.
+        }
+        for (const r of found) current[r.variable] = r.value;
+        const saved = await apiclientEnvsUpsert(sessionId, {
+          id: env.id,
+          name: env.name,
+          varsJson: JSON.stringify(current),
+        });
+        setEnvs((list) => list.map((e) => (e.id === saved.id ? { ...saved, is_active: e.is_active } : e)));
+        return results;
+      } catch (err) {
+        return fail(err instanceof Error ? err.message : String(err));
+      }
+    },
+    [envs, sessionId],
+  );
+
   // ─── Send action ──────────────────────────────────────────────────────
 
   const send = useCallback(
@@ -648,10 +744,15 @@ export function ApiClient({ tabId }: Props) {
       }
       const { url } = req;
 
-      updateDraft(draft.localId, { pending: true, error: undefined });
+      updateDraft(draft.localId, { pending: true, error: undefined, setVars: undefined });
       try {
         const response = await httpRequest(req);
-        updateDraft(draft.localId, { pending: false, response, error: undefined });
+        // Chaining only follows a 2xx — a 401's body has no token worth keeping.
+        const setVars =
+          response.status >= 200 && response.status < 300 && draft.postVars?.length
+            ? await applyPostVars(draft.postVars, response)
+            : undefined;
+        updateDraft(draft.localId, { pending: false, response, error: undefined, setVars });
         if (sessionId) {
           try {
             await apiclientAppendHistory(sessionId, {
@@ -692,7 +793,7 @@ export function ApiClient({ tabId }: Props) {
         }
       }
     },
-    [sessionId, updateDraft, vars],
+    [applyPostVars, sessionId, updateDraft, vars],
   );
 
   // Cmd/Ctrl+Enter shortcut to send
@@ -788,6 +889,14 @@ export function ApiClient({ tabId }: Props) {
       d.headers = parsed.headers.map((h) => ({ ...newKV(), name: h.name, value: h.value }));
       d.bodyMode = bodyModeFor(parsed.body, parsed.headers);
       d.bodyText = parsed.body ?? '';
+      if (parsed.form) {
+        d.bodyMode = 'multipart';
+        d.multipartBody = parsed.form.map((f) => ({ ...newKV(), name: f.name, value: f.value, file: f.file }));
+      } else if (parsed.urlencoded) {
+        d.bodyMode = 'form';
+        d.bodyText = '';
+        d.formBody = parsed.urlencoded.map((f) => ({ ...newKV(), name: f.name, value: f.value }));
+      }
       setState((s) => ({ ...s, drafts: [...s.drafts, d], activeLocalId: d.localId }));
     } catch (err) {
       toastError(`Couldn't import cURL: ${err instanceof Error ? err.message : String(err)}`);
@@ -858,6 +967,7 @@ export function ApiClient({ tabId }: Props) {
                     name: kv.name,
                     value: kv.value,
                     enabled: true,
+                    file: kv.file,
                   }));
                 }
                 setState((s) => ({
@@ -1102,7 +1212,7 @@ function RequestBuilder({
 
       {/* Builder sub-tab strip */}
       <div className="flex items-center gap-0 border-t border-edge-1 px-3">
-        {(['params', 'headers', 'body', 'auth'] as BuilderTab[]).map((t) => {
+        {(['params', 'headers', 'body', 'auth', 'post'] as BuilderTab[]).map((t) => {
           const active = builderTab === t;
           const count =
             t === 'params'
@@ -1113,9 +1223,11 @@ function RequestBuilder({
                   ? draft.bodyMode === 'none'
                     ? 0
                     : 1
-                  : draft.auth.mode === 'none'
-                    ? 0
-                    : 1;
+                  : t === 'post'
+                    ? (draft.postVars ?? []).filter((r) => r.enabled && r.variable).length
+                    : draft.auth.mode === 'none'
+                      ? 0
+                      : 1;
           return (
             <button
               key={t}
@@ -1125,7 +1237,7 @@ function RequestBuilder({
                 active ? 'text-fg-base' : 'text-fg-subtle hover:text-fg-muted',
               )}
             >
-              {t}
+              {t === 'post' ? 'Post-response' : t}
               {count > 0 && (
                 <span className="rounded-sm bg-surface-2 px-1 font-mono text-2xs text-fg-base/80">
                   {count}
@@ -1176,6 +1288,9 @@ function RequestBuilder({
             auth={draft.auth}
             onChange={(auth) => onChange({ auth })}
           />
+        )}
+        {builderTab === 'post' && (
+          <PostVarsEditor rules={draft.postVars ?? []} onChange={(postVars) => onChange({ postVars })} />
         )}
       </div>
     </div>
@@ -1353,9 +1468,94 @@ function BodyEditor({
         <KvTable
           rows={multipart}
           onChange={onMultipart}
-          placeholder={{ name: 'field', value: 'value (text only — v1)' }}
+          allowFiles
+          placeholder={{ name: 'field', value: 'value — or pick a file' }}
         />
       )}
+    </div>
+  );
+}
+
+// ─── Post-response variables editor ─────────────────────────────────────
+
+const POST_VAR_SOURCES: { value: PostVarRule['source']; label: string; hint: string }[] = [
+  { value: 'json', label: 'JSON path', hint: 'e.g. $.data.accessToken, $.items[0].id' },
+  { value: 'header', label: 'Header', hint: 'A response header, by name.' },
+  { value: 'status', label: 'Status', hint: 'The status code.' },
+];
+
+function PostVarsEditor({
+  rules,
+  onChange,
+}: {
+  rules: PostVarRule[];
+  onChange: (next: PostVarRule[]) => void;
+}) {
+  const update = (id: string, patch: Partial<PostVarRule>) =>
+    onChange(rules.map((r) => (r.id === id ? { ...r, ...patch } : r)));
+  const add = () =>
+    onChange([...rules, { id: newLocalId(), enabled: true, variable: '', source: 'json', path: '$.' }]);
+
+  return (
+    <div className="flex flex-col gap-2">
+      <div className="font-display text-xs text-fg-subtle">
+        After a 2xx response, set variables in the active environment.
+      </div>
+      <div className="overflow-hidden rounded-md border border-edge-1">
+        {rules.length === 0 && (
+          <div className="px-3 py-3 font-display text-xs text-fg-subtle/80">No rules yet.</div>
+        )}
+        {rules.map((r) => (
+          <div
+            key={r.id}
+            className="grid grid-cols-[20px_1fr_16px_130px_1fr_24px] items-center gap-2 border-b border-edge-1 px-2 py-1.5 hover:bg-surface-1"
+          >
+            <input
+              type="checkbox"
+              checked={r.enabled}
+              onChange={(e) => update(r.id, { enabled: e.target.checked })}
+              className="h-3 w-3 accent-accent"
+              aria-label="Enabled"
+            />
+            <input
+              value={r.variable}
+              onChange={(e) => update(r.id, { variable: e.target.value })}
+              placeholder="variable"
+              className="bg-transparent font-mono text-sm text-fg-base outline-none placeholder:text-fg-subtle/50"
+            />
+            <span className="text-center font-mono text-xs text-fg-subtle">←</span>
+            <Select
+              value={r.source}
+              onChange={(source) => update(r.id, { source })}
+              ariaLabel="Value source"
+              className="h-7 py-0"
+              options={POST_VAR_SOURCES}
+            />
+            <input
+              value={r.source === 'status' ? '' : r.path}
+              disabled={r.source === 'status'}
+              onChange={(e) => update(r.id, { path: e.target.value })}
+              placeholder={r.source === 'header' ? 'Header-Name' : r.source === 'json' ? '$.data.token' : ''}
+              className="bg-transparent font-mono text-sm text-fg-base outline-none placeholder:text-fg-subtle/50 disabled:opacity-40"
+            />
+            <button
+              onClick={() => onChange(rules.filter((x) => x.id !== r.id))}
+              className="flex h-5 w-5 items-center justify-center rounded text-fg-subtle/70 transition-colors hover:bg-surface-2 hover:text-rose-300"
+              aria-label="Remove rule"
+              title="Remove rule"
+            >
+              <X size={11} strokeWidth={2} />
+            </button>
+          </div>
+        ))}
+        <button
+          onClick={add}
+          className="flex w-full items-center gap-1.5 px-2.5 py-1.5 text-left font-display text-xs text-fg-subtle transition-colors hover:bg-surface-1 hover:text-fg-base"
+        >
+          <Plus size={11} strokeWidth={2.2} />
+          Add rule
+        </button>
+      </div>
     </div>
   );
 }
@@ -1593,6 +1793,18 @@ function ResponseViewer({
             truncated
           </span>
         )}
+        {draft.setVars?.map((v) => (
+          <span
+            key={v.variable}
+            className={cn(
+              'max-w-[200px] truncate rounded-sm px-1.5 py-0.5 font-mono text-2xs',
+              v.error ? 'bg-rose-500/10 text-rose-200' : 'bg-emerald-400/10 text-emerald-200',
+            )}
+            title={v.error ? `${v.variable} not set: ${v.error}` : `${v.variable} = ${v.value}`}
+          >
+            {v.error ? `${v.variable} ✕` : `${v.variable} ← ${v.value}`}
+          </span>
+        ))}
         <div className="ml-auto flex items-center gap-1">
           {tabs.map((t) => (
             <button
@@ -1714,7 +1926,7 @@ function LeftRail({
 
   const openApiInputRef = useRef<HTMLInputElement>(null);
 
-  /** OpenAPI 3.x (JSON) → a new collection with one saved request per operation. */
+  /** OpenAPI 3.x (JSON or YAML) → a new collection with one saved request per operation. */
   const importOpenApi = async (file: File) => {
     if (!sessionId) return;
     try {
@@ -1727,6 +1939,9 @@ function LeftRail({
         const d = emptyDraft(r.name);
         d.method = r.method as Method;
         d.url = r.url;
+        // Parameters without an example start disabled rather than sending `q=`.
+        d.params = r.params.map((p) => ({ ...newKV(), ...p, enabled: p.value !== '' }));
+        d.headers = r.headers.map((h) => ({ ...newKV(), ...h, enabled: h.value !== '' }));
         if (r.body !== null) {
           d.bodyMode = 'json';
           d.bodyText = r.body;
@@ -1831,7 +2046,7 @@ function LeftRail({
               <input
                 ref={openApiInputRef}
                 type="file"
-                accept=".json,application/json"
+                accept=".json,.yaml,.yml,application/json,application/yaml"
                 hidden
                 onChange={(e) => {
                   const file = e.target.files?.[0];
@@ -1842,7 +2057,7 @@ function LeftRail({
               <button
                 onClick={() => openApiInputRef.current?.click()}
                 className="flex h-5 w-5 items-center justify-center rounded text-fg-subtle hover:bg-surface-2 hover:text-fg-base"
-                title="Import OpenAPI 3.x (JSON)"
+                title="Import OpenAPI 3.x (JSON or YAML)"
                 aria-label="Import OpenAPI"
               >
                 <FileJson size={11} strokeWidth={2} />
@@ -2266,6 +2481,7 @@ function savedToDraft(saved: ApiSavedRequest): RequestDraft {
   let graphqlVariables = '';
   let formBody: KV[] = [];
   let multipartBody: KV[] = [];
+  let postVars: PostVarRule[] = [];
   let auth = emptyAuth();
   try {
     if (saved.params_json) params = JSON.parse(saved.params_json) as KV[];
@@ -2285,12 +2501,14 @@ function savedToDraft(saved: ApiSavedRequest): RequestDraft {
         graphqlVariables?: string;
         formBody: KV[];
         multipartBody: KV[];
+        postVars?: PostVarRule[];
       };
       bodyMode = b.bodyMode ?? 'none';
       bodyText = b.bodyText ?? '';
       graphqlVariables = b.graphqlVariables ?? '';
       formBody = b.formBody ?? [];
       multipartBody = b.multipartBody ?? [];
+      postVars = b.postVars ?? [];
     }
   } catch {
     /* ignore */
@@ -2314,5 +2532,6 @@ function savedToDraft(saved: ApiSavedRequest): RequestDraft {
     formBody,
     multipartBody,
     auth,
+    postVars,
   };
 }

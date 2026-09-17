@@ -1,4 +1,4 @@
-import type { HttpHeaderKV, HttpRequestDto } from './tauri';
+import type { HttpFormEntry, HttpHeaderKV, HttpRequestDto } from './tauri';
 
 /**
  * cURL ⇄ request conversion for the API Client. Pure — no DOM, no Tauri —
@@ -15,6 +15,11 @@ export interface CurlRequest {
   headers: HttpHeaderKV[];
   /** Joined request body, or null when the command sends none. */
   body: string | null;
+  /** `-F` / `--form` / `--form-string` fields; `body` is null when set. */
+  form?: HttpFormEntry[];
+  /** Set when every data option was `--data-urlencode`: the unencoded
+   *  name/value pairs, so they import as form-urlencoded rows. */
+  urlencoded?: HttpHeaderKV[];
 }
 
 /** Split a shell command line into argv, honouring quotes and escapes. */
@@ -110,7 +115,7 @@ const DATA_OPTS = new Set(['-d', '--data', '--data-raw', '--data-binary', '--dat
 /** Options whose next argument is a value we don't use — skipped so the
  *  value isn't mistaken for the URL. */
 const IGNORED_VALUE_OPTS = new Set([
-  '-o', '--output', '-F', '--form', '--form-string', '-x', '--proxy', '-m', '--max-time',
+  '-o', '--output', '-x', '--proxy', '-m', '--max-time',
   '--connect-timeout', '-w', '--write-out', '--cacert', '--cert', '-E', '--key', '-r', '--range',
   '-T', '--upload-file', '--resolve', '--retry', '-c', '--cookie-jar', '-K', '--config',
 ]);
@@ -130,6 +135,8 @@ export function parseCurl(command: string): CurlRequest {
   let head = false;
   const headers: HttpHeaderKV[] = [];
   const data: string[] = [];
+  const form: HttpFormEntry[] = [];
+  const urlencoded: HttpHeaderKV[] = [];
   let json = false;
 
   for (let i = 1; i < argv.length; i++) {
@@ -142,7 +149,7 @@ export function parseCurl(command: string): CurlRequest {
       arg = arg.slice(0, eq);
     }
     // -XPOST / -H'Accept: x' (value glued to a short option)
-    if (!arg.startsWith('--') && arg.length > 2 && arg.startsWith('-') && 'XHdu'.includes(arg[1]!)) {
+    if (!arg.startsWith('--') && arg.length > 2 && arg.startsWith('-') && 'XHduF'.includes(arg[1]!)) {
       value = arg.slice(2);
       arg = arg.slice(0, 2);
     }
@@ -155,7 +162,24 @@ export function parseCurl(command: string): CurlRequest {
       const colon = h.indexOf(':');
       if (colon > 0) headers.push({ name: h.slice(0, colon).trim(), value: h.slice(colon + 1).trim() });
     } else if (DATA_OPTS.has(arg)) {
-      data.push(takeValue());
+      const v = takeValue();
+      data.push(v);
+      if (arg === '--data-urlencode') {
+        // `name=content`; a bare `content` or `=content` has no name.
+        const eq = v.indexOf('=');
+        urlencoded.push(eq < 0 ? { name: v, value: '' } : { name: v.slice(0, eq), value: v.slice(eq + 1) });
+      }
+    } else if (arg === '-F' || arg === '--form' || arg === '--form-string') {
+      const v = takeValue();
+      const eq = v.indexOf('=');
+      const name = eq < 0 ? v : v.slice(0, eq);
+      const value = eq < 0 ? '' : v.slice(eq + 1);
+      if (arg !== '--form-string' && (value.startsWith('@') || value.startsWith('<'))) {
+        // `@path;type=…;filename=…` — keep the path, drop the part options.
+        form.push({ name, value: value.slice(1).split(';')[0]!, file: true });
+      } else {
+        form.push({ name, value, file: false });
+      }
     } else if (arg === '--json') {
       data.push(takeValue());
       json = true;
@@ -192,13 +216,16 @@ export function parseCurl(command: string): CurlRequest {
     if (!has('accept')) headers.push({ name: 'Accept', value: 'application/json' });
   }
 
-  const body = data.length > 0 ? data.join(json ? '' : '&') : null;
-  return {
-    method: method ?? (body !== null ? 'POST' : head ? 'HEAD' : 'GET'),
+  const body = form.length === 0 && data.length > 0 ? data.join(json ? '' : '&') : null;
+  const out: CurlRequest = {
+    method: method ?? (body !== null || form.length > 0 ? 'POST' : head ? 'HEAD' : 'GET'),
     url,
     headers,
     body,
   };
+  if (form.length > 0) out.form = form;
+  else if (urlencoded.length > 0 && urlencoded.length === data.length) out.urlencoded = urlencoded;
+  return out;
 }
 
 /** POSIX single-quote a word unless it is plainly safe. */
@@ -227,7 +254,13 @@ export function toCurl(req: HttpRequestDto): string {
   } else if (b.kind === 'formurlencoded') {
     for (const e of b.entries) parts.push(`--data-urlencode ${shellQuote(`${e.name}=${e.value}`)}`);
   } else if (b.kind === 'multipart') {
-    for (const e of b.entries) parts.push(`--form-string ${shellQuote(`${e.name}=${e.value}`)}`);
+    for (const e of b.entries) {
+      parts.push(
+        e.file
+          ? `-F ${shellQuote(`${e.name}=@${e.value}`)}`
+          : `--form-string ${shellQuote(`${e.name}=${e.value}`)}`,
+      );
+    }
   }
   return parts.join(' \\\n  ');
 }
