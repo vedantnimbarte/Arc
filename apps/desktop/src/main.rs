@@ -59,6 +59,21 @@ fn main() {
         .with_target(true)
         .init();
 
+    // `ARC_DATA_DIR` (the e2e suite) must also isolate what Tauri keeps
+    // outside our data dir: saved window geometry lives in the app config dir,
+    // and the WebView2 profile (localStorage) under local app data.
+    let mut window_state = WindowStateBuilder::default();
+    if let Some(dir) = arc_session_manager::data_dir_override() {
+        // An absolute filename replaces the plugin's config-dir prefix.
+        window_state = window_state.with_filename(dir.join(".window-state.json").to_string_lossy());
+        // msedgedriver already points this at its own temp profile (and
+        // expects DevToolsActivePort there), so only fill it in when unset.
+        #[cfg(windows)]
+        if std::env::var_os("WEBVIEW2_USER_DATA_FOLDER").is_none() {
+            std::env::set_var("WEBVIEW2_USER_DATA_FOLDER", dir.join("webview"));
+        }
+    }
+
     let app = tauri::Builder::default()
         // Auto-launch at login (toggleable from Settings → Appearance).
         // The plugin only flips OS-level autostart when the frontend calls
@@ -83,7 +98,7 @@ fn main() {
         // The settings & git popups are excluded — they have their own
         // sensible defaults and we don't want them migrating around.
         .plugin(
-            WindowStateBuilder::default()
+            window_state
                 .with_state_flags(WINDOW_STATE_FLAGS)
                 .with_denylist(&["settings", "git"])
                 .skip_initial_state("main")

@@ -62,7 +62,10 @@ pub async fn fs_write_file(path: String, content: String) -> Result<(), String> 
 /// like any other file — see `arc_filesystem::scratch_file`.
 #[tauri::command]
 pub async fn fs_scratch_file(ext: String) -> Result<String, String> {
-    arc_filesystem::scratch_file(&ext).map_err(|e| e.to_string())
+    let dir = arc_session_manager::data_dir()
+        .ok_or("could not resolve user data directory")?
+        .join("scratch");
+    arc_filesystem::scratch_file(&dir, &ext).map_err(|e| e.to_string())
 }
 
 #[tauri::command]

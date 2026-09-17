@@ -108,43 +108,36 @@ pub struct SessionState {
 /// Fetch the most-recent session (creating one if the DB is empty) and its
 /// tabs. The frontend calls this on launch to rehydrate the workspace.
 pub async fn current_or_create(pool: &SqlitePool) -> Result<SessionState> {
-    let row = sqlx::query_as::<_, (String, Option<String>, Option<String>, i64, i64, Option<String>)>(
-        "SELECT id, workspace_id, active_tab_id, created_at, last_active_at, pane_layout \
-         FROM sessions ORDER BY last_active_at DESC LIMIT 1",
+    // Seed a session only if there is none, in one statement. A separate
+    // SELECT-then-INSERT let two loads racing on a fresh database each create
+    // a session; both then wrote the same default tab id, the second hit the
+    // tabs primary key, and that window fell back to unsaved in-memory tabs.
+    // (The e2e suite's first launch hit this.)
+    let now = now_ms();
+    sqlx::query(
+        "INSERT INTO sessions (id, workspace_id, active_tab_id, created_at, last_active_at) \
+         SELECT ?, NULL, NULL, ?, ? WHERE NOT EXISTS (SELECT 1 FROM sessions)",
     )
-    .fetch_optional(pool)
+    .bind(Uuid::new_v4().to_string())
+    .bind(now)
+    .bind(now)
+    .execute(pool)
     .await?;
 
-    let session = match row {
-        Some((id, workspace_id, active_tab_id, created_at, last_active_at, pane_layout)) => Session {
-            id,
-            workspace_id,
-            active_tab_id,
-            created_at,
-            last_active_at,
-            pane_layout,
-        },
-        None => {
-            let now = now_ms();
-            let id = Uuid::new_v4().to_string();
-            sqlx::query(
-                "INSERT INTO sessions (id, workspace_id, active_tab_id, created_at, last_active_at) \
-                 VALUES (?, NULL, NULL, ?, ?)",
-            )
-            .bind(&id)
-            .bind(now)
-            .bind(now)
-            .execute(pool)
-            .await?;
-            Session {
-                id,
-                workspace_id: None,
-                active_tab_id: None,
-                created_at: now,
-                last_active_at: now,
-                pane_layout: None,
-            }
-        }
+    let (id, workspace_id, active_tab_id, created_at, last_active_at, pane_layout) =
+        sqlx::query_as::<_, (String, Option<String>, Option<String>, i64, i64, Option<String>)>(
+            "SELECT id, workspace_id, active_tab_id, created_at, last_active_at, pane_layout \
+             FROM sessions ORDER BY last_active_at DESC LIMIT 1",
+        )
+        .fetch_one(pool)
+        .await?;
+    let session = Session {
+        id,
+        workspace_id,
+        active_tab_id,
+        created_at,
+        last_active_at,
+        pane_layout,
     };
 
     let tab_rows = sqlx::query_as::<_, (String, String, String, String, Option<String>, Option<String>, Option<String>, i64)>(

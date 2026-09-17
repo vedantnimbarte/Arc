@@ -25,8 +25,8 @@ pub fn parent(path: impl AsRef<Path>) -> Option<String> {
         .map(|p| p.to_string_lossy().to_string())
 }
 
-/// Create a fresh, empty scratch file under `<data_dir>/arc/scratch/` and
-/// return its path.
+/// Create a fresh, empty scratch file in `dir` (ARC passes
+/// `<arc data dir>/scratch`) and return its path.
 ///
 /// Scratch buffers are real files on disk rather than an in-memory tab kind.
 /// That is the whole trick: the editor, its LSP attachment, save, syntax
@@ -37,14 +37,11 @@ pub fn parent(path: impl AsRef<Path>) -> Option<String> {
 /// `ext` is the language suffix without the dot (`md`, `sql`, `py`, ...).
 /// Anything that is not alphanumeric is rejected rather than sanitised — it
 /// arrives from the renderer and ends up in a filesystem path.
-pub fn scratch_file(ext: &str) -> Result<String> {
+pub fn scratch_file(dir: &Path, ext: &str) -> Result<String> {
     if ext.is_empty() || ext.len() > 12 || !ext.chars().all(|c| c.is_ascii_alphanumeric()) {
         return Err(Error::InvalidPath(format!("bad scratch extension: {ext}")));
     }
-    let mut dir = dirs::data_dir().ok_or(Error::NoDefaultRoot)?;
-    dir.push("arc");
-    dir.push("scratch");
-    std::fs::create_dir_all(&dir)?;
+    std::fs::create_dir_all(dir)?;
 
     // First free `scratch-N.<ext>`. Numbering restarts from 1 as old scratches
     // are deleted, which is what makes the tab titles stay short. `create_new`
@@ -76,7 +73,7 @@ mod tests {
         // `ext` arrives from the renderer and lands in a filesystem path.
         for bad in ["", "../evil", "md/../..", "a b", "sh;rm", "verylongextension"] {
             assert!(
-                scratch_file(bad).is_err(),
+                scratch_file(&std::env::temp_dir(), bad).is_err(),
                 "expected {bad:?} to be rejected"
             );
         }
@@ -84,12 +81,12 @@ mod tests {
 
     #[test]
     fn scratch_creates_distinct_empty_files() {
-        let a = scratch_file("md").expect("first scratch");
-        let b = scratch_file("md").expect("second scratch");
+        let dir = std::env::temp_dir().join(format!("arc-scratch-test-{}", std::process::id()));
+        let a = scratch_file(&dir, "md").expect("first scratch");
+        let b = scratch_file(&dir, "md").expect("second scratch");
         assert_ne!(a, b, "each call gets its own file");
         assert!(a.ends_with(".md") && b.ends_with(".md"));
         assert_eq!(std::fs::read_to_string(&a).expect("readable"), "");
-        let _ = std::fs::remove_file(&a);
-        let _ = std::fs::remove_file(&b);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

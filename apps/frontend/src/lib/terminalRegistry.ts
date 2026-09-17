@@ -5,6 +5,9 @@ export interface TerminalHandle {
   paste: (text: string) => void;
   selection: () => string;
   focus: () => void;
+  /** The whole buffer (scrollback included) as plain text. The WebGL renderer
+   *  draws to a canvas, so this is the only way the e2e suite can read output. */
+  text: () => string;
 }
 
 const terminals = new Map<string, TerminalHandle>();

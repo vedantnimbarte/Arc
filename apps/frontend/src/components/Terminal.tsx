@@ -472,6 +472,12 @@ export function Terminal({ sessionKey }: Props) {
       paste: (text) => term.paste(text),
       selection: () => term.getSelection(),
       focus: () => term.focus(),
+      text: () => {
+        const buf = term.buffer.active;
+        const lines: string[] = [];
+        for (let i = 0; i < buf.length; i++) lines.push(buf.getLine(i)?.translateToString(true) ?? '');
+        return lines.join('\n');
+      },
     });
     const earlyInput: string[] = [];
     const forwardInput = term.onData((data) => {
