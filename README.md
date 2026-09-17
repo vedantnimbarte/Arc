@@ -26,7 +26,9 @@ it.
   rules that colour matching output and can notify ("ERROR", "listening on :3000"), and
   broadcast input to type into every terminal in a workspace at once (⌥⌘I). Restored tabs
   reopen in the folder their shell was last in; keys typed while a shell is still starting
-  are kept, not dropped.
+  are kept, not dropped. Opt in to background terminals (**Settings → Terminal**) and
+  shells keep running after ARC closes — reopening reattaches each tab to its live shell,
+  an agent mid-conversation included.
 - **Scratch Buffers** — Open a throwaway file to jot in without naming or placing it
   (⇧⌘N, or pick a language from the palette). They're real files under the app data dir,
   so they save, highlight and restore like anything else.
