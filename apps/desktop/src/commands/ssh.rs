@@ -26,6 +26,9 @@
 //! global bus:
 //!   "ssh://log/<id>"   -> { id, entry: SshLogEvent }
 //!   "ssh://exit/<id>"  -> { id, code: number | null }
+//!   "ssh://forward/<id>" -> { id, forwards: Vec<ForwardInfo> } — the whole
+//!                         list, whenever a forward or a connection through
+//!                         one changes.
 //!   "ssh://host-key"   -> HostKeyPromptDto — an unknown host key is blocking a
 //!                         handshake; answer with `ssh_host_key_respond`.
 
@@ -134,6 +137,12 @@ struct SshLogEventOut {
 }
 
 #[derive(Debug, Serialize, Clone)]
+struct SshForwardEvent {
+    id: String,
+    forwards: Vec<ForwardInfo>,
+}
+
+#[derive(Debug, Serialize, Clone)]
 struct SshExitEvent {
     id: String,
     code: Option<i32>,
@@ -225,6 +234,31 @@ pub async fn ssh_connect(
                 {
                     break;
                 }
+            }
+        });
+    }
+
+    // Forward status → ssh://forward/<id>. The watch coalesces a burst of
+    // connections into one wake-up, and the pause caps it at ten events a
+    // second, so a browser on a SOCKS forward can't flood the bus.
+    if let Ok(mut changed) = state.manager.forward_watch(&id) {
+        let app = app.clone();
+        let manager = state.manager.clone();
+        let id_for_fwd = id.clone();
+        let topic = format!("ssh://forward/{id}");
+        tokio::spawn(async move {
+            while changed.changed().await.is_ok() {
+                let Ok(forwards) = manager.forward_list(&id_for_fwd).await else {
+                    break;
+                };
+                let event = SshForwardEvent {
+                    id: id_for_fwd.clone(),
+                    forwards,
+                };
+                if app.emit(&topic, event).is_err() {
+                    break;
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(100)).await;
             }
         });
     }
@@ -693,6 +727,17 @@ pub async fn ssh_fs_connect(
         .connect(&host_id, opts, Some(asker))
         .await
         .map_err(|e| format!("{e:#}"))?;
+    // Off by default: a terminal tab to the same host usually holds the same
+    // local ports already.
+    if let Some(host) = ssh_db::host_get(store.pool(), &host_id).await.ok().flatten() {
+        if host.remote_workspace_forwards && !host.forwards.is_empty() {
+            state
+                .manager
+                .start_forwards(&host_id, parse_forwards(&host.forwards)?)
+                .await
+                .map_err(|e| format!("{e:#}"))?;
+        }
+    }
     // "." resolves to the login directory, which is the right default root
     // and doubles as a check that the session actually works.
     let target = path.unwrap_or_else(|| ".".to_string());

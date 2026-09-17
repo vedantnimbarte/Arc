@@ -132,7 +132,7 @@ export function HostDetail({ host, identity, onBack, onEdit }: HostDetailProps) 
 
         {live?.status === 'connected' ? (
           <Field label="Port forwards">
-            <LiveForwards sessionId={live.id} />
+            <LiveForwards sessionId={live.id} host={host} />
           </Field>
         ) : (
           host.forwards.length > 0 && (

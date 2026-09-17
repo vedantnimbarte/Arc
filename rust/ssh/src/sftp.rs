@@ -31,7 +31,8 @@ use russh_sftp::client::SftpSession;
 use serde::{Deserialize, Serialize};
 use tokio::sync::Mutex;
 
-use crate::{dial, Dialed, SshEndpoint};
+use crate::forward::{describe_forward, SessionForwards};
+use crate::{dial, Dialed, ForwardSpec, SshEndpoint};
 
 /// Ceiling on a single remote file read, mirroring the local editor's cap.
 /// Without it a stray click on a multi-gigabyte log pulls the whole thing
@@ -64,6 +65,8 @@ struct RemoteSession {
     /// outlives this struct's creation — dropping the handle closes the
     /// transport out from under the SFTP session.
     _conn: Dialed,
+    /// The host's saved forwards, when it opts remote workspaces into them.
+    forwards: Option<SessionForwards>,
 }
 
 /// Remote filesystem connections, keyed by a caller-chosen id (ARC uses the
@@ -121,8 +124,29 @@ impl SftpManager {
             Arc::new(Mutex::new(RemoteSession {
                 sftp,
                 _conn: conn,
+                forwards: None,
             })),
         );
+        Ok(())
+    }
+
+    /// Start `specs` on the connection under `id`; they last as long as it
+    /// does. Nothing lists these in the UI, so one that can't start (most
+    /// often because a terminal tab to the same host already holds the port)
+    /// is only logged.
+    pub async fn start_forwards(&self, id: &str, specs: Vec<ForwardSpec>) -> Result<()> {
+        let session = self.session(id)?;
+        let forwards = {
+            let s = session.lock().await;
+            SessionForwards::new(s._conn.handle.clone(), s._conn.remote_forwards.clone())
+        };
+        for spec in specs {
+            let desc = describe_forward(&spec);
+            if let Some(err) = forwards.add(spec).await.error {
+                tracing::warn!(%id, "remote workspace forward {desc} failed: {err}");
+            }
+        }
+        session.lock().await.forwards = Some(forwards);
         Ok(())
     }
 
