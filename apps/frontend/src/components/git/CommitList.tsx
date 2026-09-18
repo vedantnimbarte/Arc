@@ -209,7 +209,8 @@ function DiffStat({ additions, deletions }: { additions: number; deletions: numb
   );
 }
 
-function formatRelative(unixSeconds: number): string {
+/** Compact age for a commit row — shared with the sidebar history panel. */
+export function formatRelative(unixSeconds: number): string {
   if (!unixSeconds) return '—';
   const diff = Math.max(0, Date.now() / 1000 - unixSeconds);
   if (diff < 60) return 'now';

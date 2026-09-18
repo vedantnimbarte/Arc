@@ -99,6 +99,7 @@ import { askConfirm, askText } from '../state/confirm';
 import { copyText } from '../lib/clipboard';
 import { toast, toastError } from '../state/toast';
 import { notifyEvent } from '../lib/notifyEvent';
+import { PanelTitle } from './PanelTitle';
 
 // ~800 lines of worktree + rebase UI, only pulled in when one is opened.
 const WorktreePanel = lazy(() =>
@@ -115,6 +116,9 @@ const BisectPanel = lazy(() =>
 );
 const PrPanel = lazy(() =>
   import('./git/PrPanel').then((m) => ({ default: m.PrPanel })),
+);
+const CommitHistory = lazy(() =>
+  import('./git/CommitHistory').then((m) => ({ default: m.CommitHistory })),
 );
 
 /** Path separator that matches the workspace root style. */
@@ -300,6 +304,9 @@ export function SourceControl() {
 
   // Amend
   const [amendMode, setAmendMode] = useState(false);
+  /** Which half of the panel is showing — the working tree, or the branch's
+   *  commits. Everything below the header belongs to one tab or the other. */
+  const [tab, setTab] = useState<'changes' | 'history'>('changes');
 
   // Branch management panel
   const [branchPanelOpen, setBranchPanelOpen] = useState(false);
@@ -1070,9 +1077,7 @@ function notifyGitFailure(title: string, err: unknown): void {
           (Problems, Tests, Containers); this one used to rely on the branch
           name alone to say where you are. */}
       <div className="flex shrink-0 items-center px-3 py-2">
-        <span className="font-sans text-2xs uppercase tracking-widest text-fg-subtle/60">
-          Source Control
-        </span>
+        <PanelTitle view="git" />
       </div>
       {/* Header — branch glyph, name + sync indicators, change count, refresh */}
       <div className="relative flex h-11 shrink-0 items-center gap-1.5 border-b border-border-hairline px-2.5">
@@ -1198,6 +1203,20 @@ function notifyGitFailure(title: string, err: unknown): void {
           />
         </button>
       </div>
+
+      {/* Changes / History — the working tree you're about to commit, or the
+          commits already on this branch. The count rides on the tab so a
+          switch to History doesn't hide how much is uncommitted. */}
+      {isTauri && root && (
+        <div className="flex shrink-0 items-center gap-0.5 border-b border-border-hairline px-1.5 py-1">
+          <PanelTab active={tab === 'changes'} onClick={() => setTab('changes')} count={total}>
+            Changes
+          </PanelTab>
+          <PanelTab active={tab === 'history'} onClick={() => setTab('history')}>
+            History
+          </PanelTab>
+        </div>
+      )}
 
       {/* Mid-operation bar — a stopped rebase (conflict, or an `edit` row)
           needs continue / abort, and the other multi-step operations at
@@ -1382,7 +1401,7 @@ function notifyGitFailure(title: string, err: unknown): void {
       )}
 
       {/* Commit composer — card with focus bloom + gradient commit bar */}
-      {isTauri && root && (
+      {isTauri && root && tab === 'changes' && (
         <div className="shrink-0 border-b border-border-hairline bg-surface-1/30 px-2.5 py-2.5">
           <div
             className={cn(
@@ -1486,6 +1505,7 @@ function notifyGitFailure(title: string, err: unknown): void {
       )}
 
       {/* Body */}
+      {tab === 'changes' && (
       <div className="selectable flex-1 overflow-auto px-1.5 py-2">
         {!isTauri && (
           <div className="mx-1 mb-2 flex items-start gap-2 rounded-lg border border-status-warn/20 bg-status-warn/[0.06] px-2.5 py-2 font-display text-2xs leading-relaxed">
@@ -1562,10 +1582,25 @@ function notifyGitFailure(title: string, err: unknown): void {
           );
         })}
       </div>
+      )}
+
+      {/* History — the same commits the standalone Git window shows, in the
+          panel you already have open. */}
+      {tab === 'history' && root && (
+        <Suspense fallback={null}>
+          <CommitHistory
+            root={root}
+            onAmend={() => {
+              setTab('changes');
+              if (!amendMode) void handleToggleAmend();
+            }}
+          />
+        </Suspense>
+      )}
 
       {/* Git tools — Changes / PRs / worktrees / rebase / reflog / bisect, each
           a collapsible section in the bottom stack beside stash and tags. */}
-      {isTauri && root && (
+      {isTauri && root && tab === 'changes' && (
         <Suspense fallback={null}>
           <GitToolRow
             icon={<FileText size={11} strokeWidth={2} />}
@@ -1617,7 +1652,7 @@ function notifyGitFailure(title: string, err: unknown): void {
       )}
 
       {/* Stash section */}
-      {isTauri && root && (
+      {isTauri && root && tab === 'changes' && (
         <div className="shrink-0 border-t border-border-hairline">
           <button
             onClick={() => setStashOpen((o) => !o)}
@@ -1662,7 +1697,7 @@ function notifyGitFailure(title: string, err: unknown): void {
       )}
 
       {/* Tags */}
-      {isTauri && root && (
+      {isTauri && root && tab === 'changes' && (
         <div className="shrink-0 border-t border-border-hairline">
           <button
             onClick={() => setTagsOpen((o) => !o)}
@@ -1719,7 +1754,7 @@ function notifyGitFailure(title: string, err: unknown): void {
       )}
 
       {/* Remotes */}
-      {isTauri && root && (
+      {isTauri && root && tab === 'changes' && (
         <div className="shrink-0 border-t border-border-hairline">
           <button
             onClick={() => setRemotesOpen((o) => !o)}
@@ -1784,7 +1819,7 @@ function notifyGitFailure(title: string, err: unknown): void {
       )}
 
       {/* Submodules — hidden entirely for the repos that have none. */}
-      {isTauri && root && submodules.length > 0 && (
+      {isTauri && root && submodules.length > 0 && tab === 'changes' && (
         <div className="shrink-0 border-t border-border-hairline">
           <button
             onClick={() => setSubmodulesOpen((o) => !o)}
@@ -2290,6 +2325,51 @@ function RowAction({
       )}
     >
       {icon}
+    </button>
+  );
+}
+
+// ── PanelTab ────────────────────────────────────────────────────────────────
+
+/** One half of the Changes / History switch. Styled like the Agents panel's
+ *  tabs, which is the other two-way switch in the sidebar. */
+function PanelTab({
+  active,
+  onClick,
+  count,
+  children,
+}: {
+  active: boolean;
+  onClick: () => void;
+  /** Shown as a pill when there is something to count. */
+  count?: number;
+  children: React.ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-pressed={active}
+      className={cn(
+        'flex flex-1 items-center justify-center gap-1.5 rounded-md px-2 py-1',
+        'font-display text-xs font-medium tracking-tight',
+        'transition-all duration-150 ease-apple',
+        active
+          ? 'bg-accent/15 text-accent ring-1 ring-inset ring-accent/30'
+          : 'text-fg-muted hover:bg-surface-2 hover:text-fg-base',
+      )}
+    >
+      <span className="truncate">{children}</span>
+      {count !== undefined && count > 0 && (
+        <span
+          className={cn(
+            'shrink-0 rounded-full px-1.5 font-mono text-2xs',
+            active ? 'bg-accent/20 text-accent' : 'bg-surface-2 text-fg-subtle',
+          )}
+        >
+          {count}
+        </span>
+      )}
     </button>
   );
 }

@@ -22,6 +22,7 @@ import { HostEditDialog } from './HostEditDialog';
 import type { SshHost, SshKey } from '../../lib/tauri';
 import { askConfirm } from '../../state/confirm';
 import { useRemoteWorkspace } from '../../state/remoteWorkspace';
+import { PanelTitle } from '../PanelTitle';
 
 /** SSH view — rendered inside the left sidebar's SSH tab (the activity rail
  *  owns view switching). `onClose` lets the host collapse the panel back to
@@ -194,12 +195,7 @@ function SectionHeader({
     <div className="flex flex-col border-b border-border-hairline">
       {/* Title row */}
       <div className="flex h-11 items-center justify-between px-4">
-        <div className="flex items-center gap-2.5">
-          <Server size={14} strokeWidth={1.5} className="text-accent" />
-          <span className="select-none font-mono text-2xs uppercase tracking-widest2 text-fg-muted">
-            SSH
-          </span>
-        </div>
+        <PanelTitle view="ssh" />
         <div className="flex items-center gap-0.5">
           {onSecondary && (
             <IconButton onClick={onSecondary} title="Import key">

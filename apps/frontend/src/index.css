@@ -405,6 +405,75 @@
   }
   .md-preview:focus { outline: none; }
 
+  /* Agent chat — the same Markdown rules, sized for a narrow sidebar: body
+     text matches the panel's other rows, headings step down from there, and
+     nothing adds its own outer padding (the row owns that). */
+  .md-preview.md-chat {
+    font-size: 12px;
+    line-height: 1.6;
+    padding: 0;
+    max-width: none;
+    margin: 0;
+    overflow-wrap: anywhere;
+  }
+  .md-chat h1 { font-size: 15px; }
+  .md-chat h2 { font-size: 14px; padding-bottom: 3px; }
+  .md-chat h3 { font-size: 13px; }
+  .md-chat h4,
+  .md-chat h5,
+  .md-chat h6 { font-size: 12px; }
+  .md-chat h1,
+  .md-chat h2,
+  .md-chat h3,
+  .md-chat h4,
+  .md-chat h5,
+  .md-chat h6 { margin: 1em 0 0.4em; }
+  .md-chat p { margin: 0.5em 0; }
+  .md-chat ul,
+  .md-chat ol { margin: 0.4em 0; padding-left: 1.3em; }
+  .md-chat li { margin: 0.15em 0; }
+  .md-chat blockquote { margin: 0.5em 0; padding-left: 0.75em; }
+  .md-chat hr { margin: 1em 0; }
+  .md-chat table { font-size: 11px; margin: 0.6em 0; display: block; overflow-x: auto; }
+  .md-chat th,
+  .md-chat td { padding: 3px 6px; }
+  .md-chat code { font-size: 0.92em; padding: 0 4px; overflow-wrap: anywhere; }
+  .md-chat .md-codeblock { position: relative; margin: 0.6em 0; }
+  .md-chat pre {
+    margin: 0;
+    padding: 8px 10px;
+    border-radius: 6px;
+  }
+  .md-chat pre code {
+    font-size: 11px;
+    line-height: 1.55;
+    overflow-wrap: normal;
+    white-space: pre;
+  }
+  .md-chat .md-copy {
+    position: absolute;
+    top: 4px;
+    right: 4px;
+    padding: 1px 6px;
+    border-radius: 4px;
+    border: 1px solid var(--border-strong, rgba(220, 224, 232, 0.14));
+    background: var(--surface-2, rgba(255, 255, 255, 0.065));
+    color: var(--fg-muted, rgba(230, 234, 242, 0.58));
+    font-size: 10px;
+    user-select: none;
+    opacity: 0;
+    transition: opacity 120ms ease;
+  }
+  .md-chat .md-codeblock:hover .md-copy,
+  .md-chat .md-copy:focus-visible { opacity: 1; }
+  .md-chat .md-copy:hover { color: rgb(var(--fg-base, 238 240 243)); }
+  .md-chat code.md-path {
+    cursor: pointer;
+    text-decoration: underline dotted;
+    text-underline-offset: 2px;
+  }
+  .md-chat code.md-path:hover { text-decoration-style: solid; }
+
   /* Light-mode overrides for the accent hues the theme tokens don't cover. */
   html:not(.dark) .md-preview a { color: #1d6fa5; border-bottom-color: rgba(29, 111, 165, 0.30); }
   html:not(.dark) .md-preview a:hover { border-bottom-color: #1d6fa5; }

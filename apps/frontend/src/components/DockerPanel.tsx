@@ -15,6 +15,7 @@ import { composeCommand, groupByProject, logsCommand, type Container } from '../
 import { askConfirm } from '../state/confirm';
 import { isTauri } from '../lib/tauri';
 import { cn } from '../lib/cn';
+import { PanelTitle } from './PanelTitle';
 
 /**
  * Containers panel: what Docker is running, and the four things you actually
@@ -74,9 +75,7 @@ export function DockerPanel() {
     return (
       <div className="flex min-h-0 flex-1 flex-col">
         <div className="flex shrink-0 items-center gap-1.5 px-3 py-2">
-          <span className="flex-1 font-sans text-2xs uppercase tracking-widest text-fg-subtle/60">
-            Containers
-          </span>
+          <PanelTitle view="docker" />
         </div>
         <Empty>The containers panel needs the desktop app.</Empty>
       </div>
@@ -86,9 +85,7 @@ export function DockerPanel() {
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <div className="flex shrink-0 items-center gap-1.5 px-3 py-2">
-        <span className="flex-1 font-sans text-2xs uppercase tracking-widest text-fg-subtle/60">
-          Containers
-        </span>
+        <PanelTitle view="docker" />
         {status === 'ready' && containers.length > 0 && (
           <span className="font-mono text-2xs text-fg-subtle">
             {containers.filter((c) => c.running).length}/{containers.length} up

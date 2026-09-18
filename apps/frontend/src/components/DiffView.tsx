@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Check, ChevronDown, ChevronRight, RefreshCw, Sparkles, X } from 'lucide-react';
-import { gitApply, gitDiff, type GitDiffScope } from '../lib/tauri';
+import { gitApply, gitDiff, gitDiffTrees, type GitDiffScope } from '../lib/tauri';
 import { cn } from '../lib/cn';
 import { hunkPrompt } from '../lib/agentPrompt';
 import { sendToAgent } from '../lib/sendToAgent';
@@ -9,6 +9,10 @@ interface Props {
   filePath: string;
   diffRoot: string;
   diffScope: GitDiffScope;
+  /** Set when the tab shows the file as one past commit changed it, rather
+   *  than a live working-tree scope. Read-only: a committed hunk has nothing
+   *  to stage, so `diffScope` stays 'head' and HunkBlock offers no actions. */
+  diffCommit?: { oid: string; short: string; parent: string };
 }
 
 // ─── Diff parser ─────────────────────────────────────────────────────────────
@@ -149,7 +153,7 @@ function alignRows(lines: ParsedLine[]): DiffRow[] {
 
 // ─── Component ───────────────────────────────────────────────────────────────
 
-export function DiffView({ filePath, diffRoot, diffScope }: Props) {
+export function DiffView({ filePath, diffRoot, diffScope, diffCommit }: Props) {
   const [diffText, setDiffText] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -173,7 +177,9 @@ export function DiffView({ filePath, diffRoot, diffScope }: Props) {
     setLoading(true);
     setError(null);
     try {
-      const text = await gitDiff(diffRoot, diffScope, relativePath);
+      const text = diffCommit
+        ? await gitDiffTrees(diffRoot, diffCommit.parent, diffCommit.oid, relativePath, false)
+        : await gitDiff(diffRoot, diffScope, relativePath);
       if (seq !== loadSeq.current) return;
       setDiffText(text);
     } catch (e) {
@@ -182,7 +188,7 @@ export function DiffView({ filePath, diffRoot, diffScope }: Props) {
     } finally {
       if (seq === loadSeq.current) setLoading(false);
     }
-  }, [diffRoot, diffScope, relativePath]);
+  }, [diffCommit, diffRoot, diffScope, relativePath]);
 
   useEffect(() => {
     void load();
@@ -210,15 +216,17 @@ export function DiffView({ filePath, diffRoot, diffScope }: Props) {
 
   const parsed = diffText != null ? parseDiff(diffText) : [];
 
-  const scopeLabel =
-    diffScope === 'staged'
+  const scopeLabel = diffCommit
+    ? diffCommit.short
+    : diffScope === 'staged'
       ? 'Staged'
       : diffScope === 'worktree'
         ? 'Working Tree'
         : 'HEAD';
 
-  const colHeaders =
-    diffScope === 'staged'
+  const colHeaders = diffCommit
+    ? ['Before', diffCommit.short]
+    : diffScope === 'staged'
       ? ['HEAD', 'Staged']
       : diffScope === 'worktree'
         ? ['Index', 'Working Tree']

@@ -1355,6 +1355,8 @@ export interface GitLogOptions {
   author?: string | null;
   /** Include merge commits — defaults to false everywhere except the graph view. */
   includeMerges?: boolean;
+  /** Commits to skip off the front — the history panel's paging cursor. */
+  skip?: number | null;
 }
 
 export async function gitLog(
@@ -1372,6 +1374,7 @@ export async function gitLog(
     until: o.until ?? null,
     author: o.author ?? null,
     include_merges: o.includeMerges ?? false,
+    skip: o.skip ?? null,
   };
   return gitInvoke<GitLogEntry[]>('git_log', {
     path,
@@ -1648,9 +1651,20 @@ export async function gitBranchCreate(
   path: string,
   name: string,
   checkout: boolean,
+  /** Commit/ref the branch starts at. Omitted = HEAD, git's own default. */
+  startPoint?: string | null,
 ): Promise<void> {
-  return gitInvoke<void>('git_branch_create', { path, name, checkout });
+  return gitInvoke<void>('git_branch_create', {
+    path,
+    name,
+    checkout,
+    startPoint: startPoint ?? null,
+  });
 }
+
+/** The empty tree — `git diff <this> <root commit>` is how a commit with no
+ *  parent gets a diff at all. Same hash in every repo. */
+export const GIT_EMPTY_TREE = '4b825dc642cb6eb9a060e54bf8d69288fbee4904';
 
 export async function gitBranchRename(
   path: string,
@@ -2336,6 +2350,29 @@ export interface GitAuthorInfo {
   name: string;
   email: string;
   commits: number;
+}
+
+/** One file touched by a single commit. */
+export interface GitCommitFile {
+  /** Repository-relative path as of this commit. */
+  path: string;
+  /** Single-letter status (A / M / D / R / C / T). */
+  status: string;
+  additions: number;
+  deletions: number;
+  /** git reported `-`/`-` line counts — nothing to diff line by line. */
+  binary: boolean;
+}
+
+/** Files touched by `oid`, with per-file line counts. Merges are reported
+ *  against their first parent, which is what the history panel shows. */
+export async function gitCommitFiles(path: string, oid: string): Promise<GitCommitFile[]> {
+  return gitInvoke<GitCommitFile[]>('git_commit_files', { path, oid });
+}
+
+/** Full message (subject + body) of one commit. */
+export async function gitCommitMessage(path: string, oid: string): Promise<string> {
+  return gitInvoke<string>('git_commit_message', { path, oid });
 }
 
 /** Every committer reachable from any ref, ranked by commit count desc. */

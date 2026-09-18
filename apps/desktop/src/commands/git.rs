@@ -6,6 +6,8 @@
 //!   invoke("git_changes",        { path })                              -> Vec<ChangeEntry>
 //!   invoke("git_root",           { path })                              -> Option<String>
 //!   invoke("git_log",            { path, limit, options? })             -> Vec<LogEntry>
+//!   invoke("git_commit_files",   { path, oid })                         -> Vec<CommitFile>
+//!   invoke("git_commit_message", { path, oid })                         -> String
 //!   invoke("git_diff",           { path, scope, pathFilter? })          -> String
 //!   invoke("git_snapshot_tree",  { path })                              -> String
 //!   invoke("git_diff_trees",     { path, from, to, pathFilter?, numstat }) -> String
@@ -26,7 +28,7 @@
 //!   invoke("git_checkpoint_restore", { path, oid })                      -> ()
 //!   invoke("git_checkpoint_forget",  { path, oid })                      -> ()
 //!   invoke("git_stash_drop",     { path, index })                       -> ()
-//!   invoke("git_branch_create",  { path, name, checkout })              -> ()
+//!   invoke("git_branch_create",  { path, name, checkout, startPoint? })  -> ()
 //!   invoke("git_branch_rename",  { path, oldName, newName })            -> ()
 //!   invoke("git_branch_delete",  { path, name, force })                 -> ()
 //!   invoke("git_merge",          { path, branch })                      -> MergeResult
@@ -58,7 +60,7 @@
 //!   invoke("git_bisect_reset",   { path })                              -> ()
 
 use arc_git::{
-    AuthorInfo, BisectStatus, BlameLine, BranchInfo, ChangeEntry, CheckoutResult, CommitResult, DiffScope,
+    AuthorInfo, BisectStatus, BlameLine, BranchInfo, ChangeEntry, CheckoutResult, CommitFile, CommitResult, DiffScope,
     DiffStat, GitInfo, LogEntry, LogOptions, MergeResult, RebaseTodoEntry, ReflogEntry, RemoteInfo,
     RemoteOpResult, ResetMode, StashEntry, SubmoduleEntry, TagInfo, WorktreeEntry,
 };
@@ -91,6 +93,20 @@ pub async fn git_log(
 ) -> Result<Vec<LogEntry>, String> {
     let opts = options.unwrap_or_default();
     arc_git::log(&path, limit, &opts)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn git_commit_files(path: String, oid: String) -> Result<Vec<CommitFile>, String> {
+    arc_git::commit_files(&path, &oid)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn git_commit_message(path: String, oid: String) -> Result<String, String> {
+    arc_git::commit_message(&path, &oid)
         .await
         .map_err(|e| e.to_string())
 }
@@ -297,8 +313,13 @@ pub async fn git_checkpoint_forget(path: String, oid: String) -> Result<(), Stri
 }
 
 #[tauri::command]
-pub async fn git_branch_create(path: String, name: String, checkout: bool) -> Result<(), String> {
-    arc_git::branch_create(&path, &name, checkout)
+pub async fn git_branch_create(
+    path: String,
+    name: String,
+    checkout: bool,
+    start_point: Option<String>,
+) -> Result<(), String> {
+    arc_git::branch_create(&path, &name, checkout, start_point.as_deref())
         .await
         .map_err(|e| e.to_string())
 }

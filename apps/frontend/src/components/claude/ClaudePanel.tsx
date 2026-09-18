@@ -15,6 +15,7 @@ import {
   X,
 } from 'lucide-react';
 import { cn } from '../../lib/cn';
+import { ChatMarkdown } from '../ChatMarkdown';
 import { useClaudeCode, type ClaudeChatItem } from '../../state/claudeCode';
 import { useFiles } from '../../state/files';
 import { useSettings } from '../../state/settings';
@@ -373,20 +374,20 @@ function ChatRow({ item }: { item: ClaudeChatItem }) {
   switch (item.kind) {
     case 'user':
       return (
-        <div className="rounded-md bg-surface-2 px-2 py-1.5 font-display text-xs text-fg-base">
-          {item.text}
+        <div className="rounded-md bg-surface-2 px-2 py-1.5">
+          <ChatMarkdown text={item.text} />
         </div>
       );
 
     case 'assistant':
       return (
-        <div className="whitespace-pre-wrap px-1 font-display text-xs leading-relaxed text-fg-base">
-          {item.text}
+        <div className="px-1">
+          <ChatMarkdown text={item.text} />
         </div>
       );
 
     case 'thinking':
-      return <Foldable label="reasoning" body={item.text} />;
+      return <Foldable label="reasoning" body={item.text} markdown />;
 
     case 'tool':
       return (
@@ -439,11 +440,14 @@ function Foldable({
   body,
   icon,
   tone = 'normal',
+  markdown = false,
 }: {
   label: string;
   body: string;
   icon?: React.ReactNode;
   tone?: 'normal' | 'error';
+  /** Render the body as Markdown (reasoning) rather than raw text (tool I/O). */
+  markdown?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   return (
@@ -465,7 +469,12 @@ function Foldable({
         {icon}
         <span className="truncate">{label}</span>
       </button>
-      {open && (
+      {open && markdown && (
+        <div className="mt-1 max-h-64 overflow-auto rounded border border-edge-1 bg-scrim-1 px-2 py-1.5 text-fg-muted">
+          <ChatMarkdown text={body} />
+        </div>
+      )}
+      {open && !markdown && (
         <pre className="mt-1 max-h-64 overflow-auto rounded border border-edge-1 bg-scrim-1 px-2 py-1.5 font-mono text-2xs leading-relaxed text-fg-muted">
           {body}
         </pre>
