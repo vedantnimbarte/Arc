@@ -5,6 +5,7 @@
 //! already on PATH for any developer terminal. Moving to `gix` is a
 //! contained refactor once we need richer operations.
 
+use std::collections::HashMap;
 use std::path::Path;
 
 use serde::{Deserialize, Serialize};
@@ -926,6 +927,9 @@ pub struct LogOptions {
     /// When false (default), merge commits are excluded. The Git window
     /// turns this on so the graph view can render fork/merge geometry.
     pub include_merges: bool,
+    /// `--skip=<n>`. How many commits to drop off the front — the history
+    /// panel's paging cursor.
+    pub skip: Option<usize>,
 }
 
 /// Most-recent commits reachable from HEAD, up to `limit`.
@@ -970,6 +974,9 @@ pub fn log_args(limit: usize, opts: &LogOptions) -> Vec<String> {
     ];
     if !opts.include_merges {
         args.push("--no-merges".into());
+    }
+    if let Some(n) = opts.skip.filter(|n| *n > 0) {
+        args.push(format!("--skip={n}"));
     }
     if let Some(ts) = opts.since {
         args.push(format!("--since={ts}"));
@@ -1055,6 +1062,162 @@ pub fn parse_log(stdout: &str) -> Vec<LogEntry> {
         });
     }
     entries
+}
+
+// ----- commit files ---------------------------------------------------------
+
+/// One file touched by a single commit — the history panel's file list.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CommitFile {
+    /// Repository-relative path as of this commit.
+    pub path: String,
+    /// Single-letter status (A, M, D, R, C, T).
+    pub status: String,
+    /// Lines added; 0 for binary files, which git reports as `-`.
+    pub additions: i64,
+    /// Lines removed; 0 for binary files.
+    pub deletions: i64,
+    /// True when git reported `-`/`-` instead of counts.
+    pub binary: bool,
+}
+
+/// Arguments for [`commit_files`].
+///
+/// `--raw` carries the status letter and `--numstat` the line counts; asking
+/// for both gets both blocks, raw first. `-m --first-parent` is what makes a
+/// merge commit show anything at all — the default combined diff prints no
+/// raw block, so merges would otherwise come back empty.
+pub fn commit_files_args(oid: &str) -> Vec<String> {
+    [
+        "--no-pager",
+        "show",
+        "--format=",
+        "--no-color",
+        "--raw",
+        "--numstat",
+        "-m",
+        "--first-parent",
+        oid,
+    ]
+    .iter()
+    .map(|s| (*s).to_string())
+    .collect()
+}
+
+/// Parse the output of [`commit_files_args`].
+pub fn parse_commit_files(stdout: &str) -> Vec<CommitFile> {
+    // Raw rows start with ':' and end "<status>\t<path>[\t<new path>]";
+    // numstat rows are "<ins>\t<del>\t<path>". Status comes from the raw
+    // block, counts from the numstat block, joined on path — a rename's two
+    // paths mean we key the numstat on the *last* field of the raw row.
+    let mut order: Vec<String> = Vec::new();
+    let mut status: HashMap<String, String> = HashMap::new();
+    let mut counts: HashMap<String, (i64, i64, bool)> = HashMap::new();
+
+    for line in stdout.lines() {
+        let line = line.trim_end_matches('\r');
+        if line.is_empty() {
+            continue;
+        }
+        if let Some(rest) = line.strip_prefix(':') {
+            let mut fields = rest.split('\t');
+            // Metadata column ends with the status letter(s); R/C carry a score.
+            let meta = fields.next().unwrap_or("");
+            let letter = meta
+                .rsplit(' ')
+                .find(|f| !f.is_empty())
+                .unwrap_or("M")
+                .chars()
+                .next()
+                .unwrap_or('M')
+                .to_string();
+            let paths: Vec<&str> = fields.collect();
+            let Some(path) = paths.last() else { continue };
+            let path = (*path).to_string();
+            if status.insert(path.clone(), letter).is_none() {
+                order.push(path);
+            }
+        } else {
+            let mut fields = line.split('\t');
+            let (Some(ins), Some(del), Some(path)) =
+                (fields.next(), fields.next(), fields.next())
+            else {
+                continue;
+            };
+            let binary = ins == "-" || del == "-";
+            let path = numstat_new_path(path);
+            counts.insert(
+                path.clone(),
+                (
+                    ins.parse().unwrap_or(0),
+                    del.parse().unwrap_or(0),
+                    binary,
+                ),
+            );
+            if !status.contains_key(&path) && !order.contains(&path) {
+                order.push(path);
+            }
+        }
+    }
+
+    order
+        .into_iter()
+        .map(|path| {
+            let (additions, deletions, binary) =
+                counts.get(&path).copied().unwrap_or((0, 0, false));
+            CommitFile {
+                status: status.get(&path).cloned().unwrap_or_else(|| "M".into()),
+                path,
+                additions,
+                deletions,
+                binary,
+            }
+        })
+        .collect()
+}
+
+/// Arguments for [`commit_message`].
+pub fn commit_message_args(oid: &str) -> Vec<String> {
+    ["--no-pager", "show", "-s", "--format=%B", oid]
+        .iter()
+        .map(|s| (*s).to_string())
+        .collect()
+}
+
+/// Full commit message (subject + body) of `oid`, trailing newlines trimmed.
+pub async fn commit_message<P: AsRef<Path>>(path: P, oid: &str) -> Result<String> {
+    reject_option_like(oid, "revision")?;
+    let args = commit_message_args(oid);
+    let refs: Vec<&str> = args.iter().map(String::as_str).collect();
+    Ok(run_git(path.as_ref(), &refs).await?.trim_end().to_string())
+}
+
+/// The new path of a `--numstat` row.
+///
+/// A rename is printed as `old => new`, or `pre{old => new}post` when the two
+/// paths share a prefix or suffix — and the `--raw` block keys the same file
+/// by its new path alone, so the two blocks only join up once this collapses.
+fn numstat_new_path(raw: &str) -> String {
+    if let Some(open) = raw.find('{') {
+        if let Some(rel_close) = raw[open..].find('}') {
+            let close = open + rel_close;
+            if let Some((_, new)) = raw[open + 1..close].split_once(" => ") {
+                return format!("{}{}{}", &raw[..open], new, &raw[close + 1..]);
+            }
+        }
+    }
+    match raw.split_once(" => ") {
+        Some((_, new)) => new.to_string(),
+        None => raw.to_string(),
+    }
+}
+
+/// Files touched by `oid`, with per-file line counts.
+pub async fn commit_files<P: AsRef<Path>>(path: P, oid: &str) -> Result<Vec<CommitFile>> {
+    reject_option_like(oid, "revision")?;
+    let args = commit_files_args(oid);
+    let refs: Vec<&str> = args.iter().map(String::as_str).collect();
+    Ok(parse_commit_files(&run_git(path.as_ref(), &refs).await?))
 }
 
 // ----- authors --------------------------------------------------------------
@@ -1982,14 +2145,22 @@ pub async fn branch_create<P: AsRef<Path>>(
     path: P,
     name: &str,
     checkout: bool,
+    start_point: Option<&str>,
 ) -> Result<()> {
     reject_option_like(name, "branch name")?;
+    if let Some(sp) = start_point {
+        reject_option_like(sp, "start point")?;
+    }
     let path = path.as_ref();
-    let args: &[&str] = if checkout {
-        &["checkout", "-b", name]
+    let mut args: Vec<&str> = if checkout {
+        vec!["checkout", "-b", name]
     } else {
-        &["branch", name]
+        vec!["branch", name]
     };
+    // Omitted = branch off HEAD, git's own default.
+    if let Some(sp) = start_point.filter(|s| !s.trim().is_empty()) {
+        args.push(sp);
+    }
     let output = git_cmd()
         .arg("-C")
         .arg(path)
@@ -3290,6 +3461,63 @@ mod tests {
     use super::*;
 
     #[test]
+    fn parses_commit_files_raw_and_numstat() {
+        let raw = concat!(
+            ":000000 100644 0000000 5f0f184 A	src/new.rs
+",
+            ":100644 100644 c17bd17 75fcf23 M	src/old.rs
+",
+            ":100644 000000 a0894dc 0000000 D	src/gone.rs
+",
+            ":100644 100644 aaa bbb R100	src/from.rs	src/to.rs
+",
+            ":100644 100644 ccc ddd M	logo.png
+",
+            "213	0	src/new.rs
+",
+            "2	99	src/old.rs
+",
+            "0	40	src/gone.rs
+",
+            "5	5	src/{from.rs => to.rs}
+",
+            "-	-	logo.png
+",
+        );
+        let files = parse_commit_files(raw);
+        assert_eq!(files.len(), 5, "one row per file, raw order preserved");
+        assert_eq!(files[0].path, "src/new.rs");
+        assert_eq!(files[0].status, "A");
+        assert_eq!((files[0].additions, files[0].deletions), (213, 0));
+        assert_eq!(files[1].status, "M");
+        assert_eq!((files[1].additions, files[1].deletions), (2, 99));
+        assert_eq!(files[2].status, "D");
+        // A rename keys its counts on the new path, whichever of the two
+        // shapes git chose to print it in.
+        assert_eq!(files[3].path, "src/to.rs");
+        assert_eq!(files[3].status, "R");
+        assert_eq!((files[3].additions, files[3].deletions), (5, 5));
+        // Binary files report `-`/`-`; counts fall back to zero.
+        assert!(files[4].binary);
+        assert_eq!((files[4].additions, files[4].deletions), (0, 0));
+    }
+
+    #[test]
+    fn log_args_paging_and_merges() {
+        let opts = LogOptions {
+            skip: Some(40),
+            include_merges: true,
+            ..Default::default()
+        };
+        let args = log_args(20, &opts);
+        assert!(args.contains(&"--skip=40".to_string()));
+        assert!(!args.contains(&"--no-merges".to_string()));
+        // skip=0 is the first page; git doesn't need telling.
+        let first = log_args(20, &LogOptions { skip: Some(0), ..Default::default() });
+        assert!(!first.iter().any(|a| a.starts_with("--skip")));
+    }
+
+    #[test]
     fn parses_clean_branch_with_upstream() {
         let raw = "\
 # branch.oid abc1234deadbeef
@@ -3583,6 +3811,131 @@ git bisect skip eeeeeeeeeeeeeeeeeeee
         assert!(!valid_bisect_term("reset"));
         assert!(!valid_bisect_term("--help"));
         assert!(!valid_bisect_term(""));
+    }
+
+    /// The history panel's three new calls against a real repo: paging with
+    /// `skip`, per-commit file lists (including a rename and a merge, the two
+    /// shapes `git show` reports differently), and branching off an old
+    /// commit rather than HEAD.
+    #[tokio::test]
+    async fn history_panel_reads_paging_files_and_branch_points() {
+        use std::process::Command as Sync;
+
+        let stamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0);
+        let dir = std::env::temp_dir().join(format!("arc-git-history-{stamp}"));
+        std::fs::create_dir_all(&dir).expect("tempdir");
+
+        let git = |args: &[&str]| {
+            let out = Sync::new("git")
+                .arg("-C")
+                .arg(&dir)
+                .args(args)
+                .output()
+                .expect("git runs");
+            assert!(
+                out.status.success(),
+                "git {args:?} failed: {}",
+                String::from_utf8_lossy(&out.stderr)
+            );
+        };
+        let rev = |spec: &str| -> String {
+            let out = Sync::new("git")
+                .arg("-C")
+                .arg(&dir)
+                .args(["rev-parse", spec])
+                .output()
+                .expect("git runs");
+            String::from_utf8_lossy(&out.stdout).trim().to_string()
+        };
+
+        git(&["init", "--quiet", "-b", "main"]);
+        git(&["config", "user.email", "test@example.com"]);
+        git(&["config", "user.name", "Test"]);
+        git(&["config", "commit.gpgsign", "false"]);
+
+        // Root commit — no parent, which is the case that needs the empty
+        // tree on the diff side.
+        std::fs::write(dir.join("a.txt"), "one
+two
+").expect("write");
+        git(&["add", "."]);
+        git(&["commit", "--quiet", "-m", "root"]);
+        let root_oid = rev("HEAD");
+
+        let root_files = commit_files(&dir, &root_oid).await.expect("root files");
+        assert_eq!(root_files.len(), 1);
+        assert_eq!(root_files[0].status, "A", "a root commit adds every file");
+        assert_eq!((root_files[0].additions, root_files[0].deletions), (2, 0));
+
+        // Rename + edit in one commit, plus a deletion.
+        std::fs::write(dir.join("gone.txt"), "bye
+").expect("write");
+        git(&["add", "."]);
+        git(&["commit", "--quiet", "-m", "add gone"]);
+
+        std::fs::rename(dir.join("a.txt"), dir.join("b.txt")).expect("rename");
+        std::fs::write(dir.join("b.txt"), "one
+two
+three
+").expect("write");
+        std::fs::remove_file(dir.join("gone.txt")).expect("rm");
+        git(&["add", "-A"]);
+        git(&["commit", "--quiet", "-m", "rename and delete"]);
+        let mixed = rev("HEAD");
+
+        let files = commit_files(&dir, &mixed).await.expect("files");
+        let by_path = |p: &str| files.iter().find(|f| f.path == p).cloned();
+        assert!(by_path("gone.txt").is_some_and(|f| f.status == "D"));
+        // `--no-renames` is not passed, so git may report R or A+D; either
+        // way the new path has to be listed with its line counts.
+        let b = by_path("b.txt").expect("b.txt is in the commit");
+        assert_eq!(b.additions, if b.status == "R" { 1 } else { 3 });
+
+        // A merge commit: the default combined diff prints nothing, so this
+        // is the case `-m --first-parent` exists for.
+        git(&["checkout", "--quiet", "-b", "side", &root_oid]);
+        std::fs::write(dir.join("side.txt"), "s
+").expect("write");
+        git(&["add", "."]);
+        git(&["commit", "--quiet", "-m", "side work"]);
+        git(&["checkout", "--quiet", "main"]);
+        git(&["merge", "--quiet", "--no-ff", "-m", "merge side", "side"]);
+        let merge_oid = rev("HEAD");
+
+        let merge_files = commit_files(&dir, &merge_oid).await.expect("merge files");
+        assert!(
+            merge_files.iter().any(|f| f.path == "side.txt"),
+            "a merge lists what it brought in, got {merge_files:?}"
+        );
+
+        // Paging: page two starts where page one stopped.
+        let page1 = log(&dir, 2, &LogOptions { include_merges: true, ..Default::default() })
+            .await
+            .expect("page 1");
+        let page2 = log(
+            &dir,
+            2,
+            &LogOptions { include_merges: true, skip: Some(2), ..Default::default() },
+        )
+        .await
+        .expect("page 2");
+        assert_eq!(page1.len(), 2);
+        assert!(!page2.is_empty());
+        assert!(
+            page1.iter().all(|c| page2.iter().all(|d| d.oid != c.oid)),
+            "pages must not overlap"
+        );
+
+        // Branch off an old commit, not HEAD.
+        branch_create(&dir, "from-root", false, Some(&root_oid))
+            .await
+            .expect("branch create");
+        assert_eq!(rev("from-root"), root_oid, "the branch starts where we said");
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     /// Drives a real bisect to convergence. The unit tests above cover the

@@ -132,6 +132,7 @@ pub struct GitArgs {
     start_line: Option<usize>,
     end_line: Option<usize>,
     name: Option<String>,
+    oid: Option<String>,
 }
 
 /// git with the same environment `arc_git::git_cmd` sets locally: no
@@ -250,6 +251,22 @@ pub async fn ssh_git(
                 return Err(failure(&out, "git log failed"));
             }
             to_json(serde_json::to_value(arc_git::parse_log(&text(&out.stdout))))
+        }
+        "git_commit_files" => {
+            let oid = args.oid.as_deref().ok_or("missing oid")?;
+            let out = git(m, h, cwd, &arc_git::commit_files_args(oid), None).await?;
+            if !ok(&out) {
+                return Err(failure(&out, "git show failed"));
+            }
+            to_json(serde_json::to_value(arc_git::parse_commit_files(&text(&out.stdout))))
+        }
+        "git_commit_message" => {
+            let oid = args.oid.as_deref().ok_or("missing oid")?;
+            let out = git(m, h, cwd, &arc_git::commit_message_args(oid), None).await?;
+            if !ok(&out) {
+                return Err(failure(&out, "git show failed"));
+            }
+            Ok(json!(text(&out.stdout).trim_end()))
         }
         "git_branches" => {
             let out = git(m, h, cwd, &arc_git::branches_args(), None).await?;

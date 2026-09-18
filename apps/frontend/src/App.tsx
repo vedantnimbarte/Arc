@@ -268,7 +268,8 @@ export default function App() {
           <DiffView
             filePath={tab.filePath}
             diffRoot={tab.diffRoot}
-            diffScope={tab.diffScope ?? 'worktree'}
+            diffScope={tab.diffCommit ? 'head' : (tab.diffScope ?? 'worktree')}
+            diffCommit={tab.diffCommit}
           />
         </Suspense>
       ) : tab.filePath ? (

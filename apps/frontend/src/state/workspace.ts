@@ -141,6 +141,10 @@ export interface Tab {
   diffRoot?: string;
   /** Diff scope for `kind: 'diff'` tabs. */
   diffScope?: 'worktree' | 'staged' | 'head';
+  /** Set instead of `diffScope` when the tab shows one file as it changed in
+   *  a single past commit: the commit and the parent it is diffed against.
+   *  History is immutable, so these tabs are read-only — no hunk staging. */
+  diffCommit?: { oid: string; short: string; parent: string };
   /** Git repository root for `kind: 'merge'` tabs. The conflicted file is in
    *  `filePath`; the merge view reads and rewrites it in place. */
   mergeRoot?: string;
@@ -351,6 +355,12 @@ interface WorkspaceState {
   /** Open a git diff tab for a file. Re-focuses an existing diff tab for the
    *  same path+scope rather than duplicating it. */
   openDiff: (absPath: string, root: string, scope: 'worktree' | 'staged' | 'head') => string;
+  /** One file as a single commit changed it. */
+  openCommitDiff: (
+    absPath: string,
+    root: string,
+    commit: { oid: string; short: string; parent: string },
+  ) => string;
   /** Open (or focus) the three-way merge view for a conflicted file. */
   openMerge: (absPath: string, root: string) => string;
   /** Open a throwaway buffer for jotting — a real file under the app data
@@ -1452,6 +1462,25 @@ export const useWorkspace = create<WorkspaceState>()((set, get) => ({
       diffScope: scope,
     };
     get().addTab(tab);
+    return id;
+  },
+  openCommitDiff: (absPath, root, commit) => {
+    const existing = get().tabs.find(
+      (t) => t.kind === 'diff' && t.filePath === absPath && t.diffCommit?.oid === commit.oid,
+    );
+    if (existing) {
+      get().setActive(existing.id);
+      return existing.id;
+    }
+    const id = `diff-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+    get().addTab({
+      id,
+      title: `${basename(absPath)} @ ${commit.short}`,
+      kind: 'diff',
+      filePath: absPath,
+      diffRoot: root,
+      diffCommit: commit,
+    });
     return id;
   },
   openMerge: (absPath, root) => {
