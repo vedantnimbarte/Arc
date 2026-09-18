@@ -23,6 +23,7 @@ import { askConfirm } from '../state/confirm';
 import { toast, toastError } from '../state/toast';
 import { fileIcon } from '../lib/fileIcons';
 import { cn } from '../lib/cn';
+import { PanelTitle } from './PanelTitle';
 import { isRemotePath } from '../lib/remote';
 
 const SEARCH_LIMIT = 200;
@@ -213,6 +214,9 @@ export function SearchView() {
     <div className="flex h-full min-w-0 flex-col">
       {/* Header / input */}
       <div className="shrink-0 border-b border-border-hairline px-2.5 py-2">
+        <div className="mb-1.5 flex items-center px-0.5">
+          <PanelTitle view="search" />
+        </div>
         <div className="flex items-center gap-1.5">
           <button
             type="button"

@@ -3,6 +3,7 @@ import { useFiles, type AgentPanelTab } from '../state/files';
 import { ClaudePanel } from './claude/ClaudePanel';
 import { WingmanPanel } from './wingman/WingmanPanel';
 import { cn } from '../lib/cn';
+import { PanelTitle } from './PanelTitle';
 
 /** The agents ARC can drive headlessly, and so can host a chat for.
  *
@@ -32,6 +33,9 @@ export function AgentsPanel() {
 
   return (
     <div className="flex h-full min-h-0 flex-col">
+      <div className="flex shrink-0 items-center px-3 py-2">
+        <PanelTitle view="agents" />
+      </div>
       <div className="flex shrink-0 items-center gap-0.5 border-b border-border-hairline px-1.5 py-1.5">
         {AGENT_TABS.map(({ id, label, Icon }) => {
           const active = id === tab;

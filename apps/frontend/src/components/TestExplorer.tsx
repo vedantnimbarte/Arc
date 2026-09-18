@@ -19,6 +19,7 @@ import { isTauri } from '../lib/tauri';
 import { testFailurePrompt } from '../lib/agentPrompt';
 import { sendToAgent } from '../lib/sendToAgent';
 import { cn } from '../lib/cn';
+import { PanelTitle } from './PanelTitle';
 
 /**
  * Sidebar test explorer: framework → file → test, each row runnable.
@@ -54,9 +55,7 @@ export function TestExplorer() {
     return (
       <div className="flex min-h-0 flex-1 flex-col">
         <div className="flex shrink-0 items-center gap-1.5 px-3 py-2">
-          <span className="flex-1 font-sans text-2xs uppercase tracking-widest text-fg-subtle/60">
-            Tests
-          </span>
+          <PanelTitle view="tests" />
         </div>
         <Empty>The test explorer needs the desktop app.</Empty>
       </div>
@@ -66,9 +65,7 @@ export function TestExplorer() {
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <div className="flex shrink-0 items-center gap-1.5 px-3 py-2">
-        <span className="flex-1 font-sans text-2xs uppercase tracking-widest text-fg-subtle/60">
-          Tests
-        </span>
+        <PanelTitle view="tests" />
         <button
           type="button"
           onClick={() => void scan(root)}

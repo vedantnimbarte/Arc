@@ -19,6 +19,7 @@ import { formatBinding, getBinding, type ActionId } from '../state/shortcuts';
 import { isTauri } from '../lib/tauri';
 import { Select } from './Select';
 import { cn } from '../lib/cn';
+import { PanelTitle } from './PanelTitle';
 
 /**
  * Debug panel: pick a launch config, run it under the adapter the user has
@@ -155,7 +156,7 @@ export function DebugPanel() {
 function Header({ children }: { children?: React.ReactNode }) {
   return (
     <div className="flex shrink-0 items-center gap-1.5 px-3 py-2">
-      <span className="flex-1 font-sans text-2xs uppercase tracking-widest text-fg-subtle/60">Debug</span>
+      <PanelTitle view="debug" />
       {children}
     </div>
   );

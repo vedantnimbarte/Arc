@@ -1,18 +1,15 @@
 import { Suspense, lazy, useState } from 'react';
 import {
-  ArrowDown,
-  ArrowUp,
   BellRing,
   CircleDollarSign,
   Radio,
   Gauge,
   Command as CommandIcon,
   FolderOpen,
-  GitBranch,
+  type LucideIcon,
 } from 'lucide-react';
 import type { BranchPickerAnchor } from './BranchPicker';
 import { useFiles } from '../state/files';
-import { useGit } from '../state/git';
 import { useSettings } from '../state/settings';
 import { useWorkspace } from '../state/workspace';
 import { useUsage } from '../state/usage';
@@ -21,16 +18,13 @@ import { runCommand } from '../state/commands';
 import { formatBinding, getBinding } from '../state/shortcuts';
 import { cn } from '../lib/cn';
 
-const BranchPicker = lazy(() =>
-  import('./BranchPicker').then((m) => ({ default: m.BranchPicker })),
-);
 const UsagePopover = lazy(() =>
   import('./UsagePopover').then((m) => ({ default: m.UsagePopover })),
 );
 
 /**
- * Thin strip along the bottom of the window: which folder you're in, what git
- * thinks of it, and a permanent pointer at ⌘K.
+ * Thin strip along the bottom of the window: which folder you're in, what
+ * wants your attention, and a permanent pointer at ⌘K.
  *
  * ARC used to carry a much heavier status bar (breadcrumbs, shell picker,
  * branch switcher — see commit a9e77ed) and it was removed for good reason.
@@ -41,12 +35,6 @@ const UsagePopover = lazy(() =>
 export function StatusBar() {
   const root = useFiles((s) => s.root);
   const showSidebarView = useFiles((s) => s.showSidebarView);
-  const info = useGit((s) => s.info);
-  const changes = useGit((s) => s.entries.length);
-  const conflicts = useGit((s) =>
-    s.entries.reduce((n, e) => (e.kind === 'conflict' ? n + 1 : n), 0),
-  );
-
   const paletteKbd = formatBinding(getBinding('open-command-palette'));
   const broadcastInput = useWorkspace((s) => s.broadcastInput);
   const waitingCount = useWorkspace((s) => Object.keys(s.agentWaiting).length);
@@ -56,8 +44,6 @@ export function StatusBar() {
       .filter(Boolean)
       .join(', '),
   );
-  const [branchAnchor, setBranchAnchor] = useState<BranchPickerAnchor | null>(null);
-
   const usageAgents = useSettings((s) => s.usageAgents);
   const usageSelectedId = useUsage((s) => s.selectedId);
   const usageResults = useUsage((s) => s.results);
@@ -82,32 +68,6 @@ export function StatusBar() {
         title={root ?? 'Choose the folder to work in'}
         accent={!root}
       />
-
-      {info?.branch && (
-        <Item
-          icon={GitBranch}
-          onClick={(e) => {
-            const r = e.currentTarget.getBoundingClientRect();
-            setBranchAnchor({ x: r.left, y: r.top, placement: 'above' });
-          }}
-          label={info.branch}
-          title={branchTitle(info.branch, changes, conflicts)}
-          danger={conflicts > 0}
-        >
-          {info.ahead > 0 && (
-            <span className="flex shrink-0 items-center tabular-nums">
-              <ArrowUp size={9} strokeWidth={2.4} />
-              {info.ahead}
-            </span>
-          )}
-          {info.behind > 0 && (
-            <span className="flex shrink-0 items-center tabular-nums">
-              <ArrowDown size={9} strokeWidth={2.4} />
-              {info.behind}
-            </span>
-          )}
-        </Item>
-      )}
 
       <div className="flex-1" />
 
@@ -161,14 +121,6 @@ export function StatusBar() {
       </Item>
 
       <Suspense fallback={null}>
-        {branchAnchor && (
-          <BranchPicker
-            anchor={branchAnchor}
-            onClose={() => setBranchAnchor(null)}
-            onCheckedOut={() => root && void useGit.getState().refresh(root)}
-          />
-        )}
-
         {usageAnchor && <UsagePopover anchor={usageAnchor} onClose={() => setUsageAnchor(null)} />}
       </Suspense>
     </footer>
@@ -181,20 +133,6 @@ function basename(p: string): string {
   return parts[parts.length - 1] ?? p;
 }
 
-/** The branch pill only shows name + ahead/behind on screen — a long name
- *  already eats the pill's width, and a "N changes" badge next to it wraps
- *  instead of truncating (the bug this replaced). Changes/conflicts still
- *  need to be *somewhere*, so they land in the hover tooltip instead. */
-function branchTitle(branch: string, changes: number, conflicts: number): string {
-  const detail =
-    changes > 0
-      ? conflicts > 0
-        ? `${conflicts} conflict${conflicts === 1 ? '' : 's'}`
-        : `${changes} change${changes === 1 ? '' : 's'}`
-      : null;
-  return `On branch ${branch}${detail ? ` — ${detail}` : ''} — switch branch`;
-}
-
 function Item({
   icon: Icon,
   label,
@@ -205,7 +143,7 @@ function Item({
   warn,
   children,
 }: {
-  icon: typeof GitBranch;
+  icon: LucideIcon;
   label: string;
   title: string;
   onClick: (e: React.MouseEvent<HTMLButtonElement>) => void;
