@@ -1,38 +1,56 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
 import {
+  Bookmark,
   ChevronRight,
   Columns3,
+  Copy,
   Database,
   Download,
+  FileUp,
+  GitCompareArrows,
   History,
-  KeyRound,
   ListTree,
   Loader2,
+  Network,
+  Pencil,
   Play,
   Plug,
   PlugZap,
   Plus,
   RefreshCw,
+  Square,
   Table2,
   Trash2,
   X,
 } from 'lucide-react';
 import {
+  dbApply,
+  dbBegin,
+  dbCancel,
+  dbCommit,
   dbConnDelete,
   dbConnList,
   dbConnUpsert,
   dbConnect,
   dbDisconnect,
+  dbExactCount,
   dbExport,
-  dbExportCancel,
   dbHistoryClear,
   dbHistoryDelete,
   dbHistoryList,
+  dbJobCancel,
   dbPasswordSet,
   dbPreview,
   dbQuery,
+  dbRollback,
+  dbRowCounts,
+  dbSavedDelete,
+  dbSavedList,
+  dbSavedUpsert,
+  dbSshPassphraseSet,
   dbTableSchema,
   dbTables,
+  fsPickFiles,
   fsPickSaveFile,
   fsWriteFile,
   isTauri,
@@ -40,6 +58,8 @@ import {
   type DbConnection,
   type DbQueryHistoryEntry,
   type DbQueryResult,
+  type DbRowCount,
+  type DbSavedQuery,
   type DbTableSchema,
 } from '../lib/tauri';
 import { useWorkspace } from '../state/workspace';
@@ -49,6 +69,17 @@ import { cn } from '../lib/cn';
 import { toCsv, toJson } from '../lib/dbExport';
 import { isSelectLike, unsafeStatements } from '../lib/sqlSafety';
 import { explainSql, hotNodes, parsePlan, type PlanNode } from '../lib/explainPlan';
+import { editCount, editStatements, emptyEdits, type StagedEdits } from '../lib/dbSql';
+import { createTableSql } from '../lib/schemaDiff';
+import { loadSchemas } from '../lib/dbSchemas';
+import { formatRowCount } from '../lib/dbFormat';
+import { SchemaDiagram } from './SchemaDiagram';
+import { SqlEditor, type SqlEditorHandle } from './db/SqlEditor';
+import { ResultGrid } from './db/ResultGrid';
+import { QueryPanel, type QueryPanelTab } from './db/QueryPanel';
+import { SchemaView } from './db/SchemaView';
+import { ImportCsvDialog } from './db/ImportCsvDialog';
+import { SchemaDiff } from './db/SchemaDiff';
 
 interface Props {
   tabId: string;
@@ -103,6 +134,17 @@ function backendFromUrl(url: string): DbBackend | null {
   return null;
 }
 
+/** A statement that can change the schema, so the sidebar and completion refresh after it. */
+const DDL = /\b(create|alter|drop|rename|truncate)\b/i;
+
+const newId = () => `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+
+/** What the area under the editor shows. */
+type Pane = 'grid' | 'schema' | 'plan' | 'diagram' | 'diff';
+
+const ICON_BTN =
+  'flex h-6 w-6 items-center justify-center rounded transition hover:bg-surface-2 hover:text-fg-base';
+
 /**
  * A database client tab: saved connections on the left, a SQL editor and a
  * results grid on the right.
@@ -122,22 +164,38 @@ export function DbClient({ tabId }: Props) {
   const [connected, setConnected] = useState(false);
   const [connecting, setConnecting] = useState(false);
   const [tables, setTables] = useState<string[]>([]);
+  /** Every table's schema, for completion, the diagram, the diff and grid edits. */
+  const [schemas, setSchemas] = useState<Record<string, DbTableSchema> | null>(null);
+  const [rowCounts, setRowCounts] = useState<Record<string, DbRowCount>>({});
   const [sql, setSql] = useState('');
   const [result, setResult] = useState<DbQueryResult | null>(null);
-  /** When set, the results pane shows this table's structure instead of the grid. */
+  /** The table `result` previews, when it is one — what makes the grid editable. */
+  const [resultTable, setResultTable] = useState<string | null>(null);
+  const [edits, setEdits] = useState<StagedEdits>(emptyEdits);
+  const [showEditSql, setShowEditSql] = useState(false);
+  const [pane, setPane] = useState<Pane>('grid');
   const [schema, setSchema] = useState<{ table: string; data: DbTableSchema } | null>(null);
-  const [running, setRunning] = useState(false);
+  const [plan, setPlan] = useState<{ roots: PlanNode[]; analyze: boolean } | null>(null);
+  /** Query id of the statement running now; `dbCancel` stops it. */
+  const [runningId, setRunningId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [adding, setAdding] = useState(false);
+  const [form, setForm] = useState<{ editing: DbConnection | null } | null>(null);
   /** The statement behind `result`, re-run by the full export. */
   const [resultSql, setResultSql] = useState('');
-  /** When set, the results pane shows this query plan instead of the grid. */
-  const [plan, setPlan] = useState<{ roots: PlanNode[]; analyze: boolean } | null>(null);
   const [analyze, setAnalyze] = useState(false);
   const [exporting, setExporting] = useState<{ id: string; rows: number } | null>(null);
-  const [historyOpen, setHistoryOpen] = useState(false);
+  const [panel, setPanel] = useState<QueryPanelTab | null>(null);
   const [history, setHistory] = useState<DbQueryHistoryEntry[]>([]);
+  const [saved, setSaved] = useState<DbSavedQuery[]>([]);
+  const [savingName, setSavingName] = useState<string | null>(null);
+  const [autoCommit, setAutoCommit] = useState(true);
+  const [inTx, setInTx] = useState(false);
+  const [importTable, setImportTable] = useState<string | null>(null);
+  const editor = useRef<SqlEditorHandle>(null);
+  /** Guards against a slow schema load overwriting a newer one. */
+  const schemaLoad = useRef(0);
 
+  const running = runningId !== null;
   const active = useMemo(
     () => connections.find((c) => c.id === activeId) ?? null,
     [connections, activeId],
@@ -156,22 +214,67 @@ export function DbClient({ tabId }: Props) {
     void reloadConnections();
   }, [reloadConnections]);
 
+  /** Tables, their schemas and row counts. Schemas and counts load in the
+   *  background — the sidebar is usable before they arrive. */
+  const refreshCatalog = useCallback(async (id: string) => {
+    const list = await dbTables(id);
+    setTables(list);
+    const token = ++schemaLoad.current;
+    void loadSchemas(id, list)
+      .then((s) => token === schemaLoad.current && setSchemas(s))
+      .catch((e) => toastError(`Schema: ${String(e)}`));
+    void dbRowCounts(id)
+      .then((counts) => {
+        if (token === schemaLoad.current) setRowCounts(Object.fromEntries(counts.map((c) => [c.table, c])));
+      })
+      .catch(() => {});
+  }, []);
+
   // Selecting a connection resets everything downstream of it — leaving the
   // previous database's tables and grid on screen under a new name would be
   // actively misleading.
+  const reset = useCallback(() => {
+    schemaLoad.current++;
+    setConnected(false);
+    setTables([]);
+    setSchemas(null);
+    setRowCounts({});
+    setResult(null);
+    setResultTable(null);
+    setEdits(emptyEdits());
+    setSchema(null);
+    setPlan(null);
+    setPane('grid');
+    setHistory([]);
+    setSaved([]);
+    setError(null);
+    setInTx(false);
+  }, []);
+
+  /** Ask before abandoning an open transaction; roll it back if the user agrees. */
+  const releaseTransaction = useCallback(async () => {
+    if (!inTx || !activeId) return true;
+    const ok = await askConfirm({
+      title: 'Roll back the open transaction?',
+      body: 'Its uncommitted changes are discarded.',
+      confirmLabel: 'Roll back',
+      destructive: true,
+    });
+    if (!ok) return false;
+    await dbRollback(activeId).catch(() => {});
+    setInTx(false);
+    return true;
+  }, [inTx, activeId]);
+
   const select = useCallback(
-    (id: string | null, name?: string) => {
+    async (id: string | null, name?: string) => {
+      if (id === activeId) return;
+      if (!(await releaseTransaction())) return;
       setActiveId(id);
-      setConnected(false);
-      setTables([]);
-      setResult(null);
-      setSchema(null);
-      setPlan(null);
-      setHistory([]);
-      setError(null);
+      reset();
       setTabDbConnection(tabId, id ?? undefined, name ?? 'Database');
     },
-    [setTabDbConnection, tabId],
+    [activeId, releaseTransaction, reset, setTabDbConnection, tabId],
   );
 
   const connect = useCallback(async () => {
@@ -181,7 +284,8 @@ export function DbClient({ tabId }: Props) {
     try {
       await dbConnect(activeId);
       setConnected(true);
-      setTables(await dbTables(activeId));
+      setInTx(false);
+      await refreshCatalog(activeId);
       await reloadConnections(); // refresh last-used ordering
     } catch (e) {
       setConnected(false);
@@ -189,14 +293,14 @@ export function DbClient({ tabId }: Props) {
     } finally {
       setConnecting(false);
     }
-  }, [activeId, connecting, reloadConnections]);
+  }, [activeId, connecting, refreshCatalog, reloadConnections]);
 
   const disconnect = useCallback(async () => {
     if (!activeId) return;
+    if (inTx && !(await releaseTransaction())) return;
     await dbDisconnect(activeId);
-    setConnected(false);
-    setTables([]);
-  }, [activeId]);
+    reset();
+  }, [activeId, inTx, releaseTransaction, reset]);
 
   const reloadHistory = useCallback(async () => {
     if (!activeId) return;
@@ -207,9 +311,19 @@ export function DbClient({ tabId }: Props) {
     }
   }, [activeId]);
 
+  const reloadSaved = useCallback(async () => {
+    if (!activeId) return;
+    try {
+      setSaved(await dbSavedList(activeId));
+    } catch (e) {
+      toastError(String(e));
+    }
+  }, [activeId]);
+
   useEffect(() => {
-    if (historyOpen) void reloadHistory();
-  }, [historyOpen, reloadHistory]);
+    if (panel === 'history') void reloadHistory();
+    if (panel) void reloadSaved();
+  }, [panel, reloadHistory, reloadSaved]);
 
   /** Ask before a destructive statement runs. True when it may proceed. */
   const confirmSafe = useCallback(
@@ -226,6 +340,13 @@ export function DbClient({ tabId }: Props) {
     [active?.backend],
   );
 
+  /** In manual-commit mode, open a transaction before the first write. */
+  const ensureTransaction = useCallback(async () => {
+    if (autoCommit || inTx || !activeId) return;
+    await dbBegin(activeId);
+    setInTx(true);
+  }, [autoCommit, inTx, activeId]);
+
   // Queries are serialized by `running`, so a slow one can't have its results
   // overwritten by a fast one started after it.
   const run = useCallback(
@@ -234,23 +355,27 @@ export function DbClient({ tabId }: Props) {
       const trimmed = text.trim();
       if (!trimmed) return;
       if (!(await confirmSafe(trimmed, 'Run'))) return;
-      setRunning(true);
+      const queryId = newId();
+      setRunningId(queryId);
       setError(null);
-      setSchema(null);
-      setPlan(null);
+      setPane('grid');
       try {
-        setResult(await dbQuery(activeId, trimmed));
+        await ensureTransaction();
+        setResult(await dbQuery(activeId, trimmed, queryId));
         setResultSql(trimmed);
+        setResultTable(null);
+        setEdits(emptyEdits());
+        if (DDL.test(trimmed)) void refreshCatalog(activeId);
       } catch (e) {
         setResult(null);
         setError(String(e));
       } finally {
-        setRunning(false);
+        setRunningId(null);
         // The backend recorded the statement either way.
-        if (historyOpen) void reloadHistory();
+        if (panel === 'history') void reloadHistory();
       }
     },
-    [activeId, confirmSafe, connected, running, historyOpen, reloadHistory],
+    [activeId, confirmSafe, connected, running, ensureTransaction, refreshCatalog, panel, reloadHistory],
   );
 
   /** EXPLAIN the editor's statement and show the plan tree. ANALYZE executes
@@ -262,21 +387,21 @@ export function DbClient({ tabId }: Props) {
       if (!trimmed) return;
       const withAnalyze = analyze && active.backend === 'postgres';
       if (withAnalyze && !(await confirmSafe(trimmed, 'Execute'))) return;
-      setRunning(true);
+      const queryId = newId();
+      setRunningId(queryId);
       setError(null);
-      setSchema(null);
       try {
-        const res = await dbQuery(activeId, explainSql(active.backend, trimmed, withAnalyze));
+        const res = await dbQuery(activeId, explainSql(active.backend, trimmed, withAnalyze), queryId);
         setPlan({ roots: parsePlan(active.backend, res), analyze: withAnalyze });
+        setPane('plan');
       } catch (e) {
-        setPlan(null);
         setError(String(e));
       } finally {
-        setRunning(false);
-        if (historyOpen) void reloadHistory();
+        setRunningId(null);
+        if (panel === 'history') void reloadHistory();
       }
     },
-    [activeId, active, analyze, confirmSafe, connected, running, historyOpen, reloadHistory],
+    [activeId, active, analyze, confirmSafe, connected, running, panel, reloadHistory],
   );
 
   /** Re-run the result's statement in Rust and stream every row to a file. */
@@ -290,7 +415,7 @@ export function DbClient({ tabId }: Props) {
       if (!(await confirmSafe(resultSql, 'Export'))) return;
       const path = await fsPickSaveFile(`results.${format}`);
       if (!path) return;
-      const id = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+      const id = newId();
       setExporting({ id, rows: 0 });
       try {
         const rows = await dbExport(activeId, resultSql, format, path, id, (n) =>
@@ -311,12 +436,14 @@ export function DbClient({ tabId }: Props) {
       if (!activeId) return;
       setError(null);
       try {
-        setSchema({ table, data: await dbTableSchema(activeId, table) });
+        const data = schemas?.[table] ?? (await dbTableSchema(activeId, table));
+        setSchema({ table, data });
+        setPane('schema');
       } catch (e) {
         setError(String(e));
       }
     },
-    [activeId],
+    [activeId, schemas],
   );
 
   const exportResult = useCallback(
@@ -339,24 +466,34 @@ export function DbClient({ tabId }: Props) {
   const previewTable = useCallback(
     async (table: string) => {
       if (!activeId || running) return;
-      setRunning(true);
+      if (editCount(edits) > 0) {
+        const ok = await askConfirm({
+          title: 'Discard unsaved edits?',
+          body: 'The staged changes in the grid have not been applied.',
+          confirmLabel: 'Discard',
+          destructive: true,
+        });
+        if (!ok) return;
+      }
+      setRunningId(newId());
       setError(null);
-      setSchema(null);
-      setPlan(null);
+      setPane('grid');
       // Show the query we ran, so the next edit starts from something real.
       const shown = `SELECT * FROM ${table} LIMIT 200`;
       setSql(shown);
       try {
         setResult(await dbPreview(activeId, table, 200));
         setResultSql(shown);
+        setResultTable(table);
+        setEdits(emptyEdits());
       } catch (e) {
         setResult(null);
         setError(String(e));
       } finally {
-        setRunning(false);
+        setRunningId(null);
       }
     },
-    [activeId, running],
+    [activeId, running, edits],
   );
 
   const remove = useCallback(
@@ -370,13 +507,153 @@ export function DbClient({ tabId }: Props) {
       if (!ok) return;
       try {
         await dbConnDelete(conn.id);
-        if (activeId === conn.id) select(null);
+        if (activeId === conn.id) {
+          setActiveId(null);
+          reset();
+          setTabDbConnection(tabId, undefined, 'Database');
+        }
         await reloadConnections();
       } catch (e) {
         toastError(String(e));
       }
     },
-    [activeId, reloadConnections, select],
+    [activeId, reloadConnections, reset, setTabDbConnection, tabId],
+  );
+
+  // ─── Transactions ──────────────────────────────────────────────────────────
+
+  const finishTx = useCallback(
+    async (commit: boolean) => {
+      if (!activeId) return;
+      try {
+        await (commit ? dbCommit(activeId) : dbRollback(activeId));
+        toast(commit ? 'Committed' : 'Rolled back');
+      } catch (e) {
+        toastError(String(e));
+      } finally {
+        setInTx(false);
+        void refreshCatalog(activeId);
+      }
+    },
+    [activeId, refreshCatalog],
+  );
+
+  // ─── Staged grid edits ─────────────────────────────────────────────────────
+
+  const tableSchema = resultTable ? schemas?.[resultTable] : undefined;
+  const pk = useMemo(
+    () => tableSchema?.columns.filter((c) => c.primary_key).map((c) => c.name) ?? [],
+    [tableSchema],
+  );
+  const editable =
+    !!result &&
+    !!resultTable &&
+    !!tableSchema &&
+    pk.length > 0 &&
+    pk.every((c) => result.columns.includes(c));
+  const readOnlyReason = !resultTable
+    ? null
+    : !tableSchema
+      ? 'Loading schema…'
+      : pk.length === 0
+        ? 'Read-only: the table has no primary key'
+        : null;
+
+  const statements = useMemo(
+    () =>
+      editable && active && result && resultTable
+        ? editStatements(active.backend, resultTable, result.columns, result.rows, pk, edits)
+        : [],
+    [editable, active, result, resultTable, pk, edits],
+  );
+
+  const applyEdits = useCallback(async () => {
+    if (!activeId || !resultTable || statements.length === 0 || running) return;
+    setRunningId(newId());
+    setError(null);
+    try {
+      await ensureTransaction();
+      const n = await dbApply(activeId, statements);
+      toast(`${n} row${n === 1 ? '' : 's'} changed${!autoCommit ? ' — commit to keep them' : ''}`);
+      setEdits(emptyEdits());
+      setShowEditSql(false);
+      setResult(await dbPreview(activeId, resultTable, 200));
+      void dbRowCounts(activeId)
+        .then((c) => setRowCounts(Object.fromEntries(c.map((x) => [x.table, x]))))
+        .catch(() => {});
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setRunningId(null);
+      if (panel === 'history') void reloadHistory();
+    }
+  }, [activeId, resultTable, statements, running, ensureTransaction, autoCommit, panel, reloadHistory]);
+
+  // ─── Saved queries ─────────────────────────────────────────────────────────
+
+  const saveQuery = useCallback(
+    async (name: string) => {
+      if (!activeId || !sql.trim() || !name.trim()) return;
+      try {
+        await dbSavedUpsert({ connection_id: activeId, name: name.trim(), sql });
+        setSavingName(null);
+        setPanel('saved');
+        await reloadSaved();
+        toast(`Saved “${name.trim()}”`);
+      } catch (e) {
+        toastError(String(e));
+      }
+    },
+    [activeId, sql, reloadSaved],
+  );
+
+  const exactCount = useCallback(
+    async (table: string) => {
+      if (!activeId) return;
+      try {
+        const rows = await dbExactCount(activeId, table);
+        setRowCounts((c) => ({ ...c, [table]: { table, rows, estimated: false } }));
+      } catch (e) {
+        toastError(String(e));
+      }
+    },
+    [activeId],
+  );
+
+  const copyDdl = useCallback(
+    async (table: string, data: DbTableSchema) => {
+      if (!active) return;
+      await navigator.clipboard.writeText(createTableSql(active.backend, table, data).join(';\n\n') + ';');
+      toast(`CREATE TABLE ${table} copied`);
+    },
+    [active],
+  );
+
+  const completion = useMemo(() => {
+    const out: Record<string, string[]> = {};
+    for (const t of tables) out[t] = schemas?.[t]?.columns.map((c) => c.name) ?? [];
+    return out;
+  }, [tables, schemas]);
+
+  const schemaActions = (table: string, data: DbTableSchema) => (
+    <>
+      <button
+        type="button"
+        onClick={() => void copyDdl(table, data)}
+        title="Copy CREATE TABLE"
+        className="flex items-center gap-1 rounded px-1.5 py-0.5 font-sans text-2xs text-fg-muted transition hover:bg-surface-2 hover:text-fg-base"
+      >
+        <Copy size={10} /> DDL
+      </button>
+      <button
+        type="button"
+        onClick={() => setImportTable(table)}
+        title="Import rows from a CSV file"
+        className="flex items-center gap-1 rounded px-1.5 py-0.5 font-sans text-2xs text-fg-muted transition hover:bg-surface-2 hover:text-fg-base"
+      >
+        <FileUp size={10} /> Import CSV
+      </button>
+    </>
   );
 
   if (!isTauri) {
@@ -386,6 +663,8 @@ export function DbClient({ tabId }: Props) {
       </div>
     );
   }
+
+  const nEdits = editCount(edits);
 
   return (
     <div className="flex h-full overflow-hidden bg-bg-base text-sm">
@@ -397,7 +676,7 @@ export function DbClient({ tabId }: Props) {
           </span>
           <button
             type="button"
-            onClick={() => setAdding(true)}
+            onClick={() => setForm({ editing: null })}
             title="Add a connection"
             className="flex h-5 w-5 items-center justify-center rounded text-fg-muted transition hover:bg-surface-2 hover:text-fg-base"
           >
@@ -405,7 +684,7 @@ export function DbClient({ tabId }: Props) {
           </button>
         </div>
         <div className="min-h-0 flex-1 overflow-auto pb-2">
-          {connections.length === 0 && !adding && (
+          {connections.length === 0 && !form && (
             <p className="px-3 py-2 font-sans text-xs leading-relaxed text-fg-subtle">
               No connections yet. Add one to browse a database.
             </p>
@@ -420,16 +699,31 @@ export function DbClient({ tabId }: Props) {
             >
               <button
                 type="button"
-                onClick={() => select(c.id, c.name)}
+                onClick={() => void select(c.id, c.name)}
                 className="flex min-w-0 flex-1 items-center gap-2 text-left"
               >
                 <Database size={12} className="shrink-0 text-fg-subtle" />
                 <span className="min-w-0 flex-1">
-                  <span className="block truncate font-sans text-xs text-fg-base">{c.name}</span>
+                  <span className="flex items-center gap-1 truncate font-sans text-xs text-fg-base">
+                    <span className="truncate">{c.name}</span>
+                    {c.ssh && (
+                      <span className="shrink-0 rounded bg-surface-2 px-1 font-sans text-[9px] text-fg-subtle" title={`via SSH ${c.ssh.user}@${c.ssh.host}`}>
+                        SSH
+                      </span>
+                    )}
+                  </span>
                   <span className="block truncate font-mono text-2xs text-fg-subtle/70">
                     {c.url}
                   </span>
                 </span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setForm({ editing: c })}
+                title="Edit connection"
+                className="shrink-0 text-fg-subtle opacity-0 transition hover:text-fg-base group-hover:opacity-100"
+              >
+                <Pencil size={11} />
               </button>
               <button
                 type="button"
@@ -448,32 +742,61 @@ export function DbClient({ tabId }: Props) {
               <div className="px-3 pb-1 font-sans text-2xs uppercase tracking-widest text-fg-subtle/60">
                 Tables
               </div>
-              {tables.map((t) => (
-                <div
-                  key={t}
-                  className={cn(
-                    'group flex items-center gap-2 px-3 py-1',
-                    schema?.table === t ? 'bg-surface-2' : 'hover:bg-surface-1',
-                  )}
-                >
-                  <button
-                    type="button"
-                    onClick={() => void previewTable(t)}
-                    className="flex min-w-0 flex-1 items-center gap-2 text-left"
+              {tables.map((t) => {
+                const rc = rowCounts[t];
+                const count = formatRowCount(rc);
+                return (
+                  <div
+                    key={t}
+                    className={cn(
+                      'group flex items-center gap-2 px-3 py-1',
+                      (pane === 'schema' && schema?.table === t) || resultTable === t
+                        ? 'bg-surface-2'
+                        : 'hover:bg-surface-1',
+                    )}
                   >
-                    <Table2 size={11} className="shrink-0 text-fg-subtle" />
-                    <span className="truncate font-mono text-xs text-fg-base/85">{t}</span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => void showSchema(t)}
-                    title="Show schema"
-                    className="shrink-0 text-fg-subtle opacity-0 transition hover:text-fg-base group-hover:opacity-100"
-                  >
-                    <Columns3 size={11} />
-                  </button>
-                </div>
-              ))}
+                    <button
+                      type="button"
+                      onClick={() => void previewTable(t)}
+                      className="flex min-w-0 flex-1 items-center gap-2 text-left"
+                    >
+                      <Table2 size={11} className="shrink-0 text-fg-subtle" />
+                      <span className="truncate font-mono text-xs text-fg-base/85">{t}</span>
+                    </button>
+                    {count && (
+                      <button
+                        type="button"
+                        onClick={() => rc?.estimated && void exactCount(t)}
+                        title={rc?.estimated ? 'Estimated row count — click for the exact number' : 'Rows'}
+                        className={cn(
+                          'shrink-0 font-sans text-2xs text-fg-subtle/70 group-hover:hidden',
+                          rc?.estimated && 'hover:text-fg-base',
+                        )}
+                      >
+                        {count}
+                      </button>
+                    )}
+                    <span className="hidden shrink-0 items-center gap-1.5 group-hover:flex">
+                      <button
+                        type="button"
+                        onClick={() => setImportTable(t)}
+                        title="Import CSV"
+                        className="text-fg-subtle transition hover:text-fg-base"
+                      >
+                        <FileUp size={11} />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => void showSchema(t)}
+                        title="Show schema"
+                        className="text-fg-subtle transition hover:text-fg-base"
+                      >
+                        <Columns3 size={11} />
+                      </button>
+                    </span>
+                  </div>
+                );
+              })}
             </div>
           )}
           {connected && tables.length === 0 && (
@@ -491,6 +814,17 @@ export function DbClient({ tabId }: Props) {
           {active && (
             <span className="shrink-0 rounded bg-surface-2 px-1.5 py-0.5 font-sans text-2xs text-fg-subtle">
               {active.backend}
+            </span>
+          )}
+          {inTx && (
+            <span className="flex shrink-0 items-center gap-1 rounded bg-status-warn/15 px-1.5 py-0.5 font-sans text-2xs text-status-warn">
+              transaction open
+              <button type="button" onClick={() => void finishTx(true)} className="ml-1 rounded px-1 text-fg-base hover:bg-status-warn/20">
+                Commit
+              </button>
+              <button type="button" onClick={() => void finishTx(false)} className="rounded px-1 text-fg-base hover:bg-status-warn/20">
+                Rollback
+              </button>
             </span>
           )}
           <div className="ml-auto flex items-center gap-1.5">
@@ -519,22 +853,39 @@ export function DbClient({ tabId }: Props) {
             {connected && (
               <button
                 type="button"
-                onClick={() => void dbTables(activeId!).then(setTables).catch(() => {})}
+                onClick={() => void refreshCatalog(activeId!).catch((e) => toastError(String(e)))}
                 title="Refresh tables"
-                className="flex h-6 w-6 items-center justify-center rounded text-fg-muted transition hover:bg-surface-2 hover:text-fg-base"
+                className={cn(ICON_BTN, 'text-fg-muted')}
               >
                 <RefreshCw size={12} />
               </button>
             )}
+            {connected && tables.length > 0 && (
+              <>
+                <button
+                  type="button"
+                  onClick={() => setPane((p) => (p === 'diagram' ? 'grid' : 'diagram'))}
+                  title="Schema diagram"
+                  className={cn(ICON_BTN, pane === 'diagram' ? 'bg-surface-2 text-fg-base' : 'text-fg-muted')}
+                >
+                  <Network size={12} />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setPane((p) => (p === 'diff' ? 'grid' : 'diff'))}
+                  title="Compare schema with another connection"
+                  className={cn(ICON_BTN, pane === 'diff' ? 'bg-surface-2 text-fg-base' : 'text-fg-muted')}
+                >
+                  <GitCompareArrows size={12} />
+                </button>
+              </>
+            )}
             {active && (
               <button
                 type="button"
-                onClick={() => setHistoryOpen((o) => !o)}
-                title="Query history"
-                className={cn(
-                  'flex h-6 w-6 items-center justify-center rounded transition hover:bg-surface-2 hover:text-fg-base',
-                  historyOpen ? 'bg-surface-2 text-fg-base' : 'text-fg-muted',
-                )}
+                onClick={() => setPanel((p) => (p ? null : 'history'))}
+                title="History and saved queries"
+                className={cn(ICON_BTN, panel ? 'bg-surface-2 text-fg-base' : 'text-fg-muted')}
               >
                 <History size={12} />
               </button>
@@ -542,13 +893,16 @@ export function DbClient({ tabId }: Props) {
           </div>
         </div>
 
-        {adding && (
+        {form && (
           <ConnectionForm
-            onCancel={() => setAdding(false)}
+            editing={form.editing}
+            onCancel={() => setForm(null)}
             onSaved={async (conn) => {
-              setAdding(false);
+              const wasEditing = form.editing;
+              setForm(null);
               await reloadConnections();
-              select(conn.id, conn.name);
+              if (!wasEditing) await select(conn.id, conn.name);
+              else if (conn.id === activeId && connected) toast('Saved — reconnect to use the new settings');
             }}
           />
         )}
@@ -562,38 +916,46 @@ export function DbClient({ tabId }: Props) {
           </div>
         )}
 
-        {/* SQL editor. A plain textarea: this is a query box, and wiring a
-            second CodeMirror instance in here would buy highlighting at the
-            cost of a whole editor lifecycle to keep in sync. */}
+        {/* SQL editor */}
         <div className="shrink-0 border-b border-border-hairline">
-          <textarea
-            value={sql}
-            onChange={(e) => setSql(e.target.value)}
-            onKeyDown={(e) => {
-              if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
-                e.preventDefault();
-                void run(sql);
-              }
-            }}
-            placeholder={connected ? 'SELECT …    (⌘/Ctrl + Enter to run)' : 'Connect first'}
-            disabled={!connected}
-            spellCheck={false}
-            rows={5}
-            className="w-full resize-y bg-bg-base px-3 py-2 font-mono text-sm leading-[19px] text-fg-base placeholder:text-fg-subtle/70 focus:outline-none disabled:opacity-50"
-          />
-          <div className="flex items-center gap-2 px-3 pb-1.5">
+          <div className="h-32 min-h-[64px] resize-y overflow-hidden">
+            <SqlEditor
+              ref={editor}
+              value={sql}
+              onChange={setSql}
+              onRun={(text) => void run(text)}
+              backend={active?.backend ?? null}
+              completion={completion}
+              disabled={!connected}
+              placeholder={connected ? 'SELECT …    (⌘/Ctrl + Enter runs the selection or everything)' : 'Connect first'}
+            />
+          </div>
+          <div className="flex flex-wrap items-center gap-x-2 gap-y-1 px-3 pb-1.5 pt-1 [&>*]:shrink-0 [&>*]:whitespace-nowrap">
+            {running ? (
+              <button
+                type="button"
+                onClick={() => runningId && void dbCancel(runningId).catch((e) => toastError(String(e)))}
+                title="Ask the server to stop this statement"
+                className="flex items-center gap-1 rounded-lg bg-status-err/15 px-2.5 py-1 font-sans text-xs text-status-err ring-1 ring-status-err/40 transition-colors hover:bg-status-err/25"
+              >
+                <Square size={10} />
+                Cancel
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={() => void run(editor.current?.selectionOrAll() ?? sql)}
+                disabled={!connected || !sql.trim()}
+                title="Run the selection, or everything (⌘/Ctrl + Enter)"
+                className="flex items-center gap-1 rounded-lg bg-accent-soft px-2.5 py-1 font-sans text-xs text-fg-base ring-1 ring-accent/45 transition-colors hover:bg-accent/20 disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                <Play size={11} />
+                Run
+              </button>
+            )}
             <button
               type="button"
-              onClick={() => void run(sql)}
-              disabled={!connected || running || !sql.trim()}
-              className="flex items-center gap-1 rounded-lg bg-accent-soft px-2.5 py-1 font-sans text-xs text-fg-base ring-1 ring-accent/45 transition-colors hover:bg-accent/20 disabled:cursor-not-allowed disabled:opacity-40"
-            >
-              {running ? <Loader2 size={11} className="animate-spin" /> : <Play size={11} />}
-              Run
-            </button>
-            <button
-              type="button"
-              onClick={() => void explain(sql)}
+              onClick={() => void explain(editor.current?.selectionOrAll() ?? sql)}
               disabled={!connected || running || !sql.trim()}
               title="Show the query plan"
               className="flex items-center gap-1 rounded-lg px-2.5 py-1 font-sans text-xs text-fg-muted transition-colors hover:bg-surface-2 hover:text-fg-base disabled:cursor-not-allowed disabled:opacity-40"
@@ -601,6 +963,48 @@ export function DbClient({ tabId }: Props) {
               <ListTree size={11} />
               Explain
             </button>
+            {savingName === null ? (
+              <button
+                type="button"
+                onClick={() => setSavingName('')}
+                disabled={!activeId || !sql.trim()}
+                title="Save this query on the connection"
+                className="flex items-center gap-1 rounded-lg px-2.5 py-1 font-sans text-xs text-fg-muted transition-colors hover:bg-surface-2 hover:text-fg-base disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                <Bookmark size={11} />
+                Save
+              </button>
+            ) : (
+              <input
+                autoFocus
+                value={savingName}
+                onChange={(e) => setSavingName(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') void saveQuery(savingName);
+                  if (e.key === 'Escape') setSavingName(null);
+                }}
+                onBlur={() => !savingName.trim() && setSavingName(null)}
+                placeholder="Name, then Enter"
+                className="w-40 rounded-md border border-accent/45 bg-bg-base px-2 py-0.5 font-sans text-xs text-fg-base focus:outline-none"
+              />
+            )}
+            <label
+              className="flex items-center gap-1 font-sans text-xs text-fg-subtle"
+              title={
+                inTx
+                  ? 'Commit or roll back the open transaction first'
+                  : 'Off: statements run inside a transaction you commit or roll back yourself'
+              }
+            >
+              <input
+                type="checkbox"
+                checked={autoCommit}
+                disabled={inTx || !connected}
+                onChange={(e) => setAutoCommit(e.target.checked)}
+                className="h-3 w-3 accent-accent"
+              />
+              Auto-commit
+            </label>
             {active?.backend === 'postgres' && (
               <label
                 className="flex items-center gap-1 font-sans text-xs text-fg-subtle"
@@ -616,7 +1020,7 @@ export function DbClient({ tabId }: Props) {
                 {analyze && <span className="text-status-warn">(executes the query)</span>}
               </label>
             )}
-            {result && !plan && (
+            {result && pane === 'grid' && (
               <span className="font-sans text-xs text-fg-subtle">
                 {result.columns.length > 0
                   ? `${result.rows.length} row${result.rows.length === 1 ? '' : 's'}`
@@ -632,7 +1036,7 @@ export function DbClient({ tabId }: Props) {
                 Exporting… {exporting.rows.toLocaleString()} rows
                 <button
                   type="button"
-                  onClick={() => void dbExportCancel(exporting.id)}
+                  onClick={() => void dbJobCancel(exporting.id)}
                   className="rounded px-1.5 py-0.5 text-fg-muted transition hover:bg-surface-2 hover:text-fg-base"
                 >
                   Cancel
@@ -641,8 +1045,7 @@ export function DbClient({ tabId }: Props) {
             ) : (
               result &&
               result.columns.length > 0 &&
-              !schema &&
-              !plan && (
+              pane === 'grid' && (
                 <div className="ml-auto flex items-center gap-1">
                   {(['csv', 'json'] as const).map((format) => (
                     <button
@@ -675,63 +1078,122 @@ export function DbClient({ tabId }: Props) {
           </div>
         </div>
 
-        {/* ── Results grid ── */}
-        <div className="min-h-0 flex-1 overflow-auto">
-          {schema ? (
-            <SchemaView table={schema.table} schema={schema.data} onClose={() => setSchema(null)} />
-          ) : plan ? (
-            <PlanView roots={plan.roots} analyze={plan.analyze} onClose={() => setPlan(null)} />
+        {/* Staged edits bar */}
+        {pane === 'grid' && nEdits > 0 && (
+          <div className="shrink-0 border-b border-border-hairline bg-status-warn/10">
+            <div className="flex items-center gap-2 px-3 py-1 font-sans text-xs">
+              <span className="text-status-warn">
+                {nEdits} pending change{nEdits === 1 ? '' : 's'} to {resultTable}
+              </span>
+              <button
+                type="button"
+                onClick={() => setShowEditSql((v) => !v)}
+                className="flex items-center gap-0.5 text-fg-muted hover:text-fg-base"
+              >
+                <ChevronRight size={10} className={cn('transition-transform', showEditSql && 'rotate-90')} />
+                SQL
+              </button>
+              <span className="flex-1" />
+              <button
+                type="button"
+                onClick={() => setEdits(emptyEdits())}
+                className="rounded px-2 py-0.5 text-fg-muted transition hover:bg-surface-2 hover:text-fg-base"
+              >
+                Discard
+              </button>
+              <button
+                type="button"
+                onClick={() => void applyEdits()}
+                disabled={running}
+                className="rounded-md bg-accent-soft px-2.5 py-0.5 text-fg-base ring-1 ring-accent/45 transition-colors hover:bg-accent/20 disabled:opacity-40"
+              >
+                Apply {autoCommit ? '' : '(in transaction)'}
+              </button>
+            </div>
+            {showEditSql && (
+              <pre className="max-h-40 overflow-auto whitespace-pre-wrap break-all px-3 pb-2 font-mono text-2xs text-fg-base/80">
+                {statements.map((s) => `${s};`).join('\n')}
+              </pre>
+            )}
+          </div>
+        )}
+
+        {/* ── Results area ── */}
+        <div className="min-h-0 flex-1 overflow-hidden">
+          {pane === 'diagram' && active ? (
+            schemas ? (
+              <SchemaDiagram
+                backend={active.backend}
+                schemas={schemas}
+                rowCounts={rowCounts}
+                onOpenTable={(t) => void previewTable(t)}
+                renderDetails={(t, s, onCloseDetails) => (
+                  <SchemaView table={t} schema={s} onClose={onCloseDetails} />
+                )}
+                onClose={() => setPane('grid')}
+              />
+            ) : (
+              <Waiting label="Loading schema…" />
+            )
+          ) : pane === 'diff' && active ? (
+            schemas ? (
+              <SchemaDiff
+                active={active}
+                schemas={schemas}
+                connections={connections}
+                onSendToEditor={(text) => {
+                  setSql(text);
+                  setPane('grid');
+                  toast('Migration SQL loaded — review it, then Run');
+                }}
+                onClose={() => setPane('grid')}
+              />
+            ) : (
+              <Waiting label="Loading schema…" />
+            )
+          ) : pane === 'schema' && schema ? (
+            <div className="h-full overflow-auto">
+              <SchemaView
+                table={schema.table}
+                schema={schema.data}
+                onClose={() => setPane('grid')}
+                actions={schemaActions(schema.table, schema.data)}
+              />
+            </div>
+          ) : pane === 'plan' && plan ? (
+            <div className="h-full overflow-auto">
+              <PlanView roots={plan.roots} analyze={plan.analyze} onClose={() => setPane('grid')} />
+            </div>
           ) : result && result.columns.length > 0 ? (
-            <table className="w-max min-w-full border-collapse text-left">
-              <thead className="sticky top-0 bg-bg-chrome">
-                <tr>
-                  {result.columns.map((c, i) => (
-                    <th
-                      key={`${c}-${i}`}
-                      className="whitespace-nowrap border-b border-r border-border-hairline px-2.5 py-1 font-sans text-2xs uppercase tracking-widest text-fg-subtle/70"
-                    >
-                      {c}
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {result.rows.map((row, ri) => (
-                  <tr key={ri} className={ri % 2 ? 'bg-surface-1' : undefined}>
-                    {row.map((cell, ci) => (
-                      <td
-                        key={ci}
-                        title={cell ?? 'NULL'}
-                        className="max-w-md truncate border-b border-r border-border-hairline px-2.5 py-0.5 font-mono text-xs text-fg-base/85"
-                      >
-                        {cell === null ? (
-                          <span className="italic text-fg-subtle/60">NULL</span>
-                        ) : (
-                          cell
-                        )}
-                      </td>
-                    ))}
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+            <ResultGrid
+              result={result}
+              editing={editable ? { edits, onChange: setEdits } : undefined}
+              readOnlyReason={readOnlyReason}
+            />
           ) : (
             <div className="flex h-32 items-center justify-center font-sans text-xs text-fg-subtle">
-              {result
-                ? 'Statement ran — no rows returned.'
-                : connected
-                  ? 'Run a query, or pick a table on the left.'
-                  : 'Not connected.'}
+              {running ? (
+                <Loader2 size={13} className="animate-spin" />
+              ) : result ? (
+                'Statement ran — no rows returned.'
+              ) : connected ? (
+                'Run a query, or pick a table on the left.'
+              ) : (
+                'Not connected.'
+              )}
             </div>
           )}
         </div>
       </div>
 
-      {historyOpen && activeId && (
-        <HistoryPanel
-          entries={history}
-          onLoad={(h) => setSql(h.sql)}
-          onDelete={async (h) => {
+      {panel && activeId && (
+        <QueryPanel
+          tab={panel}
+          onTab={setPanel}
+          history={history}
+          saved={saved}
+          onLoad={(text) => setSql(text)}
+          onDeleteHistory={async (h) => {
             try {
               await dbHistoryDelete(h.id);
               setHistory((list) => list.filter((x) => x.id !== h.id));
@@ -739,7 +1201,7 @@ export function DbClient({ tabId }: Props) {
               toastError(String(e));
             }
           }}
-          onClear={async () => {
+          onClearHistory={async () => {
             const ok = await askConfirm({
               title: 'Clear query history?',
               body: `Every recorded statement for “${active?.name ?? 'this connection'}” is removed.`,
@@ -754,108 +1216,98 @@ export function DbClient({ tabId }: Props) {
               toastError(String(e));
             }
           }}
-          onClose={() => setHistoryOpen(false)}
+          onDeleteSaved={async (q) => {
+            try {
+              await dbSavedDelete(q.id);
+              setSaved((list) => list.filter((x) => x.id !== q.id));
+            } catch (e) {
+              toastError(String(e));
+            }
+          }}
+          onRenameSaved={async (q, name) => {
+            try {
+              await dbSavedUpsert({ id: q.id, connection_id: q.connection_id, name, sql: q.sql });
+              await reloadSaved();
+            } catch (e) {
+              toastError(String(e));
+            }
+          }}
+          onOverwriteSaved={async (q) => {
+            if (!sql.trim()) return;
+            try {
+              await dbSavedUpsert({ id: q.id, connection_id: q.connection_id, name: q.name, sql });
+              await reloadSaved();
+              toast(`Updated “${q.name}”`);
+            } catch (e) {
+              toastError(String(e));
+            }
+          }}
+          onClose={() => setPanel(null)}
+        />
+      )}
+
+      {importTable && activeId && (
+        <ImportTableDialog
+          connId={activeId}
+          table={importTable}
+          schema={schemas?.[importTable] ?? null}
+          inTransaction={inTx}
+          beforeImport={ensureTransaction}
+          onClose={() => setImportTable(null)}
+          onDone={(rows) => {
+            setImportTable(null);
+            toast(`Imported ${rows.toLocaleString()} row${rows === 1 ? '' : 's'} into ${importTable}`);
+            void refreshCatalog(activeId);
+            if (resultTable === importTable) void previewTable(importTable);
+          }}
         />
       )}
     </div>
   );
 }
 
-// ─── Query history ───────────────────────────────────────────────────────────
-
-/** The connection's recorded statements, newest first. Click one to load it. */
-function HistoryPanel({
-  entries,
-  onLoad,
-  onDelete,
-  onClear,
-  onClose,
-}: {
-  entries: DbQueryHistoryEntry[];
-  onLoad: (h: DbQueryHistoryEntry) => void;
-  onDelete: (h: DbQueryHistoryEntry) => void;
-  onClear: () => void;
-  onClose: () => void;
-}) {
-  const [query, setQuery] = useState('');
-  const shown = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    return q ? entries.filter((h) => h.sql.toLowerCase().includes(q)) : entries;
-  }, [entries, query]);
-
+function Waiting({ label }: { label: string }) {
   return (
-    <div className="flex w-72 shrink-0 flex-col border-l border-border-hairline bg-bg-panel/40">
-      <div className="flex items-center gap-1.5 px-3 py-2">
-        <span className="flex-1 font-sans text-2xs uppercase tracking-widest text-fg-subtle/60">
-          History
-        </span>
-        {entries.length > 0 && (
-          <button
-            type="button"
-            onClick={onClear}
-            title="Clear history"
-            className="flex h-5 w-5 items-center justify-center rounded text-fg-muted transition hover:bg-surface-2 hover:text-status-err"
-          >
-            <Trash2 size={11} />
-          </button>
-        )}
-        <button
-          type="button"
-          onClick={onClose}
-          title="Close"
-          className="flex h-5 w-5 items-center justify-center rounded text-fg-muted transition hover:bg-surface-2 hover:text-fg-base"
-        >
-          <X size={12} />
-        </button>
-      </div>
-      <div className="px-3 pb-2">
-        <input
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          placeholder="Search"
-          spellCheck={false}
-          className="w-full rounded-lg border border-border-subtle bg-bg-base/60 px-2.5 py-1 font-sans text-xs text-fg-base placeholder:text-fg-subtle focus:border-accent/45 focus:outline-none"
-        />
-      </div>
-      <div className="min-h-0 flex-1 overflow-auto pb-2">
-        {shown.length === 0 && (
-          <p className="px-3 py-2 font-sans text-xs text-fg-subtle">
-            {entries.length === 0 ? 'No queries run yet.' : 'No matches.'}
-          </p>
-        )}
-        {shown.map((h) => (
-          <div key={h.id} className="group flex items-start gap-2 px-3 py-1.5 hover:bg-surface-1">
-            <button
-              type="button"
-              onClick={() => onLoad(h)}
-              title={h.error ?? 'Load into the editor'}
-              className="min-w-0 flex-1 text-left"
-            >
-              <span className="line-clamp-2 break-all font-mono text-xs text-fg-base/85">{h.sql}</span>
-              <span className="mt-0.5 flex gap-1.5 font-sans text-2xs text-fg-subtle/70">
-                <span>{new Date(h.executed_at).toLocaleString()}</span>
-                <span>{h.duration_ms} ms</span>
-                {h.error ? (
-                  <span className="text-status-err">error</span>
-                ) : (
-                  <span>
-                    {h.row_count} row{h.row_count === 1 ? '' : 's'}
-                  </span>
-                )}
-              </span>
-            </button>
-            <button
-              type="button"
-              onClick={() => onDelete(h)}
-              title="Delete"
-              className="mt-0.5 shrink-0 text-fg-subtle opacity-0 transition hover:text-status-err group-hover:opacity-100"
-            >
-              <X size={11} />
-            </button>
-          </div>
-        ))}
-      </div>
+    <div className="flex h-full items-center justify-center gap-2 font-sans text-xs text-fg-subtle">
+      <Loader2 size={13} className="animate-spin" />
+      {label}
     </div>
+  );
+}
+
+/** The import dialog, once the table's schema is at hand. */
+function ImportTableDialog({
+  connId,
+  table,
+  schema,
+  inTransaction,
+  beforeImport,
+  onClose,
+  onDone,
+}: {
+  connId: string;
+  table: string;
+  schema: DbTableSchema | null;
+  inTransaction: boolean;
+  beforeImport: () => Promise<void>;
+  onClose: () => void;
+  onDone: (rows: number) => void;
+}) {
+  const [loaded, setLoaded] = useState<DbTableSchema | null>(schema);
+  useEffect(() => {
+    if (!loaded) void dbTableSchema(connId, table).then(setLoaded, (e) => toastError(String(e)));
+  }, [connId, table, loaded]);
+  if (!loaded) return null;
+  return (
+    <ImportCsvDialog
+      connId={connId}
+      table={table}
+      schema={loaded}
+      inTransaction={inTransaction}
+      beforeImport={beforeImport}
+      onClose={onClose}
+      onDone={onDone}
+    />
   );
 }
 
@@ -950,127 +1402,30 @@ function PlanNodeRow({ node, depth, hot }: { node: PlanNode; depth: number; hot:
   );
 }
 
-// ─── Schema view ─────────────────────────────────────────────────────────────
-
-const TH =
-  'whitespace-nowrap border-b border-r border-border-hairline px-2.5 py-1 font-sans text-2xs uppercase tracking-widest text-fg-subtle/70';
-const TD =
-  'max-w-md truncate border-b border-r border-border-hairline px-2.5 py-0.5 font-mono text-xs text-fg-base/85';
-
-/** A table's columns, indexes and foreign keys, in the grid's own styling. */
-function SchemaView({
-  table,
-  schema,
-  onClose,
-}: {
-  table: string;
-  schema: DbTableSchema;
-  onClose: () => void;
-}) {
-  const section = (label: string) => (
-    <div className="px-3 pb-1 pt-3 font-sans text-2xs uppercase tracking-widest text-fg-subtle/60">
-      {label}
-    </div>
-  );
-  return (
-    <div className="pb-3">
-      <div className="flex items-center gap-2 border-b border-border-hairline px-3 py-1.5">
-        <Columns3 size={12} className="shrink-0 text-fg-subtle" />
-        <span className="truncate font-mono text-xs text-fg-base">{table}</span>
-        <button
-          type="button"
-          onClick={onClose}
-          title="Back to results"
-          className="ml-auto shrink-0 text-fg-subtle hover:text-fg-base"
-        >
-          <X size={12} />
-        </button>
-      </div>
-
-      {section('Columns')}
-      <table className="w-max min-w-full border-collapse text-left">
-        <thead>
-          <tr>
-            {['Name', 'Type', 'Nullable', 'Default'].map((h) => (
-              <th key={h} className={TH}>
-                {h}
-              </th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {schema.columns.map((c) => (
-            <tr key={c.name}>
-              <td className={TD}>
-                <span className="flex items-center gap-1.5">
-                  {c.name}
-                  {c.primary_key && (
-                    <span title="Primary key">
-                      <KeyRound size={10} className="text-accent" />
-                    </span>
-                  )}
-                </span>
-              </td>
-              <td className={TD}>{c.data_type}</td>
-              <td className={TD}>{c.nullable ? 'yes' : 'no'}</td>
-              <td className={TD} title={c.default ?? ''}>
-                {c.default ?? <span className="italic text-fg-subtle/60">—</span>}
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-
-      {schema.indexes.length > 0 && (
-        <>
-          {section('Indexes')}
-          <table className="w-max min-w-full border-collapse text-left">
-            <tbody>
-              {schema.indexes.map((ix) => (
-                <tr key={ix.name}>
-                  <td className={TD}>{ix.name}</td>
-                  <td className={TD}>{ix.columns}</td>
-                  <td className={TD}>{ix.unique ? 'unique' : ''}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </>
-      )}
-
-      {schema.foreign_keys.length > 0 && (
-        <>
-          {section('Foreign keys')}
-          <table className="w-max min-w-full border-collapse text-left">
-            <tbody>
-              {schema.foreign_keys.map((fk, i) => (
-                <tr key={`${fk.name}-${i}`}>
-                  {fk.name && <td className={TD}>{fk.name}</td>}
-                  <td className={TD}>
-                    {fk.columns} → {fk.references}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </>
-      )}
-    </div>
-  );
-}
-
 // ─── Connection form ─────────────────────────────────────────────────────────
 
+const INPUT =
+  'rounded-lg border border-border-subtle bg-bg-base/60 px-2.5 py-1.5 font-sans text-xs text-fg-base placeholder:text-fg-subtle focus:border-accent/45 focus:outline-none';
+
 function ConnectionForm({
+  editing,
   onCancel,
   onSaved,
 }: {
+  /** The connection being edited, or null to add one. */
+  editing: DbConnection | null;
   onCancel: () => void;
   onSaved: (conn: DbConnection) => void | Promise<void>;
 }) {
-  const [name, setName] = useState('');
-  const [url, setUrl] = useState('');
+  const [name, setName] = useState(editing?.name ?? '');
+  const [url, setUrl] = useState(editing?.url ?? '');
   const [password, setPassword] = useState('');
+  const [useSsh, setUseSsh] = useState(!!editing?.ssh);
+  const [sshHost, setSshHost] = useState(editing?.ssh?.host ?? '');
+  const [sshPort, setSshPort] = useState(String(editing?.ssh?.port ?? 22));
+  const [sshUser, setSshUser] = useState(editing?.ssh?.user ?? '');
+  const [sshKey, setSshKey] = useState(editing?.ssh?.key_path ?? '');
+  const [sshPassphrase, setSshPassphrase] = useState('');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const nameRef = useRef<HTMLInputElement>(null);
@@ -1091,6 +1446,11 @@ function ConnectionForm({
       setError('URL must start with postgres://, mysql:// or sqlite://');
       return;
     }
+    const port = Number(sshPort);
+    if (useSsh && (!Number.isInteger(port) || port < 1 || port > 65535)) {
+      setError('SSH port must be 1-65535');
+      return;
+    }
     setSaving(true);
     setError(null);
     try {
@@ -1099,18 +1459,30 @@ function ConnectionForm({
       const split = splitPassword(trimmedUrl);
       const secret = password || split.password;
       const conn = await dbConnUpsert({
+        id: editing?.id ?? null,
         name: name.trim() || split.url,
         backend: detected,
         url: split.url,
-        has_password: secret.length > 0,
+        // Editing with the field left blank keeps the stored password.
+        has_password: secret.length > 0 || !!editing?.has_password,
+        ssh: useSsh
+          ? { host: sshHost.trim(), port, user: sshUser.trim(), key_path: sshKey.trim() }
+          : null,
       });
       if (secret) await dbPasswordSet(conn.id, secret);
+      if (useSsh && sshPassphrase) await dbSshPassphraseSet(conn.id, sshPassphrase);
+      if (!useSsh && editing?.ssh) await dbSshPassphraseSet(conn.id, '');
       await onSaved(conn);
     } catch (e) {
       setError(String(e));
     } finally {
       setSaving(false);
     }
+  };
+
+  const keys = (e: KeyboardEvent) => {
+    if (e.key === 'Enter') void save();
+    if (e.key === 'Escape') onCancel();
   };
 
   return (
@@ -1122,19 +1494,16 @@ function ConnectionForm({
           onChange={(e) => setName(e.target.value)}
           placeholder="Name (optional)"
           spellCheck={false}
-          className="w-40 shrink-0 rounded-lg border border-border-subtle bg-bg-base/60 px-2.5 py-1.5 font-sans text-xs text-fg-base placeholder:text-fg-subtle focus:border-accent/45 focus:outline-none"
+          className={cn(INPUT, 'w-40 shrink-0')}
         />
         <input
           value={url}
           onChange={(e) => setUrl(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter') void save();
-            if (e.key === 'Escape') onCancel();
-          }}
+          onKeyDown={keys}
           placeholder={placeholder}
           spellCheck={false}
           autoComplete="off"
-          className="min-w-0 flex-1 rounded-lg border border-border-subtle bg-bg-base/60 px-2.5 py-1.5 font-mono text-xs text-fg-base placeholder:text-fg-subtle focus:border-accent/45 focus:outline-none"
+          className={cn(INPUT, 'min-w-0 flex-1 font-mono')}
         />
       </div>
       <div className="flex items-center gap-2">
@@ -1142,14 +1511,25 @@ function ConnectionForm({
           type="password"
           value={password}
           onChange={(e) => setPassword(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter') void save();
-            if (e.key === 'Escape') onCancel();
-          }}
-          placeholder="Password (optional — or paste it in the URL)"
+          onKeyDown={keys}
+          placeholder={
+            editing?.has_password
+              ? 'Password (leave blank to keep the saved one)'
+              : 'Password (optional — or paste it in the URL)'
+          }
           autoComplete="off"
-          className="min-w-0 flex-1 rounded-lg border border-border-subtle bg-bg-base/60 px-2.5 py-1.5 font-sans text-xs text-fg-base placeholder:text-fg-subtle focus:border-accent/45 focus:outline-none"
+          className={cn(INPUT, 'min-w-0 flex-1')}
         />
+        <label className="flex shrink-0 items-center gap-1.5 font-sans text-xs text-fg-muted">
+          <input
+            type="checkbox"
+            checked={useSsh}
+            onChange={(e) => setUseSsh(e.target.checked)}
+            disabled={backend === 'sqlite'}
+            className="h-3 w-3 accent-accent"
+          />
+          SSH tunnel
+        </label>
         <button
           type="button"
           onClick={() => void save()}
@@ -1166,9 +1546,73 @@ function ConnectionForm({
           cancel
         </button>
       </div>
+      {useSsh && backend !== 'sqlite' && (
+        <div className="space-y-2 rounded-lg border border-border-subtle px-2.5 py-2">
+          <div className="flex items-center gap-2">
+            <input
+              value={sshUser}
+              onChange={(e) => setSshUser(e.target.value)}
+              onKeyDown={keys}
+              placeholder="SSH user"
+              spellCheck={false}
+              className={cn(INPUT, 'w-28 shrink-0')}
+            />
+            <span className="font-sans text-xs text-fg-subtle">@</span>
+            <input
+              value={sshHost}
+              onChange={(e) => setSshHost(e.target.value)}
+              onKeyDown={keys}
+              placeholder="bastion.example.com"
+              spellCheck={false}
+              className={cn(INPUT, 'min-w-0 flex-1 font-mono')}
+            />
+            <span className="font-sans text-xs text-fg-subtle">:</span>
+            <input
+              value={sshPort}
+              onChange={(e) => setSshPort(e.target.value)}
+              onKeyDown={keys}
+              inputMode="numeric"
+              className={cn(INPUT, 'w-16 shrink-0 font-mono')}
+            />
+          </div>
+          <div className="flex items-center gap-2">
+            <input
+              value={sshKey}
+              onChange={(e) => setSshKey(e.target.value)}
+              onKeyDown={keys}
+              placeholder="Private key path (~/.ssh/id_ed25519)"
+              spellCheck={false}
+              className={cn(INPUT, 'min-w-0 flex-1 font-mono')}
+            />
+            <button
+              type="button"
+              onClick={() => void fsPickFiles().then(([f]) => f && setSshKey(f))}
+              className="shrink-0 rounded-lg px-2.5 py-1.5 font-sans text-xs text-fg-muted ring-1 ring-edge-2 transition hover:bg-surface-2 hover:text-fg-base"
+            >
+              Browse…
+            </button>
+            <input
+              type="password"
+              value={sshPassphrase}
+              onChange={(e) => setSshPassphrase(e.target.value)}
+              onKeyDown={keys}
+              placeholder={editing?.ssh ? 'Key passphrase (blank keeps it)' : 'Key passphrase (if any)'}
+              autoComplete="off"
+              className={cn(INPUT, 'w-48 shrink-0')}
+            />
+          </div>
+          <p className="font-sans text-2xs leading-relaxed text-fg-subtle">
+            The URL&apos;s host and port are as seen from the SSH server — often{' '}
+            <span className="font-mono">localhost</span>. Public-key auth only; the host key is
+            checked against <span className="font-mono">~/.ssh/known_hosts</span>. TLS modes that
+            verify the hostname (<span className="font-mono">verify-full</span>) won&apos;t match
+            through the tunnel.
+          </p>
+        </div>
+      )}
       <p className="font-sans text-2xs leading-relaxed text-fg-subtle">
-        The password is stored in your OS credential vault, never in ARC&apos;s database — the
-        saved URL keeps only <span className="font-mono">user@host</span>.
+        Passwords and passphrases are stored in your OS credential vault, never in ARC&apos;s
+        database — the saved URL keeps only <span className="font-mono">user@host</span>.
       </p>
       {error && <p className="font-sans text-xs text-status-err">{error}</p>}
     </div>

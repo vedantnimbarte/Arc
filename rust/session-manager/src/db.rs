@@ -20,6 +20,19 @@ pub struct DbConnection {
     pub has_password: bool,
     pub created_at: i64,
     pub last_used_at: Option<i64>,
+    #[serde(default)]
+    pub ssh: Option<DbSsh>,
+}
+
+/// Reach the database through an SSH local forward. The URL's host and port
+/// are then as seen from the SSH server. The key's passphrase, if any, lives
+/// in the OS vault, never here.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DbSsh {
+    pub host: String,
+    pub port: u16,
+    pub user: String,
+    pub key_path: String,
 }
 
 /// Frontend → backend payload. `id` absent means "create".
@@ -32,11 +45,34 @@ pub struct DbConnectionInput {
     pub url: String,
     #[serde(default)]
     pub has_password: bool,
+    #[serde(default)]
+    pub ssh: Option<DbSsh>,
 }
 
-type Row = (String, String, String, String, i64, i64, Option<i64>);
+type Row = (
+    String,
+    String,
+    String,
+    String,
+    i64,
+    i64,
+    Option<i64>,
+    Option<String>,
+    i64,
+    Option<String>,
+    Option<String>,
+);
 
 fn hydrate(t: Row) -> DbConnection {
+    let ssh = match (t.7, t.9, t.10) {
+        (Some(host), Some(user), Some(key_path)) => Some(DbSsh {
+            host,
+            port: t.8 as u16,
+            user,
+            key_path,
+        }),
+        _ => None,
+    };
     DbConnection {
         id: t.0,
         name: t.1,
@@ -45,10 +81,12 @@ fn hydrate(t: Row) -> DbConnection {
         has_password: t.4 != 0,
         created_at: t.5,
         last_used_at: t.6,
+        ssh,
     }
 }
 
-const SELECT: &str = "SELECT id, name, backend, url, has_password, created_at, last_used_at \
+const SELECT: &str = "SELECT id, name, backend, url, has_password, created_at, last_used_at, \
+                      ssh_host, ssh_port, ssh_user, ssh_key_path \
                       FROM db_connections";
 
 pub async fn list(pool: &SqlitePool) -> Result<Vec<DbConnection>> {
@@ -67,47 +105,48 @@ pub async fn get(pool: &SqlitePool, id: &str) -> Result<Option<DbConnection>> {
 }
 
 pub async fn upsert(pool: &SqlitePool, input: DbConnectionInput) -> Result<DbConnection> {
-    let now = now_ms();
-    if let Some(id) = input.id {
+    let ssh = input.ssh.as_ref();
+    if let Some(id) = &input.id {
         sqlx::query(
-            "UPDATE db_connections SET name = ?, backend = ?, url = ?, has_password = ? \
-             WHERE id = ?",
+            "UPDATE db_connections SET name = ?, backend = ?, url = ?, has_password = ?, \
+             ssh_host = ?, ssh_port = ?, ssh_user = ?, ssh_key_path = ? WHERE id = ?",
         )
         .bind(&input.name)
         .bind(&input.backend)
         .bind(&input.url)
         .bind(i64::from(input.has_password))
-        .bind(&id)
+        .bind(ssh.map(|s| &s.host))
+        .bind(ssh.map_or(22, |s| i64::from(s.port)))
+        .bind(ssh.map(|s| &s.user))
+        .bind(ssh.map(|s| &s.key_path))
+        .bind(id)
         .execute(pool)
         .await?;
-        if let Some(c) = get(pool, &id).await? {
+        if let Some(c) = get(pool, id).await? {
             return Ok(c);
         }
     }
 
     let id = Uuid::new_v4().to_string();
     sqlx::query(
-        "INSERT INTO db_connections (id, name, backend, url, has_password, created_at, last_used_at) \
-         VALUES (?, ?, ?, ?, ?, ?, NULL)",
+        "INSERT INTO db_connections (id, name, backend, url, has_password, created_at, last_used_at, \
+         ssh_host, ssh_port, ssh_user, ssh_key_path) \
+         VALUES (?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?)",
     )
     .bind(&id)
     .bind(&input.name)
     .bind(&input.backend)
     .bind(&input.url)
     .bind(i64::from(input.has_password))
-    .bind(now)
+    .bind(now_ms())
+    .bind(ssh.map(|s| &s.host))
+    .bind(ssh.map_or(22, |s| i64::from(s.port)))
+    .bind(ssh.map(|s| &s.user))
+    .bind(ssh.map(|s| &s.key_path))
     .execute(pool)
     .await?;
 
-    Ok(DbConnection {
-        id,
-        name: input.name,
-        backend: input.backend,
-        url: input.url,
-        has_password: input.has_password,
-        created_at: now,
-        last_used_at: None,
-    })
+    Ok(get(pool, &id).await?.expect("row just inserted"))
 }
 
 pub async fn delete(pool: &SqlitePool, id: &str) -> Result<()> {
@@ -214,6 +253,98 @@ pub async fn history_delete(pool: &SqlitePool, id: i64) -> Result<()> {
 pub async fn history_clear(pool: &SqlitePool, connection_id: &str) -> Result<()> {
     sqlx::query("DELETE FROM db_query_history WHERE connection_id = ?")
         .bind(connection_id)
+        .execute(pool)
+        .await?;
+    Ok(())
+}
+
+// ─── Saved queries ────────────────────────────────────────────────────────
+
+/// A named query kept on a connection.
+#[derive(Debug, Clone, Serialize)]
+pub struct DbSavedQuery {
+    pub id: String,
+    pub connection_id: String,
+    pub name: String,
+    pub sql: String,
+    pub created_at: i64,
+    pub updated_at: i64,
+}
+
+/// Frontend → backend payload. `id` absent means "create".
+#[derive(Debug, Clone, Deserialize)]
+pub struct DbSavedQueryInput {
+    #[serde(default)]
+    pub id: Option<String>,
+    pub connection_id: String,
+    pub name: String,
+    pub sql: String,
+}
+
+type SavedRow = (String, String, String, String, i64, i64);
+
+const SAVED_SELECT: &str =
+    "SELECT id, connection_id, name, sql, created_at, updated_at FROM db_saved_queries";
+
+fn hydrate_saved(t: SavedRow) -> DbSavedQuery {
+    DbSavedQuery {
+        id: t.0,
+        connection_id: t.1,
+        name: t.2,
+        sql: t.3,
+        created_at: t.4,
+        updated_at: t.5,
+    }
+}
+
+/// Alphabetical, case-insensitive.
+pub async fn saved_list(pool: &SqlitePool, connection_id: &str) -> Result<Vec<DbSavedQuery>> {
+    let sql = format!("{SAVED_SELECT} WHERE connection_id = ? ORDER BY name COLLATE NOCASE");
+    let rows = sqlx::query_as::<_, SavedRow>(&sql)
+        .bind(connection_id)
+        .fetch_all(pool)
+        .await?;
+    Ok(rows.into_iter().map(hydrate_saved).collect())
+}
+
+pub async fn saved_upsert(pool: &SqlitePool, input: DbSavedQueryInput) -> Result<DbSavedQuery> {
+    let now = now_ms();
+    let id = match input.id {
+        Some(id) => {
+            sqlx::query("UPDATE db_saved_queries SET name = ?, sql = ?, updated_at = ? WHERE id = ?")
+                .bind(&input.name)
+                .bind(&input.sql)
+                .bind(now)
+                .bind(&id)
+                .execute(pool)
+                .await?;
+            id
+        }
+        None => {
+            let id = Uuid::new_v4().to_string();
+            sqlx::query(
+                "INSERT INTO db_saved_queries (id, connection_id, name, sql, created_at, updated_at) \
+                 VALUES (?, ?, ?, ?, ?, ?)",
+            )
+            .bind(&id)
+            .bind(&input.connection_id)
+            .bind(&input.name)
+            .bind(&input.sql)
+            .bind(now)
+            .bind(now)
+            .execute(pool)
+            .await?;
+            id
+        }
+    };
+    let sql = format!("{SAVED_SELECT} WHERE id = ?");
+    let row = sqlx::query_as::<_, SavedRow>(&sql).bind(&id).fetch_one(pool).await?;
+    Ok(hydrate_saved(row))
+}
+
+pub async fn saved_delete(pool: &SqlitePool, id: &str) -> Result<()> {
+    sqlx::query("DELETE FROM db_saved_queries WHERE id = ?")
+        .bind(id)
         .execute(pool)
         .await?;
     Ok(())

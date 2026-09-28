@@ -80,7 +80,7 @@ pub struct HostKeyPromptDto {
 ///
 /// Returns the sender to hand to arc-ssh. The spawned pump ends when that
 /// sender is dropped, i.e. when the handshake is over either way.
-fn host_key_bridge(app: AppHandle, state: &SshState) -> arc_ssh::HostKeyAsker {
+pub(crate) fn host_key_bridge(app: AppHandle, state: &SshState) -> arc_ssh::HostKeyAsker {
     let (tx, mut rx) = tokio::sync::mpsc::channel::<arc_ssh::HostKeyPrompt>(1);
     let prompts = state.host_key_prompts.clone();
     tauri::async_runtime::spawn(async move {
