@@ -344,6 +344,11 @@ export async function fsWriteFile(path: string, content: string): Promise<void> 
   return invoke<void>('fs_write_file', { path, content });
 }
 
+/** Write binary content, given as base64 (e.g. the payload of a PNG data URL). */
+export async function fsWriteBytes(path: string, base64: string): Promise<void> {
+  await invoke('fs_write_bytes', { path, base64 });
+}
+
 /** Create an empty scratch file under the app data dir and return its path.
  *  `ext` is the language suffix without the dot. A scratch buffer is a real
  *  file, so the caller just `openFile`s it — see `arc_filesystem::scratch_file`. */
@@ -3202,6 +3207,17 @@ export interface DbConnection {
   has_password: boolean;
   created_at: number;
   last_used_at: number | null;
+  /** Set when the database is reached through an SSH tunnel. */
+  ssh: DbSsh | null;
+}
+
+/** SSH tunnel settings. The URL's host/port are then as seen from `host`.
+ *  The key's passphrase lives in the OS vault (`dbSshPassphraseSet`). */
+export interface DbSsh {
+  host: string;
+  port: number;
+  user: string;
+  key_path: string;
 }
 
 export interface DbConnectionInput {
@@ -3210,6 +3226,7 @@ export interface DbConnectionInput {
   backend: DbBackend;
   url: string;
   has_password: boolean;
+  ssh?: DbSsh | null;
 }
 
 export interface DbQueryResult {
@@ -3238,6 +3255,11 @@ export async function dbPasswordSet(id: string, password: string): Promise<void>
   await invoke('db_password_set', { id, password });
 }
 
+/** Store the tunnel's SSH key passphrase in the OS vault. Empty clears it. */
+export async function dbSshPassphraseSet(id: string, passphrase: string): Promise<void> {
+  await invoke('db_ssh_passphrase_set', { id, passphrase });
+}
+
 export async function dbConnect(id: string): Promise<DbBackend> {
   return invoke<DbBackend>('db_connect', { id });
 }
@@ -3250,8 +3272,54 @@ export async function dbIsConnected(id: string): Promise<boolean> {
   return invoke<boolean>('db_is_connected', { id });
 }
 
-export async function dbQuery(id: string, sql: string): Promise<DbQueryResult> {
-  return invoke<DbQueryResult>('db_query', { id, sql });
+/** Run `sql`. With a `queryId`, `dbCancel(queryId)` can stop it mid-flight. */
+export async function dbQuery(id: string, sql: string, queryId?: string): Promise<DbQueryResult> {
+  return invoke<DbQueryResult>('db_query', { id, sql, queryId: queryId ?? null });
+}
+
+/** Ask the server to stop the statement running under `queryId`. */
+export async function dbCancel(queryId: string): Promise<void> {
+  await invoke('db_cancel', { queryId });
+}
+
+/** Manual transactions: every statement on the connection runs inside it
+ *  until commit/rollback. Disconnecting rolls it back. */
+export async function dbBegin(id: string): Promise<void> {
+  await invoke('db_begin', { id });
+}
+
+export async function dbCommit(id: string): Promise<void> {
+  await invoke('db_commit', { id });
+}
+
+export async function dbRollback(id: string): Promise<void> {
+  await invoke('db_rollback', { id });
+}
+
+export async function dbInTransaction(id: string): Promise<boolean> {
+  return invoke<boolean>('db_in_transaction', { id });
+}
+
+/** Run `statements` all-or-nothing (or inside the open manual transaction).
+ *  Resolves with the total rows affected. */
+export async function dbApply(id: string, statements: string[]): Promise<number> {
+  return invoke<number>('db_apply', { id, statements });
+}
+
+export interface DbRowCount {
+  table: string;
+  /** null when the catalog has no estimate yet. */
+  rows: number | null;
+  /** A catalog estimate rather than COUNT(*). */
+  estimated: boolean;
+}
+
+export async function dbRowCounts(id: string): Promise<DbRowCount[]> {
+  return invoke<DbRowCount[]>('db_row_counts', { id });
+}
+
+export async function dbExactCount(id: string, table: string): Promise<number> {
+  return invoke<number>('db_exact_count', { id, table });
 }
 
 export async function dbTables(id: string): Promise<string[]> {
@@ -3272,9 +3340,21 @@ export interface DbTableSchema {
     primary_key: boolean;
   }>;
   /** `columns` is comma-joined, in index order. */
-  indexes: Array<{ name: string; columns: string; unique: boolean }>;
+  indexes: Array<{
+    name: string;
+    columns: string;
+    unique: boolean;
+    /** Backs the primary key. */
+    primary: boolean;
+    /** Owned by a PK/UNIQUE constraint — not created or dropped as an index. */
+    implicit: boolean;
+    /** The server's own CREATE INDEX text (Postgres, SQLite); null on MySQL. */
+    definition: string | null;
+  }>;
   /** `name` is empty on SQLite; `references` reads `table(col, …)`. */
   foreign_keys: Array<{ name: string; columns: string; references: string }>;
+  /** `expression` is parenthesized: `(price > 0)`. `name` is empty for an unnamed SQLite check. */
+  checks: Array<{ name: string; expression: string }>;
 }
 
 export async function dbTableSchema(id: string, table: string): Promise<DbTableSchema> {
@@ -3284,7 +3364,7 @@ export async function dbTableSchema(id: string, table: string): Promise<DbTableS
 /**
  * Re-run `sql` in Rust and stream every row into `path`, past the grid's
  * 20,000-row cap. Resolves with the row count; `onProgress` gets the running
- * count. SELECT-like statements only. Cancel with `dbExportCancel(exportId)`.
+ * count. SELECT-like statements only. Cancel with `dbJobCancel(exportId)`.
  */
 export async function dbExport(
   id: string,
@@ -3302,8 +3382,44 @@ export async function dbExport(
   }
 }
 
-export async function dbExportCancel(exportId: string): Promise<void> {
-  await invoke('db_export_cancel', { exportId });
+/** Stop a running export or CSV import. */
+export async function dbJobCancel(jobId: string): Promise<void> {
+  await invoke('db_job_cancel', { jobId });
+}
+
+export interface DbCsvPreview {
+  rows: Array<Array<string | null>>;
+  /** Records in the whole file, header included. */
+  total_rows: number;
+}
+
+export async function dbCsvPreview(path: string, limit = 20): Promise<DbCsvPreview> {
+  return invoke<DbCsvPreview>('db_csv_preview', { path, limit });
+}
+
+export interface DbImportSpec {
+  table: string;
+  /** Target columns, in the order of `sources`. */
+  columns: string[];
+  /** For each target column, the CSV field index it reads. */
+  sources: number[];
+  has_header: boolean;
+}
+
+/** Load a CSV file into a table, all or nothing. Cancel with `dbJobCancel(jobId)`. */
+export async function dbImportCsv(
+  id: string,
+  path: string,
+  spec: DbImportSpec,
+  jobId: string,
+  onProgress: (rows: number) => void,
+): Promise<number> {
+  const unlisten = await listen<number>(`db://import/${jobId}`, (e) => onProgress(e.payload));
+  try {
+    return await invoke<number>('db_import_csv', { id, path, spec, jobId });
+  } finally {
+    unlisten();
+  }
 }
 
 /** One statement from a connection's query history. Mirrors `arc_session_manager::DbQueryHistoryEntry`. */
@@ -3329,4 +3445,31 @@ export async function dbHistoryDelete(historyId: number): Promise<void> {
 
 export async function dbHistoryClear(id: string): Promise<void> {
   await invoke('db_history_clear', { id });
+}
+
+/** A named query kept on a connection. Mirrors `arc_session_manager::DbSavedQuery`. */
+export interface DbSavedQuery {
+  id: string;
+  connection_id: string;
+  name: string;
+  sql: string;
+  created_at: number;
+  updated_at: number;
+}
+
+export async function dbSavedList(id: string): Promise<DbSavedQuery[]> {
+  return invoke<DbSavedQuery[]>('db_saved_list', { id });
+}
+
+export async function dbSavedUpsert(input: {
+  id?: string | null;
+  connection_id: string;
+  name: string;
+  sql: string;
+}): Promise<DbSavedQuery> {
+  return invoke<DbSavedQuery>('db_saved_upsert', { input });
+}
+
+export async function dbSavedDelete(savedId: string): Promise<void> {
+  await invoke('db_saved_delete', { savedId });
 }

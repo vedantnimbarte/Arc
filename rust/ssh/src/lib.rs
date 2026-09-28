@@ -52,7 +52,9 @@ pub mod sftp;
 
 use forward::{describe_forward, RemoteForwards, SessionForwards};
 pub use exec::{remote_command, shell_join, shell_quote, ExecEvent, ExecOutput};
-pub use forward::{check_jump, ConnError, ForwardInfo, ForwardKind, ForwardSpec, ForwardState};
+pub use forward::{
+    check_jump, ConnError, ForwardInfo, ForwardKind, ForwardSpec, ForwardState, Tunnel,
+};
 pub use sftp::{
     parse_remote_uri, posix_join, posix_parent, remote_uri, RemoteDirEntry, RemoteFsOpts,
     SftpManager, MAX_REMOTE_FILE_BYTES,

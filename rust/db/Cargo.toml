@@ -11,6 +11,9 @@ description = "Postgres / MySQL / SQLite query executor for ARC's database clien
 anyhow = { workspace = true }
 dashmap = { workspace = true }
 futures-util = { workspace = true }
+# Only for `sqlite3_interrupt`, to cancel a running SQLite statement. Same
+# version sqlx-sqlite already links, so no second copy of SQLite.
+libsqlite3-sys = { version = "0.30", default-features = false }
 serde = { workspace = true }
 serde_json = { workspace = true }
 sqlx = { workspace = true }

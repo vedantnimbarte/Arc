@@ -10,6 +10,7 @@
 //!   invoke("fs_pick_save_file", { defaultName }) -> Option<String>
 //!   invoke("fs_read_file",  { path })      -> String (utf-8)
 //!   invoke("fs_write_file", { path, content }) -> ()
+//!   invoke("fs_write_bytes", { path, base64 }) -> ()
 //!   invoke("fs_watch_start", { path })     -> String (watchId)
 //!   invoke("fs_watch_stop",  { watchId })  -> ()
 //!   invoke("fs_scratch_file", { ext })    -> String (path)
@@ -56,6 +57,17 @@ pub async fn fs_read_file(path: String) -> Result<String, String> {
 #[tauri::command]
 pub async fn fs_write_file(path: String, content: String) -> Result<(), String> {
     arc_filesystem::write_file(&path, &content).map_err(|e| e.to_string())
+}
+
+/// Write binary content (an exported image) that the frontend holds as base64.
+/// Only ever to a path the user just picked in a save dialog.
+#[tauri::command]
+pub async fn fs_write_bytes(path: String, base64: String) -> Result<(), String> {
+    use base64::Engine;
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(base64.as_bytes())
+        .map_err(|e| format!("bad base64: {e}"))?;
+    std::fs::write(&path, bytes).map_err(|e| format!("could not write {path}: {e}"))
 }
 
 /// Create an empty scratch file and hand back its path. The caller opens it

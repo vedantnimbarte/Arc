@@ -470,6 +470,75 @@ pub(crate) async fn accept_forwarded(
     });
 }
 
+/// A private `-L` forward on its own SSH connection, for a client inside ARC
+/// (the database tab) rather than for the user. Listens on an ephemeral
+/// loopback port — whoever opened it reads [`Tunnel::local_port`] and points
+/// the client there. Dropping it stops the listener and closes the connection.
+pub struct Tunnel {
+    pub local_port: u16,
+    accept: tokio::task::JoinHandle<()>,
+    /// Keeps the SSH connection (and its jump host's) alive.
+    _dialed: crate::Dialed,
+}
+
+impl Drop for Tunnel {
+    fn drop(&mut self) {
+        self.accept.abort();
+    }
+}
+
+impl Tunnel {
+    /// Log in to `target` (through `jump`, if any) and start forwarding
+    /// `127.0.0.1:<local_port>` to `dest_host:dest_port` as seen from it.
+    /// `asker` handles an unknown host key, as for a shell session.
+    pub async fn open(
+        target: &crate::SshEndpoint,
+        jump: Option<&crate::SshEndpoint>,
+        dest_host: &str,
+        dest_port: u16,
+        asker: Option<crate::HostKeyAsker>,
+    ) -> Result<Tunnel> {
+        let dialed = crate::dial(target, jump, 30, asker, None).await?;
+        let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
+            .await
+            .context("listen on 127.0.0.1")?;
+        let local_port = listener.local_addr()?.port();
+        let spec = ForwardSpec {
+            kind: ForwardKind::Local,
+            bind_port: local_port,
+            dest_host: dest_host.to_string(),
+            dest_port,
+        };
+        let handle = dialed.handle.clone();
+        let accept = tokio::spawn(async move {
+            let mut conns = tokio::task::JoinSet::new();
+            loop {
+                let (sock, peer) = match listener.accept().await {
+                    Ok(v) => v,
+                    Err(err) => {
+                        tracing::warn!(?err, "tunnel accept");
+                        tokio::time::sleep(Duration::from_millis(200)).await;
+                        continue;
+                    }
+                };
+                while conns.try_join_next().is_some() {}
+                let handle = handle.clone();
+                let spec = spec.clone();
+                conns.spawn(async move {
+                    if let Err(err) = pipe_local(&handle, &spec, sock, peer).await {
+                        tracing::warn!(%err, "tunnel connection");
+                    }
+                });
+            }
+        });
+        Ok(Tunnel {
+            local_port,
+            accept,
+            _dialed: dialed,
+        })
+    }
+}
+
 pub(crate) fn describe_forward(spec: &ForwardSpec) -> String {
     match spec.kind {
         ForwardKind::Local => format!(

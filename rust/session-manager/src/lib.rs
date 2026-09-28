@@ -23,7 +23,9 @@ pub mod tabs;
 pub mod workspaces;
 
 pub use commands::CommandRecord;
-pub use db::{DbConnection, DbConnectionInput, DbQueryHistoryEntry};
+pub use db::{
+    DbConnection, DbConnectionInput, DbQueryHistoryEntry, DbSavedQuery, DbSavedQueryInput, DbSsh,
+};
 pub use ssh::{SshHost, SshHostInput, SshKey, SshSessionLogEntry};
 // Re-export so downstream crates (e.g. apps/desktop) that hold a
 // `&SessionStore` can name the pool type without taking a direct sqlx dep.
@@ -269,6 +271,7 @@ mod tests {
             backend: "sqlite".into(),
             url: "sqlite::memory:".into(),
             has_password: false,
+            ssh: None,
         };
         let a = db::upsert(pool, conn("a")).await.unwrap();
         let b = db::upsert(pool, conn("b")).await.unwrap();
@@ -304,5 +307,83 @@ mod tests {
         // Deleting a connection takes its history with it.
         db::delete(pool, &b.id).await.unwrap();
         assert!(db::history_list(pool, &b.id).await.unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn db_ssh_settings_and_saved_queries() {
+        let store = fresh_store().await;
+        let pool = store.pool();
+        let ssh = DbSsh {
+            host: "bastion.example".into(),
+            port: 2222,
+            user: "deploy".into(),
+            key_path: "/home/me/.ssh/id_ed25519".into(),
+        };
+        let input = DbConnectionInput {
+            id: None,
+            name: "prod".into(),
+            backend: "postgres".into(),
+            url: "postgres://app@10.0.0.5/app".into(),
+            has_password: true,
+            ssh: Some(ssh.clone()),
+        };
+        let c = db::upsert(pool, input.clone()).await.unwrap();
+        assert_eq!(c.ssh.as_ref(), Some(&ssh));
+        assert_eq!(db::get(pool, &c.id).await.unwrap().unwrap().ssh, Some(ssh));
+
+        // Clearing the tunnel on update.
+        let c = db::upsert(pool, DbConnectionInput { id: Some(c.id.clone()), ssh: None, ..input })
+            .await
+            .unwrap();
+        assert_eq!(c.ssh, None);
+
+        let q = db::saved_upsert(
+            pool,
+            DbSavedQueryInput {
+                id: None,
+                connection_id: c.id.clone(),
+                name: "users".into(),
+                sql: "SELECT * FROM users".into(),
+            },
+        )
+        .await
+        .unwrap();
+        db::saved_upsert(
+            pool,
+            DbSavedQueryInput {
+                id: None,
+                connection_id: c.id.clone(),
+                name: "Active".into(),
+                sql: "SELECT 1".into(),
+            },
+        )
+        .await
+        .unwrap();
+        let renamed = db::saved_upsert(
+            pool,
+            DbSavedQueryInput {
+                id: Some(q.id.clone()),
+                connection_id: c.id.clone(),
+                name: "all users".into(),
+                sql: "SELECT id FROM users".into(),
+            },
+        )
+        .await
+        .unwrap();
+        assert_eq!(renamed.id, q.id);
+        assert_eq!(renamed.created_at, q.created_at);
+
+        let names: Vec<_> = db::saved_list(pool, &c.id)
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|s| s.name)
+            .collect();
+        assert_eq!(names, vec!["Active", "all users"], "case-insensitive order");
+
+        db::saved_delete(pool, &q.id).await.unwrap();
+        assert_eq!(db::saved_list(pool, &c.id).await.unwrap().len(), 1);
+        db::delete(pool, &c.id).await.unwrap();
+        assert!(db::saved_list(pool, &c.id).await.unwrap().is_empty());
     }
 }
