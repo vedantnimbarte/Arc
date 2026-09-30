@@ -13,6 +13,7 @@ import {
   PanelRight,
   Send,
   Server,
+  Sparkles,
   Terminal as TerminalIcon,
   X,
   type LucideIcon,
@@ -61,6 +62,8 @@ export function iconForKind(kind: Tab['kind']): LucideIcon {
       return GitCompare;
     case 'github':
       return Github;
+    case 'claude':
+      return Sparkles;
     default:
       return FileCode;
   }

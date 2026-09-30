@@ -1112,6 +1112,14 @@ function TreeNode({
         onClick={handleClick}
         onDoubleClick={handleDoubleClick}
         onContextMenu={handleContextMenu}
+        // Drag a path out of the tree — the Claude Code composer turns it
+        // into an @-mention; anything that takes text gets the plain path.
+        draggable
+        onDragStart={(e) => {
+          e.dataTransfer.setData('arc/path', entry.path);
+          e.dataTransfer.setData('text/plain', entry.path);
+          e.dataTransfer.effectAllowed = 'copy';
+        }}
         className={cn(
           'group relative flex h-[26px] w-full items-center gap-1.5 rounded-md pr-2 font-display text-sm tracking-tight transition-colors duration-100',
           'hover:bg-surface-1',

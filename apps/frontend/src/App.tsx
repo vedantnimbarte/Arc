@@ -143,6 +143,9 @@ const WingmanBoard = lazy(() =>
 const WingmanReview = lazy(() =>
   import('./components/wingman/WingmanReview').then((m) => ({ default: m.WingmanReview })),
 );
+const ClaudeWindow = lazy(() =>
+  import('./components/claude/ClaudeWindow').then((m) => ({ default: m.ClaudeWindow })),
+);
 const GitHubView = lazy(() =>
   import('./components/github/GitHubView').then((m) => ({ default: m.GitHubView })),
 );
@@ -254,6 +257,10 @@ export default function App() {
       ) : tab.kind === 'db' ? (
         <Suspense fallback={<EditorFallback />}>
           <DbClient tabId={tab.id} />
+        </Suspense>
+      ) : tab.kind === 'claude' ? (
+        <Suspense fallback={<EditorFallback />}>
+          <ClaudeWindow tabId={tab.id} />
         </Suspense>
       ) : tab.kind === 'github' ? (
         <Suspense fallback={<EditorFallback />}>
@@ -743,6 +750,18 @@ export default function App() {
         run: () => {
           useFiles.getState().setAgentPanelTab('claude');
           useFiles.getState().showSidebarView('agents');
+        },
+      },
+      {
+        id: 'claude.window',
+        title: 'Claude Code: Open window',
+        description: 'Full-window chat with history for this folder',
+        group: 'Claude Code',
+        keywords: ['claude', 'window', 'tab', 'chat', 'history', 'agent'],
+        icon: Sparkles,
+        when: () => useClaudeCode.getState().status === 'ready',
+        run: () => {
+          useWorkspace.getState().openClaudeCode();
         },
       },
       {

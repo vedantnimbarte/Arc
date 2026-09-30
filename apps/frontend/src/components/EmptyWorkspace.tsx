@@ -17,6 +17,7 @@ import {
 } from 'lucide-react';
 import { useWorkspace } from '../state/workspace';
 import { useFiles } from '../state/files';
+import { useClaudeCode } from '../state/claudeCode';
 import { fileIcon } from '../lib/fileIcons';
 import { fsPickFiles, fsPickFolder, isTauri, ptyListAiClis, type AiCliInfo } from '../lib/tauri';
 import { groupColorDef, rgba, type TabGroupColorId } from '../lib/tabGroups';
@@ -65,6 +66,8 @@ export function EmptyWorkspace({ onOpenCommandPalette }: Props) {
   const openApiClient = useWorkspace((s) => s.openApiClient);
   const openDbClient = useWorkspace((s) => s.openDbClient);
   const openGitHub = useWorkspace((s) => s.openGitHub);
+  const openClaudeCode = useWorkspace((s) => s.openClaudeCode);
+  const claudeReady = useClaudeCode((s) => s.status === 'ready');
   const openFile = useWorkspace((s) => s.openFile);
   const launchAiCli = useWorkspace((s) => s.launchAiCli);
   const recentFiles = useFiles((s) => s.recentFiles).slice(0, 5);
@@ -143,6 +146,11 @@ export function EmptyWorkspace({ onOpenCommandPalette }: Props) {
     { title: 'API Client', hint: 'Send a request', icon: Send, color: 'violet', run: () => openApiClient() },
     { title: 'Database', hint: 'Run a query', icon: Database, color: 'amber', run: () => openDbClient() },
     { title: 'GitHub', hint: 'Browse and clone', icon: Github, color: 'slate', run: () => openGitHub() },
+    // Only when the CLI is installed — a tile that opens a "not installed"
+    // screen is a dead end.
+    ...(claudeReady
+      ? [{ title: 'Claude Code', hint: 'Chat about this folder', icon: Sparkles, color: 'orange', run: () => openClaudeCode() } satisfies CoreTool]
+      : []),
   ];
 
   const connectSsh = () => useFiles.getState().showSidebarView('ssh');

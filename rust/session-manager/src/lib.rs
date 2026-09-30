@@ -191,6 +191,14 @@ mod tests {
                 preview_url: None,
                 apiclient_state_json: None,
             },
+            TabInput {
+                id: "t3".into(),
+                title: "Claude Code".into(),
+                kind: TabKind::Claude,
+                file_path: None,
+                preview_url: None,
+                apiclient_state_json: Some(r#"{"cwd":"/tmp"}"#.into()),
+            },
         ];
         tabs::save_tabs(store.pool(), &state.session.id, &inputs, Some("t2"), None)
             .await
@@ -199,7 +207,10 @@ mod tests {
         let again = tabs::current_or_create(store.pool())
             .await
             .expect("reload");
-        assert_eq!(again.tabs.len(), 2);
+        assert_eq!(again.tabs.len(), 3);
+        let claude = again.tabs.iter().find(|t| t.id == "t3").expect("claude tab");
+        assert_eq!(claude.kind, TabKind::Claude);
+        assert_eq!(claude.apiclient_state_json.as_deref(), Some(r#"{"cwd":"/tmp"}"#));
         assert_eq!(again.session.active_tab_id.as_deref(), Some("t2"));
     }
 

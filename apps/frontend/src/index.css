@@ -397,6 +397,12 @@
     margin: 0;
     overflow-wrap: anywhere;
   }
+  /* The full Claude Code window: a reading column, not a sidebar, so the
+     body steps up to the app's base size. */
+  .md-preview.md-chat.md-roomy { font-size: 14px; line-height: 1.65; }
+  .md-chat.md-roomy h1 { font-size: 19px; }
+  .md-chat.md-roomy h2 { font-size: 16px; }
+  .md-chat.md-roomy h3 { font-size: 14px; }
   .md-chat h1 { font-size: 15px; }
   .md-chat h2 { font-size: 14px; padding-bottom: 3px; }
   .md-chat h3 { font-size: 13px; }

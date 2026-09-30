@@ -2,6 +2,8 @@ import { describe, expect, it, beforeEach } from 'vitest';
 import {
   __applyEventForTests as applyEvent,
   __resetClaudeForTests,
+  buildContent,
+  diffStat,
   editedPath,
   summarizeToolInput,
   useClaudeCode,
@@ -211,5 +213,62 @@ describe('editedPath', () => {
     expect(editedPath('Read', { file_path: '/r/a.ts' })).toBeNull();
     expect(editedPath('Edit', { file_path: '   ' })).toBeNull();
     expect(editedPath('Edit', undefined)).toBeNull();
+  });
+});
+
+describe('replayed prompts', () => {
+  beforeEach(() => __resetClaudeForTests());
+
+  it('adds a user row for each recorded prompt', () => {
+    const s = feed({ kind: 'user', payload: { text: '/plan add a window' } }, delta('ok'));
+    expect(s.chat).toEqual([
+      { kind: 'user', text: '/plan add a window' },
+      { kind: 'assistant', text: 'ok' },
+    ]);
+  });
+});
+
+describe('buildContent', () => {
+  it('sends a plain prompt as one text block', () => {
+    expect(buildContent('hi', [])).toEqual([{ type: 'text', text: 'hi' }]);
+  });
+
+  it('inlines text files and sends images as image blocks', () => {
+    const blocks = buildContent('look', [
+      { kind: 'text', name: 'a.txt', text: 'body' },
+      { kind: 'image', name: 's.png', mediaType: 'image/png', data: 'AAAA' },
+    ]);
+    expect(blocks).toEqual([
+      { type: 'text', text: 'look\n\n<file name="a.txt">\nbody\n</file>' },
+      { type: 'image', source: { type: 'base64', media_type: 'image/png', data: 'AAAA' } },
+    ]);
+  });
+
+  it('sends an image with no prompt as just the image', () => {
+    const blocks = buildContent('', [
+      { kind: 'image', name: 's.png', mediaType: 'image/png', data: 'AAAA' },
+    ]);
+    expect(blocks).toHaveLength(1);
+    expect((blocks[0] as { type: string }).type).toBe('image');
+  });
+});
+
+describe('diffStat', () => {
+  it('counts lines for each write tool', () => {
+    expect(diffStat('Edit', { old_string: 'a\nb', new_string: 'a\nb\nc' })).toEqual({ add: 3, del: 2 });
+    expect(diffStat('Write', { content: 'x\ny' })).toEqual({ add: 2, del: 0 });
+    expect(
+      diffStat('MultiEdit', {
+        edits: [
+          { old_string: 'a', new_string: 'b\nc' },
+          { old_string: 'd', new_string: '' },
+        ],
+      }),
+    ).toEqual({ add: 2, del: 2 });
+  });
+
+  it('is null for tools that write nothing', () => {
+    expect(diffStat('Read', { file_path: 'x' })).toBeNull();
+    expect(diffStat('Edit', null)).toBeNull();
   });
 });

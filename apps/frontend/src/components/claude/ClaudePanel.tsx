@@ -16,7 +16,13 @@ import {
 } from 'lucide-react';
 import { cn } from '../../lib/cn';
 import { ChatMarkdown } from '../ChatMarkdown';
-import { useClaudeCode, type ClaudeChatItem } from '../../state/claudeCode';
+import {
+  diffStat,
+  summarizeToolInput,
+  useClaudeCode,
+  type ClaudeChatItem,
+  type ClaudeSessionHook,
+} from '../../state/claudeCode';
 import { useFiles } from '../../state/files';
 import { useSettings } from '../../state/settings';
 
@@ -159,7 +165,7 @@ export function ClaudePanel() {
         </div>
       )}
 
-      <EditedFiles />
+      <EditedFiles store={useClaudeCode} />
 
       <div className="shrink-0 border-t border-border-hairline px-2 py-2">
         <div className="flex items-end gap-1 rounded-md border border-edge-1 bg-surface-1 px-1.5 py-1 focus-within:border-accent/40">
@@ -313,9 +319,9 @@ function PermissionPrompt() {
  * to ARC's own diff viewer, which then shows it against HEAD exactly as Source
  * Control would.
  */
-function EditedFiles() {
-  const files = useClaudeCode((s) => s.editedFiles);
-  const open = useClaudeCode((s) => s.openEditedFile);
+export function EditedFiles({ store }: { store: ClaudeSessionHook }) {
+  const files = store((s) => s.editedFiles);
+  const open = store((s) => s.openEditedFile);
   const [collapsed, setCollapsed] = useState(false);
 
   if (files.length === 0) return null;
@@ -365,17 +371,27 @@ function EditedFiles() {
 
 /** Last path segment, on either separator — paths come from the CLI, which
  *  reports them in the host OS's form. */
-function basename(path: string): string {
+/** `path` relative to `root` when it's inside it, else as given. */
+export function relativeTo(root: string, path: string): string {
+  const norm = (p: string) => p.replace(/\\/g, '/').replace(/\/+$/, '');
+  const r = norm(root);
+  const p = norm(path);
+  return p.toLowerCase().startsWith(`${r.toLowerCase()}/`) ? p.slice(r.length + 1) : path;
+}
+
+export function basename(path: string): string {
   const parts = path.split(/[\\/]/).filter(Boolean);
   return parts[parts.length - 1] ?? path;
 }
 
-function ChatRow({ item }: { item: ClaudeChatItem }) {
+/** `root`, when given, shortens paths in tool rows to folder-relative ones. */
+export function ChatRow({ item, root }: { item: ClaudeChatItem; root?: string | null }) {
   switch (item.kind) {
     case 'user':
       return (
         <div className="rounded-md bg-surface-2 px-2 py-1.5">
           <ChatMarkdown text={item.text} />
+          <AttachmentNames names={item.attachments} />
         </div>
       );
 
@@ -389,11 +405,22 @@ function ChatRow({ item }: { item: ClaudeChatItem }) {
     case 'thinking':
       return <Foldable label="reasoning" body={item.text} markdown />;
 
-    case 'tool':
+    case 'tool': {
+      const raw = summarizeToolInput(item.name, item.input);
+      const summary = root ? relativeTo(root, raw) : raw;
+      const stat = diffStat(item.name, item.input);
       return (
         <Foldable
-          label={item.name}
+          label={summary ? `${item.name}  ${summary}` : item.name}
           icon={<Wrench size={10} strokeWidth={2} />}
+          trailing={
+            stat && (
+              <span className="shrink-0 tabular-nums">
+                <span className="text-status-ok">+{stat.add}</span>{' '}
+                <span className="text-status-err">−{stat.del}</span>
+              </span>
+            )
+          }
           tone={item.isError ? 'error' : 'normal'}
           body={[
             JSON.stringify(item.input, null, 2),
@@ -401,6 +428,7 @@ function ChatRow({ item }: { item: ClaudeChatItem }) {
           ].join('')}
         />
       );
+    }
 
     case 'decision':
       return (
@@ -433,18 +461,38 @@ function ChatRow({ item }: { item: ClaudeChatItem }) {
   }
 }
 
+/** Names of the files attached to a prompt, as quiet chips. */
+export function AttachmentNames({ names }: { names?: string[] }) {
+  if (!names?.length) return null;
+  return (
+    <div className="mt-1 flex flex-wrap gap-1">
+      {names.map((n, i) => (
+        <span
+          key={i}
+          className="max-w-[16rem] truncate rounded bg-surface-2 px-1.5 py-0.5 font-mono text-2xs text-fg-muted"
+        >
+          {n}
+        </span>
+      ))}
+    </div>
+  );
+}
+
 /** Collapsed-by-default disclosure for the noisy rows — reasoning and tool
  *  payloads. Both are useful on demand and overwhelming by default. */
-function Foldable({
+export function Foldable({
   label,
   body,
   icon,
+  trailing,
   tone = 'normal',
   markdown = false,
 }: {
   label: string;
   body: string;
   icon?: React.ReactNode;
+  /** Right-aligned extra on the header row (e.g. a diff stat). */
+  trailing?: React.ReactNode;
   tone?: 'normal' | 'error';
   /** Render the body as Markdown (reasoning) rather than raw text (tool I/O). */
   markdown?: boolean;
@@ -467,7 +515,8 @@ function Foldable({
           <ChevronRight size={10} strokeWidth={2.2} />
         )}
         {icon}
-        <span className="truncate">{label}</span>
+        <span className="min-w-0 flex-1 truncate text-left">{label}</span>
+        {trailing}
       </button>
       {open && markdown && (
         <div className="mt-1 max-h-64 overflow-auto rounded border border-edge-1 bg-scrim-1 px-2 py-1.5 text-fg-muted">

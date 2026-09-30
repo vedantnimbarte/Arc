@@ -25,15 +25,15 @@ const MODE_HELP: Record<ClaudePermissionMode, string> = {
   bypassPermissions: 'Skips every permission check. Use only in a repo you can throw away.',
 };
 
-const RISKY: ClaudePermissionMode[] = ['dontAsk', 'bypassPermissions'];
+export const RISKY_MODES: ClaudePermissionMode[] = ['dontAsk', 'bypassPermissions'];
 
 /** Each mode carries its own help into the popover, so you can read what a
  *  mode does before choosing it rather than after. */
-const MODE_OPTIONS: SelectOption<ClaudePermissionMode>[] = CLAUDE_PERMISSION_MODES.map((m) => ({
+export const MODE_OPTIONS: SelectOption<ClaudePermissionMode>[] = CLAUDE_PERMISSION_MODES.map((m) => ({
   value: m,
   label: m,
   hint: MODE_HELP[m],
-  risky: RISKY.includes(m),
+  risky: RISKY_MODES.includes(m),
 }));
 
 export function ClaudeSettings() {
@@ -95,7 +95,7 @@ export function ClaudeSettings() {
         </span>
       </div>
 
-      {RISKY.includes(mode) && (
+      {RISKY_MODES.includes(mode) && (
         <p className="flex items-start gap-1.5 rounded bg-status-warn/10 px-2 py-1.5 font-display text-2xs leading-relaxed text-status-warn">
           <TriangleAlert size={12} strokeWidth={2} className="mt-px shrink-0" />
           <span>

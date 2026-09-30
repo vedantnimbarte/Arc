@@ -1,12 +1,14 @@
-import { create } from 'zustand';
+import { create, type StoreApi, type UseBoundStore } from 'zustand';
 import type { UnlistenFn } from '@tauri-apps/api/event';
 import {
   claudeAvailable,
   claudePermissionRespond,
+  claudeSessionLoad,
   claudeTurnCancel,
   claudeTurnStart,
   isTauri,
   onClaudeTurn,
+  type ClaudePermissionMode,
   type ClaudeStreamEvent,
 } from '../lib/tauri';
 import { useFiles } from './files';
@@ -24,6 +26,10 @@ import { useWorkspace } from './workspace';
  *
  * Conversation history lives in the CLI, not here: each turn reports a
  * `sessionId`, and passing it back as `resume` continues the same thread.
+ *
+ * There is one session per surface: `useClaudeCode` carries the sidebar
+ * panel's, and every Claude Code window gets its own store from
+ * `claudeWindow(tabId)`. All of them share `sessionSlice` and `applyEvent`.
  */
 
 /** Feature gate. `unavailable` means the CLI isn't on PATH — the common case
@@ -32,7 +38,7 @@ export type ClaudeStatus = 'checking' | 'ready' | 'unavailable';
 
 /** One rendered transcript row. Identical vocabulary to the Wingman panel's. */
 export type ClaudeChatItem =
-  | { kind: 'user'; text: string }
+  | { kind: 'user'; text: string; attachments?: string[] }
   | { kind: 'assistant'; text: string }
   | { kind: 'thinking'; text: string }
   | { kind: 'tool'; id: string; name: string; input: unknown; output?: string; isError?: boolean }
@@ -73,11 +79,13 @@ export interface ClaudeEditedFile {
   edits: number;
 }
 
-interface ClaudeState {
-  status: ClaudeStatus;
-  /** Resolved binary path — shown in Settings so "not installed" is diagnosable. */
-  binary: string | null;
+/** A file attached to a prompt: text is inlined, images go as image blocks. */
+export type ClaudeAttachment =
+  | { kind: 'text'; name: string; text: string }
+  | { kind: 'image'; name: string; mediaType: string; data: string };
 
+/** One conversation: its transcript, the live turn, and the actions on it. */
+export interface ClaudeSession {
   /** CLI-held conversation id, from the turn's `init`. Null until the first turn. */
   sessionId: string | null;
   chat: ClaudeChatItem[];
@@ -102,22 +110,48 @@ interface ClaudeState {
    *  queue would imply a concurrency the protocol doesn't have. */
   pending: ClaudePermission | null;
 
-  /** Probe for the CLI. Safe to call repeatedly; called on boot. */
-  detect: () => Promise<void>;
   /** Answer the pending permission prompt and unblock the turn. */
   respond: (allow: boolean, message?: string) => Promise<void>;
-  send: (prompt: string) => Promise<void>;
+  send: (prompt: string, attachments?: ClaudeAttachment[]) => Promise<void>;
   /** Stop the in-flight turn. */
   cancel: () => Promise<void>;
   /** Drop the conversation and start a fresh session on the next turn. */
   newChat: () => void;
+  /** Replace the transcript with a recorded conversation, continued from the
+   *  next turn. */
+  loadSession: (cwd: string, id: string) => Promise<void>;
   /** Open one of Claude's edits in ARC's diff viewer, against the working tree. */
   openEditedFile: (path: string) => void;
 }
 
-/** Teardown handle for the live turn. Outside the store so it never lands in a
- *  React render path or a devtools snapshot. */
-let unlistenTurn: UnlistenFn | null = null;
+interface ClaudeState extends ClaudeSession {
+  status: ClaudeStatus;
+  /** Resolved binary path — shown in Settings so "not installed" is diagnosable. */
+  binary: string | null;
+  /** Probe for the CLI. Safe to call repeatedly; called on boot. */
+  detect: () => Promise<void>;
+}
+
+/** A Claude Code window's own settings, persisted with its tab. */
+export interface ClaudeWindowPrefs {
+  cwd: string | null;
+  model: string;
+  permissionMode: ClaudePermissionMode;
+  sidebarHidden: boolean;
+}
+
+export type ClaudeWindowSession = ClaudeSession & ClaudeWindowPrefs;
+
+/** Any session store's hook — the panel's `useClaudeCode` or a window's. */
+export type ClaudeSessionHook = <T>(selector: (s: ClaudeSession) => T) => T;
+
+/** Where and how a session's turns run. Read at send time, so a window's
+ *  dropdowns apply from the next turn. */
+interface TurnConfig {
+  cwd: string | null;
+  model: string;
+  permissionMode: string;
+}
 
 function num(v: unknown): number {
   return typeof v === 'number' && Number.isFinite(v) ? v : 0;
@@ -147,18 +181,192 @@ export function editedPath(name: string, input: unknown): string | null {
   return typeof path === 'string' && path.trim() ? path : null;
 }
 
-export const useClaudeCode = create<ClaudeState>((set, get) => ({
-  status: 'checking',
-  binary: null,
+type SessionSet = (
+  patch: Partial<ClaudeSession> | ((s: ClaudeSession) => Partial<ClaudeSession>),
+) => void;
+
+/** Every live session store, so a send can see whether the same conversation
+ *  is already running in another window. */
+const registry = new Set<StoreApi<ClaudeSession>>();
+
+/** True when a session other than `self` is streaming conversation `id`.
+ *
+ *  ponytail: only sees ARC's own sessions; a `claude` running in a terminal on
+ *  the same conversation isn't detectable from here. */
+export function sessionBusyElsewhere(id: string, self?: StoreApi<ClaudeSession>): boolean {
+  for (const s of registry) {
+    const st = s.getState();
+    if (s !== self && st.streaming && st.sessionId === id) return true;
+  }
+  return false;
+}
+
+const EMPTY_SESSION = {
   sessionId: null,
-  chat: [],
+  chat: [] as ClaudeChatItem[],
   streaming: false,
   activeTopic: null,
   usage: null,
   costUsd: 0,
-  denials: [],
-  editedFiles: [],
+  denials: [] as string[],
+  editedFiles: [] as ClaudeEditedFile[],
   pending: null,
+};
+
+/** The conversation half of a store, shared by the panel and every window.
+ *  `set`/`get`/`api` are the owning store's; `cfg` says where turns run. */
+function sessionSlice(
+  rawSet: unknown,
+  rawGet: unknown,
+  api: unknown,
+  cfg: () => TurnConfig,
+): ClaudeSession {
+  const set = rawSet as SessionSet;
+  const get = rawGet as () => ClaudeSession;
+  const self = api as StoreApi<ClaudeSession>;
+  registry.add(self);
+  /** Teardown handle for this session's live turn. Outside the store so it
+   *  never lands in a React render path or a devtools snapshot. */
+  let unlisten: UnlistenFn | null = null;
+  /** Bumped per load so a slow load can't land over a later one. */
+  let loadSeq = 0;
+  const fail = (e: unknown) =>
+    set((s) => ({
+      chat: [...s.chat, { kind: 'error', message: e instanceof Error ? e.message : String(e) }],
+    }));
+
+  return {
+    ...EMPTY_SESSION,
+
+    newChat: () => {
+      unlisten?.();
+      unlisten = null;
+      loadSeq++;
+      set({ ...EMPTY_SESSION });
+    },
+
+    loadSession: async (cwd, id) => {
+      if (get().streaming) return;
+      const seq = ++loadSeq;
+      let events: ClaudeStreamEvent[];
+      try {
+        events = await claudeSessionLoad(cwd, id);
+      } catch (e) {
+        if (seq === loadSeq) fail(e);
+        return;
+      }
+      if (seq !== loadSeq || get().streaming) return;
+      // Fold into a local copy and commit once: a long transcript is
+      // thousands of events, and one render beats thousands.
+      let acc: ClaudeSession = { ...get(), ...EMPTY_SESSION };
+      for (const ev of events) {
+        applyEvent((fn) => {
+          acc = { ...acc, ...fn(acc) };
+        }, ev);
+      }
+      set({
+        ...EMPTY_SESSION,
+        sessionId: id,
+        chat: acc.chat,
+        editedFiles: acc.editedFiles,
+        usage: acc.usage,
+      });
+    },
+
+    respond: async (allow, message) => {
+      const { pending, activeTopic } = get();
+      if (!pending || !activeTopic) return;
+      // Clear before the call, not after: the CLI resumes the moment it reads
+      // the answer, and a prompt still on screen would invite a second click
+      // that lands on a request id the turn has already moved past.
+      set((s) => ({
+        pending: null,
+        chat: [
+          ...s.chat,
+          { kind: 'decision', tool: pending.tool, allowed: allow, summary: pending.summary },
+        ],
+      }));
+      try {
+        await claudePermissionRespond({
+          topic: activeTopic,
+          requestId: pending.requestId,
+          allow,
+          message: message ?? null,
+        });
+      } catch (e) {
+        fail(e);
+      }
+    },
+
+    cancel: async () => {
+      const topic = get().activeTopic;
+      if (!topic) return;
+      // The turn's own terminal event flips `streaming` — killing the child
+      // produces one, so there's nothing to reset here.
+      await claudeTurnCancel(topic).catch(() => {});
+    },
+
+    openEditedFile: (path) => {
+      // Claude Code edits the working tree in place, so the diff against HEAD is
+      // exactly what ARC's Source Control already renders. Root at the session's
+      // folder, not at the file — that's what the git stack expects.
+      const root = cfg().cwd;
+      if (!root) return;
+      useWorkspace.getState().openDiff(path, root, 'worktree');
+    },
+
+    send: async (prompt, attachments = []) => {
+      const { streaming, sessionId } = get();
+      const { cwd, model, permissionMode } = cfg();
+      // One turn at a time: a second child would be a second conversation, and
+      // both would race to resume the same session id.
+      if (useClaudeCode.getState().status !== 'ready' || streaming) return;
+      if (!prompt.trim() && attachments.length === 0) return;
+      if (!cwd) {
+        fail(new Error('Open a folder before asking Claude about it.'));
+        return;
+      }
+      if (sessionId && sessionBusyElsewhere(sessionId, self)) {
+        fail(new Error('This conversation is running in another window.'));
+        return;
+      }
+
+      set((s) => ({
+        chat: [
+          ...s.chat,
+          attachments.length
+            ? { kind: 'user', text: prompt, attachments: attachments.map((a) => a.name) }
+            : { kind: 'user', text: prompt },
+        ],
+        streaming: true,
+        denials: [],
+        pending: null,
+      }));
+
+      try {
+        const topic = await claudeTurnStart({
+          cwd,
+          content: buildContent(prompt, attachments),
+          resume: sessionId,
+          model: model || null,
+          permissionMode,
+          maxBudgetUsd: useSettings.getState().claudeMaxBudgetUsd || null,
+        });
+        set({ activeTopic: topic });
+
+        unlisten?.();
+        unlisten = await onClaudeTurn(topic, (ev) => applyEvent(set, ev));
+      } catch (e) {
+        fail(e);
+        set({ streaming: false, activeTopic: null });
+      }
+    },
+  };
+}
+
+export const useClaudeCode = create<ClaudeState>((set, get, api) => ({
+  status: 'checking',
+  binary: null,
 
   detect: async () => {
     // Browser-only dev build has no IPC. Report unavailable rather than
@@ -175,118 +383,87 @@ export const useClaudeCode = create<ClaudeState>((set, get) => ({
     }
   },
 
-  newChat: () => {
-    unlistenTurn?.();
-    unlistenTurn = null;
-    set({
-      sessionId: null,
-      chat: [],
-      streaming: false,
-      activeTopic: null,
-      usage: null,
-      costUsd: 0,
-      denials: [],
-      editedFiles: [],
-      pending: null,
-    });
-  },
-
-  respond: async (allow, message) => {
-    const { pending, activeTopic } = get();
-    if (!pending || !activeTopic) return;
-    // Clear before the call, not after: the CLI resumes the moment it reads
-    // the answer, and a prompt still on screen would invite a second click
-    // that lands on a request id the turn has already moved past.
-    set((s) => ({
-      pending: null,
-      chat: [
-        ...s.chat,
-        { kind: 'decision', tool: pending.tool, allowed: allow, summary: pending.summary },
-      ],
-    }));
-    try {
-      await claudePermissionRespond({
-        topic: activeTopic,
-        requestId: pending.requestId,
-        allow,
-        message: message ?? null,
-      });
-    } catch (e) {
-      set((s) => ({
-        chat: [
-          ...s.chat,
-          { kind: 'error', message: e instanceof Error ? e.message : String(e) },
-        ],
-      }));
-    }
-  },
-
-  cancel: async () => {
-    const topic = get().activeTopic;
-    if (!topic) return;
-    // The turn's own terminal event flips `streaming` — killing the child
-    // produces one, so there's nothing to reset here.
-    await claudeTurnCancel(topic).catch(() => {});
-  },
-
-  openEditedFile: (path) => {
-    // Claude Code edits the working tree in place, so the diff against HEAD is
-    // exactly what ARC's Source Control already renders. Root at the workspace,
-    // not at the file — that's what the git stack expects.
-    const root = useFiles.getState().root;
-    if (!root) return;
-    useWorkspace.getState().openDiff(path, root, 'worktree');
-  },
-
-  send: async (prompt) => {
-    const { status, streaming } = get();
-    const root = useFiles.getState().root;
-    // One turn at a time: a second child would be a second conversation, and
-    // both would race to resume the same session id.
-    if (status !== 'ready' || streaming || !prompt.trim()) return;
-    if (!root) {
-      set((s) => ({
-        chat: [
-          ...s.chat,
-          { kind: 'error', message: 'Open a folder before asking Claude about it.' },
-        ],
-      }));
-      return;
-    }
-
+  // The sidebar panel follows the file tree and the Settings defaults.
+  ...sessionSlice(set, get, api, () => {
     const settings = useSettings.getState();
-    set((s) => ({
-      chat: [...s.chat, { kind: 'user', text: prompt }],
-      streaming: true,
-      denials: [],
-      pending: null,
-    }));
-
-    try {
-      const topic = await claudeTurnStart({
-        cwd: root,
-        prompt,
-        resume: get().sessionId,
-        model: settings.claudeModel || null,
-        permissionMode: settings.claudePermissionMode,
-        maxBudgetUsd: settings.claudeMaxBudgetUsd || null,
-      });
-      set({ activeTopic: topic });
-
-      unlistenTurn?.();
-      unlistenTurn = await onClaudeTurn(topic, (ev) => applyEvent(set, ev));
-    } catch (e) {
-      set((s) => ({
-        chat: [
-          ...s.chat,
-          { kind: 'error', message: e instanceof Error ? e.message : String(e) },
-        ],
-        streaming: false,
-        activeTopic: null,
-      }));
-    }
-  },
+    return {
+      cwd: useFiles.getState().root,
+      model: settings.claudeModel,
+      permissionMode: settings.claudePermissionMode,
+    };
+  }),
 }));
+
+const windows = new Map<string, UseBoundStore<StoreApi<ClaudeWindowSession>>>();
+
+/** The store for one Claude Code window, created on first use. `prefs` only
+ *  seeds a new store; an existing one keeps its state. */
+export function claudeWindow(
+  tabId: string,
+  prefs: ClaudeWindowPrefs,
+): UseBoundStore<StoreApi<ClaudeWindowSession>> {
+  let store = windows.get(tabId);
+  if (!store) {
+    store = create<ClaudeWindowSession>()((set, get, api) => ({
+      ...sessionSlice(set, get, api, () => get()),
+      ...prefs,
+    }));
+    windows.set(tabId, store);
+  }
+  return store;
+}
+
+/** Tear down a closed window: kill its turn and forget its store. */
+export function disposeClaudeWindow(tabId: string): void {
+  const store = windows.get(tabId);
+  if (!store) return;
+  void store.getState().cancel();
+  store.getState().newChat();
+  registry.delete(store as unknown as StoreApi<ClaudeSession>);
+  windows.delete(tabId);
+}
+
+/** The user message's content blocks. Text files are inlined into the prompt
+ *  (the CLI takes no document block for local text); images go as image blocks. */
+export function buildContent(prompt: string, attachments: ClaudeAttachment[]): unknown[] {
+  let text = prompt;
+  for (const a of attachments) {
+    if (a.kind === 'text') text += `\n\n<file name="${a.name}">\n${a.text}\n</file>`;
+  }
+  const blocks: unknown[] = [];
+  if (text.trim()) blocks.push({ type: 'text', text: text.trim() });
+  for (const a of attachments) {
+    if (a.kind === 'image') {
+      blocks.push({
+        type: 'image',
+        source: { type: 'base64', media_type: a.mediaType, data: a.data },
+      });
+    }
+  }
+  return blocks;
+}
+
+/** Lines added / removed by a write tool call, or null for anything else. */
+export function diffStat(name: string, input: unknown): { add: number; del: number } | null {
+  if (!input || typeof input !== 'object') return null;
+  const o = input as Record<string, unknown>;
+  const lines = (v: unknown) => (typeof v === 'string' && v ? v.split('\n').length : 0);
+  switch (name) {
+    case 'Edit':
+      return { add: lines(o.new_string), del: lines(o.old_string) };
+    case 'MultiEdit': {
+      const edits = Array.isArray(o.edits) ? (o.edits as Record<string, unknown>[]) : [];
+      return edits.reduce<{ add: number; del: number }>(
+        (acc, e) => ({ add: acc.add + lines(e?.new_string), del: acc.del + lines(e?.old_string) }),
+        { add: 0, del: 0 },
+      );
+    }
+    case 'Write':
+      return { add: lines(o.content), del: 0 };
+    default:
+      return null;
+  }
+}
 
 /**
  * Fold one stream event into the transcript.
@@ -295,7 +472,7 @@ export const useClaudeCode = create<ClaudeState>((set, get) => ({
  * than pushing a new one — otherwise a turn produces one row per token.
  */
 function applyEvent(
-  set: (fn: (s: ClaudeState) => Partial<ClaudeState>) => void,
+  set: (fn: (s: ClaudeSession) => Partial<ClaudeSession>) => void,
   ev: ClaudeStreamEvent,
 ): void {
   const p = ev.payload ?? {};
@@ -305,6 +482,11 @@ function applyEvent(
     // replays it as `resume` from then on.
     case 'init':
       set(() => ({ sessionId: str(p.session_id) || null }));
+      return;
+
+    // A typed prompt, from a replayed transcript.
+    case 'user':
+      set((s) => ({ chat: [...s.chat, { kind: 'user', text: str(p.text) }] }));
       return;
 
     case 'text_delta':
@@ -487,20 +669,9 @@ function withEdit(
 
 /** Reset for tests. Not used by the app. */
 export function __resetClaudeForTests(): void {
-  unlistenTurn?.();
-  unlistenTurn = null;
-  useClaudeCode.setState({
-    status: 'ready',
-    sessionId: null,
-    chat: [],
-    streaming: false,
-    activeTopic: null,
-    usage: null,
-    costUsd: 0,
-    denials: [],
-    editedFiles: [],
-    pending: null,
-  });
+  for (const id of [...windows.keys()]) disposeClaudeWindow(id);
+  useClaudeCode.getState().newChat();
+  useClaudeCode.setState({ status: 'ready' });
 }
 
 export { applyEvent as __applyEventForTests };
