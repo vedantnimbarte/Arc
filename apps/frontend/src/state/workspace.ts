@@ -70,6 +70,7 @@ export interface Tab {
     | 'db'
     | 'github'
     | 'merge'
+    | 'claude'
     | 'wingman-board'
     | 'wingman-review'
     | 'agent-runs';
@@ -413,6 +414,8 @@ interface WorkspaceState {
   setPreviewUrl: (id: string, url: string) => void;
   /** Open a new API Client tab. */
   openApiClient: () => string;
+  /** Open a Claude Code window on `cwd` (default: the file tree's root). */
+  openClaudeCode: (cwd?: string | null) => string;
   /** Open (or focus) the GitHub tab. Only one is useful — it carries its own
    *  repo picker, so a second tab would just duplicate the same account. */
   openGitHub: () => string;
@@ -1631,6 +1634,21 @@ export const useWorkspace = create<WorkspaceState>()((set, get) => ({
     get().addTab(tab);
     return id;
   },
+  openClaudeCode: (cwd) => {
+    const id = `claude-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+    const settings = useSettings.getState();
+    // The window's state rides in the same opaque blob API Client tabs use;
+    // `ClaudeWindow` owns its shape.
+    const apiClientState = JSON.stringify({
+      cwd: cwd ?? useFiles.getState().root,
+      sessionId: null,
+      model: settings.claudeModel,
+      permissionMode: settings.claudePermissionMode,
+      sidebarHidden: false,
+    });
+    get().addTab({ id, title: 'Claude Code', kind: 'claude', apiClientState });
+    return id;
+  },
   openGitHub: () => {
     // Scoped to the signed-in account, not the workspace — a second tab would
     // show the same repos. Focus the existing one instead.
@@ -1754,6 +1772,24 @@ export const useWorkspace = create<WorkspaceState>()((set, get) => ({
         title: source.title,
         workspaceId: source.workspaceId,
         kind: 'apiclient',
+      };
+      set((s) => ({ tabs: [...s.tabs, newTab] }));
+    } else if (source.kind === 'claude') {
+      // Same folder and settings, fresh conversation — two windows on one
+      // conversation could only take turns.
+      newTabId = `claude-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+      let blob: Record<string, unknown> = {};
+      try {
+        blob = JSON.parse(source.apiClientState ?? '{}') as Record<string, unknown>;
+      } catch {
+        /* a corrupt blob just means a default window */
+      }
+      const newTab: Tab = {
+        id: newTabId,
+        title: 'Claude Code',
+        workspaceId: source.workspaceId,
+        kind: 'claude',
+        apiClientState: JSON.stringify({ ...blob, sessionId: null }),
       };
       set((s) => ({ tabs: [...s.tabs, newTab] }));
     } else {
@@ -1949,7 +1985,9 @@ export const useWorkspace = create<WorkspaceState>()((set, get) => ({
             filePath: t.file_path ?? undefined,
             previewUrl: t.preview_url ?? undefined,
             apiClientState:
-              t.kind === 'apiclient' ? t.apiclient_state_json ?? undefined : undefined,
+              t.kind === 'apiclient' || t.kind === 'claude'
+                ? t.apiclient_state_json ?? undefined
+                : undefined,
             sshHostId,
             diffRoot,
             diffScope,
@@ -2127,6 +2165,7 @@ const PERSISTED_KINDS = new Set<Tab['kind']>([
   'db',
   'github',
   'merge',
+  'claude',
 ]);
 
 function toTabInputs(tabs: Tab[]): TabInput[] {
@@ -2142,7 +2181,7 @@ function toTabInputs(tabs: Tab[]): TabInput[] {
       // tabs; each kind stores its own shape. PTY/editor/preview tabs leave
       // it null.
       apiclient_state_json:
-        t.kind === 'apiclient'
+        t.kind === 'apiclient' || t.kind === 'claude'
           ? t.apiClientState ?? null
           : t.kind === 'ssh' && t.sshHostId
             ? JSON.stringify({ sshHostId: t.sshHostId })

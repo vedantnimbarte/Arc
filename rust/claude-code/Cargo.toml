@@ -10,6 +10,7 @@ description = "Client for the Claude Code CLI in headless stream-json mode — o
 [dependencies]
 anyhow = { workspace = true }
 arc-pty = { workspace = true }
+dirs = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 tokio = { workspace = true }

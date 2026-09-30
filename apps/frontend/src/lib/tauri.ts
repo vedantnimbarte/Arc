@@ -961,6 +961,7 @@ export type TabKind =
   | 'db'
   | 'github'
   | 'merge'
+  | 'claude'
   | 'wingman-board'
   | 'wingman-review'
   | 'agent-runs';
@@ -3040,10 +3041,11 @@ export async function claudePlanUsage(): Promise<string> {
 }
 
 /** Start a turn. Returns the topic to listen on; `resume` continues a prior
- *  conversation by its session id. */
+ *  conversation by its session id. `content` is the user message's Anthropic
+ *  content blocks (`text`, `image`), passed to the CLI unchanged. */
 export async function claudeTurnStart(opts: {
   cwd: string;
-  prompt: string;
+  content: unknown[];
   resume?: string | null;
   model?: string | null;
   permissionMode?: string | null;
@@ -3051,7 +3053,7 @@ export async function claudeTurnStart(opts: {
 }): Promise<string> {
   return invoke<string>('claude_turn_start', {
     cwd: opts.cwd,
-    prompt: opts.prompt,
+    content: opts.content,
     resume: opts.resume ?? null,
     model: opts.model ?? null,
     permissionMode: opts.permissionMode ?? null,
@@ -3079,6 +3081,31 @@ export async function claudePermissionRespond(opts: {
  *  a permission prompt the user would rather not answer either way. */
 export async function claudeTurnCancel(topic: string): Promise<void> {
   return invoke('claude_turn_cancel', { topic });
+}
+
+/** One conversation from the CLI's history (`~/.claude/projects`). */
+export interface ClaudeSessionMeta {
+  id: string;
+  title: string | null;
+  firstPrompt: string | null;
+  /** Last write, ms since the epoch. */
+  updatedAt: number;
+}
+
+/** Conversations the CLI has recorded for `cwd`, newest first — including
+ *  ones started from a terminal. */
+export async function claudeSessionsList(cwd: string): Promise<ClaudeSessionMeta[]> {
+  return invoke<ClaudeSessionMeta[]>('claude_sessions_list', { cwd });
+}
+
+/** A recorded conversation replayed as turn events, for the store's reducer. */
+export async function claudeSessionLoad(cwd: string, id: string): Promise<ClaudeStreamEvent[]> {
+  return invoke<ClaudeStreamEvent[]>('claude_session_load', { cwd, id });
+}
+
+/** Delete a conversation from the CLI's history. `claude --resume` loses it too. */
+export async function claudeSessionDelete(cwd: string, id: string): Promise<void> {
+  return invoke('claude_session_delete', { cwd, id });
 }
 
 /** Listen on a topic returned by `claudeTurnStart`. */

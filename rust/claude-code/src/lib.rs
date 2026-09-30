@@ -40,6 +40,8 @@ use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::Command;
 use tokio::sync::{mpsc, oneshot};
 
+pub mod sessions;
+
 /// One event handed to the frontend, in ARC's own vocabulary.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Event {
@@ -63,7 +65,8 @@ pub struct TurnOptions {
     /// Absolute path the child runs in. This is what scopes Claude's file
     /// access, so it is the one field with no sensible default.
     pub cwd: String,
-    pub prompt: String,
+    /// The user message's content blocks (`text`, `image`), passed through as-is.
+    pub content: Vec<Value>,
     /// Session to continue, from a previous turn's `session_id`.
     pub resume: Option<String>,
     /// Alias (`opus`, `sonnet`, `haiku`) or a full model id.
@@ -331,17 +334,17 @@ fn unsupported_line(request_id: &str, subtype: &str) -> String {
 }
 
 /// One user turn, as the CLI's `--input-format stream-json` expects it.
-fn user_message_line(prompt: &str) -> String {
+fn user_message_line(content: &[Value]) -> String {
     json!({
         "type": "user",
-        "message": { "role": "user", "content": [{ "type": "text", "text": prompt }] },
+        "message": { "role": "user", "content": content },
     })
     .to_string()
 }
 
 /// A `tool_result`'s `content` is a string on some tools and a block array on
 /// others. The panel renders one text body either way.
-fn stringify_content(v: Option<&Value>) -> String {
+pub(crate) fn stringify_content(v: Option<&Value>) -> String {
     match v {
         Some(Value::String(s)) => s.clone(),
         Some(Value::Array(blocks)) => blocks
@@ -450,7 +453,7 @@ where
             let _ = tx.send(line);
         }
     }
-    send(&to_child, user_message_line(&opts.prompt));
+    send(&to_child, user_message_line(&opts.content));
 
     let stdout = child.stdout.take().context("claude: no stdout")?;
     let stderr = child.stderr.take().context("claude: no stderr")?;
@@ -764,10 +767,13 @@ mod tests {
 
     #[test]
     fn the_prompt_goes_out_as_a_stream_json_user_message() {
-        let v: Value = serde_json::from_str(&user_message_line("say hi")).unwrap();
+        let image = json!({"type":"image","source":{"type":"base64","media_type":"image/png","data":"AAAA"}});
+        let line = user_message_line(&[json!({"type":"text","text":"say hi"}), image.clone()]);
+        let v: Value = serde_json::from_str(&line).unwrap();
         assert_eq!(v["type"], "user");
         assert_eq!(v["message"]["role"], "user");
         assert_eq!(v["message"]["content"][0]["text"], "say hi");
+        assert_eq!(v["message"]["content"][1], image);
     }
 
     #[test]

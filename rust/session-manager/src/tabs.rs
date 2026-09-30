@@ -21,6 +21,7 @@ pub enum TabKind {
     Db,
     Merge,
     Github,
+    Claude,
 }
 
 impl TabKind {
@@ -35,6 +36,7 @@ impl TabKind {
             TabKind::Db => "db",
             TabKind::Merge => "merge",
             TabKind::Github => "github",
+            TabKind::Claude => "claude",
         }
     }
 
@@ -48,6 +50,7 @@ impl TabKind {
             "db" => TabKind::Db,
             "merge" => TabKind::Merge,
             "github" => TabKind::Github,
+            "claude" => TabKind::Claude,
             // Anything else (including stray data) defaults to terminal —
             // the schema CHECK prevents storage of other values, so this
             // branch only runs if the DB has been hand-edited.

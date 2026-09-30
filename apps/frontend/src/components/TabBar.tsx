@@ -14,6 +14,7 @@ import {
   Send,
   Database,
   Github,
+  Sparkles,
   Keyboard,
   ChevronRight,
   type LucideIcon,
@@ -22,6 +23,7 @@ import { getCurrentWindow } from '@tauri-apps/api/window';
 import { LAYOUT_MODES, layoutModeOf, useWorkspace, type LayoutMode } from '../state/workspace';
 import { LAYOUT_MODE_INFO, LayoutModeGlyph } from './LayoutModeGlyph';
 import { useFiles } from '../state/files';
+import { useClaudeCode } from '../state/claudeCode';
 import { runCommand } from '../state/commands';
 import { Tooltip } from './Tooltip';
 import { AGENT_PANEL_H, AGENT_PANEL_W } from './agentPanelSize';
@@ -53,7 +55,9 @@ export function TabBar() {
     openApiClient,
     openDbClient,
     openGitHub,
+    openClaudeCode,
   } = useWorkspace();
+  const claudeReady = useClaudeCode((s) => s.status === 'ready');
   const activeTab = useWorkspace((s) => s.tabs.find((t) => t.id === s.activeTabId) ?? null);
   const layoutMode = useWorkspace((s) => layoutModeOf(s.workspaces, s.activeWorkspaceId));
   const setLayoutMode = useWorkspace((s) => s.setLayoutMode);
@@ -156,6 +160,11 @@ export function TabBar() {
 
   const handleNewDbClient = () => {
     openDbClient();
+    setMenuOpen(false);
+  };
+
+  const handleNewClaude = () => {
+    openClaudeCode();
     setMenuOpen(false);
   };
 
@@ -333,6 +342,16 @@ export function TabBar() {
                   <Database size={12} strokeWidth={2} className="text-fg-subtle" />
                   <span className="flex-1">Database</span>
                 </button>
+                {claudeReady && (
+                  <button
+                    role="menuitem"
+                    onClick={handleNewClaude}
+                    className="flex w-full items-center gap-2 px-3 py-2 text-left font-display text-sm text-fg-base/90 transition-colors hover:bg-surface-2"
+                  >
+                    <Sparkles size={12} strokeWidth={2} className="text-fg-subtle" />
+                    <span className="flex-1">Claude Code</span>
+                  </button>
+                )}
                 <button
                   role="menuitem"
                   onClick={handleNewGitHub}

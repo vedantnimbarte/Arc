@@ -1,17 +1,10 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import {
   ChevronRight,
-  FileCode,
-  GitCompare,
-  Github,
   Maximize2,
   Minimize2,
-  Monitor,
   PanelBottom,
   PanelRight,
-  Send,
-  Server,
-  Terminal as TerminalIcon,
   X,
   type LucideIcon,
 } from 'lucide-react';
@@ -23,6 +16,7 @@ import { TabGroupMenu } from './TabGroupMenu';
 import { groupColorTokens, type GroupColorTokens } from '../lib/tabGroups';
 import { Tooltip } from './Tooltip';
 import { AgentQueueButton } from './AgentQueue';
+import { iconForKind } from './PaneHeader';
 
 interface Props {
   paneId: string;
@@ -30,29 +24,6 @@ interface Props {
    *  and chrome backdrop. `topbar` is a transparent inline strip used when
    *  the tabs live in the application toolbar. */
   variant?: 'leaf' | 'topbar';
-}
-
-/** Per-kind glyph. Each tab kind gets a distinct icon so the strip is
- *  scannable at a glance — terminals, editors, previews, API clients, SSH
- *  sessions and diffs all read differently. */
-function iconForKind(kind: Tab['kind']): LucideIcon {
-  switch (kind) {
-    case 'terminal':
-      return TerminalIcon;
-    case 'preview':
-      return Monitor;
-    case 'apiclient':
-      return Send;
-    case 'ssh':
-      return Server;
-    case 'diff':
-    case 'agent-runs':
-      return GitCompare;
-    case 'github':
-      return Github;
-    default:
-      return FileCode;
-  }
 }
 
 /** One render unit in the strip: either a free tab or a run of tabs that

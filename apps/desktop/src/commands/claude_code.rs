@@ -11,6 +11,9 @@
 //!   invoke("claude_turn_start", { ... })                -> topic
 //!   invoke("claude_turn_cancel", { topic })             -> ()
 //!   invoke("claude_permission_respond", { ... })        -> ()
+//!   invoke("claude_sessions_list", { cwd })             -> SessionMeta[]
+//!   invoke("claude_session_load", { cwd, id })          -> { kind, payload }[]
+//!   invoke("claude_session_delete", { cwd, id })        -> ()
 //!
 //! `claude_turn_start` returns immediately with a topic and emits
 //! `{ kind, payload }` on it per event, then exactly one terminal event —
@@ -20,7 +23,7 @@
 //! `claude_permission_respond` answers it, so the two commands are halves of
 //! one conversation rather than independent calls.
 
-use arc_claude_code::{run_turn, Decision, TurnOptions};
+use arc_claude_code::{run_turn, sessions, Decision, TurnOptions};
 use dashmap::DashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 use tauri::{AppHandle, Emitter, Manager, State};
@@ -91,9 +94,7 @@ pub async fn claude_plan_usage() -> Result<String, String> {
 /// `.credentials.json` file (honoring `CLAUDE_CONFIG_DIR`), or on macOS the
 /// login keychain, where Claude Code keeps it instead.
 fn claude_oauth_token() -> Option<String> {
-    let dir = std::env::var_os("CLAUDE_CONFIG_DIR")
-        .map(std::path::PathBuf::from)
-        .or_else(|| dirs::home_dir().map(|h| h.join(".claude")))?;
+    let dir = sessions::config_dir()?;
     let json = std::fs::read_to_string(dir.join(".credentials.json"))
         .ok()
         .or_else(|| {
@@ -116,7 +117,7 @@ pub async fn claude_turn_start(
     app: AppHandle,
     state: State<'_, ClaudeState>,
     cwd: String,
-    prompt: String,
+    content: Vec<serde_json::Value>,
     resume: Option<String>,
     model: Option<String>,
     permission_mode: Option<String>,
@@ -124,6 +125,9 @@ pub async fn claude_turn_start(
 ) -> Result<String, String> {
     if cwd.trim().is_empty() {
         return Err("claude: no workspace folder is open".into());
+    }
+    if content.is_empty() {
+        return Err("claude: empty message".into());
     }
 
     let id = state.next_stream.fetch_add(1, Ordering::Relaxed);
@@ -136,7 +140,7 @@ pub async fn claude_turn_start(
 
     let opts = TurnOptions {
         cwd,
-        prompt,
+        content,
         resume,
         model,
         permission_mode,
@@ -210,4 +214,35 @@ pub async fn claude_turn_cancel(
         let _ = tx.send(());
     }
     Ok(())
+}
+
+/// Conversations the CLI has recorded for `cwd`, newest first.
+#[tauri::command]
+pub async fn claude_sessions_list(cwd: String) -> Result<Vec<sessions::SessionMeta>, String> {
+    tokio::task::spawn_blocking(move || sessions::list(&cwd))
+        .await
+        .map_err(|e| e.to_string())?
+        .map_err(|e| format!("{e:#}"))
+}
+
+/// One conversation replayed as turn events, for the panel's reducer.
+#[tauri::command]
+pub async fn claude_session_load(cwd: String, id: String) -> Result<Vec<serde_json::Value>, String> {
+    let events = tokio::task::spawn_blocking(move || sessions::load(&cwd, &id))
+        .await
+        .map_err(|e| e.to_string())?
+        .map_err(|e| format!("{e:#}"))?;
+    Ok(events
+        .into_iter()
+        .map(|ev| serde_json::json!({ "kind": ev.kind, "payload": ev.payload }))
+        .collect())
+}
+
+/// Delete a conversation from the CLI's history.
+#[tauri::command]
+pub async fn claude_session_delete(cwd: String, id: String) -> Result<(), String> {
+    tokio::task::spawn_blocking(move || sessions::delete(&cwd, &id))
+        .await
+        .map_err(|e| e.to_string())?
+        .map_err(|e| format!("{e:#}"))
 }
