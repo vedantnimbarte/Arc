@@ -1,4 +1,13 @@
-import { Component, lazy, Suspense, useEffect, useRef, useState, type ErrorInfo, type ReactNode } from 'react';
+import {
+  Component,
+  lazy,
+  Suspense,
+  useEffect,
+  useRef,
+  useState,
+  type ErrorInfo,
+  type ReactNode,
+} from 'react';
 import { createPortal } from 'react-dom';
 import { Terminal } from './components/Terminal';
 import { Preview } from './components/Preview';
@@ -11,7 +20,6 @@ import { StatusBar } from './components/StatusBar';
 import { EmptyWorkspace } from './components/EmptyWorkspace';
 import { ResizeHandle } from './components/ResizeHandle';
 import { PaneTreeView } from './components/PaneTreeView';
-import { WorkspaceRail } from './components/WorkspaceRail';
 import { useWorkspace } from './state/workspace';
 import { toast } from './state/toast';
 import { useProblems } from './state/problems';
@@ -104,21 +112,15 @@ const WingmanPromptDialog = lazy(() =>
 );
 
 // CodeMirror is heavy — defer its bundle until a file is actually opened.
-const Editor = lazy(() =>
-  import('./components/Editor').then((m) => ({ default: m.Editor })),
-);
-const DiffView = lazy(() =>
-  import('./components/DiffView').then((m) => ({ default: m.DiffView })),
-);
+const Editor = lazy(() => import('./components/Editor').then((m) => ({ default: m.Editor })));
+const DiffView = lazy(() => import('./components/DiffView').then((m) => ({ default: m.DiffView })));
 const AgentRuns = lazy(() =>
   import('./components/AgentRuns').then((m) => ({ default: m.AgentRuns })),
 );
 const MergeView = lazy(() =>
   import('./components/MergeView').then((m) => ({ default: m.MergeView })),
 );
-const DbClient = lazy(() =>
-  import('./components/DbClient').then((m) => ({ default: m.DbClient })),
-);
+const DbClient = lazy(() => import('./components/DbClient').then((m) => ({ default: m.DbClient })));
 // Everything below is reachable but rarely on the boot path — a REST client,
 // an SSH terminal, the SSH log drawer and the git overlays. Each is only
 // rendered behind a tab kind or an open flag, so deferring them keeps the
@@ -126,9 +128,7 @@ const DbClient = lazy(() =>
 const ApiClient = lazy(() =>
   import('./components/ApiClient').then((m) => ({ default: m.ApiClient })),
 );
-const SshTab = lazy(() =>
-  import('./components/ssh/SshTab').then((m) => ({ default: m.SshTab })),
-);
+const SshTab = lazy(() => import('./components/ssh/SshTab').then((m) => ({ default: m.SshTab })));
 const SshSessionLogPanel = lazy(() =>
   import('./components/ssh/SshSessionLogDrawer').then((m) => ({
     default: m.SshSessionLogPanel,
@@ -314,10 +314,6 @@ export default function App() {
   const sidebarView = useFiles((s) => s.sidebarView);
   const toggleSidebar = useFiles((s) => s.toggleCollapsed);
   const setSidebarWidth = useFiles((s) => s.setSidebarWidth);
-  const openSettings = () =>
-    void settingsWindowOpen().catch((err) =>
-      console.error('[settings] open window failed:', err),
-    );
 
   // Load persisted tabs + active tab from SQLite (or legacy localStorage)
   // before the renderer settles. hydrate() is idempotent.
@@ -523,7 +519,11 @@ export default function App() {
       if (!action) return;
       // Stepping keys are bare F-keys that terminal programs (htop, mc, vim)
       // use too, so they only belong to the debugger while a session is live.
-      if (action.startsWith('debug-') && action !== 'debug-start-continue' && !useDebug.getState().sessionId) {
+      if (
+        action.startsWith('debug-') &&
+        action !== 'debug-start-continue' &&
+        !useDebug.getState().sessionId
+      ) {
         return;
       }
       // Capture phase + stopPropagation so app shortcuts win over a focused
@@ -764,7 +764,8 @@ export default function App() {
       {
         id: 'problems.run',
         title: 'Problems: Check the project',
-        description: 'Run every detected checker (tsc, cargo, eslint, ruff, go vet) and list what they report.',
+        description:
+          'Run every detected checker (tsc, cargo, eslint, ruff, go vet) and list what they report.',
         group: 'View',
         keywords: ['problems', 'errors', 'lint', 'typecheck', 'diagnostics', 'build'],
         icon: CircleAlert,
@@ -821,75 +822,65 @@ export default function App() {
     <div className="relative flex h-full w-full flex-col overflow-hidden bg-bg-base text-fg-base">
       <div className="desktop-wash" aria-hidden />
 
-      <div className="relative z-10 flex h-full w-full">
-        {/* Discord/Slack-style workspace rail — leftmost full-height column. */}
-        <WorkspaceRail onOpenSettings={openSettings} />
+      {/* The title bar spans the full width — over the sidebar *and* the
+          panes — so the window controls sit flush against the right edge. */}
+      <div className="relative z-10 flex h-full w-full min-h-0 min-w-0 flex-col">
+        <TabBar />
 
-        {/* Everything right of the workspace rail. The title bar spans this
-            whole column — over the panes *and* the sidebar — so the window
-            controls sit flush against the window's right edge. */}
-        <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-          <TabBar />
+        {/* Layout: sidebar rail (left edge) | sidebar panel | main. The rail
+              never collapses, so there is always a way back to a view. */}
+        <div className="flex min-h-0 min-w-0 flex-1">
+          <aside
+            ref={railAsideRef}
+            className="material-sidebar shrink-0 border-r border-border-hairline transition-[width] duration-200 ease-apple"
+            style={{ width: railLabels ? SIDEBAR_RAIL_WIDTH_LABELED : SIDEBAR_RAIL_WIDTH }}
+          >
+            <SidebarRail />
+          </aside>
+          <aside
+            ref={panelAsideRef}
+            className="shrink-0 overflow-hidden transition-[width] duration-300 ease-apple"
+            style={{ width: sidebarCollapsed ? 0 : sidebarWidth }}
+            aria-hidden={sidebarCollapsed}
+          >
+            <div
+              className="material-sidebar h-full border-r border-border-hairline"
+              style={{ width: sidebarWidth }}
+            >
+              <Sidebar />
+            </div>
+          </aside>
+          {!sidebarCollapsed && (
+            <ResizeHandle
+              edge="left"
+              getWidth={() => useFiles.getState().sidebarWidth}
+              onResize={setSidebarWidth}
+              resetWidth={defaultWidthForView(sidebarView)}
+            />
+          )}
 
-          {/* Layout: main | sidebar panel | sidebar rail (right edge) */}
-          <div className="flex min-h-0 min-w-0 flex-1">
-            <div className="relative flex min-h-0 min-w-0 flex-1 px-3 pb-2 pt-1">
-              <div className="material-content flex min-h-0 w-full overflow-hidden rounded-window shadow-panel ring-1 ring-border-subtle">
-                <main className="relative min-w-0 flex-1 overflow-hidden p-1.5">
-                  {/* Split-pane tree — each leaf hosts a tab and can be split
+          <div className="relative flex min-h-0 min-w-0 flex-1 px-3 pb-2 pt-1">
+            <div className="material-content flex min-h-0 w-full overflow-hidden rounded-window shadow-panel ring-1 ring-border-subtle">
+              <main className="relative min-w-0 flex-1 overflow-hidden p-1.5">
+                {/* Split-pane tree — each leaf hosts a tab and can be split
                       right/down into a new pane, with draggable dividers. */}
-                  <PaneTreeView
-                    hostsRef={hostsRef}
-                    stageRef={stageRef}
-                    onOpenCommandPalette={() => setPaletteOpen(true)}
-                  />
-                </main>
-              </div>
-
-              {sshLogPanelOpen && (
-                <Suspense fallback={null}>
-                  <SshSessionLogPanel onClose={() => setSshLogPanelOpen(false)} />
-                </Suspense>
-              )}
+                <PaneTreeView
+                  hostsRef={hostsRef}
+                  stageRef={stageRef}
+                  onOpenCommandPalette={() => setPaletteOpen(true)}
+                />
+              </main>
             </div>
 
-            {/* Sidebar — columns on the right edge, mirroring the workspace
-                rail on the left: the panel, then its activity rail pinned
-                outboard against the window edge. They run from under the
-                title bar to the bottom of the window. The rail never
-                collapses, so there is always a way back to a view. */}
-            {!sidebarCollapsed && (
-              <ResizeHandle
-                edge="right"
-                getWidth={() => useFiles.getState().sidebarWidth}
-                onResize={setSidebarWidth}
-                resetWidth={defaultWidthForView(sidebarView)}
-              />
+            {sshLogPanelOpen && (
+              <Suspense fallback={null}>
+                <SshSessionLogPanel onClose={() => setSshLogPanelOpen(false)} />
+              </Suspense>
             )}
-            <aside
-              ref={panelAsideRef}
-              className="shrink-0 overflow-hidden transition-[width] duration-300 ease-apple"
-              style={{ width: sidebarCollapsed ? 0 : sidebarWidth }}
-              aria-hidden={sidebarCollapsed}
-            >
-              <div
-                className="material-sidebar h-full border-l border-border-hairline"
-                style={{ width: sidebarWidth }}
-              >
-                <Sidebar />
-              </div>
-            </aside>
-            <aside
-              ref={railAsideRef}
-              className="material-sidebar shrink-0 border-l border-border-hairline transition-[width] duration-200 ease-apple"
-              style={{ width: railLabels ? SIDEBAR_RAIL_WIDTH_LABELED : SIDEBAR_RAIL_WIDTH }}
-            >
-              <SidebarRail />
-            </aside>
           </div>
-
-          <StatusBar />
         </div>
+
+        <StatusBar />
       </div>
 
       <Suspense fallback={null}>
@@ -1056,8 +1047,14 @@ function EditorFallback() {
   return (
     <div className="flex h-full items-center justify-center gap-1.5 text-fg-subtle">
       <span className="h-1 w-1 animate-pulse-soft rounded-full bg-accent" />
-      <span className="h-1 w-1 animate-pulse-soft rounded-full bg-accent" style={{ animationDelay: '0.2s' }} />
-      <span className="h-1 w-1 animate-pulse-soft rounded-full bg-accent" style={{ animationDelay: '0.4s' }} />
+      <span
+        className="h-1 w-1 animate-pulse-soft rounded-full bg-accent"
+        style={{ animationDelay: '0.2s' }}
+      />
+      <span
+        className="h-1 w-1 animate-pulse-soft rounded-full bg-accent"
+        style={{ animationDelay: '0.4s' }}
+      />
     </div>
   );
 }
@@ -1085,9 +1082,7 @@ function useTerminalProfileCommands(): void {
         keywords: ['terminal', 'shell', 'new', 'profile', profile.name, profile.shell],
         icon: TerminalSquare,
         run: () => {
-          void useWorkspace
-            .getState()
-            .newTerminal({ title: profile.name, profileId: profile.id });
+          void useWorkspace.getState().newTerminal({ title: profile.name, profileId: profile.id });
         },
       }));
       unregister = useCommands.getState().registerMany(actions);

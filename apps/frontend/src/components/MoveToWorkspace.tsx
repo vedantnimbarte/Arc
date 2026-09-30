@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom';
 import { ArrowRightLeft, ChevronRight, Plus } from 'lucide-react';
 import { useWorkspace } from '../state/workspace';
 import { groupColorDef, rgba } from '../lib/tabGroups';
-import { initials } from './WorkspaceRail';
+import { initials } from './WorkspaceSwitcher';
 import { DEFAULT_WORKSPACE_COLOR } from './WorkspaceEditPanel';
 import { cn } from '../lib/cn';
 

@@ -199,6 +199,8 @@ export function SidebarRail() {
   const view = useFiles((s) => s.sidebarView);
   const show = useFiles((s) => s.showSidebarView);
   const setSidebarView = useFiles((s) => s.setSidebarView);
+  const collapsed = useFiles((s) => s.collapsed);
+  const toggleCollapsed = useFiles((s) => s.toggleCollapsed);
   const gitCount = useGit((s) => s.entries.length);
   const gitConflicts = useGit((s) =>
     s.entries.reduce((n, e) => (e.kind === 'conflict' ? n + 1 : n), 0),
@@ -263,7 +265,11 @@ export function SidebarRail() {
       )}
     >
       {views.map(({ id, label, Icon, shortcut }) => {
-        const active = view === id;
+        // `selected` drives the roving tabindex / ARIA (so the rail stays
+        // reachable while collapsed); `active` is the visual highlight, only
+        // shown while the panel is actually open — VS Code style.
+        const selected = view === id;
+        const active = selected && !collapsed;
         const badge = railBadge(id, gitCount, gitConflicts, sshLive);
         const binding = shortcut ? getBinding(shortcut) : null;
         const kbd = binding ? formatBinding(binding) : undefined;
@@ -274,12 +280,14 @@ export function SidebarRail() {
             type="button"
             role="tab"
             id={tabId(id)}
-            aria-selected={active}
+            aria-selected={selected}
+            aria-expanded={active}
             aria-controls={SIDEBAR_PANEL_ID}
             aria-label={label}
-            tabIndex={active ? 0 : -1}
+            tabIndex={selected ? 0 : -1}
             title={[label, kbd, badge?.title].filter(Boolean).join(' · ')}
-            onClick={() => show(id)}
+            // Clicking the open view closes the panel; anything else opens it on that view.
+            onClick={() => (active ? toggleCollapsed() : show(id))}
             onContextMenu={(e) => menu.open(id, e)}
             className={cn(
               'group relative flex h-7 items-center rounded-md outline-none',
@@ -291,14 +299,14 @@ export function SidebarRail() {
                 : 'text-fg-muted hover:bg-surface-1 hover:text-fg-base',
             )}
           >
-            {/* Ribbon marks the active view — on the outer (right) edge, the
+            {/* Ribbon marks the active view — on the outer (left) edge, the
                 vertical analogue of a top rail's underline. */}
             {active && (
               <span
                 aria-hidden
                 className={cn(
-                  'pointer-events-none absolute top-1/2 h-3.5 w-[2px] -translate-y-1/2 rounded-l-full bg-accent-bright/70',
-                  labels ? '-right-1' : '-right-2',
+                  'pointer-events-none absolute top-1/2 h-3.5 w-[2px] -translate-y-1/2 rounded-r-full bg-accent-bright/70',
+                  labels ? '-left-1' : '-left-2',
                 )}
               />
             )}
@@ -326,12 +334,12 @@ export function SidebarRail() {
           </button>
         );
         // With labels off the icon is the only cue, so it gets a real tooltip
-        // rather than the ~1s native one. Opens left — the rail hugs the
-        // window's right edge.
+        // rather than the ~1s native one. Opens right — the rail hugs the
+        // window's left edge.
         return labels ? (
           button
         ) : (
-          <Tooltip key={id} label={label} kbd={kbd} side="left">
+          <Tooltip key={id} label={label} kbd={kbd} side="right">
             {button}
           </Tooltip>
         );

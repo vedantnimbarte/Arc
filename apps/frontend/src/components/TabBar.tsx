@@ -5,8 +5,7 @@ import {
   Terminal as TerminalIcon,
   FileCode,
   FolderOpen,
-  PanelRightClose,
-  PanelRightOpen,
+  Settings as SettingsIcon,
   Bot,
   Columns3,
   LayoutGrid,
@@ -27,14 +26,10 @@ import { runCommand } from '../state/commands';
 import { Tooltip } from './Tooltip';
 import { AGENT_PANEL_H, AGENT_PANEL_W } from './agentPanelSize';
 import { NotificationCenter } from './NotificationCenter';
+import { WorkspaceSwitcher } from './WorkspaceSwitcher';
 import { formatBinding, getBinding } from '../state/shortcuts';
 import { cn } from '../lib/cn';
-import {
-  fsPickFolder,
-  fsWriteFile,
-  ptyListAiClis,
-  type AiCliInfo,
-} from '../lib/tauri';
+import { fsPickFolder, fsWriteFile, ptyListAiClis, type AiCliInfo } from '../lib/tauri';
 
 const AgentLauncher = lazy(() =>
   import('./AgentLauncher').then((m) => ({ default: m.AgentLauncher })),
@@ -62,8 +57,6 @@ export function TabBar() {
   const activeTab = useWorkspace((s) => s.tabs.find((t) => t.id === s.activeTabId) ?? null);
   const layoutMode = useWorkspace((s) => layoutModeOf(s.workspaces, s.activeWorkspaceId));
   const setLayoutMode = useWorkspace((s) => s.setLayoutMode);
-  const sidebarCollapsed = useFiles((s) => s.collapsed);
-  const toggleSidebar = useFiles((s) => s.toggleCollapsed);
   const root = useFiles((s) => s.root);
 
   const [menuOpen, setMenuOpen] = useState(false);
@@ -82,9 +75,11 @@ export function TabBar() {
   // hit the action again to re-detect (we re-run on every menu open below).
   useEffect(() => {
     if (!isTauri) return;
-    ptyListAiClis().then(setAiClis).catch((err) => {
-      console.error('[TabBar] list AI CLIs failed:', err);
-    });
+    ptyListAiClis()
+      .then(setAiClis)
+      .catch((err) => {
+        console.error('[TabBar] list AI CLIs failed:', err);
+      });
   }, []);
 
   // Anchor the (portaled) menu to the plus button using viewport coords.
@@ -134,7 +129,9 @@ export function TabBar() {
   // Re-detect when the +menu opens — picks up CLIs installed mid-session.
   useEffect(() => {
     if (!menuOpen || !isTauri) return;
-    ptyListAiClis().then(setAiClis).catch(() => {});
+    ptyListAiClis()
+      .then(setAiClis)
+      .catch(() => {});
   }, [menuOpen]);
 
   const handleNewTerminal = () => {
@@ -175,228 +172,226 @@ export function TabBar() {
 
   return (
     <>
-    {/* z-20: `.material-toolbar`'s backdrop-filter opens a stacking context, so
+      {/* z-20: `.material-toolbar`'s backdrop-filter opens a stacking context, so
         a tooltip's own z-index is local to this bar and can't lift it over the
         content row — a later sibling with no z-index of its own. Without this,
         every tooltip here is painted over the moment it hangs past h-9. */}
-    <div
-      data-tauri-drag-region="deep"
-      className="material-toolbar relative z-20 flex h-9 shrink-0 items-center gap-2 pl-3"
-    >
-      {/* Focused pane's title, centered. Absolutely positioned + click-through
+      <div
+        data-tauri-drag-region="deep"
+        className="material-toolbar relative z-20 flex h-9 shrink-0 items-center gap-2 pl-3"
+      >
+        {/* Focused pane's title, centered. Absolutely positioned + click-through
           so it never shifts the side clusters or eats the window-drag region. */}
-      {activeTab && (
-        <div className="pointer-events-none absolute inset-y-0 left-1/2 flex max-w-[44%] -translate-x-1/2 items-center gap-1.5 px-3">
-          <span className="truncate font-display text-sm font-medium tracking-tight text-fg-base/85">
-            {activeTab.title}
-          </span>
-          {activeTab.cwd && (
-            <span className="shrink truncate font-display text-xs text-fg-subtle">
-              · {basename(activeTab.cwd)}
+        {activeTab && (
+          <div className="pointer-events-none absolute inset-y-0 left-1/2 flex max-w-[44%] -translate-x-1/2 items-center gap-1.5 px-3">
+            <span className="truncate font-display text-sm font-medium tracking-tight text-fg-base/85">
+              {activeTab.title}
             </span>
-          )}
-        </div>
-      )}
+            {activeTab.cwd && (
+              <span className="shrink truncate font-display text-xs text-fg-subtle">
+                · {basename(activeTab.cwd)}
+              </span>
+            )}
+          </div>
+        )}
 
-      {/* AI CLI launcher + keyboard shortcuts — relocated here from the old
-          bottom status bar, sitting between the sidebar toggle and the +. */}
-      <AiCliMenuButton clis={aiClis} />
-      <Tooltip label="Keyboard shortcuts" kbd={formatBinding(getBinding('open-shortcuts'))}>
-        <button
-          onClick={() => void runCommand('shortcut.open-shortcuts')}
-          className="group flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-fg-muted transition-all duration-200 ease-apple hover:bg-surface-2 hover:text-fg-base active:bg-surface-3"
-          aria-label="Keyboard shortcuts"
-        >
-          <Keyboard size={14} strokeWidth={1.9} />
-        </button>
-      </Tooltip>
+        {/* Workspace dropdown — far left, the bar's anchor. */}
+        <WorkspaceSwitcher />
 
-      {/* The workspace renders every tab as a grid cell (no tab strip); the +
-          adds one. Labelled "tab" everywhere the user can see it — "cell" is
-          internal vocabulary. The flex-1 keeps it left-aligned and preserves
-          the window-drag region. Workspace switching lives in the left rail. */}
-      <div className="flex min-w-0 flex-1 items-center gap-1.5 pl-1">
-        <Tooltip label="New tab">
+        {/* AI CLI launcher + keyboard shortcuts — relocated here from the old
+          bottom status bar, sitting between the workspace switcher and the +. */}
+        <AiCliMenuButton clis={aiClis} />
+        <Tooltip label="Keyboard shortcuts" kbd={formatBinding(getBinding('open-shortcuts'))}>
           <button
-            ref={plusRef}
-            onClick={() => setMenuOpen((o) => !o)}
-            className="group ml-0.5 flex h-[28px] w-[28px] shrink-0 items-center justify-center rounded-[7px] text-fg-subtle transition-all duration-200 ease-apple hover:bg-surface-2 hover:text-fg-base active:bg-surface-3"
-            aria-label="New tab"
-            aria-expanded={menuOpen}
-            aria-haspopup="menu"
+            onClick={() => void runCommand('shortcut.open-shortcuts')}
+            className="group flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-fg-muted transition-all duration-200 ease-apple hover:bg-surface-2 hover:text-fg-base active:bg-surface-3"
+            aria-label="Keyboard shortcuts"
           >
-            <Plus
-              size={13}
-              strokeWidth={2}
-              className="transition-transform duration-200 ease-apple group-active:scale-90"
-            />
+            <Keyboard size={14} strokeWidth={1.9} />
           </button>
         </Tooltip>
-      </div>
 
-      {/* Layout mode — tiles, tabs or floating. Per-workspace, so it reflects whichever
+        {/* The workspace renders every tab as a grid cell (no tab strip); the +
+          adds one. Labelled "tab" everywhere the user can see it — "cell" is
+          internal vocabulary. The flex-1 keeps it left-aligned and preserves
+          the window-drag region. */}
+        <div className="flex min-w-0 flex-1 items-center gap-1.5 pl-1">
+          <Tooltip label="New tab">
+            <button
+              ref={plusRef}
+              onClick={() => setMenuOpen((o) => !o)}
+              className="group ml-0.5 flex h-[28px] w-[28px] shrink-0 items-center justify-center rounded-[7px] text-fg-subtle transition-all duration-200 ease-apple hover:bg-surface-2 hover:text-fg-base active:bg-surface-3"
+              aria-label="New tab"
+              aria-expanded={menuOpen}
+              aria-haspopup="menu"
+            >
+              <Plus
+                size={13}
+                strokeWidth={2}
+                className="transition-transform duration-200 ease-apple group-active:scale-90"
+              />
+            </button>
+          </Tooltip>
+        </div>
+
+        <NotificationCenter />
+
+        <Tooltip label="Settings" kbd={formatBinding(getBinding('open-settings'))} align="end">
+          <button
+            onClick={() => void runCommand('shortcut.open-settings')}
+            className="group flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-fg-muted transition-all duration-200 ease-apple hover:bg-surface-2 hover:text-fg-base active:bg-surface-3"
+            aria-label="Open settings"
+          >
+            <SettingsIcon size={14} strokeWidth={1.9} />
+          </button>
+        </Tooltip>
+
+        {/* Layout mode — tiles, tabs or floating. Per-workspace, so it reflects whichever
           workspace is active. Sits in the right cluster, inboard of the
           window controls. */}
-      <NotificationCenter />
+        <LayoutModePicker mode={layoutMode} onSelect={setLayoutMode} />
 
-      <LayoutModePicker mode={layoutMode} onSelect={setLayoutMode} />
+        <div className="ml-0.5 pr-2" />
 
-      {/* Sidebar toggle — grouped with the layout switch since both control
-          how the workspace is laid out. */}
-      <Tooltip label={sidebarCollapsed ? 'Show sidebar' : 'Hide sidebar'} kbd="⌘B" align="end">
-        <button
-          onClick={toggleSidebar}
-          className="group flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-fg-muted transition-all duration-200 ease-apple hover:bg-surface-2 hover:text-fg-base active:bg-surface-3"
-          aria-label={sidebarCollapsed ? 'Show sidebar' : 'Hide sidebar'}
-          aria-pressed={!sidebarCollapsed}
-        >
-          {sidebarCollapsed ? (
-            <PanelRightOpen size={14} strokeWidth={1.9} />
-          ) : (
-            <PanelRightClose size={14} strokeWidth={1.9} />
-          )}
-        </button>
-      </Tooltip>
-
-      <div className="ml-0.5 pr-2" />
-
-      {isTauri && <WindowControls />}
-    </div>
-    {menuOpen && menuPos && typeof document !== 'undefined' &&
-      createPortal(
-        <div
-          ref={menuRef}
-          role="menu"
-          style={{ position: 'fixed', top: menuPos.top, left: menuPos.left }}
-          className={cn(
-            'material-sheet z-50 animate-popover-in overflow-hidden rounded-md bg-bg-panel shadow-sheet ring-1 ring-edge-2',
-            menuView === 'root' && 'w-52',
-          )}
-        >
-          {menuView === 'agents' ? (
-            <Suspense fallback={null}>
-              <AgentLauncher
-                detected={aiClis}
-                onBack={() => setMenuView('root')}
-                onDone={() => setMenuOpen(false)}
-              />
-            </Suspense>
-          ) : (
-          <>
-          <button
-            role="menuitem"
-            onClick={() => {
-              setMenuOpen(false);
-              void runCommand('workspace.launcher');
-            }}
-            className="flex w-full items-center gap-2 px-3 py-2 text-left font-display text-sm text-fg-base/90 transition-colors hover:bg-surface-2"
+        {isTauri && <WindowControls />}
+      </div>
+      {menuOpen &&
+        menuPos &&
+        typeof document !== 'undefined' &&
+        createPortal(
+          <div
+            ref={menuRef}
+            role="menu"
+            style={{ position: 'fixed', top: menuPos.top, left: menuPos.left }}
+            className={cn(
+              'material-sheet z-50 animate-popover-in overflow-hidden rounded-md bg-bg-panel shadow-sheet ring-1 ring-edge-2',
+              menuView === 'root' && 'w-52',
+            )}
           >
-            <LayoutGrid size={12} strokeWidth={2} className="text-fg-subtle" />
-            <span className="flex-1">Launcher…</span>
-          </button>
-          <div className="my-1 border-t border-edge-1" />
-          <button
-            role="menuitem"
-            onClick={handleNewTerminal}
-            className="flex w-full items-center gap-2 px-3 py-2 text-left font-display text-sm text-fg-base/90 transition-colors hover:bg-surface-2"
-          >
-            <TerminalIcon size={12} strokeWidth={2} className="text-fg-subtle" />
-            <span className="flex-1">Terminal</span>
-            <kbd className="font-mono text-2xs text-fg-subtle">
-              {formatBinding(getBinding('new-terminal'))}
-            </kbd>
-          </button>
-          <button
-            role="menuitem"
-            onClick={newEditor}
-            className="flex w-full items-center gap-2 px-3 py-2 text-left font-display text-sm text-fg-base/90 transition-colors hover:bg-surface-2"
-          >
-            <FileCode size={12} strokeWidth={2} className="text-fg-subtle" />
-            <span className="flex-1">Editor (new file)</span>
-          </button>
-          <button
-            role="menuitem"
-            onClick={handleNewPreview}
-            className="flex w-full items-center gap-2 px-3 py-2 text-left font-display text-sm text-fg-base/90 transition-colors hover:bg-surface-2"
-          >
-            <Monitor size={12} strokeWidth={2} className="text-fg-subtle" />
-            <span className="flex-1">Preview</span>
-          </button>
-          <button
-            role="menuitem"
-            onClick={handleNewApiClient}
-            className="flex w-full items-center gap-2 px-3 py-2 text-left font-display text-sm text-fg-base/90 transition-colors hover:bg-surface-2"
-          >
-            <Send size={12} strokeWidth={2} className="text-fg-subtle" />
-            <span className="flex-1">API Client</span>
-          </button>
-          <button
-            role="menuitem"
-            onClick={handleNewDbClient}
-            className="flex w-full items-center gap-2 px-3 py-2 text-left font-display text-sm text-fg-base/90 transition-colors hover:bg-surface-2"
-          >
-            <Database size={12} strokeWidth={2} className="text-fg-subtle" />
-            <span className="flex-1">Database</span>
-          </button>
-          <button
-            role="menuitem"
-            onClick={handleNewGitHub}
-            className="flex w-full items-center gap-2 px-3 py-2 text-left font-display text-sm text-fg-base/90 transition-colors hover:bg-surface-2"
-          >
-            <Github size={12} strokeWidth={2} className="text-fg-subtle" />
-            <span className="flex-1">GitHub</span>
-          </button>
-          <div className="my-1 border-t border-edge-1" />
-          {/* One row into the launch panel, rather than a flat list of every
+            {menuView === 'agents' ? (
+              <Suspense fallback={null}>
+                <AgentLauncher
+                  detected={aiClis}
+                  onBack={() => setMenuView('root')}
+                  onDone={() => setMenuOpen(false)}
+                />
+              </Suspense>
+            ) : (
+              <>
+                <button
+                  role="menuitem"
+                  onClick={() => {
+                    setMenuOpen(false);
+                    void runCommand('workspace.launcher');
+                  }}
+                  className="flex w-full items-center gap-2 px-3 py-2 text-left font-display text-sm text-fg-base/90 transition-colors hover:bg-surface-2"
+                >
+                  <LayoutGrid size={12} strokeWidth={2} className="text-fg-subtle" />
+                  <span className="flex-1">Launcher…</span>
+                </button>
+                <div className="my-1 border-t border-edge-1" />
+                <button
+                  role="menuitem"
+                  onClick={handleNewTerminal}
+                  className="flex w-full items-center gap-2 px-3 py-2 text-left font-display text-sm text-fg-base/90 transition-colors hover:bg-surface-2"
+                >
+                  <TerminalIcon size={12} strokeWidth={2} className="text-fg-subtle" />
+                  <span className="flex-1">Terminal</span>
+                  <kbd className="font-mono text-2xs text-fg-subtle">
+                    {formatBinding(getBinding('new-terminal'))}
+                  </kbd>
+                </button>
+                <button
+                  role="menuitem"
+                  onClick={newEditor}
+                  className="flex w-full items-center gap-2 px-3 py-2 text-left font-display text-sm text-fg-base/90 transition-colors hover:bg-surface-2"
+                >
+                  <FileCode size={12} strokeWidth={2} className="text-fg-subtle" />
+                  <span className="flex-1">Editor (new file)</span>
+                </button>
+                <button
+                  role="menuitem"
+                  onClick={handleNewPreview}
+                  className="flex w-full items-center gap-2 px-3 py-2 text-left font-display text-sm text-fg-base/90 transition-colors hover:bg-surface-2"
+                >
+                  <Monitor size={12} strokeWidth={2} className="text-fg-subtle" />
+                  <span className="flex-1">Preview</span>
+                </button>
+                <button
+                  role="menuitem"
+                  onClick={handleNewApiClient}
+                  className="flex w-full items-center gap-2 px-3 py-2 text-left font-display text-sm text-fg-base/90 transition-colors hover:bg-surface-2"
+                >
+                  <Send size={12} strokeWidth={2} className="text-fg-subtle" />
+                  <span className="flex-1">API Client</span>
+                </button>
+                <button
+                  role="menuitem"
+                  onClick={handleNewDbClient}
+                  className="flex w-full items-center gap-2 px-3 py-2 text-left font-display text-sm text-fg-base/90 transition-colors hover:bg-surface-2"
+                >
+                  <Database size={12} strokeWidth={2} className="text-fg-subtle" />
+                  <span className="flex-1">Database</span>
+                </button>
+                <button
+                  role="menuitem"
+                  onClick={handleNewGitHub}
+                  className="flex w-full items-center gap-2 px-3 py-2 text-left font-display text-sm text-fg-base/90 transition-colors hover:bg-surface-2"
+                >
+                  <Github size={12} strokeWidth={2} className="text-fg-subtle" />
+                  <span className="flex-1">GitHub</span>
+                </button>
+                <div className="my-1 border-t border-edge-1" />
+                {/* One row into the launch panel, rather than a flat list of every
               detected CLI — the panel offers all thirteen ARC supports plus
               the instance count, which a menu row cannot carry. */}
-          <button
-            role="menuitem"
-            onClick={() => setMenuView('agents')}
-            className="flex w-full items-center gap-2 px-3 py-2 text-left font-display text-sm text-fg-base/90 transition-colors hover:bg-surface-2"
-          >
-            <Bot size={12} strokeWidth={2} className="text-fg-subtle" />
-            <span className="flex-1">Agents</span>
-            <ChevronRight size={12} strokeWidth={2} className="text-fg-subtle" />
-          </button>
-          {hasWingman && (
-            <>
-              {/* Pilot and headless stay here: both need a typed goal before
+                <button
+                  role="menuitem"
+                  onClick={() => setMenuView('agents')}
+                  className="flex w-full items-center gap-2 px-3 py-2 text-left font-display text-sm text-fg-base/90 transition-colors hover:bg-surface-2"
+                >
+                  <Bot size={12} strokeWidth={2} className="text-fg-subtle" />
+                  <span className="flex-1">Agents</span>
+                  <ChevronRight size={12} strokeWidth={2} className="text-fg-subtle" />
+                </button>
+                {hasWingman && (
+                  <>
+                    {/* Pilot and headless stay here: both need a typed goal before
                   anything spawns, so they do not fit the panel's flow. */}
-              <button
-                role="menuitem"
-                onClick={() => launchWingmanMode('pilot')}
-                className="flex w-full items-center gap-2 px-3 py-2 text-left font-display text-sm text-fg-base/90 transition-colors hover:bg-surface-2"
-                title="Prompt for a goal, then run Wingman pilot mode"
-              >
-                <Bot size={12} strokeWidth={2} className="text-fg-subtle" />
-                <span className="flex-1 truncate">Wingman Pilot</span>
-              </button>
-              <button
-                role="menuitem"
-                onClick={() => launchWingmanMode('headless')}
-                className="flex w-full items-center gap-2 px-3 py-2 text-left font-display text-sm text-fg-base/90 transition-colors hover:bg-surface-2"
-                title="Prompt for a message, then run a one-shot headless response"
-              >
-                <Bot size={12} strokeWidth={2} className="text-fg-subtle" />
-                <span className="flex-1 truncate">Wingman (headless)</span>
-              </button>
-            </>
-          )}
-          </>
-          )}
-        </div>,
-        document.body,
-      )}
-    <NewFileDialog
-      open={newFileOpen}
-      initialDirectory={root}
-      onClose={() => setNewFileOpen(false)}
-      onCreated={(path) => {
-        setNewFileOpen(false);
-        openFile(path);
-      }}
-    />
+                    <button
+                      role="menuitem"
+                      onClick={() => launchWingmanMode('pilot')}
+                      className="flex w-full items-center gap-2 px-3 py-2 text-left font-display text-sm text-fg-base/90 transition-colors hover:bg-surface-2"
+                      title="Prompt for a goal, then run Wingman pilot mode"
+                    >
+                      <Bot size={12} strokeWidth={2} className="text-fg-subtle" />
+                      <span className="flex-1 truncate">Wingman Pilot</span>
+                    </button>
+                    <button
+                      role="menuitem"
+                      onClick={() => launchWingmanMode('headless')}
+                      className="flex w-full items-center gap-2 px-3 py-2 text-left font-display text-sm text-fg-base/90 transition-colors hover:bg-surface-2"
+                      title="Prompt for a message, then run a one-shot headless response"
+                    >
+                      <Bot size={12} strokeWidth={2} className="text-fg-subtle" />
+                      <span className="flex-1 truncate">Wingman (headless)</span>
+                    </button>
+                  </>
+                )}
+              </>
+            )}
+          </div>,
+          document.body,
+        )}
+      <NewFileDialog
+        open={newFileOpen}
+        initialDirectory={root}
+        onClose={() => setNewFileOpen(false)}
+        onCreated={(path) => {
+          setNewFileOpen(false);
+          openFile(path);
+        }}
+      />
     </>
   );
 }
@@ -463,7 +458,9 @@ function LayoutModePicker({
     const step = { ArrowRight: 1, ArrowDown: 1, ArrowLeft: -1, ArrowUp: -1 }[e.key];
     if (!step) return;
     e.preventDefault();
-    const items = Array.from(menuRef.current?.querySelectorAll<HTMLElement>('[role="menuitemradio"]') ?? []);
+    const items = Array.from(
+      menuRef.current?.querySelectorAll<HTMLElement>('[role="menuitemradio"]') ?? [],
+    );
     const i = items.indexOf(document.activeElement as HTMLElement);
     items[(i + step + items.length) % items.length]?.focus();
   };
@@ -483,7 +480,9 @@ function LayoutModePicker({
           aria-expanded={open}
           className={cn(
             'flex h-8 w-8 shrink-0 items-center justify-center rounded-md transition-colors duration-200 ease-apple',
-            open ? 'bg-surface-3 text-fg-base' : 'text-fg-muted hover:bg-surface-2 hover:text-fg-base',
+            open
+              ? 'bg-surface-3 text-fg-base'
+              : 'text-fg-muted hover:bg-surface-2 hover:text-fg-base',
           )}
         >
           {LAYOUT_ICONS[mode]}
@@ -618,7 +617,9 @@ function AiCliMenuButton({ clis }: { clis: AiCliInfo[] }) {
       {/* The same panel the new-tab menu's Agents row opens: this button used
           to list the detected CLIs and launch one with no options, which could
           not say what else ARC supports or start more than one. */}
-      {open && pos && typeof document !== 'undefined' &&
+      {open &&
+        pos &&
+        typeof document !== 'undefined' &&
         createPortal(
           <div
             ref={menuRef}
@@ -640,12 +641,25 @@ function WindowControls() {
 
   useEffect(() => {
     const win = getCurrentWindow();
-    win.isMaximized().then(setIsMaximized).catch(() => {});
+    win
+      .isMaximized()
+      .then(setIsMaximized)
+      .catch(() => {});
     let unlistenFn: (() => void) | null = null;
-    win.onResized(() => {
-      win.isMaximized().then(setIsMaximized).catch(() => {});
-    }).then((fn) => { unlistenFn = fn; }).catch(() => {});
-    return () => { unlistenFn?.(); };
+    win
+      .onResized(() => {
+        win
+          .isMaximized()
+          .then(setIsMaximized)
+          .catch(() => {});
+      })
+      .then((fn) => {
+        unlistenFn = fn;
+      })
+      .catch(() => {});
+    return () => {
+      unlistenFn?.();
+    };
   }, []);
 
   const win = getCurrentWindow();
@@ -667,7 +681,15 @@ function WindowControls() {
       >
         <span className="pointer-events-none transition-transform duration-200 ease-out group-hover:translate-y-[1.5px]">
           <svg width="11" height="11" viewBox="0 0 11 11" fill="none" aria-hidden>
-            <line x1="2" y1="5.5" x2="9" y2="5.5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round"/>
+            <line
+              x1="2"
+              y1="5.5"
+              x2="9"
+              y2="5.5"
+              stroke="currentColor"
+              strokeWidth="1.6"
+              strokeLinecap="round"
+            />
           </svg>
         </span>
       </button>
@@ -691,14 +713,33 @@ function WindowControls() {
             <svg width="11" height="11" viewBox="0 0 11 11" fill="none" aria-hidden>
               <path
                 d="M4 1.5H9.5V7H7.5"
-                stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"
+                stroke="currentColor"
+                strokeWidth="1.4"
+                strokeLinecap="round"
+                strokeLinejoin="round"
               />
-              <rect x="1.5" y="4" width="6" height="6" rx="0.9" stroke="currentColor" strokeWidth="1.4"/>
+              <rect
+                x="1.5"
+                y="4"
+                width="6"
+                height="6"
+                rx="0.9"
+                stroke="currentColor"
+                strokeWidth="1.4"
+              />
             </svg>
           ) : (
             /* Maximize: single clean square */
             <svg width="11" height="11" viewBox="0 0 11 11" fill="none" aria-hidden>
-              <rect x="1.5" y="1.5" width="8" height="8" rx="1.2" stroke="currentColor" strokeWidth="1.4"/>
+              <rect
+                x="1.5"
+                y="1.5"
+                width="8"
+                height="8"
+                rx="1.2"
+                stroke="currentColor"
+                strokeWidth="1.4"
+              />
             </svg>
           )}
         </span>
@@ -720,13 +761,32 @@ function WindowControls() {
         {/* Radial glow that blooms from the centre on hover */}
         <span
           className="pointer-events-none absolute inset-0 rounded-md opacity-0 transition-opacity duration-200 group-hover:opacity-100"
-          style={{ background: 'radial-gradient(ellipse 80% 60% at 50% 120%, rgba(244,63,94,0.35) 0%, transparent 70%)' }}
+          style={{
+            background:
+              'radial-gradient(ellipse 80% 60% at 50% 120%, rgba(244,63,94,0.35) 0%, transparent 70%)',
+          }}
           aria-hidden
         />
         <span className="pointer-events-none relative transition-transform duration-300 ease-out group-hover:rotate-90">
           <svg width="11" height="11" viewBox="0 0 11 11" fill="none" aria-hidden>
-            <line x1="2" y1="2" x2="9" y2="9" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round"/>
-            <line x1="9" y1="2" x2="2" y2="9" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round"/>
+            <line
+              x1="2"
+              y1="2"
+              x2="9"
+              y2="9"
+              stroke="currentColor"
+              strokeWidth="1.6"
+              strokeLinecap="round"
+            />
+            <line
+              x1="9"
+              y1="2"
+              x2="2"
+              y2="9"
+              stroke="currentColor"
+              strokeWidth="1.6"
+              strokeLinecap="round"
+            />
           </svg>
         </span>
       </button>
