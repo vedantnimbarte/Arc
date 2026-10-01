@@ -307,6 +307,7 @@ fn main() {
             commands::db::db_is_connected,
             commands::db::db_query,
             commands::db::db_tables,
+            commands::db::db_stats,
             commands::db::db_preview,
             // Database client: schema view + results export.
             commands::db::db_table_schema,

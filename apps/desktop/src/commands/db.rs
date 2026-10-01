@@ -407,6 +407,12 @@ pub async fn db_apply(
     res
 }
 
+/// Analytics view poll — off the query history and outside any transaction.
+#[tauri::command]
+pub async fn db_stats(state: State<'_, DbState>, id: String, sql: String) -> Result<QueryResult, String> {
+    state.manager.stats(&id, &sql).await.map_err(chain_err)
+}
+
 #[tauri::command]
 pub async fn db_tables(state: State<'_, DbState>, id: String) -> Result<Vec<String>, String> {
     state.manager.tables(&id).await.map_err(chain_err)

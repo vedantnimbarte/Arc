@@ -3349,6 +3349,12 @@ export async function dbExactCount(id: string, table: string): Promise<number> {
   return invoke<number>('db_exact_count', { id, table });
 }
 
+/** Analytics SQL: skips query history and never runs inside an open
+ *  transaction (except on SQLite's single connection). */
+export async function dbStats(id: string, sql: string): Promise<DbQueryResult> {
+  return invoke<DbQueryResult>('db_stats', { id, sql });
+}
+
 export async function dbTables(id: string): Promise<string[]> {
   return invoke<string[]>('db_tables', { id });
 }

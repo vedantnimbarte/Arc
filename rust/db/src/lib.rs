@@ -693,12 +693,13 @@ impl DbManager {
     pub async fn connect(&self, id: &str, url: &str) -> Result<Backend> {
         let backend = Backend::from_url(url)?;
         // Small pool: this is one human running one query at a time, and a
-        // fat pool against a shared dev database is rude. Three leaves room
-        // for a pinned transaction, a running query, and its cancel.
+        // fat pool against a shared dev database is rude. Four leaves room
+        // for a pinned transaction, a running query, its cancel, and the
+        // analytics view's poll.
         let pool = match backend {
             Backend::Postgres => Pool::Postgres(
                 PgPoolOptions::new()
-                    .max_connections(3)
+                    .max_connections(4)
                     .acquire_timeout(CONNECT_TIMEOUT)
                     .connect(url)
                     .await
@@ -706,7 +707,7 @@ impl DbManager {
             ),
             Backend::Mysql => Pool::Mysql(
                 MySqlPoolOptions::new()
-                    .max_connections(3)
+                    .max_connections(4)
                     .acquire_timeout(CONNECT_TIMEOUT)
                     .connect(url)
                     .await
@@ -793,6 +794,20 @@ impl DbManager {
             None => None,
         };
         run(lease.conn(), sql).await
+    }
+
+    /// Run the analytics view's catalog/stats SQL. Unlike [`query`](Self::query)
+    /// it never touches a pinned transaction on Postgres/MySQL — a failing
+    /// poll must not abort the user's transaction — and the caller keeps it
+    /// out of history. SQLite has one connection, so it shares the lease.
+    pub async fn stats(&self, id: &str, sql: &str) -> Result<QueryResult> {
+        let (pool, _, _) = self.parts(id)?;
+        if matches!(pool, Pool::Sqlite(_)) {
+            let mut lease = self.lease(id).await?;
+            return run(lease.conn(), sql).await;
+        }
+        let mut conn = acquire(&pool).await?;
+        run(&mut conn, sql).await
     }
 
     /// Note how to cancel whatever runs next on `lease`'s connection.

@@ -2,7 +2,6 @@ import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent }
 import {
   Bookmark,
   ChevronRight,
-  Columns3,
   Copy,
   Database,
   Download,
@@ -19,7 +18,6 @@ import {
   Plus,
   RefreshCw,
   Square,
-  Table2,
   Trash2,
   X,
 } from 'lucide-react';
@@ -80,6 +78,8 @@ import { QueryPanel, type QueryPanelTab } from './db/QueryPanel';
 import { SchemaView } from './db/SchemaView';
 import { ImportCsvDialog } from './db/ImportCsvDialog';
 import { SchemaDiff } from './db/SchemaDiff';
+import { TableTree } from './db/TableTree';
+import { DbAnalytics } from './db/DbAnalytics';
 
 interface Props {
   tabId: string;
@@ -126,6 +126,21 @@ export function splitPassword(url: string): { url: string; password: string } {
 }
 
 /** Guess the backend from a URL so the form's radio follows what you paste. */
+/** Sidebar group name for backends without schemas: the database name from a
+ *  MySQL URL, `main` for SQLite (its name for the attached file). */
+function defaultSchema(conn: DbConnection | null): string {
+  if (conn?.backend === 'mysql') {
+    try {
+      const db = decodeURIComponent(new URL(conn.url).pathname.slice(1));
+      if (db) return db;
+    } catch {
+      /* unparsable URL — fall through */
+    }
+    return conn.name;
+  }
+  return 'main';
+}
+
 function backendFromUrl(url: string): DbBackend | null {
   const scheme = url.split('://')[0]?.toLowerCase() ?? '';
   if (scheme === 'postgres' || scheme === 'postgresql') return 'postgres';
@@ -174,6 +189,7 @@ export function DbClient({ tabId }: Props) {
   const [edits, setEdits] = useState<StagedEdits>(emptyEdits);
   const [showEditSql, setShowEditSql] = useState(false);
   const [pane, setPane] = useState<Pane>('grid');
+  const [view, setView] = useState<'query' | 'analytics'>('query');
   const [schema, setSchema] = useState<{ table: string; data: DbTableSchema } | null>(null);
   const [plan, setPlan] = useState<{ roots: PlanNode[]; analyze: boolean } | null>(null);
   /** Query id of the statement running now; `dbCancel` stops it. */
@@ -736,68 +752,24 @@ export function DbClient({ tabId }: Props) {
             </div>
           ))}
 
-          {/* Tables of the connected database, indented under its row. */}
+          {/* Tables of the connected database, grouped by schema. */}
           {connected && tables.length > 0 && (
-            <div className="mt-2 border-t border-border-hairline pt-2">
-              <div className="px-3 pb-1 font-sans text-2xs uppercase tracking-widest text-fg-subtle/60">
-                Tables
-              </div>
-              {tables.map((t) => {
-                const rc = rowCounts[t];
-                const count = formatRowCount(rc);
-                return (
-                  <div
-                    key={t}
-                    className={cn(
-                      'group flex items-center gap-2 px-3 py-1',
-                      (pane === 'schema' && schema?.table === t) || resultTable === t
-                        ? 'bg-surface-2'
-                        : 'hover:bg-surface-1',
-                    )}
-                  >
-                    <button
-                      type="button"
-                      onClick={() => void previewTable(t)}
-                      className="flex min-w-0 flex-1 items-center gap-2 text-left"
-                    >
-                      <Table2 size={11} className="shrink-0 text-fg-subtle" />
-                      <span className="truncate font-mono text-xs text-fg-base/85">{t}</span>
-                    </button>
-                    {count && (
-                      <button
-                        type="button"
-                        onClick={() => rc?.estimated && void exactCount(t)}
-                        title={rc?.estimated ? 'Estimated row count — click for the exact number' : 'Rows'}
-                        className={cn(
-                          'shrink-0 font-sans text-2xs text-fg-subtle/70 group-hover:hidden',
-                          rc?.estimated && 'hover:text-fg-base',
-                        )}
-                      >
-                        {count}
-                      </button>
-                    )}
-                    <span className="hidden shrink-0 items-center gap-1.5 group-hover:flex">
-                      <button
-                        type="button"
-                        onClick={() => setImportTable(t)}
-                        title="Import CSV"
-                        className="text-fg-subtle transition hover:text-fg-base"
-                      >
-                        <FileUp size={11} />
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => void showSchema(t)}
-                        title="Show schema"
-                        className="text-fg-subtle transition hover:text-fg-base"
-                      >
-                        <Columns3 size={11} />
-                      </button>
-                    </span>
-                  </div>
-                );
-              })}
-            </div>
+            <TableTree
+              tables={tables}
+              rowCounts={rowCounts}
+              defaultSchema={defaultSchema(active)}
+              activeTable={pane === 'schema' && schema ? schema.table : resultTable}
+              onPreview={(t) => {
+                setView('query');
+                void previewTable(t);
+              }}
+              onExactCount={(t) => void exactCount(t)}
+              onImport={setImportTable}
+              onSchema={(t) => {
+                setView('query');
+                void showSchema(t);
+              }}
+            />
           )}
           {connected && tables.length === 0 && (
             <p className="px-3 py-2 font-sans text-xs text-fg-subtle">No tables.</p>
@@ -815,6 +787,29 @@ export function DbClient({ tabId }: Props) {
             <span className="shrink-0 rounded bg-surface-2 px-1.5 py-0.5 font-sans text-2xs text-fg-subtle">
               {active.backend}
             </span>
+          )}
+          {connected && (
+            <div
+              role="tablist"
+              aria-label="View"
+              className="ml-2 flex shrink-0 rounded-md bg-surface-1 p-0.5 ring-1 ring-border-hairline"
+            >
+              {(['query', 'analytics'] as const).map((v) => (
+                <button
+                  key={v}
+                  type="button"
+                  role="tab"
+                  aria-selected={view === v}
+                  onClick={() => setView(v)}
+                  className={cn(
+                    'rounded px-2.5 py-0.5 font-sans text-xs transition-colors',
+                    view === v ? 'bg-surface-3 text-fg-base' : 'text-fg-muted hover:text-fg-base',
+                  )}
+                >
+                  {v === 'query' ? 'Query' : 'Analytics'}
+                </button>
+              ))}
+            </div>
           )}
           {inTx && (
             <span className="flex shrink-0 items-center gap-1 rounded bg-status-warn/15 px-1.5 py-0.5 font-sans text-2xs text-status-warn">
@@ -864,7 +859,10 @@ export function DbClient({ tabId }: Props) {
               <>
                 <button
                   type="button"
-                  onClick={() => setPane((p) => (p === 'diagram' ? 'grid' : 'diagram'))}
+                  onClick={() => {
+                    setView('query');
+                    setPane((p) => (p === 'diagram' ? 'grid' : 'diagram'));
+                  }}
                   title="Schema diagram"
                   className={cn(ICON_BTN, pane === 'diagram' ? 'bg-surface-2 text-fg-base' : 'text-fg-muted')}
                 >
@@ -872,7 +870,10 @@ export function DbClient({ tabId }: Props) {
                 </button>
                 <button
                   type="button"
-                  onClick={() => setPane((p) => (p === 'diff' ? 'grid' : 'diff'))}
+                  onClick={() => {
+                    setView('query');
+                    setPane((p) => (p === 'diff' ? 'grid' : 'diff'));
+                  }}
                   title="Compare schema with another connection"
                   className={cn(ICON_BTN, pane === 'diff' ? 'bg-surface-2 text-fg-base' : 'text-fg-muted')}
                 >
@@ -916,274 +917,282 @@ export function DbClient({ tabId }: Props) {
           </div>
         )}
 
-        {/* SQL editor */}
-        <div className="shrink-0 border-b border-border-hairline">
-          <div className="h-32 min-h-[64px] resize-y overflow-hidden">
-            <SqlEditor
-              ref={editor}
-              value={sql}
-              onChange={setSql}
-              onRun={(text) => void run(text)}
-              backend={active?.backend ?? null}
-              completion={completion}
-              disabled={!connected}
-              placeholder={connected ? 'SELECT …    (⌘/Ctrl + Enter runs the selection or everything)' : 'Connect first'}
-            />
+        {view === 'analytics' && connected && active && activeId ? (
+          <div className="min-h-0 flex-1">
+            <DbAnalytics key={activeId} connId={activeId} backend={active.backend} />
           </div>
-          <div className="flex flex-wrap items-center gap-x-2 gap-y-1 px-3 pb-1.5 pt-1 [&>*]:shrink-0 [&>*]:whitespace-nowrap">
-            {running ? (
+        ) : (
+          <>
+          {/* SQL editor */}
+          <div className="shrink-0 border-b border-border-hairline">
+            <div className="h-32 min-h-[64px] resize-y overflow-hidden">
+              <SqlEditor
+                ref={editor}
+                value={sql}
+                onChange={setSql}
+                onRun={(text) => void run(text)}
+                backend={active?.backend ?? null}
+                completion={completion}
+                disabled={!connected}
+                placeholder={connected ? 'SELECT …    (⌘/Ctrl + Enter runs the selection or everything)' : 'Connect first'}
+              />
+            </div>
+            <div className="flex flex-wrap items-center gap-x-2 gap-y-1 px-3 pb-1.5 pt-1 [&>*]:shrink-0 [&>*]:whitespace-nowrap">
+              {running ? (
+                <button
+                  type="button"
+                  onClick={() => runningId && void dbCancel(runningId).catch((e) => toastError(String(e)))}
+                  title="Ask the server to stop this statement"
+                  className="flex items-center gap-1 rounded-lg bg-status-err/15 px-2.5 py-1 font-sans text-xs text-status-err ring-1 ring-status-err/40 transition-colors hover:bg-status-err/25"
+                >
+                  <Square size={10} />
+                  Cancel
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => void run(editor.current?.selectionOrAll() ?? sql)}
+                  disabled={!connected || !sql.trim()}
+                  title="Run the selection, or everything (⌘/Ctrl + Enter)"
+                  className="flex items-center gap-1 rounded-lg bg-accent-soft px-2.5 py-1 font-sans text-xs text-fg-base ring-1 ring-accent/45 transition-colors hover:bg-accent/20 disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  <Play size={11} />
+                  Run
+                </button>
+              )}
               <button
                 type="button"
-                onClick={() => runningId && void dbCancel(runningId).catch((e) => toastError(String(e)))}
-                title="Ask the server to stop this statement"
-                className="flex items-center gap-1 rounded-lg bg-status-err/15 px-2.5 py-1 font-sans text-xs text-status-err ring-1 ring-status-err/40 transition-colors hover:bg-status-err/25"
-              >
-                <Square size={10} />
-                Cancel
-              </button>
-            ) : (
-              <button
-                type="button"
-                onClick={() => void run(editor.current?.selectionOrAll() ?? sql)}
-                disabled={!connected || !sql.trim()}
-                title="Run the selection, or everything (⌘/Ctrl + Enter)"
-                className="flex items-center gap-1 rounded-lg bg-accent-soft px-2.5 py-1 font-sans text-xs text-fg-base ring-1 ring-accent/45 transition-colors hover:bg-accent/20 disabled:cursor-not-allowed disabled:opacity-40"
-              >
-                <Play size={11} />
-                Run
-              </button>
-            )}
-            <button
-              type="button"
-              onClick={() => void explain(editor.current?.selectionOrAll() ?? sql)}
-              disabled={!connected || running || !sql.trim()}
-              title="Show the query plan"
-              className="flex items-center gap-1 rounded-lg px-2.5 py-1 font-sans text-xs text-fg-muted transition-colors hover:bg-surface-2 hover:text-fg-base disabled:cursor-not-allowed disabled:opacity-40"
-            >
-              <ListTree size={11} />
-              Explain
-            </button>
-            {savingName === null ? (
-              <button
-                type="button"
-                onClick={() => setSavingName('')}
-                disabled={!activeId || !sql.trim()}
-                title="Save this query on the connection"
+                onClick={() => void explain(editor.current?.selectionOrAll() ?? sql)}
+                disabled={!connected || running || !sql.trim()}
+                title="Show the query plan"
                 className="flex items-center gap-1 rounded-lg px-2.5 py-1 font-sans text-xs text-fg-muted transition-colors hover:bg-surface-2 hover:text-fg-base disabled:cursor-not-allowed disabled:opacity-40"
               >
-                <Bookmark size={11} />
-                Save
+                <ListTree size={11} />
+                Explain
               </button>
-            ) : (
-              <input
-                autoFocus
-                value={savingName}
-                onChange={(e) => setSavingName(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') void saveQuery(savingName);
-                  if (e.key === 'Escape') setSavingName(null);
-                }}
-                onBlur={() => !savingName.trim() && setSavingName(null)}
-                placeholder="Name, then Enter"
-                className="w-40 rounded-md border border-accent/45 bg-bg-base px-2 py-0.5 font-sans text-xs text-fg-base focus:outline-none"
-              />
-            )}
-            <label
-              className="flex items-center gap-1 font-sans text-xs text-fg-subtle"
-              title={
-                inTx
-                  ? 'Commit or roll back the open transaction first'
-                  : 'Off: statements run inside a transaction you commit or roll back yourself'
-              }
-            >
-              <input
-                type="checkbox"
-                checked={autoCommit}
-                disabled={inTx || !connected}
-                onChange={(e) => setAutoCommit(e.target.checked)}
-                className="h-3 w-3 accent-accent"
-              />
-              Auto-commit
-            </label>
-            {active?.backend === 'postgres' && (
+              {savingName === null ? (
+                <button
+                  type="button"
+                  onClick={() => setSavingName('')}
+                  disabled={!activeId || !sql.trim()}
+                  title="Save this query on the connection"
+                  className="flex items-center gap-1 rounded-lg px-2.5 py-1 font-sans text-xs text-fg-muted transition-colors hover:bg-surface-2 hover:text-fg-base disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  <Bookmark size={11} />
+                  Save
+                </button>
+              ) : (
+                <input
+                  autoFocus
+                  value={savingName}
+                  onChange={(e) => setSavingName(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') void saveQuery(savingName);
+                    if (e.key === 'Escape') setSavingName(null);
+                  }}
+                  onBlur={() => !savingName.trim() && setSavingName(null)}
+                  placeholder="Name, then Enter"
+                  className="w-40 rounded-md border border-accent/45 bg-bg-base px-2 py-0.5 font-sans text-xs text-fg-base focus:outline-none"
+                />
+              )}
               <label
                 className="flex items-center gap-1 font-sans text-xs text-fg-subtle"
-                title="EXPLAIN ANALYZE executes the statement — writes included — to measure real rows and timings."
+                title={
+                  inTx
+                    ? 'Commit or roll back the open transaction first'
+                    : 'Off: statements run inside a transaction you commit or roll back yourself'
+                }
               >
                 <input
                   type="checkbox"
-                  checked={analyze}
-                  onChange={(e) => setAnalyze(e.target.checked)}
+                  checked={autoCommit}
+                  disabled={inTx || !connected}
+                  onChange={(e) => setAutoCommit(e.target.checked)}
                   className="h-3 w-3 accent-accent"
                 />
-                Analyze
-                {analyze && <span className="text-status-warn">(executes the query)</span>}
+                Auto-commit
               </label>
-            )}
-            {result && pane === 'grid' && (
-              <span className="font-sans text-xs text-fg-subtle">
-                {result.columns.length > 0
-                  ? `${result.rows.length} row${result.rows.length === 1 ? '' : 's'}`
-                  : `${result.rows_affected} row${result.rows_affected === 1 ? '' : 's'} affected`}
-                {' · '}
-                {result.duration_ms} ms
-                {result.truncated && ' · truncated'}
-              </span>
-            )}
-            {exporting ? (
-              <div className="ml-auto flex items-center gap-1.5 font-sans text-xs text-fg-subtle">
-                <Loader2 size={11} className="animate-spin" />
-                Exporting… {exporting.rows.toLocaleString()} rows
+              {active?.backend === 'postgres' && (
+                <label
+                  className="flex items-center gap-1 font-sans text-xs text-fg-subtle"
+                  title="EXPLAIN ANALYZE executes the statement — writes included — to measure real rows and timings."
+                >
+                  <input
+                    type="checkbox"
+                    checked={analyze}
+                    onChange={(e) => setAnalyze(e.target.checked)}
+                    className="h-3 w-3 accent-accent"
+                  />
+                  Analyze
+                  {analyze && <span className="text-status-warn">(executes the query)</span>}
+                </label>
+              )}
+              {result && pane === 'grid' && (
+                <span className="font-sans text-xs text-fg-subtle">
+                  {result.columns.length > 0
+                    ? `${result.rows.length} row${result.rows.length === 1 ? '' : 's'}`
+                    : `${result.rows_affected} row${result.rows_affected === 1 ? '' : 's'} affected`}
+                  {' · '}
+                  {result.duration_ms} ms
+                  {result.truncated && ' · truncated'}
+                </span>
+              )}
+              {exporting ? (
+                <div className="ml-auto flex items-center gap-1.5 font-sans text-xs text-fg-subtle">
+                  <Loader2 size={11} className="animate-spin" />
+                  Exporting… {exporting.rows.toLocaleString()} rows
+                  <button
+                    type="button"
+                    onClick={() => void dbJobCancel(exporting.id)}
+                    className="rounded px-1.5 py-0.5 text-fg-muted transition hover:bg-surface-2 hover:text-fg-base"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              ) : (
+                result &&
+                result.columns.length > 0 &&
+                pane === 'grid' && (
+                  <div className="ml-auto flex items-center gap-1">
+                    {(['csv', 'json'] as const).map((format) => (
+                      <button
+                        key={format}
+                        type="button"
+                        onClick={() => void exportResult(format)}
+                        title={`Export these rows as ${format.toUpperCase()}`}
+                        className="flex items-center gap-1 rounded px-1.5 py-0.5 font-sans text-2xs uppercase text-fg-muted transition hover:bg-surface-2 hover:text-fg-base"
+                      >
+                        <Download size={10} />
+                        {format}
+                      </button>
+                    ))}
+                    <span className="mx-0.5 h-3 w-px bg-border-hairline" />
+                    {(['csv', 'json'] as const).map((format) => (
+                      <button
+                        key={format}
+                        type="button"
+                        onClick={() => void exportFull(format)}
+                        title={`Export full result as ${format.toUpperCase()} — re-runs the query and streams every row to the file, past the grid's cap`}
+                        className="flex items-center gap-1 rounded px-1.5 py-0.5 font-sans text-2xs uppercase text-fg-muted transition hover:bg-surface-2 hover:text-fg-base"
+                      >
+                        <Download size={10} />
+                        full {format}
+                      </button>
+                    ))}
+                  </div>
+                )
+              )}
+            </div>
+          </div>
+
+          {/* Staged edits bar */}
+          {pane === 'grid' && nEdits > 0 && (
+            <div className="shrink-0 border-b border-border-hairline bg-status-warn/10">
+              <div className="flex items-center gap-2 px-3 py-1 font-sans text-xs">
+                <span className="text-status-warn">
+                  {nEdits} pending change{nEdits === 1 ? '' : 's'} to {resultTable}
+                </span>
                 <button
                   type="button"
-                  onClick={() => void dbJobCancel(exporting.id)}
-                  className="rounded px-1.5 py-0.5 text-fg-muted transition hover:bg-surface-2 hover:text-fg-base"
+                  onClick={() => setShowEditSql((v) => !v)}
+                  className="flex items-center gap-0.5 text-fg-muted hover:text-fg-base"
                 >
-                  Cancel
+                  <ChevronRight size={10} className={cn('transition-transform', showEditSql && 'rotate-90')} />
+                  SQL
+                </button>
+                <span className="flex-1" />
+                <button
+                  type="button"
+                  onClick={() => setEdits(emptyEdits())}
+                  className="rounded px-2 py-0.5 text-fg-muted transition hover:bg-surface-2 hover:text-fg-base"
+                >
+                  Discard
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void applyEdits()}
+                  disabled={running}
+                  className="rounded-md bg-accent-soft px-2.5 py-0.5 text-fg-base ring-1 ring-accent/45 transition-colors hover:bg-accent/20 disabled:opacity-40"
+                >
+                  Apply {autoCommit ? '' : '(in transaction)'}
                 </button>
               </div>
-            ) : (
-              result &&
-              result.columns.length > 0 &&
-              pane === 'grid' && (
-                <div className="ml-auto flex items-center gap-1">
-                  {(['csv', 'json'] as const).map((format) => (
-                    <button
-                      key={format}
-                      type="button"
-                      onClick={() => void exportResult(format)}
-                      title={`Export these rows as ${format.toUpperCase()}`}
-                      className="flex items-center gap-1 rounded px-1.5 py-0.5 font-sans text-2xs uppercase text-fg-muted transition hover:bg-surface-2 hover:text-fg-base"
-                    >
-                      <Download size={10} />
-                      {format}
-                    </button>
-                  ))}
-                  <span className="mx-0.5 h-3 w-px bg-border-hairline" />
-                  {(['csv', 'json'] as const).map((format) => (
-                    <button
-                      key={format}
-                      type="button"
-                      onClick={() => void exportFull(format)}
-                      title={`Export full result as ${format.toUpperCase()} — re-runs the query and streams every row to the file, past the grid's cap`}
-                      className="flex items-center gap-1 rounded px-1.5 py-0.5 font-sans text-2xs uppercase text-fg-muted transition hover:bg-surface-2 hover:text-fg-base"
-                    >
-                      <Download size={10} />
-                      full {format}
-                    </button>
-                  ))}
-                </div>
-              )
-            )}
-          </div>
-        </div>
-
-        {/* Staged edits bar */}
-        {pane === 'grid' && nEdits > 0 && (
-          <div className="shrink-0 border-b border-border-hairline bg-status-warn/10">
-            <div className="flex items-center gap-2 px-3 py-1 font-sans text-xs">
-              <span className="text-status-warn">
-                {nEdits} pending change{nEdits === 1 ? '' : 's'} to {resultTable}
-              </span>
-              <button
-                type="button"
-                onClick={() => setShowEditSql((v) => !v)}
-                className="flex items-center gap-0.5 text-fg-muted hover:text-fg-base"
-              >
-                <ChevronRight size={10} className={cn('transition-transform', showEditSql && 'rotate-90')} />
-                SQL
-              </button>
-              <span className="flex-1" />
-              <button
-                type="button"
-                onClick={() => setEdits(emptyEdits())}
-                className="rounded px-2 py-0.5 text-fg-muted transition hover:bg-surface-2 hover:text-fg-base"
-              >
-                Discard
-              </button>
-              <button
-                type="button"
-                onClick={() => void applyEdits()}
-                disabled={running}
-                className="rounded-md bg-accent-soft px-2.5 py-0.5 text-fg-base ring-1 ring-accent/45 transition-colors hover:bg-accent/20 disabled:opacity-40"
-              >
-                Apply {autoCommit ? '' : '(in transaction)'}
-              </button>
-            </div>
-            {showEditSql && (
-              <pre className="max-h-40 overflow-auto whitespace-pre-wrap break-all px-3 pb-2 font-mono text-2xs text-fg-base/80">
-                {statements.map((s) => `${s};`).join('\n')}
-              </pre>
-            )}
-          </div>
-        )}
-
-        {/* ── Results area ── */}
-        <div className="min-h-0 flex-1 overflow-hidden">
-          {pane === 'diagram' && active ? (
-            schemas ? (
-              <SchemaDiagram
-                backend={active.backend}
-                schemas={schemas}
-                rowCounts={rowCounts}
-                onOpenTable={(t) => void previewTable(t)}
-                renderDetails={(t, s, onCloseDetails) => (
-                  <SchemaView table={t} schema={s} onClose={onCloseDetails} />
-                )}
-                onClose={() => setPane('grid')}
-              />
-            ) : (
-              <Waiting label="Loading schema…" />
-            )
-          ) : pane === 'diff' && active ? (
-            schemas ? (
-              <SchemaDiff
-                active={active}
-                schemas={schemas}
-                connections={connections}
-                onSendToEditor={(text) => {
-                  setSql(text);
-                  setPane('grid');
-                  toast('Migration SQL loaded — review it, then Run');
-                }}
-                onClose={() => setPane('grid')}
-              />
-            ) : (
-              <Waiting label="Loading schema…" />
-            )
-          ) : pane === 'schema' && schema ? (
-            <div className="h-full overflow-auto">
-              <SchemaView
-                table={schema.table}
-                schema={schema.data}
-                onClose={() => setPane('grid')}
-                actions={schemaActions(schema.table, schema.data)}
-              />
-            </div>
-          ) : pane === 'plan' && plan ? (
-            <div className="h-full overflow-auto">
-              <PlanView roots={plan.roots} analyze={plan.analyze} onClose={() => setPane('grid')} />
-            </div>
-          ) : result && result.columns.length > 0 ? (
-            <ResultGrid
-              result={result}
-              editing={editable ? { edits, onChange: setEdits } : undefined}
-              readOnlyReason={readOnlyReason}
-            />
-          ) : (
-            <div className="flex h-32 items-center justify-center font-sans text-xs text-fg-subtle">
-              {running ? (
-                <Loader2 size={13} className="animate-spin" />
-              ) : result ? (
-                'Statement ran — no rows returned.'
-              ) : connected ? (
-                'Run a query, or pick a table on the left.'
-              ) : (
-                'Not connected.'
+              {showEditSql && (
+                <pre className="max-h-40 overflow-auto whitespace-pre-wrap break-all px-3 pb-2 font-mono text-2xs text-fg-base/80">
+                  {statements.map((s) => `${s};`).join('\n')}
+                </pre>
               )}
             </div>
           )}
-        </div>
+
+          {/* ── Results area ── */}
+          <div className="min-h-0 flex-1 overflow-hidden">
+            {pane === 'diagram' && active ? (
+              schemas ? (
+                <SchemaDiagram
+                  backend={active.backend}
+                  schemas={schemas}
+                  rowCounts={rowCounts}
+                  onOpenTable={(t) => void previewTable(t)}
+                  renderDetails={(t, s, onCloseDetails) => (
+                    <SchemaView table={t} schema={s} onClose={onCloseDetails} />
+                  )}
+                  onClose={() => setPane('grid')}
+                />
+              ) : (
+                <Waiting label="Loading schema…" />
+              )
+            ) : pane === 'diff' && active ? (
+              schemas ? (
+                <SchemaDiff
+                  active={active}
+                  schemas={schemas}
+                  connections={connections}
+                  onSendToEditor={(text) => {
+                    setSql(text);
+                    setPane('grid');
+                    toast('Migration SQL loaded — review it, then Run');
+                  }}
+                  onClose={() => setPane('grid')}
+                />
+              ) : (
+                <Waiting label="Loading schema…" />
+              )
+            ) : pane === 'schema' && schema ? (
+              <div className="h-full overflow-auto">
+                <SchemaView
+                  table={schema.table}
+                  schema={schema.data}
+                  onClose={() => setPane('grid')}
+                  actions={schemaActions(schema.table, schema.data)}
+                />
+              </div>
+            ) : pane === 'plan' && plan ? (
+              <div className="h-full overflow-auto">
+                <PlanView roots={plan.roots} analyze={plan.analyze} onClose={() => setPane('grid')} />
+              </div>
+            ) : result && result.columns.length > 0 ? (
+              <ResultGrid
+                result={result}
+                editing={editable ? { edits, onChange: setEdits } : undefined}
+                readOnlyReason={readOnlyReason}
+              />
+            ) : (
+              <div className="flex h-32 items-center justify-center font-sans text-xs text-fg-subtle">
+                {running ? (
+                  <Loader2 size={13} className="animate-spin" />
+                ) : result ? (
+                  'Statement ran — no rows returned.'
+                ) : connected ? (
+                  'Run a query, or pick a table on the left.'
+                ) : (
+                  'Not connected.'
+                )}
+              </div>
+            )}
+          </div>
+          </>
+        )}
       </div>
 
       {panel && activeId && (
