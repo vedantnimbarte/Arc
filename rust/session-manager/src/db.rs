@@ -22,6 +22,8 @@ pub struct DbConnection {
     pub last_used_at: Option<i64>,
     #[serde(default)]
     pub ssh: Option<DbSsh>,
+    /// `normal`, `production` or `readonly` — see migration 0022.
+    pub safety: String,
 }
 
 /// Reach the database through an SSH local forward. The URL's host and port
@@ -47,6 +49,22 @@ pub struct DbConnectionInput {
     pub has_password: bool,
     #[serde(default)]
     pub ssh: Option<DbSsh>,
+    #[serde(default = "normal")]
+    pub safety: String,
+}
+
+fn normal() -> String {
+    "normal".into()
+}
+
+/// Anything unrecognised reads as `normal`, so a typo can't silently disable
+/// the destructive-statement prompt — and can't enable read-only either.
+fn safety_level(s: &str) -> &'static str {
+    match s {
+        "production" => "production",
+        "readonly" => "readonly",
+        _ => "normal",
+    }
 }
 
 type Row = (
@@ -61,6 +79,7 @@ type Row = (
     i64,
     Option<String>,
     Option<String>,
+    String,
 );
 
 fn hydrate(t: Row) -> DbConnection {
@@ -82,11 +101,12 @@ fn hydrate(t: Row) -> DbConnection {
         created_at: t.5,
         last_used_at: t.6,
         ssh,
+        safety: safety_level(&t.11).to_string(),
     }
 }
 
 const SELECT: &str = "SELECT id, name, backend, url, has_password, created_at, last_used_at, \
-                      ssh_host, ssh_port, ssh_user, ssh_key_path \
+                      ssh_host, ssh_port, ssh_user, ssh_key_path, safety \
                       FROM db_connections";
 
 pub async fn list(pool: &SqlitePool) -> Result<Vec<DbConnection>> {
@@ -109,7 +129,7 @@ pub async fn upsert(pool: &SqlitePool, input: DbConnectionInput) -> Result<DbCon
     if let Some(id) = &input.id {
         sqlx::query(
             "UPDATE db_connections SET name = ?, backend = ?, url = ?, has_password = ?, \
-             ssh_host = ?, ssh_port = ?, ssh_user = ?, ssh_key_path = ? WHERE id = ?",
+             ssh_host = ?, ssh_port = ?, ssh_user = ?, ssh_key_path = ?, safety = ? WHERE id = ?",
         )
         .bind(&input.name)
         .bind(&input.backend)
@@ -119,6 +139,7 @@ pub async fn upsert(pool: &SqlitePool, input: DbConnectionInput) -> Result<DbCon
         .bind(ssh.map_or(22, |s| i64::from(s.port)))
         .bind(ssh.map(|s| &s.user))
         .bind(ssh.map(|s| &s.key_path))
+        .bind(safety_level(&input.safety))
         .bind(id)
         .execute(pool)
         .await?;
@@ -130,8 +151,8 @@ pub async fn upsert(pool: &SqlitePool, input: DbConnectionInput) -> Result<DbCon
     let id = Uuid::new_v4().to_string();
     sqlx::query(
         "INSERT INTO db_connections (id, name, backend, url, has_password, created_at, last_used_at, \
-         ssh_host, ssh_port, ssh_user, ssh_key_path) \
-         VALUES (?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?)",
+         ssh_host, ssh_port, ssh_user, ssh_key_path, safety) \
+         VALUES (?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?)",
     )
     .bind(&id)
     .bind(&input.name)
@@ -143,6 +164,7 @@ pub async fn upsert(pool: &SqlitePool, input: DbConnectionInput) -> Result<DbCon
     .bind(ssh.map_or(22, |s| i64::from(s.port)))
     .bind(ssh.map(|s| &s.user))
     .bind(ssh.map(|s| &s.key_path))
+    .bind(safety_level(&input.safety))
     .execute(pool)
     .await?;
 

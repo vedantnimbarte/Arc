@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
 import {
+  ArrowLeft,
   Bookmark,
   ChevronRight,
   Copy,
@@ -7,9 +8,12 @@ import {
   Download,
   FileUp,
   GitCompareArrows,
+  HardDriveDownload,
+  HardDriveUpload,
   History,
   ListTree,
   Loader2,
+  Lock,
   Network,
   Pencil,
   Play,
@@ -17,7 +21,10 @@ import {
   PlugZap,
   Plus,
   RefreshCw,
+  ShieldAlert,
+  Sparkles,
   Square,
+  TableProperties,
   Trash2,
   X,
 } from 'lucide-react';
@@ -31,6 +38,7 @@ import {
   dbConnUpsert,
   dbConnect,
   dbDisconnect,
+  dbDump,
   dbExactCount,
   dbExport,
   dbHistoryClear,
@@ -38,8 +46,8 @@ import {
   dbHistoryList,
   dbJobCancel,
   dbPasswordSet,
-  dbPreview,
   dbQuery,
+  dbRestore,
   dbRollback,
   dbRowCounts,
   dbSavedDelete,
@@ -57,6 +65,7 @@ import {
   type DbQueryHistoryEntry,
   type DbQueryResult,
   type DbRowCount,
+  type DbSafety,
   type DbSavedQuery,
   type DbTableSchema,
 } from '../lib/tauri';
@@ -65,11 +74,15 @@ import { askConfirm } from '../state/confirm';
 import { toast, toastError } from '../state/toast';
 import { cn } from '../lib/cn';
 import { toCsv, toJson } from '../lib/dbExport';
-import { isSelectLike, unsafeStatements } from '../lib/sqlSafety';
-import { explainSql, hotNodes, parsePlan, type PlanNode } from '../lib/explainPlan';
+import { isReadOnlySql, isSelectLike, unsafeStatements } from '../lib/sqlSafety';
+import { explainSql, hotNodes, parsePlan, planText, type PlanNode } from '../lib/explainPlan';
 import { editCount, editStatements, emptyEdits, type StagedEdits } from '../lib/dbSql';
 import { createTableSql } from '../lib/schemaDiff';
-import { loadSchemas } from '../lib/dbSchemas';
+import { loadSchemas, schemaSummary } from '../lib/dbSchemas';
+import { bindParams, queryParams } from '../lib/sqlParams';
+import { browseSql, newBrowse, type Browse } from '../lib/dbBrowse';
+import { buildRelations } from '../lib/dbRelations';
+import type { SqlContext } from '../lib/ai';
 import { formatRowCount } from '../lib/dbFormat';
 import { SchemaDiagram } from './SchemaDiagram';
 import { SqlEditor, type SqlEditorHandle } from './db/SqlEditor';
@@ -80,6 +93,9 @@ import { ImportCsvDialog } from './db/ImportCsvDialog';
 import { SchemaDiff } from './db/SchemaDiff';
 import { TableTree } from './db/TableTree';
 import { DbAnalytics } from './db/DbAnalytics';
+import { TableDesigner } from './db/TableDesigner';
+import { AskClaudeBar, ClaudeExplain } from './db/ClaudeSql';
+import { QueryParamsDialog } from './db/QueryParamsDialog';
 
 interface Props {
   tabId: string;
@@ -125,7 +141,6 @@ export function splitPassword(url: string): { url: string; password: string } {
   };
 }
 
-/** Guess the backend from a URL so the form's radio follows what you paste. */
 /** Sidebar group name for backends without schemas: the database name from a
  *  MySQL URL, `main` for SQLite (its name for the attached file). */
 function defaultSchema(conn: DbConnection | null): string {
@@ -141,6 +156,7 @@ function defaultSchema(conn: DbConnection | null): string {
   return 'main';
 }
 
+/** Guess the backend from a URL so the form's radio follows what you paste. */
 function backendFromUrl(url: string): DbBackend | null {
   const scheme = url.split('://')[0]?.toLowerCase() ?? '';
   if (scheme === 'postgres' || scheme === 'postgresql') return 'postgres';
@@ -149,13 +165,53 @@ function backendFromUrl(url: string): DbBackend | null {
   return null;
 }
 
+const SAFETY_LEVELS: Array<{ id: DbSafety; label: string; hint: string }> = [
+  { id: 'normal', label: 'Normal', hint: 'Asks before DROP, TRUNCATE, or UPDATE/DELETE without WHERE.' },
+  { id: 'production', label: 'Production', hint: 'Asks before every write, and shows a red bar while connected.' },
+  { id: 'readonly', label: 'Read-only', hint: 'Refuses writes — the server is put in read-only mode too.' },
+];
+
 /** A statement that can change the schema, so the sidebar and completion refresh after it. */
 const DDL = /\b(create|alter|drop|rename|truncate)\b/i;
 
 const newId = () => `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 
 /** What the area under the editor shows. */
-type Pane = 'grid' | 'schema' | 'plan' | 'diagram' | 'diff';
+type Pane = 'grid' | 'schema' | 'plan' | 'diagram' | 'diff' | 'design';
+
+/**
+ * One query tab inside the connection: its editor text and what it last
+ * showed. The active tab's values live in the component's own state; this
+ * snapshot is what an inactive tab keeps until it's switched back to.
+ */
+interface QueryTab {
+  id: string;
+  name: string;
+  sql: string;
+  result: DbQueryResult | null;
+  resultSql: string;
+  resultTable: string | null;
+  browse: Browse | null;
+  hasNext: boolean;
+  /** Tables left by following foreign keys, for Back. */
+  trail: Browse[];
+  plan: { roots: PlanNode[]; analyze: boolean } | null;
+  pane: Pane;
+}
+
+const blankTab = (id: string, n: number): QueryTab => ({
+  id,
+  name: `Query ${n}`,
+  sql: '',
+  result: null,
+  resultSql: '',
+  resultTable: null,
+  browse: null,
+  hasNext: false,
+  trail: [],
+  plan: null,
+  pane: 'grid',
+});
 
 const ICON_BTN =
   'flex h-6 w-6 items-center justify-center rounded transition hover:bg-surface-2 hover:text-fg-base';
@@ -207,6 +263,25 @@ export function DbClient({ tabId }: Props) {
   const [autoCommit, setAutoCommit] = useState(true);
   const [inTx, setInTx] = useState(false);
   const [importTable, setImportTable] = useState<string | null>(null);
+  /** Server-side browse behind `result`, when it previews a table. */
+  const [browse, setBrowse] = useState<Browse | null>(null);
+  const [hasNext, setHasNext] = useState(false);
+  const [trail, setTrail] = useState<Browse[]>([]);
+  const [queryTabs, setQueryTabs] = useState<QueryTab[]>(() => [blankTab('q1', 1)]);
+  const [activeTabId, setActiveTabId] = useState('q1');
+  const tabCounter = useRef(1);
+  /** Table designer target: null table = create. */
+  const [design, setDesign] = useState<{ table: string | null } | null>(null);
+  const [askOpen, setAskOpen] = useState(false);
+  /** The question an open Claude explanation answers; `n` remounts it per question. */
+  const [aiExplain, setAiExplain] = useState<
+    { n: number; sql: string; problem: { error: string } | { plan: string } } | null
+  >(null);
+  /** The statement behind `error`, for "Explain with Claude". */
+  const [failedSql, setFailedSql] = useState<string | null>(null);
+  const [paramPrompt, setParamPrompt] = useState<{ sql: string; names: string[] } | null>(null);
+  const paramValues = useRef<Record<string, string>>({});
+  const [backingUp, setBackingUp] = useState<'dump' | 'restore' | null>(null);
   const editor = useRef<SqlEditorHandle>(null);
   /** Guards against a slow schema load overwriting a newer one. */
   const schemaLoad = useRef(0);
@@ -216,6 +291,9 @@ export function DbClient({ tabId }: Props) {
     () => connections.find((c) => c.id === activeId) ?? null,
     [connections, activeId],
   );
+
+  const safety: DbSafety = active?.safety ?? 'normal';
+  const readOnly = safety === 'readonly';
 
   const reloadConnections = useCallback(async () => {
     if (!isTauri) return;
@@ -264,8 +342,21 @@ export function DbClient({ tabId }: Props) {
     setHistory([]);
     setSaved([]);
     setError(null);
+    setFailedSql(null);
     setInTx(false);
-  }, []);
+    setBrowse(null);
+    setHasNext(false);
+    setTrail([]);
+    setDesign(null);
+    setAiExplain(null);
+    setView('query');
+    // Query tabs are per database: the editor text stays with the active tab,
+    // the others' results would describe the old database.
+    setQueryTabs((tabs) => {
+      const keep = tabs.find((t) => t.id === activeTabId) ?? blankTab('q1', 1);
+      return [{ ...blankTab(keep.id, 1), name: keep.name }];
+    });
+  }, [activeTabId]);
 
   /** Ask before abandoning an open transaction; roll it back if the user agrees. */
   const releaseTransaction = useCallback(async () => {
@@ -341,19 +432,56 @@ export function DbClient({ tabId }: Props) {
     if (panel) void reloadSaved();
   }, [panel, reloadHistory, reloadSaved]);
 
-  /** Ask before a destructive statement runs. True when it may proceed. */
+  /**
+   * Whether a statement may run, given the connection's safety level:
+   * read-only refuses writes outright, production asks before any write, and
+   * every level asks before a destructive one. True when it may proceed.
+   */
   const confirmSafe = useCallback(
     async (text: string, action: string) => {
+      const writes = !isReadOnlySql(text, active?.backend);
+      if (safety === 'readonly' && writes) {
+        setError('This connection is read-only, and the statement writes. Change the connection’s safety level to run it.');
+        return false;
+      }
       const risky = unsafeStatements(text, active?.backend);
-      if (risky.length === 0) return true;
+      if (risky.length > 0) {
+        return askConfirm({
+          title: `${action} a destructive statement${safety === 'production' ? ' on production' : ''}?`,
+          body: `${risky.join(', ')} — this affects every row and can't be undone from here.`,
+          confirmLabel: `${action} anyway`,
+          destructive: true,
+        });
+      }
+      if (safety === 'production' && writes) {
+        return askConfirm({
+          title: `${action} on production?`,
+          body: `“${active?.name ?? 'This connection'}” is marked production, and this statement changes data or schema.`,
+          confirmLabel: action,
+          destructive: true,
+        });
+      }
+      return true;
+    },
+    [active?.backend, active?.name, safety],
+  );
+
+  /** The same gate for writes the client builds itself (grid edits, imports). */
+  const confirmWrite = useCallback(
+    async (what: string) => {
+      if (safety === 'readonly') {
+        setError('This connection is read-only.');
+        return false;
+      }
+      if (safety !== 'production') return true;
       return askConfirm({
-        title: `${action} a destructive statement?`,
-        body: `${risky.join(', ')} — this affects every row and can't be undone from here.`,
-        confirmLabel: `${action} anyway`,
+        title: `${what} on production?`,
+        body: `“${active?.name ?? 'This connection'}” is marked production.`,
+        confirmLabel: what,
         destructive: true,
       });
     },
-    [active?.backend],
+    [active?.name, safety],
   );
 
   /** In manual-commit mode, open a transaction before the first write. */
@@ -366,32 +494,43 @@ export function DbClient({ tabId }: Props) {
   // Queries are serialized by `running`, so a slow one can't have its results
   // overwritten by a fast one started after it.
   const run = useCallback(
-    async (text: string) => {
-      if (!activeId || !connected || running) return;
+    async (text: string, bound = false) => {
+      if (!activeId || !active || !connected || running) return;
       const trimmed = text.trim();
       if (!trimmed) return;
+      // `:name` parameters are asked for first; the dialog runs the bound text.
+      const names = bound ? [] : queryParams(trimmed, active.backend);
+      if (names.length > 0) {
+        setParamPrompt({ sql: trimmed, names });
+        return;
+      }
       if (!(await confirmSafe(trimmed, 'Run'))) return;
       const queryId = newId();
       setRunningId(queryId);
       setError(null);
+      setFailedSql(null);
+      setAiExplain(null);
       setPane('grid');
       try {
         await ensureTransaction();
         setResult(await dbQuery(activeId, trimmed, queryId));
         setResultSql(trimmed);
         setResultTable(null);
+        setBrowse(null);
+        setTrail([]);
         setEdits(emptyEdits());
         if (DDL.test(trimmed)) void refreshCatalog(activeId);
       } catch (e) {
         setResult(null);
         setError(String(e));
+        setFailedSql(trimmed);
       } finally {
         setRunningId(null);
         // The backend recorded the statement either way.
         if (panel === 'history') void reloadHistory();
       }
     },
-    [activeId, confirmSafe, connected, running, ensureTransaction, refreshCatalog, panel, reloadHistory],
+    [activeId, active, confirmSafe, connected, running, ensureTransaction, refreshCatalog, panel, reloadHistory],
   );
 
   /** EXPLAIN the editor's statement and show the plan tree. ANALYZE executes
@@ -410,8 +549,10 @@ export function DbClient({ tabId }: Props) {
         const res = await dbQuery(activeId, explainSql(active.backend, trimmed, withAnalyze), queryId);
         setPlan({ roots: parsePlan(active.backend, res), analyze: withAnalyze });
         setPane('plan');
+        setAiExplain(null);
       } catch (e) {
         setError(String(e));
+        setFailedSql(trimmed);
       } finally {
         setRunningId(null);
         if (panel === 'history') void reloadHistory();
@@ -479,38 +620,85 @@ export function DbClient({ tabId }: Props) {
     [result],
   );
 
-  const previewTable = useCallback(
-    async (table: string) => {
-      if (!activeId || running) return;
-      if (editCount(edits) > 0) {
-        const ok = await askConfirm({
-          title: 'Discard unsaved edits?',
-          body: 'The staged changes in the grid have not been applied.',
-          confirmLabel: 'Discard',
-          destructive: true,
-        });
-        if (!ok) return;
-      }
+  /** True when there are no staged grid edits, or the user agrees to drop them. */
+  const discardEditsOk = useCallback(async () => {
+    if (editCount(edits) === 0) return true;
+    return askConfirm({
+      title: 'Discard unsaved edits?',
+      body: 'The staged changes in the grid have not been applied.',
+      confirmLabel: 'Discard',
+      destructive: true,
+    });
+  }, [edits]);
+
+  /** Load one page of a table browse into the grid. Kept out of the query
+   *  history: sorting and paging would otherwise bury what was typed. */
+  const loadBrowse = useCallback(
+    async (b: Browse): Promise<boolean> => {
+      if (!activeId || !active || running) return false;
       setRunningId(newId());
       setError(null);
+      setFailedSql(null);
+      setAiExplain(null);
       setPane('grid');
-      // Show the query we ran, so the next edit starts from something real.
-      const shown = `SELECT * FROM ${table} LIMIT 200`;
-      setSql(shown);
+      const fetchSql = browseSql(active.backend, b);
       try {
-        setResult(await dbPreview(activeId, table, 200));
-        setResultSql(shown);
-        setResultTable(table);
+        const res = await dbQuery(activeId, fetchSql, undefined, { history: false });
+        const more = res.rows.length > b.pageSize;
+        setResult(more ? { ...res, rows: res.rows.slice(0, b.pageSize) } : res);
+        setHasNext(more);
+        setBrowse(b);
+        setResultTable(b.table);
+        // The full export re-runs this — every matching row, not the page.
+        setResultSql(browseSql(active.backend, b, 'none'));
+        // Show the page's query, so the next edit starts from something real.
+        setSql(browseSql(active.backend, b, 'page'));
         setEdits(emptyEdits());
+        return true;
       } catch (e) {
         setResult(null);
         setError(String(e));
+        setFailedSql(fetchSql);
+        return false;
       } finally {
         setRunningId(null);
       }
     },
-    [activeId, running, edits],
+    [activeId, active, running],
   );
+
+  const previewTable = useCallback(
+    async (table: string) => {
+      if (!(await discardEditsOk())) return;
+      setTrail([]);
+      await loadBrowse(newBrowse(table));
+    },
+    [discardEditsOk, loadBrowse],
+  );
+
+  /** Sort, filter or page the current browse. */
+  const changeBrowse = useCallback(
+    async (b: Browse) => {
+      if (await discardEditsOk()) await loadBrowse(b);
+    },
+    [discardEditsOk, loadBrowse],
+  );
+
+  /** Follow a foreign key: open the referenced rows, remembering where we were. */
+  const followLink = useCallback(
+    async (b: Browse) => {
+      if (!(await discardEditsOk())) return;
+      const from = browse;
+      if ((await loadBrowse(b)) && from) setTrail((t) => [...t, from]);
+    },
+    [browse, discardEditsOk, loadBrowse],
+  );
+
+  const goBack = useCallback(async () => {
+    const prev = trail.at(-1);
+    if (!prev || !(await discardEditsOk())) return;
+    if (await loadBrowse(prev)) setTrail((t) => t.slice(0, -1));
+  }, [trail, discardEditsOk, loadBrowse]);
 
   const remove = useCallback(
     async (conn: DbConnection) => {
@@ -562,6 +750,7 @@ export function DbClient({ tabId }: Props) {
     [tableSchema],
   );
   const editable =
+    !readOnly &&
     !!result &&
     !!resultTable &&
     !!tableSchema &&
@@ -569,11 +758,39 @@ export function DbClient({ tabId }: Props) {
     pk.every((c) => result.columns.includes(c));
   const readOnlyReason = !resultTable
     ? null
-    : !tableSchema
-      ? 'Loading schema…'
-      : pk.length === 0
-        ? 'Read-only: the table has no primary key'
-        : null;
+    : readOnly
+      ? 'Read-only connection'
+      : !tableSchema
+        ? 'Loading schema…'
+        : pk.length === 0
+          ? 'Read-only: the table has no primary key'
+          : null;
+
+  /** Foreign-key columns of the browsed table, each opening the row it references. */
+  const relations = useMemo(() => (schemas ? buildRelations(schemas).relations : []), [schemas]);
+  const links = useMemo(() => {
+    if (!result || !resultTable) return undefined;
+    const out: Record<string, { to: string; follow: (row: Array<string | null>) => void }> = {};
+    for (const r of relations) {
+      if (r.from !== resultTable || r.fromColumns.length !== r.toColumns.length) continue;
+      const idx = r.fromColumns.map((c) => result.columns.indexOf(c));
+      if (idx.some((i) => i < 0)) continue;
+      out[r.fromColumns[0]!] = {
+        to: r.to,
+        follow: (row) => {
+          const values = idx.map((i) => row[i] ?? null);
+          if (values.some((v) => v === null)) return;
+          void followLink(newBrowse(r.to, Object.fromEntries(r.toColumns.map((c, k) => [c, `=${values[k]}`]))));
+        },
+      };
+    }
+    return out;
+  }, [relations, result, resultTable, followLink]);
+
+  const aiContext = useMemo<SqlContext | null>(
+    () => (active ? { dialect: active.backend, schema: schemaSummary(tables, schemas) } : null),
+    [active, tables, schemas],
+  );
 
   const statements = useMemo(
     () =>
@@ -584,7 +801,8 @@ export function DbClient({ tabId }: Props) {
   );
 
   const applyEdits = useCallback(async () => {
-    if (!activeId || !resultTable || statements.length === 0 || running) return;
+    if (!activeId || !active || !resultTable || statements.length === 0 || running) return;
+    if (!(await confirmWrite('Apply changes'))) return;
     setRunningId(newId());
     setError(null);
     try {
@@ -593,7 +811,11 @@ export function DbClient({ tabId }: Props) {
       toast(`${n} row${n === 1 ? '' : 's'} changed${!autoCommit ? ' — commit to keep them' : ''}`);
       setEdits(emptyEdits());
       setShowEditSql(false);
-      setResult(await dbPreview(activeId, resultTable, 200));
+      // Re-read the same page, so the grid shows what the database now holds.
+      const b = browse ?? newBrowse(resultTable);
+      const res = await dbQuery(activeId, browseSql(active.backend, b), undefined, { history: false });
+      setHasNext(res.rows.length > b.pageSize);
+      setResult({ ...res, rows: res.rows.slice(0, b.pageSize) });
       void dbRowCounts(activeId)
         .then((c) => setRowCounts(Object.fromEntries(c.map((x) => [x.table, x]))))
         .catch(() => {});
@@ -603,7 +825,154 @@ export function DbClient({ tabId }: Props) {
       setRunningId(null);
       if (panel === 'history') void reloadHistory();
     }
-  }, [activeId, resultTable, statements, running, ensureTransaction, autoCommit, panel, reloadHistory]);
+  }, [
+    activeId,
+    active,
+    resultTable,
+    statements,
+    running,
+    confirmWrite,
+    ensureTransaction,
+    autoCommit,
+    browse,
+    panel,
+    reloadHistory,
+  ]);
+
+  // ─── Query tabs ────────────────────────────────────────────────────────────
+
+  /** The active tab as it stands now, from the live state. */
+  const snapshot = useCallback(
+    (t: QueryTab): QueryTab => ({ ...t, sql, result, resultSql, resultTable, browse, hasNext, trail, plan, pane }),
+    [sql, result, resultSql, resultTable, browse, hasNext, trail, plan, pane],
+  );
+
+  const loadTab = (t: QueryTab) => {
+    setSql(t.sql);
+    setResult(t.result);
+    setResultSql(t.resultSql);
+    setResultTable(t.resultTable);
+    setBrowse(t.browse);
+    setHasNext(t.hasNext);
+    setTrail(t.trail);
+    setPlan(t.plan);
+    setPane(t.pane === 'design' || t.pane === 'schema' ? 'grid' : t.pane);
+    setEdits(emptyEdits());
+    setError(null);
+    setFailedSql(null);
+    setAiExplain(null);
+    setActiveTabId(t.id);
+  };
+
+  const switchTab = useCallback(
+    async (id: string) => {
+      if (id === activeTabId || running || !(await discardEditsOk())) return;
+      const target = queryTabs.find((t) => t.id === id);
+      if (!target) return;
+      setQueryTabs((tabs) => tabs.map((t) => (t.id === activeTabId ? snapshot(t) : t)));
+      loadTab(target);
+    },
+    // loadTab only calls setters.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [activeTabId, running, discardEditsOk, queryTabs, snapshot],
+  );
+
+  const newTab = useCallback(async () => {
+    if (running || !(await discardEditsOk())) return;
+    const n = ++tabCounter.current;
+    const fresh = blankTab(`q${n}`, n);
+    setQueryTabs((tabs) => [...tabs.map((t) => (t.id === activeTabId ? snapshot(t) : t)), fresh]);
+    loadTab(fresh);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [running, discardEditsOk, activeTabId, snapshot]);
+
+  const closeTab = useCallback(
+    async (id: string) => {
+      if (queryTabs.length === 1 || running) return;
+      if (id === activeTabId) {
+        if (!(await discardEditsOk())) return;
+        const i = queryTabs.findIndex((t) => t.id === id);
+        const next = queryTabs[i + 1] ?? queryTabs[i - 1]!;
+        loadTab(next);
+      }
+      setQueryTabs((tabs) => tabs.filter((t) => t.id !== id));
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [queryTabs, running, activeTabId, discardEditsOk],
+  );
+
+  // ─── Backup & restore ──────────────────────────────────────────────────────
+
+  const backup = useCallback(async () => {
+    if (!activeId || !active || backingUp) return;
+    const stamp = new Date().toISOString().slice(0, 10);
+    const base = active.name.replace(/[^\w.-]+/g, '-');
+    const path = await fsPickSaveFile(`${base}-${stamp}.${active.backend === 'sqlite' ? 'db' : 'sql'}`);
+    if (!path) return;
+    setBackingUp('dump');
+    try {
+      await dbDump(activeId, path);
+      toast(`Backed up ${active.name} to ${path}`);
+    } catch (e) {
+      toastError(String(e));
+    } finally {
+      setBackingUp(null);
+    }
+  }, [activeId, active, backingUp]);
+
+  const restore = useCallback(async () => {
+    if (!activeId || !active || backingUp) return;
+    if (readOnly) {
+      setError('This connection is read-only.');
+      return;
+    }
+    const [path] = await fsPickFiles();
+    if (!path) return;
+    const ok = await askConfirm({
+      title: `Run ${path.split(/[\\/]/).pop()} against ${active.name}?`,
+      body:
+        (safety === 'production' ? 'This is a production connection. ' : '') +
+        'Every statement in the script runs' +
+        (active.backend === 'postgres' ? ' in one transaction, stopping at the first error.' : ', in order.') +
+        ' A dump usually drops or replaces what it creates.',
+      confirmLabel: 'Restore',
+      destructive: true,
+    });
+    if (!ok) return;
+    setBackingUp('restore');
+    try {
+      await dbRestore(activeId, path);
+      toast('Restore finished');
+      await refreshCatalog(activeId);
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setBackingUp(null);
+    }
+  }, [activeId, active, backingUp, readOnly, safety, refreshCatalog]);
+
+  /** Open the CSV import, behind the connection's write gate. */
+  const openImport = useCallback(
+    async (table: string) => {
+      if (await confirmWrite('Import into this table')) setImportTable(table);
+    },
+    [confirmWrite],
+  );
+
+  const openDesigner = useCallback((table: string | null) => {
+    setView('query');
+    setDesign({ table });
+    setPane('design');
+  }, []);
+
+  /** Put generated SQL in the editor for review — nothing runs until Run. */
+  const sendToEditor = useCallback((text: string, note: string) => {
+    setSql(text);
+    setPane('grid');
+    setDesign(null);
+    setView('query');
+    toast(note);
+  }, []);
 
   // ─── Saved queries ─────────────────────────────────────────────────────────
 
@@ -661,14 +1030,26 @@ export function DbClient({ tabId }: Props) {
       >
         <Copy size={10} /> DDL
       </button>
-      <button
-        type="button"
-        onClick={() => setImportTable(table)}
-        title="Import rows from a CSV file"
-        className="flex items-center gap-1 rounded px-1.5 py-0.5 font-sans text-2xs text-fg-muted transition hover:bg-surface-2 hover:text-fg-base"
-      >
-        <FileUp size={10} /> Import CSV
-      </button>
+      {!readOnly && (
+        <>
+          <button
+            type="button"
+            onClick={() => openDesigner(table)}
+            title="Add, rename, change or drop columns"
+            className="flex items-center gap-1 rounded px-1.5 py-0.5 font-sans text-2xs text-fg-muted transition hover:bg-surface-2 hover:text-fg-base"
+          >
+            <TableProperties size={10} /> Alter
+          </button>
+          <button
+            type="button"
+            onClick={() => void openImport(table)}
+            title="Import rows from a CSV file"
+            className="flex items-center gap-1 rounded px-1.5 py-0.5 font-sans text-2xs text-fg-muted transition hover:bg-surface-2 hover:text-fg-base"
+          >
+            <FileUp size={10} /> Import CSV
+          </button>
+        </>
+      )}
     </>
   );
 
@@ -727,6 +1108,16 @@ export function DbClient({ tabId }: Props) {
                         SSH
                       </span>
                     )}
+                    {c.safety === 'production' && (
+                      <span className="shrink-0 rounded bg-status-err/15 px-1 font-sans text-[9px] text-status-err" title="Production: every write asks first">
+                        PROD
+                      </span>
+                    )}
+                    {c.safety === 'readonly' && (
+                      <span className="shrink-0 rounded bg-surface-2 px-1 font-sans text-[9px] text-fg-subtle" title="Read-only">
+                        RO
+                      </span>
+                    )}
                   </span>
                   <span className="block truncate font-mono text-2xs text-fg-subtle/70">
                     {c.url}
@@ -764,15 +1155,23 @@ export function DbClient({ tabId }: Props) {
                 void previewTable(t);
               }}
               onExactCount={(t) => void exactCount(t)}
-              onImport={setImportTable}
+              onImport={readOnly ? undefined : (t) => void openImport(t)}
               onSchema={(t) => {
                 setView('query');
                 void showSchema(t);
               }}
+              onCreateTable={readOnly ? undefined : () => openDesigner(null)}
             />
           )}
           {connected && tables.length === 0 && (
-            <p className="px-3 py-2 font-sans text-xs text-fg-subtle">No tables.</p>
+            <p className="px-3 py-2 font-sans text-xs text-fg-subtle">
+              No tables.{' '}
+              {!readOnly && (
+                <button type="button" onClick={() => openDesigner(null)} className="text-fg-muted underline hover:text-fg-base">
+                  Create one
+                </button>
+              )}
+            </p>
           )}
         </div>
       </div>
@@ -881,6 +1280,30 @@ export function DbClient({ tabId }: Props) {
                 </button>
               </>
             )}
+            {connected && (
+              <>
+                <button
+                  type="button"
+                  onClick={() => void backup()}
+                  disabled={backingUp !== null}
+                  title={active?.backend === 'sqlite' ? 'Back up: save a copy of the database file' : 'Back up: dump the database to a SQL file'}
+                  className={cn(ICON_BTN, 'text-fg-muted disabled:opacity-40')}
+                >
+                  {backingUp === 'dump' ? <Loader2 size={12} className="animate-spin" /> : <HardDriveDownload size={12} />}
+                </button>
+                {!readOnly && (
+                  <button
+                    type="button"
+                    onClick={() => void restore()}
+                    disabled={backingUp !== null}
+                    title="Restore: run a SQL script or dump file against this database"
+                    className={cn(ICON_BTN, 'text-fg-muted disabled:opacity-40')}
+                  >
+                    {backingUp === 'restore' ? <Loader2 size={12} className="animate-spin" /> : <HardDriveUpload size={12} />}
+                  </button>
+                )}
+              </>
+            )}
             {active && (
               <button
                 type="button"
@@ -908,21 +1331,124 @@ export function DbClient({ tabId }: Props) {
           />
         )}
 
+        {connected && safety === 'production' && (
+          <div className="flex shrink-0 items-center gap-1.5 border-b border-status-err/30 bg-status-err/10 px-3 py-1 font-sans text-xs text-status-err">
+            <ShieldAlert size={12} />
+            Production database — every write asks for confirmation.
+          </div>
+        )}
+        {connected && readOnly && (
+          <div className="flex shrink-0 items-center gap-1.5 border-b border-border-hairline bg-surface-1 px-3 py-1 font-sans text-xs text-fg-muted">
+            <Lock size={11} />
+            Read-only — writes are refused here and by the server.
+          </div>
+        )}
+
         {error && (
           <div className="flex shrink-0 items-start gap-2 border-b border-border-hairline bg-status-err/10 px-3 py-1.5 font-sans text-xs text-status-err">
             <span className="min-w-0 flex-1 whitespace-pre-wrap break-words">{error}</span>
+            {failedSql && aiContext && (
+              <button
+                type="button"
+                onClick={() => setAiExplain((x) => ({ n: (x?.n ?? 0) + 1, sql: failedSql, problem: { error } }))}
+                className="flex shrink-0 items-center gap-1 rounded px-1.5 text-fg-base hover:bg-status-err/15"
+              >
+                <Sparkles size={11} /> Explain with Claude
+              </button>
+            )}
             <button type="button" onClick={() => setError(null)} className="shrink-0 hover:opacity-70">
               <X size={12} />
             </button>
           </div>
         )}
 
+        {aiExplain && aiContext && view === 'query' && (
+          <ClaudeExplain
+            key={aiExplain.n}
+            sql={aiExplain.sql}
+            problem={aiExplain.problem}
+            ctx={aiContext}
+            onUseFix={(text) => {
+              setAiExplain(null);
+              sendToEditor(text, 'Claude’s suggestion is in the editor — review it, then Run');
+            }}
+            onClose={() => setAiExplain(null)}
+          />
+        )}
+
         {view === 'analytics' && connected && active && activeId ? (
           <div className="min-h-0 flex-1">
-            <DbAnalytics key={activeId} connId={activeId} backend={active.backend} />
+            <DbAnalytics
+              key={activeId}
+              connId={activeId}
+              backend={active.backend}
+              safety={safety}
+              onOpenSql={(text) => sendToEditor(text, 'Query from the analytics view is in the editor')}
+            />
           </div>
         ) : (
           <>
+          {/* Query tabs */}
+          {connected && (
+            <div className="flex shrink-0 items-center gap-0.5 overflow-x-auto border-b border-border-hairline px-2 pt-1">
+              {queryTabs.map((t) => {
+                const isActive = t.id === activeTabId;
+                const label = (isActive ? resultTable : t.resultTable) ?? t.name;
+                return (
+                  <div
+                    key={t.id}
+                    className={cn(
+                      'group flex shrink-0 items-center gap-1 rounded-t-md border border-b-0 px-2.5 py-1 font-sans text-xs',
+                      isActive
+                        ? 'border-border-hairline bg-bg-base text-fg-base'
+                        : 'border-transparent text-fg-muted hover:bg-surface-1 hover:text-fg-base',
+                    )}
+                  >
+                    <button
+                      type="button"
+                      onClick={() => void switchTab(t.id)}
+                      disabled={running}
+                      className="max-w-[12rem] truncate disabled:cursor-not-allowed"
+                      title={label}
+                    >
+                      {label}
+                    </button>
+                    {queryTabs.length > 1 && (
+                      <button
+                        type="button"
+                        onClick={() => void closeTab(t.id)}
+                        title="Close tab"
+                        className="text-fg-subtle opacity-0 transition hover:text-fg-base group-hover:opacity-100"
+                      >
+                        <X size={10} />
+                      </button>
+                    )}
+                  </div>
+                );
+              })}
+              <button
+                type="button"
+                onClick={() => void newTab()}
+                disabled={running}
+                title="New query tab"
+                className="ml-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded text-fg-muted transition hover:bg-surface-2 hover:text-fg-base disabled:opacity-40"
+              >
+                <Plus size={11} />
+              </button>
+            </div>
+          )}
+
+          {askOpen && aiContext && connected && (
+            <AskClaudeBar
+              ctx={aiContext}
+              onUse={(text) => {
+                setAskOpen(false);
+                sendToEditor(text, 'Claude’s query is in the editor — review it, then Run');
+              }}
+              onClose={() => setAskOpen(false)}
+            />
+          )}
+
           {/* SQL editor */}
           <div className="shrink-0 border-b border-border-hairline">
             <div className="h-32 min-h-[64px] resize-y overflow-hidden">
@@ -969,6 +1495,19 @@ export function DbClient({ tabId }: Props) {
               >
                 <ListTree size={11} />
                 Explain
+              </button>
+              <button
+                type="button"
+                onClick={() => setAskOpen((o) => !o)}
+                disabled={!connected}
+                title="Describe a query and let Claude write it"
+                className={cn(
+                  'flex items-center gap-1 rounded-lg px-2.5 py-1 font-sans text-xs transition-colors hover:bg-surface-2 hover:text-fg-base disabled:cursor-not-allowed disabled:opacity-40',
+                  askOpen ? 'bg-surface-2 text-fg-base' : 'text-fg-muted',
+                )}
+              >
+                <Sparkles size={11} />
+                Ask Claude
               </button>
               {savingName === null ? (
                 <button
@@ -1167,20 +1706,101 @@ export function DbClient({ tabId }: Props) {
                   actions={schemaActions(schema.table, schema.data)}
                 />
               </div>
+            ) : pane === 'design' && design && active && design.table && !schemas?.[design.table] ? (
+              <Waiting label="Loading schema…" />
+            ) : pane === 'design' && design && active ? (
+              <TableDesigner
+                key={design.table ?? '+new'}
+                backend={active.backend}
+                current={
+                  design.table && schemas?.[design.table]
+                    ? { table: design.table, schema: schemas[design.table]! }
+                    : null
+                }
+                defaultSchema="public"
+                onSendToEditor={(text) =>
+                  sendToEditor(text, design.table ? 'ALTER statements are in the editor — review them, then Run' : 'CREATE TABLE is in the editor — review it, then Run')
+                }
+                onClose={() => {
+                  setDesign(null);
+                  setPane('grid');
+                }}
+              />
             ) : pane === 'plan' && plan ? (
-              <div className="h-full overflow-auto">
-                <PlanView roots={plan.roots} analyze={plan.analyze} onClose={() => setPane('grid')} />
+              <div className="flex h-full flex-col">
+                {aiContext && !aiExplain && (
+                  <div className="flex shrink-0 justify-end border-b border-border-hairline px-3 py-1">
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setAiExplain((x) => ({
+                          n: (x?.n ?? 0) + 1,
+                          sql: editor.current?.selectionOrAll() ?? sql,
+                          problem: { plan: planText(plan.roots) },
+                        }))
+                      }
+                      className="flex items-center gap-1 rounded px-1.5 py-0.5 font-sans text-2xs text-fg-muted transition hover:bg-surface-2 hover:text-fg-base"
+                    >
+                      <Sparkles size={10} /> Explain this plan with Claude
+                    </button>
+                  </div>
+                )}
+                <div className="min-h-0 flex-1 overflow-auto">
+                  <PlanView roots={plan.roots} analyze={plan.analyze} onClose={() => setPane('grid')} />
+                </div>
               </div>
             ) : result && result.columns.length > 0 ? (
-              <ResultGrid
-                result={result}
-                editing={editable ? { edits, onChange: setEdits } : undefined}
-                readOnlyReason={readOnlyReason}
-              />
+              <div className="flex h-full flex-col">
+                {trail.length > 0 && (
+                  <div className="flex shrink-0 items-center gap-2 border-b border-border-hairline px-3 py-1 font-sans text-2xs text-fg-subtle">
+                    <button
+                      type="button"
+                      onClick={() => void goBack()}
+                      disabled={running}
+                      className="flex items-center gap-1 rounded px-1.5 py-0.5 text-fg-muted transition hover:bg-surface-2 hover:text-fg-base"
+                    >
+                      <ArrowLeft size={10} /> Back to {trail.at(-1)!.table}
+                    </button>
+                    <span className="truncate">{[...trail.map((b) => b.table), resultTable].join(' → ')}</span>
+                  </div>
+                )}
+                <div className="min-h-0 flex-1">
+                  <ResultGrid
+                    result={result}
+                    editing={editable ? { edits, onChange: setEdits, pk } : undefined}
+                    readOnlyReason={readOnlyReason}
+                    browsing={browse ? { browse, hasNext, onChange: (b) => void changeBrowse(b) } : undefined}
+                    links={browse ? links : undefined}
+                    copyAs={{ backend: active?.backend ?? 'postgres', table: resultTable }}
+                  />
+                </div>
+              </div>
             ) : (
-              <div className="flex h-32 items-center justify-center font-sans text-xs text-fg-subtle">
+              <div className="flex h-32 flex-col items-center justify-center gap-2 font-sans text-xs text-fg-subtle">
                 {running ? (
                   <Loader2 size={13} className="animate-spin" />
+                ) : browse ? (
+                  <>
+                    {Object.values(browse.filters).some((f) => f.trim())
+                      ? `No rows in ${browse.table} match these filters.`
+                      : `${browse.table} has no rows${browse.page > 0 ? ' on this page' : ''}.`}
+                    <span className="flex gap-2">
+                      {Object.values(browse.filters).some((f) => f.trim()) && (
+                        <button
+                          type="button"
+                          onClick={() => void changeBrowse({ ...browse, filters: {}, page: 0 })}
+                          className="text-fg-muted underline hover:text-fg-base"
+                        >
+                          Clear filters
+                        </button>
+                      )}
+                      {trail.length > 0 && (
+                        <button type="button" onClick={() => void goBack()} className="text-fg-muted underline hover:text-fg-base">
+                          Back to {trail.at(-1)!.table}
+                        </button>
+                      )}
+                    </span>
+                  </>
                 ) : result ? (
                   'Statement ran — no rows returned.'
                 ) : connected ? (
@@ -1252,6 +1872,19 @@ export function DbClient({ tabId }: Props) {
             }
           }}
           onClose={() => setPanel(null)}
+        />
+      )}
+
+      {paramPrompt && active && (
+        <QueryParamsDialog
+          names={paramPrompt.names}
+          initial={paramValues.current}
+          onClose={() => setParamPrompt(null)}
+          onRun={(values) => {
+            paramValues.current = { ...paramValues.current, ...values };
+            setParamPrompt(null);
+            void run(bindParams(paramPrompt.sql, active.backend, values), true);
+          }}
         />
       )}
 
@@ -1435,6 +2068,7 @@ function ConnectionForm({
   const [sshUser, setSshUser] = useState(editing?.ssh?.user ?? '');
   const [sshKey, setSshKey] = useState(editing?.ssh?.key_path ?? '');
   const [sshPassphrase, setSshPassphrase] = useState('');
+  const [safety, setSafety] = useState<DbSafety>(editing?.safety ?? 'normal');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const nameRef = useRef<HTMLInputElement>(null);
@@ -1477,6 +2111,7 @@ function ConnectionForm({
         ssh: useSsh
           ? { host: sshHost.trim(), port, user: sshUser.trim(), key_path: sshKey.trim() }
           : null,
+        safety,
       });
       if (secret) await dbPasswordSet(conn.id, secret);
       if (useSsh && sshPassphrase) await dbSshPassphraseSet(conn.id, sshPassphrase);
@@ -1619,6 +2254,24 @@ function ConnectionForm({
           </p>
         </div>
       )}
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1" role="radiogroup" aria-label="Safety">
+        <span className="font-sans text-xs text-fg-muted">Safety</span>
+        {SAFETY_LEVELS.map((s) => (
+          <label key={s.id} className="flex items-center gap-1.5 font-sans text-xs text-fg-muted" title={s.hint}>
+            <input
+              type="radio"
+              name="db-safety"
+              checked={safety === s.id}
+              onChange={() => setSafety(s.id)}
+              className="h-3 w-3 accent-accent"
+            />
+            {s.label}
+          </label>
+        ))}
+        <span className="font-sans text-2xs text-fg-subtle">
+          {SAFETY_LEVELS.find((s) => s.id === safety)!.hint}
+        </span>
+      </div>
       <p className="font-sans text-2xs leading-relaxed text-fg-subtle">
         Passwords and passphrases are stored in your OS credential vault, never in ARC&apos;s
         database — the saved URL keeps only <span className="font-mono">user@host</span>.

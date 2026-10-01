@@ -3236,7 +3236,13 @@ export interface DbConnection {
   last_used_at: number | null;
   /** Set when the database is reached through an SSH tunnel. */
   ssh: DbSsh | null;
+  safety: DbSafety;
 }
+
+/** How carefully the client treats a connection: `normal` asks before
+ *  destructive statements, `production` before any write (with a warning
+ *  bar), `readonly` refuses writes — and the server enforces it too. */
+export type DbSafety = 'normal' | 'production' | 'readonly';
 
 /** SSH tunnel settings. The URL's host/port are then as seen from `host`.
  *  The key's passphrase lives in the OS vault (`dbSshPassphraseSet`). */
@@ -3254,6 +3260,7 @@ export interface DbConnectionInput {
   url: string;
   has_password: boolean;
   ssh?: DbSsh | null;
+  safety?: DbSafety;
 }
 
 export interface DbQueryResult {
@@ -3300,8 +3307,13 @@ export async function dbIsConnected(id: string): Promise<boolean> {
 }
 
 /** Run `sql`. With a `queryId`, `dbCancel(queryId)` can stop it mid-flight. */
-export async function dbQuery(id: string, sql: string, queryId?: string): Promise<DbQueryResult> {
-  return invoke<DbQueryResult>('db_query', { id, sql, queryId: queryId ?? null });
+export async function dbQuery(
+  id: string,
+  sql: string,
+  queryId?: string,
+  opts: { history?: boolean } = {},
+): Promise<DbQueryResult> {
+  return invoke<DbQueryResult>('db_query', { id, sql, queryId: queryId ?? null, history: opts.history ?? true });
 }
 
 /** Ask the server to stop the statement running under `queryId`. */
@@ -3347,6 +3359,17 @@ export async function dbRowCounts(id: string): Promise<DbRowCount[]> {
 
 export async function dbExactCount(id: string, table: string): Promise<number> {
   return invoke<number>('db_exact_count', { id, table });
+}
+
+/** Back up the database to `path`: `pg_dump`/`mysqldump` plain SQL, or a
+ *  `VACUUM INTO` copy of a SQLite file. */
+export async function dbDump(id: string, path: string): Promise<void> {
+  return invoke<void>('db_dump', { id, path });
+}
+
+/** Run a SQL script file against the database (`psql`/`mysql` for servers). */
+export async function dbRestore(id: string, path: string): Promise<void> {
+  return invoke<void>('db_restore', { id, path });
 }
 
 /** Analytics SQL: skips query history and never runs inside an open

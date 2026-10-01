@@ -37,6 +37,29 @@ export function isSelectLike(sql: string, backend?: DbBackend): boolean {
   return verb === 'select' || verb === 'values' || verb === 'table' || verb === 'show';
 }
 
+/**
+ * True when no statement in `sql` writes: each is a read (SELECT, VALUES,
+ * TABLE, SHOW, EXPLAIN, DESCRIBE, a WITH ending in SELECT) or session/
+ * transaction control (SET, BEGIN, COMMIT, …), and no INSERT/UPDATE/DELETE/
+ * MERGE hides anywhere inside — EXPLAIN ANALYZE DELETE counts as a write.
+ * Drives the production prompt and the read-only refusal; errs towards
+ * "writes", so an unknown verb asks rather than slips through.
+ */
+export function isReadOnlySql(sql: string, backend?: DbBackend): boolean {
+  return statements(sql, backend).every((words) => {
+    if (words.some((w) => WRITES.has(w.word))) return false;
+    const top = words.filter((w) => w.depth === 0).map((w) => w.word);
+    const first = words[0]!.depth === 0 ? top[0] : words[0]!.word;
+    const verb = first === 'with' ? top.find((w) => VERBS.has(w)) : first;
+    return verb !== undefined && READS.has(verb);
+  });
+}
+
+const READS = new Set([
+  'select', 'values', 'table', 'show', 'explain', 'describe', 'desc',
+  'set', 'reset', 'begin', 'start', 'commit', 'rollback', 'end', 'savepoint', 'release', 'use',
+]);
+
 type Word = { word: string; depth: number };
 
 /** Lex `sql` into its `;`-separated statements, each a list of bare words

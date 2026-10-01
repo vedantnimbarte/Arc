@@ -283,6 +283,7 @@ mod tests {
             url: "sqlite::memory:".into(),
             has_password: false,
             ssh: None,
+            safety: "normal".into(),
         };
         let a = db::upsert(pool, conn("a")).await.unwrap();
         let b = db::upsert(pool, conn("b")).await.unwrap();
@@ -337,9 +338,11 @@ mod tests {
             url: "postgres://app@10.0.0.5/app".into(),
             has_password: true,
             ssh: Some(ssh.clone()),
+            safety: "production".into(),
         };
         let c = db::upsert(pool, input.clone()).await.unwrap();
         assert_eq!(c.ssh.as_ref(), Some(&ssh));
+        assert_eq!(c.safety, "production");
         assert_eq!(db::get(pool, &c.id).await.unwrap().unwrap().ssh, Some(ssh));
 
         // Clearing the tunnel on update.

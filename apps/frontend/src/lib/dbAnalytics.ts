@@ -2,6 +2,7 @@
 // counters into the per-second series the live charts draw. Every query here
 // runs through `dbStats` — off the history, outside any open transaction.
 import type { DbBackend, DbQueryResult } from './tauri';
+import { quoteIdent } from './dbSql';
 
 export type Counters = Record<string, number>;
 
@@ -17,7 +18,7 @@ export interface ChartSpec {
 export interface Column {
   key: string;
   label: string;
-  format?: 'bytes' | 'num' | 'secs';
+  format?: 'bytes' | 'num' | 'secs' | 'ms';
   /** Right-aligned, tabular figures. */
   numeric?: boolean;
 }
@@ -27,6 +28,15 @@ export interface Section {
   columns: Column[];
   /** Shown when the query fails — usually a missing extension/privilege. */
   unavailable: string;
+  /** One line above the rows saying how to read them. */
+  hint?: string;
+}
+
+/** A per-table maintenance command offered in the tables tab. */
+export interface Maintenance {
+  label: string;
+  title: string;
+  sql: (table: string) => string;
 }
 
 export interface Dialect {
@@ -38,9 +48,25 @@ export interface Dialect {
   unusedIndexes: Section | null;
   activity: Section | null;
   locks: Section | null;
+  /** Statements by total time spent. */
+  topQueries: Section | null;
+  /** Tables read mostly by full scans — where an index may be missing. */
+  scanHeavy: Section | null;
+  maintenance: Maintenance[];
   /** SQL that stops session `pid`, by how hard. */
   stop: ((pid: number, hard: boolean) => string) | null;
 }
+
+const TOP_QUERY_COLUMNS: Column[] = [
+  { key: 'query', label: 'Query' },
+  { key: 'calls', label: 'Calls', format: 'num', numeric: true },
+  { key: 'total_ms', label: 'Total time', format: 'ms', numeric: true },
+  { key: 'mean_ms', label: 'Mean', format: 'ms', numeric: true },
+  { key: 'rows', label: 'Rows', format: 'num', numeric: true },
+];
+
+const SCAN_HINT =
+  'Read mostly by full scans. An index on the columns their queries filter by may help — find those queries in Top queries, then Explain one.';
 
 const SESSIONS: ChartSpec = {
   title: 'Sessions',
@@ -189,6 +215,44 @@ ORDER BY l.granted, l.pid LIMIT 200`,
     columns: LOCK_COLUMNS,
     unavailable: 'Lock information is unavailable on this server.',
   },
+  topQueries: {
+    sql: `SELECT left(regexp_replace(query, '\\s+', ' ', 'g'), 400) AS query, calls,
+  round(total_exec_time::numeric, 1) AS total_ms, round(mean_exec_time::numeric, 2) AS mean_ms, rows
+FROM pg_stat_statements
+WHERE dbid = (SELECT oid FROM pg_database WHERE datname = current_database())
+ORDER BY total_exec_time DESC LIMIT 25`,
+    columns: TOP_QUERY_COLUMNS,
+    unavailable:
+      'Top queries need pg_stat_statements: add it to shared_preload_libraries, restart, then run CREATE EXTENSION pg_stat_statements.',
+  },
+  scanHeavy: {
+    sql: `SELECT schemaname || '.' || relname AS name, seq_scan, seq_tup_read,
+  coalesce(idx_scan, 0) AS idx_scan, n_live_tup AS live
+FROM pg_stat_user_tables
+WHERE seq_scan > coalesce(idx_scan, 0) AND n_live_tup > 1000
+ORDER BY seq_tup_read DESC LIMIT 20`,
+    columns: [
+      { key: 'name', label: 'Table' },
+      { key: 'seq_scan', label: 'Full scans', format: 'num', numeric: true },
+      { key: 'seq_tup_read', label: 'Rows scanned', format: 'num', numeric: true },
+      { key: 'idx_scan', label: 'Index scans', format: 'num', numeric: true },
+      { key: 'live', label: 'Rows', format: 'num', numeric: true },
+    ],
+    unavailable: 'Scan statistics are unavailable on this server.',
+    hint: SCAN_HINT,
+  },
+  maintenance: [
+    {
+      label: 'Vacuum',
+      title: 'VACUUM (ANALYZE): reclaim dead rows and refresh planner statistics',
+      sql: (t) => `VACUUM (ANALYZE) ${quoteIdent('postgres', t)}`,
+    },
+    {
+      label: 'Analyze',
+      title: 'ANALYZE: refresh planner statistics',
+      sql: (t) => `ANALYZE ${quoteIdent('postgres', t)}`,
+    },
+  ],
   stop: (pid, hard) => `SELECT ${hard ? 'pg_terminate_backend' : 'pg_cancel_backend'}(${pid})`,
 };
 
@@ -258,6 +322,42 @@ ORDER BY l.lock_status <> 'GRANTED' DESC LIMIT 200`,
     columns: LOCK_COLUMNS,
     unavailable: 'Lock information needs MySQL 8 with performance_schema enabled.',
   },
+  topQueries: {
+    // Timer columns are picoseconds.
+    sql: `SELECT LEFT(DIGEST_TEXT, 400) AS query, COUNT_STAR AS calls,
+  ROUND(SUM_TIMER_WAIT / 1e9, 1) AS total_ms, ROUND(AVG_TIMER_WAIT / 1e9, 2) AS mean_ms,
+  SUM_ROWS_SENT AS \`rows\`
+FROM performance_schema.events_statements_summary_by_digest
+WHERE SCHEMA_NAME = DATABASE()
+ORDER BY SUM_TIMER_WAIT DESC LIMIT 25`,
+    columns: TOP_QUERY_COLUMNS,
+    unavailable: 'Top queries need performance_schema enabled.',
+  },
+  scanHeavy: {
+    sql: `SELECT object_name AS name, rows_full_scanned AS seq_tup_read, latency
+FROM sys.schema_tables_with_full_table_scans
+WHERE object_schema = DATABASE()
+ORDER BY rows_full_scanned DESC LIMIT 20`,
+    columns: [
+      { key: 'name', label: 'Table' },
+      { key: 'seq_tup_read', label: 'Rows scanned', format: 'num', numeric: true },
+      { key: 'latency', label: 'Time spent' },
+    ],
+    unavailable: 'Scan statistics need the sys schema and performance_schema.',
+    hint: SCAN_HINT,
+  },
+  maintenance: [
+    {
+      label: 'Analyze',
+      title: 'ANALYZE TABLE: refresh index statistics',
+      sql: (t) => `ANALYZE TABLE ${quoteIdent('mysql', t)}`,
+    },
+    {
+      label: 'Optimize',
+      title: 'OPTIMIZE TABLE: rebuild the table and reclaim free space (locks it while running)',
+      sql: (t) => `OPTIMIZE TABLE ${quoteIdent('mysql', t)}`,
+    },
+  ],
   stop: (pid, hard) => `${hard ? 'KILL' : 'KILL QUERY'} ${pid}`,
 };
 
@@ -281,6 +381,20 @@ GROUP BY name ORDER BY 2 DESC LIMIT 20`,
   unusedIndexes: null,
   activity: null,
   locks: null,
+  topQueries: null,
+  scanHeavy: null,
+  maintenance: [
+    {
+      label: 'Analyze',
+      title: 'ANALYZE: refresh the query planner statistics',
+      sql: (t) => `ANALYZE ${quoteIdent('sqlite', t)}`,
+    },
+    {
+      label: 'Vacuum',
+      title: 'VACUUM: rebuild the whole database file and reclaim free pages',
+      sql: () => 'VACUUM',
+    },
+  ],
   stop: null,
 };
 
@@ -357,5 +471,8 @@ export function formatCell(value: string | null, format: Column['format']): stri
   if (format === 'bytes' && Number.isFinite(n)) return formatBytes(n);
   if (format === 'num' && Number.isFinite(n)) return n < 0 ? '—' : formatNumber(n);
   if (format === 'secs' && Number.isFinite(n)) return formatDuration(Math.max(0, n));
+  if (format === 'ms' && Number.isFinite(n)) {
+    return n < 1000 ? `${formatNumber(n)} ms` : formatDuration(Math.round(n / 1000));
+  }
   return value;
 }

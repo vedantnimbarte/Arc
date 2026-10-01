@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Ban, Loader2, Pause, Play, Power, RefreshCw } from 'lucide-react';
-import { dbStats, type DbBackend } from '../../lib/tauri';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { Ban, CornerDownLeft, Loader2, Pause, Play, Power, RefreshCw } from 'lucide-react';
+import { dbStats, type DbBackend, type DbSafety } from '../../lib/tauri';
 import {
   DIALECTS,
   formatBytes,
@@ -12,6 +12,7 @@ import {
   records,
   type ChartSpec,
   type Counters,
+  type Maintenance,
   type Section,
 } from '../../lib/dbAnalytics';
 import { askConfirm } from '../../state/confirm';
@@ -21,21 +22,35 @@ import { cn } from '../../lib/cn';
 interface Props {
   connId: string;
   backend: DbBackend;
+  safety: DbSafety;
+  /** Put a statement in the query editor and switch to it. */
+  onOpenSql: (sql: string) => void;
 }
 
 type Row = Record<string, string | null>;
 type Loaded = { rows: Row[]; error: null } | { rows: null; error: string } | null;
 type Sample = { t: number; c: Counters };
-type TabKey = 'activity' | 'locks' | 'tables' | 'unusedIndexes';
+type TabKey = 'activity' | 'locks' | 'topQueries' | 'tables' | 'scanHeavy' | 'unusedIndexes';
 
 /** Two minutes of history at the default 2s interval. */
 const MAX_SAMPLES = 61;
 const INTERVALS = [1000, 2000, 5000, 10000];
+const TAB_ORDER: TabKey[] = ['activity', 'locks', 'topQueries', 'tables', 'scanHeavy', 'unusedIndexes'];
 const TAB_LABELS: Record<TabKey, string> = {
   activity: 'Sessions',
   locks: 'Locks',
+  topQueries: 'Top queries',
   tables: 'Largest tables',
+  scanHeavy: 'Full scans',
   unusedIndexes: 'Unused indexes',
+};
+const NO_SECTIONS: Record<TabKey, Loaded> = {
+  activity: null,
+  locks: null,
+  topQueries: null,
+  tables: null,
+  scanHeavy: null,
+  unusedIndexes: null,
 };
 
 async function load(connId: string, section: Section | null): Promise<Loaded> {
@@ -49,7 +64,7 @@ async function load(connId: string, section: Section | null): Promise<Loaded> {
 
 /** pgAdmin-style dashboard for the connected database. Live counters and
  *  sessions poll only while this view is on screen and not paused. */
-export function DbAnalytics({ connId, backend }: Props) {
+export function DbAnalytics({ connId, backend, safety, onOpenSql }: Props) {
   const d = DIALECTS[backend];
   const root = useRef<HTMLDivElement>(null);
   const [intervalMs, setIntervalMs] = useState(2000);
@@ -57,29 +72,27 @@ export function DbAnalytics({ connId, backend }: Props) {
   const [samples, setSamples] = useState<Sample[]>([]);
   const [pollError, setPollError] = useState<string | null>(null);
   const [overview, setOverview] = useState<Row | null>(null);
-  const [sections, setSections] = useState<Record<TabKey, Loaded>>({
-    activity: null,
-    locks: null,
-    tables: null,
-    unusedIndexes: null,
-  });
-  const tabs = (['activity', 'locks', 'tables', 'unusedIndexes'] as const).filter((k) => d[k]);
+  const [sections, setSections] = useState<Record<TabKey, Loaded>>(NO_SECTIONS);
+  const tabs = TAB_ORDER.filter((k) => d[k]);
   const [tab, setTab] = useState<TabKey>(tabs[0] ?? 'tables');
   const [refreshing, setRefreshing] = useState(false);
+  const [maintaining, setMaintaining] = useState<string | null>(null);
 
-  /** The slow, mostly-static parts: overview, sizes, index usage. */
+  /** The slow, mostly-static parts: overview, sizes, index and query stats. */
   const refreshStatic = useCallback(async () => {
     setRefreshing(true);
-    const [ov, tables, unusedIndexes] = await Promise.all([
+    const [ov, tables, unusedIndexes, topQueries, scanHeavy] = await Promise.all([
       dbStats(connId, d.overview).then(
         (r) => records(r)[0] ?? null,
         () => null,
       ),
       load(connId, d.tables),
       load(connId, d.unusedIndexes),
+      load(connId, d.topQueries),
+      load(connId, d.scanHeavy),
     ]);
     setOverview(ov);
-    setSections((s) => ({ ...s, tables, unusedIndexes }));
+    setSections((s) => ({ ...s, tables, unusedIndexes, topQueries, scanHeavy }));
     setRefreshing(false);
   }, [connId, d]);
 
@@ -142,6 +155,76 @@ export function DbAnalytics({ connId, backend }: Props) {
     } catch (e) {
       toastError(String(e));
     }
+  };
+
+  /** VACUUM / ANALYZE / OPTIMIZE one table. Production asks first. */
+  const maintain = async (table: string, m: Maintenance) => {
+    if (maintaining) return;
+    const sql = m.sql(table);
+    if (safety === 'production') {
+      const ok = await askConfirm({
+        title: `${m.label} ${table} on production?`,
+        body: `${sql} — ${m.title.split(': ')[1] ?? m.title}.`,
+        confirmLabel: m.label,
+      });
+      if (!ok) return;
+    }
+    setMaintaining(`${m.label}:${table}`);
+    try {
+      await dbStats(connId, sql);
+      toast(`${m.label} finished on ${table}`);
+      void refreshStatic();
+    } catch (e) {
+      toastError(String(e));
+    } finally {
+      setMaintaining(null);
+    }
+  };
+
+  const rowActions = (row: Row): ReactNode => {
+    if (tab === 'activity' && d.stop && row.pid && !isSelf(row)) {
+      return (
+        <>
+          <button type="button" onClick={() => void stop(row.pid!, false)} title="Cancel the running query" className={ROW_BTN}>
+            <Ban size={12} />
+          </button>
+          <button
+            type="button"
+            onClick={() => void stop(row.pid!, true)}
+            title="Terminate the session"
+            className="rounded p-1 text-fg-subtle transition hover:bg-status-err/15 hover:text-status-err"
+          >
+            <Power size={12} />
+          </button>
+        </>
+      );
+    }
+    if (tab === 'topQueries' && row.query) {
+      return (
+        <button type="button" onClick={() => onOpenSql(row.query!)} title="Open in the query editor" className={ROW_BTN}>
+          <CornerDownLeft size={12} />
+        </button>
+      );
+    }
+    if ((tab === 'tables' || tab === 'scanHeavy') && row.name && safety !== 'readonly') {
+      return d.maintenance.map((m) => {
+        const busy = maintaining === `${m.label}:${row.name}`;
+        return (
+          <button
+            key={m.label}
+            type="button"
+            disabled={maintaining !== null}
+            onClick={() => void maintain(row.name!, m)}
+            title={m.title}
+            className="flex items-center gap-1 rounded px-1.5 py-0.5 text-2xs text-fg-subtle transition hover:bg-surface-2 hover:text-fg-base disabled:opacity-40"
+          >
+            {busy && <Loader2 size={10} className="animate-spin" />}
+            {m.label}
+          </button>
+        );
+      });
+    }
+    return null;
   };
 
   const latest = samples.at(-1)?.c;
@@ -264,11 +347,7 @@ export function DbAnalytics({ connId, backend }: Props) {
           );
         })}
       </div>
-      <SectionTable
-        section={d[tab]!}
-        loaded={sections[tab]}
-        onStop={tab === 'activity' && d.stop ? stop : undefined}
-      />
+      <SectionTable section={d[tab]!} loaded={sections[tab]} actions={rowActions} />
     </div>
   );
 }
@@ -453,14 +532,19 @@ function niceMax(v: number): number {
   return [1, 2, 5, 10].map((m) => m * p).find((m) => m >= v)!;
 }
 
+const isSelf = (r: Row) => r.self === 't' || r.self === 'true' || r.self === '1';
+
+const ROW_BTN = 'rounded p-1 text-fg-subtle transition hover:bg-surface-2 hover:text-fg-base';
+
 function SectionTable({
   section,
   loaded,
-  onStop,
+  actions,
 }: {
   section: Section;
   loaded: Loaded;
-  onStop?: (pid: string, hard: boolean) => void;
+  /** Buttons shown on row hover. */
+  actions?: (row: Row) => ReactNode;
 }) {
   if (!loaded) return <p className="px-4 py-4 font-sans text-xs text-fg-subtle">Loading…</p>;
   if (loaded.rows === null)
@@ -469,6 +553,7 @@ function SectionTable({
     return <p className="px-4 py-4 font-sans text-xs text-fg-subtle">Nothing to show.</p>;
   return (
     <div className="overflow-x-auto px-3 pb-4 pt-1">
+      {section.hint && <p className="px-2 pb-1 font-sans text-xs text-fg-subtle">{section.hint}</p>}
       <table className="w-full border-collapse font-sans text-xs">
         <thead>
           <tr className="text-left text-fg-subtle">
@@ -483,12 +568,12 @@ function SectionTable({
                 {c.label}
               </th>
             ))}
-            {onStop && <th className="w-16" />}
+            {actions && <th className="w-16" />}
           </tr>
         </thead>
         <tbody>
           {loaded.rows.map((r, i) => {
-            const self = r.self === 't' || r.self === 'true' || r.self === '1';
+            const self = isSelf(r);
             return (
               <tr key={i} className="group border-t border-border-hairline hover:bg-surface-1">
                 {section.columns.map((c) => (
@@ -513,28 +598,11 @@ function SectionTable({
                     )}
                   </td>
                 ))}
-                {onStop && (
+                {actions && (
                   <td className="whitespace-nowrap px-2 py-1 text-right">
-                    {!self && r.pid && (
-                      <span className="invisible flex justify-end gap-1 group-hover:visible group-focus-within:visible">
-                        <button
-                          type="button"
-                          onClick={() => onStop(r.pid!, false)}
-                          title="Cancel the running query"
-                          className="rounded p-1 text-fg-subtle transition hover:bg-surface-2 hover:text-fg-base"
-                        >
-                          <Ban size={12} />
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => onStop(r.pid!, true)}
-                          title="Terminate the session"
-                          className="rounded p-1 text-fg-subtle transition hover:bg-status-err/15 hover:text-status-err"
-                        >
-                          <Power size={12} />
-                        </button>
-                      </span>
-                    )}
+                    <span className="invisible flex justify-end gap-1 group-focus-within:visible group-hover:visible">
+                      {actions(r)}
+                    </span>
                   </td>
                 )}
               </tr>

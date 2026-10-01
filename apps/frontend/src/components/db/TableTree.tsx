@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { ChevronRight, Columns3, FileUp, Search, Table2, X } from 'lucide-react';
+import { ChevronRight, Columns3, FileUp, Plus, Search, Table2, X } from 'lucide-react';
 import type { DbRowCount } from '../../lib/tauri';
 import { formatRowCount } from '../../lib/dbFormat';
 import { cn } from '../../lib/cn';
@@ -13,8 +13,11 @@ interface Props {
   activeTable: string | null;
   onPreview: (table: string) => void;
   onExactCount: (table: string) => void;
-  onImport: (table: string) => void;
+  /** Absent on a read-only connection. */
+  onImport?: (table: string) => void;
   onSchema: (table: string) => void;
+  /** Opens the table designer; absent on a read-only connection. */
+  onCreateTable?: () => void;
 }
 
 /** Split `schema.table` at the first dot; bare names go to the default group. */
@@ -34,6 +37,7 @@ export function TableTree({
   onExactCount,
   onImport,
   onSchema,
+  onCreateTable,
 }: Props) {
   const [filter, setFilter] = useState('');
   /** Explicit open/closed choices; schemas absent here use the default. */
@@ -79,6 +83,16 @@ export function TableTree({
             className="shrink-0 text-fg-subtle hover:text-fg-base"
           >
             <X size={11} />
+          </button>
+        )}
+        {onCreateTable && (
+          <button
+            type="button"
+            onClick={onCreateTable}
+            title="New table"
+            className="shrink-0 text-fg-subtle transition hover:text-fg-base"
+          >
+            <Plus size={11} />
           </button>
         )}
       </label>
@@ -169,14 +183,16 @@ export function TableTree({
                         </button>
                       )}
                       <span className="hidden shrink-0 items-center gap-1.5 group-hover:flex">
-                        <button
-                          type="button"
-                          onClick={() => onImport(full)}
-                          title="Import CSV"
-                          className="text-fg-subtle transition hover:text-fg-base"
-                        >
-                          <FileUp size={11} />
-                        </button>
+                        {onImport && (
+                          <button
+                            type="button"
+                            onClick={() => onImport(full)}
+                            title="Import CSV"
+                            className="text-fg-subtle transition hover:text-fg-base"
+                          >
+                            <FileUp size={11} />
+                          </button>
+                        )}
                         <button
                           type="button"
                           onClick={() => onSchema(full)}

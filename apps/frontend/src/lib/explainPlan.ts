@@ -190,3 +190,22 @@ export function hotNodes(roots: PlanNode[]): Set<PlanNode> {
   if (max <= 0) return new Set();
   return new Set(all.filter((n) => own.get(n)! >= max / 2));
 }
+
+/** The plan as an indented outline — what `explainSqlIssue` sends Claude. */
+export function planText(roots: PlanNode[]): string {
+  const lines: string[] = [];
+  const walk = (n: PlanNode, depth: number) => {
+    const facts = [
+      n.relation && `on ${n.relation}`,
+      n.detail,
+      n.estRows !== undefined && `est rows ${n.estRows}`,
+      n.estCost !== undefined && `cost ${n.estCost}`,
+      n.actualRows !== undefined && `actual rows ${n.actualRows}`,
+      n.actualMs !== undefined && `${n.actualMs} ms`,
+    ].filter(Boolean);
+    lines.push(`${'  '.repeat(depth)}${n.label}${facts.length ? ` (${facts.join('; ')})` : ''}`);
+    n.children.forEach((c) => walk(c, depth + 1));
+  };
+  roots.forEach((r) => walk(r, 0));
+  return lines.join('\n');
+}

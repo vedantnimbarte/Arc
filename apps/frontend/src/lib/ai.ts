@@ -183,6 +183,95 @@ export async function explainFailure(
   return parseExplanation(status, bodyText);
 }
 
+// ─── SQL (database client) ──────────────────────────────────────────────────
+
+const SQL_PROMPT = [
+  'You write SQL for a developer working in a database client.',
+  '',
+  'Reply with the SQL and nothing else: no explanation, no markdown fences.',
+  'Use the dialect named by the user and only the tables and columns in the',
+  'schema they give; quote identifiers the way that dialect needs. If the',
+  'request is ambiguous, pick the most likely reading. If it cannot be done',
+  'with the given schema, reply with one SQL comment line saying why.',
+  'Prefer a read-only query unless the request clearly asks to change data,',
+  'and never write DROP or TRUNCATE unless asked to by name.',
+].join('\n');
+
+const SQL_EXPLAIN_PROMPT = [
+  'A developer ran a SQL statement in a database client. Explain the problem',
+  'they hit — an error message, or a slow query plan — briefly and concretely.',
+  '',
+  'Answer in at most four short sentences of plain language, naming the cause',
+  'visible in the error or plan (for a plan: the expensive node and why).',
+  '',
+  'If a corrected or faster statement would fix it, end with a fenced ```sql',
+  'block holding exactly that one statement. Omit it when unsure.',
+].join('\n');
+
+/** Dialect plus the tables and columns Claude may use. */
+export interface SqlContext {
+  dialect: 'postgres' | 'mysql' | 'sqlite';
+  /** One line per table: `name(col type, …)`. */
+  schema: string;
+}
+
+/** Ask Claude for SQL matching `request`. Returned for review, never run. */
+export async function suggestSql(request: string, ctx: SqlContext): Promise<string> {
+  if (!isTauri) throw new AiError('SQL suggestions need the desktop app.');
+  const key = await requireKey();
+  const [status, bodyText] = await ask(
+    key,
+    SQL_PROMPT,
+    [`Dialect: ${ctx.dialect}`, '', 'Schema:', ctx.schema || '(no tables)', '', `Request: ${request}`].join('\n'),
+  );
+  const sql = stripFence(responseText(status, bodyText));
+  if (!sql) throw new AiError('No SQL came back — try rephrasing.');
+  return sql;
+}
+
+/** Why a statement failed or ran slowly, and possibly a better statement. */
+export interface SqlExplanation {
+  explanation: string;
+  fix: string | null;
+}
+
+export async function explainSqlIssue(
+  sql: string,
+  problem: { error: string } | { plan: string },
+  ctx: SqlContext,
+): Promise<SqlExplanation> {
+  if (!isTauri) throw new AiError('Explanations need the desktop app.');
+  const key = await requireKey();
+  const [status, bodyText] = await ask(
+    key,
+    SQL_EXPLAIN_PROMPT,
+    [
+      `Dialect: ${ctx.dialect}`,
+      '',
+      'Schema:',
+      ctx.schema || '(no tables)',
+      '',
+      'Statement:',
+      sql,
+      '',
+      'error' in problem ? `Error:\n${problem.error}` : `Query plan:\n${problem.plan}`,
+    ].join('\n'),
+  );
+  return parseSqlExplanation(status, bodyText);
+}
+
+/** Split an explanation from its optional trailing ```sql block. Exported for tests. */
+export function parseSqlExplanation(status: number, bodyText: string | null): SqlExplanation {
+  const text = responseText(status, bodyText);
+  if (!text) throw new AiError('No explanation came back — try again.');
+  const m = /```(?:sql)?[^\n]*\n([\s\S]*?)\n?```\s*$/i.exec(text);
+  if (!m) return { explanation: text, fix: null };
+  return {
+    explanation: text.slice(0, m.index).trim() || 'Suggested fix:',
+    fix: m[1]!.trim() || null,
+  };
+}
+
 /** Read the configured model without importing the settings store at module
  *  scope (it pulls in the theme layer, which the test environment has no DOM
  *  for). */

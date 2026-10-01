@@ -211,6 +211,235 @@ fn via_tunnel(url: &str, port: u16) -> String {
     format!("{}://{userinfo}127.0.0.1:{port}{}", p.scheme, p.tail)
 }
 
+// ─── Backup & restore ─────────────────────────────────────────────────────
+
+/// What `pg_dump`/`psql` or `mysqldump`/`mysql` need to reach a connection:
+/// its URL (through its live tunnel, if any) and the password, which goes in
+/// the tool's environment rather than on a command line other processes can
+/// read.
+async fn tool_target(
+    store: &SessionStore,
+    state: &DbState,
+    id: &str,
+) -> Result<(Backend, String, Option<String>, String), String> {
+    let conn = db::get(store.pool(), id)
+        .await
+        .map_err(str_err)?
+        .ok_or_else(|| "no such connection".to_string())?;
+    let backend = Backend::from_url(&conn.url).map_err(str_err)?;
+    let mut url = conn.url.clone();
+    if conn.ssh.is_some() {
+        let port = state
+            .tunnels
+            .get(id)
+            .map(|t| t.local_port)
+            .ok_or("connect first — the SSH tunnel is opened on connect")?;
+        url = via_tunnel(&url, port);
+    }
+    Ok((backend, url, secret(id), conn.safety))
+}
+
+/// The file a `sqlite:` URL opens (`sqlite:///abs`, `sqlite://rel`, `sqlite:rel`),
+/// or None for an in-memory database.
+fn sqlite_file(url: &str) -> Option<PathBuf> {
+    let rest = url.strip_prefix("sqlite:")?;
+    let rest = rest.strip_prefix("//").unwrap_or(rest);
+    let path = rest.split(['?', '#']).next().unwrap_or("");
+    if path.is_empty() || path == ":memory:" {
+        return None;
+    }
+    // `sqlite:///C:/db.sqlite` on Windows leaves a leading slash before the drive.
+    let path = match path.as_bytes() {
+        [b'/', d, b':', ..] if d.is_ascii_alphabetic() => &path[1..],
+        _ => path,
+    };
+    Some(PathBuf::from(path))
+}
+
+/// MySQL's CLI tools take the URL's parts as flags.
+fn mysql_args(url: &str) -> Result<Vec<String>, String> {
+    let p = url_parts(url).ok_or("the connection URL has no host")?;
+    let (host, port) = url_host_port(url, Backend::Mysql)?;
+    let db = p.tail.trim_start_matches('/').split(['?', '#']).next().unwrap_or("");
+    if db.is_empty() {
+        return Err("the connection URL names no database".into());
+    }
+    let mut args = vec![format!("--host={host}"), format!("--port={port}")];
+    if let Some(user) = p.userinfo.filter(|u| !u.is_empty()) {
+        args.push(format!("--user={}", percent_decode(user)));
+    }
+    args.push(percent_decode(db));
+    Ok(args)
+}
+
+fn percent_decode(s: &str) -> String {
+    let b = s.as_bytes();
+    let mut out = Vec::with_capacity(b.len());
+    let mut i = 0;
+    while i < b.len() {
+        if b[i] == b'%' && i + 2 < b.len() {
+            if let Ok(v) = u8::from_str_radix(&s[i + 1..i + 3], 16) {
+                out.push(v);
+                i += 3;
+                continue;
+            }
+        }
+        out.push(b[i]);
+        i += 1;
+    }
+    String::from_utf8_lossy(&out).into_owned()
+}
+
+/// Run a client tool to completion. A missing binary gets a hint rather than
+/// the OS's bare "program not found".
+async fn run_tool(
+    program: &str,
+    args: &[String],
+    env: &[(&str, Option<String>)],
+    stdin_file: Option<&std::path::Path>,
+) -> Result<(), String> {
+    use std::process::Stdio;
+    let mut cmd = tokio::process::Command::new(program);
+    cmd.args(args)
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped())
+        .kill_on_drop(true);
+    for (k, v) in env {
+        if let Some(v) = v {
+            cmd.env(k, v);
+        }
+    }
+    match stdin_file {
+        Some(path) => {
+            let f = std::fs::File::open(path).map_err(|e| format!("{}: {e}", path.display()))?;
+            cmd.stdin(Stdio::from(f));
+        }
+        None => {
+            cmd.stdin(Stdio::null());
+        }
+    }
+    // No console flash on Windows — same reasoning as `arc_git::git_cmd`.
+    #[cfg(windows)]
+    {
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        cmd.creation_flags(CREATE_NO_WINDOW);
+    }
+    let out = cmd.output().await.map_err(|e| {
+        if e.kind() == std::io::ErrorKind::NotFound {
+            format!("`{program}` was not found on PATH — install the database's client tools to back up and restore")
+        } else {
+            format!("could not run `{program}`: {e}")
+        }
+    })?;
+    if out.status.success() {
+        return Ok(());
+    }
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    let tail: Vec<&str> = stderr.lines().rev().take(8).collect();
+    Err(format!(
+        "`{program}` failed: {}",
+        tail.into_iter().rev().collect::<Vec<_>>().join("\n")
+    ))
+}
+
+/// Back up the whole database to `path`: a plain-SQL `pg_dump`/`mysqldump`,
+/// or for SQLite a consistent copy of the file via `VACUUM INTO`.
+#[tauri::command]
+pub async fn db_dump(
+    store: State<'_, SessionStore>,
+    state: State<'_, DbState>,
+    id: String,
+    path: PathBuf,
+) -> Result<(), String> {
+    let (backend, url, password, _) = tool_target(&store, &state, &id).await?;
+    let file = path.to_string_lossy().into_owned();
+    match backend {
+        Backend::Postgres => {
+            let args = vec![
+                format!("--dbname={url}"),
+                format!("--file={file}"),
+                "--no-owner".into(),
+                "--no-privileges".into(),
+            ];
+            run_tool("pg_dump", &args, &[("PGPASSWORD", password)], None).await
+        }
+        Backend::Mysql => {
+            let mut args = vec![
+                "--single-transaction".into(),
+                "--routines".into(),
+                "--triggers".into(),
+                format!("--result-file={file}"),
+            ];
+            args.extend(mysql_args(&url)?);
+            run_tool("mysqldump", &args, &[("MYSQL_PWD", password)], None).await
+        }
+        Backend::Sqlite => {
+            if path.exists() {
+                // Replacing the existing file below must never mean deleting
+                // the database being backed up.
+                if let Some(db) = sqlite_file(&url) {
+                    let same = match (std::fs::canonicalize(&db), std::fs::canonicalize(&path)) {
+                        (Ok(a), Ok(b)) => a == b,
+                        _ => false,
+                    };
+                    if same {
+                        return Err("pick a different file — that is the database itself".into());
+                    }
+                }
+                // VACUUM INTO refuses an existing file; the save dialog has
+                // already asked about replacing it.
+                std::fs::remove_file(&path).map_err(|e| format!("{file}: {e}"))?;
+            }
+            let sql = format!("VACUUM INTO '{}'", file.replace('\'', "''"));
+            state.manager.stats(&id, &sql).await.map(|_| ()).map_err(chain_err)
+        }
+    }
+}
+
+/// Run a SQL script against the database: `psql`/`mysql` for the server
+/// backends (so a `pg_dump` file's `COPY … FROM stdin` blocks work), the
+/// connection itself for SQLite. Postgres restores in one transaction.
+#[tauri::command]
+pub async fn db_restore(
+    store: State<'_, SessionStore>,
+    state: State<'_, DbState>,
+    id: String,
+    path: PathBuf,
+) -> Result<(), String> {
+    let (backend, url, password, safety) = tool_target(&store, &state, &id).await?;
+    if safety == "readonly" {
+        return Err("this connection is read-only".into());
+    }
+    let file = path.to_string_lossy().into_owned();
+    match backend {
+        Backend::Postgres => {
+            let args = vec![
+                format!("--dbname={url}"),
+                format!("--file={file}"),
+                "--single-transaction".into(),
+                "--set=ON_ERROR_STOP=1".into(),
+                "--quiet".into(),
+            ];
+            run_tool("psql", &args, &[("PGPASSWORD", password)], None).await
+        }
+        Backend::Mysql => {
+            let args = mysql_args(&url)?;
+            run_tool("mysql", &args, &[("MYSQL_PWD", password)], Some(&path)).await
+        }
+        Backend::Sqlite => {
+            let bytes = std::fs::read(&path).map_err(|e| format!("{file}: {e}"))?;
+            if bytes.starts_with(b"SQLite format 3\0") {
+                return Err(
+                    "that is a database file, not a SQL script — add it as its own connection to open it"
+                        .into(),
+                );
+            }
+            let sql = String::from_utf8(bytes).map_err(|_| "the script is not UTF-8 text".to_string())?;
+            state.manager.query(&id, &sql, None).await.map(|_| ()).map_err(chain_err)
+        }
+    }
+}
+
 // ─── Saved connections ────────────────────────────────────────────────────
 
 #[tauri::command]
@@ -303,7 +532,8 @@ pub async fn db_connect(
     if let Some(pw) = secret(&id) {
         url = with_password(&url, &pw);
     }
-    let backend = state.manager.connect(&id, &url).await.map_err(str_err)?;
+    let read_only = conn.safety == "readonly";
+    let backend = state.manager.connect(&id, &url, read_only).await.map_err(str_err)?;
     if let Some(t) = tunnel {
         state.tunnels.insert(id.clone(), t);
     }
@@ -333,6 +563,9 @@ pub async fn db_query(
     id: String,
     sql: String,
     query_id: Option<String>,
+    // `false` for the grid's own browsing queries (sort, filter, page), which
+    // would otherwise bury what the user actually typed.
+    history: Option<bool>,
 ) -> Result<QueryResult, String> {
     let started = Instant::now();
     let res = state
@@ -340,12 +573,14 @@ pub async fn db_query(
         .query(&id, &sql, query_id.as_deref())
         .await
         .map_err(chain_err);
-    let rows = match &res {
-        Ok(r) if r.columns.is_empty() => Ok(r.rows_affected as i64),
-        Ok(r) => Ok(r.rows.len() as i64),
-        Err(e) => Err(e.as_str()),
-    };
-    record(&store, &id, &sql, started, rows).await;
+    if history.unwrap_or(true) {
+        let rows = match &res {
+            Ok(r) if r.columns.is_empty() => Ok(r.rows_affected as i64),
+            Ok(r) => Ok(r.rows.len() as i64),
+            Err(e) => Err(e.as_str()),
+        };
+        record(&store, &id, &sql, started, rows).await;
+    }
     res
 }
 
@@ -572,6 +807,27 @@ pub async fn db_saved_delete(store: State<'_, SessionStore>, saved_id: String) -
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn sqlite_url_names_its_file() {
+        assert_eq!(sqlite_file("sqlite:///home/me/app.db"), Some(PathBuf::from("/home/me/app.db")));
+        assert_eq!(sqlite_file("sqlite:///C:/data/app.db?mode=rwc"), Some(PathBuf::from("C:/data/app.db")));
+        assert_eq!(sqlite_file("sqlite:app.db"), Some(PathBuf::from("app.db")));
+        assert_eq!(sqlite_file("sqlite::memory:"), None);
+    }
+
+    #[test]
+    fn mysql_url_becomes_client_flags() {
+        assert_eq!(
+            mysql_args("mysql://app%40ops@db.local:3307/shop?ssl-mode=required").unwrap(),
+            ["--host=db.local", "--port=3307", "--user=app@ops", "shop"]
+        );
+        assert_eq!(
+            mysql_args("mysql://root@localhost/app").unwrap(),
+            ["--host=localhost", "--port=3306", "--user=root", "app"]
+        );
+        assert!(mysql_args("mysql://root@localhost/").is_err());
+    }
 
     #[test]
     fn password_is_spliced_and_encoded() {

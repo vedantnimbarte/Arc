@@ -3,6 +3,9 @@
  * server sent (see `arc_db`), with `null` for SQL NULL.
  */
 
+import type { DbBackend } from './tauri';
+import { quoteIdent, sqlValue } from './dbSql';
+
 type Cell = string | null;
 
 /**
@@ -35,4 +38,27 @@ export function toJson(columns: string[], rows: Cell[][]): string {
   });
   const objects = rows.map((r) => Object.fromEntries(keys.map((k, i) => [k, r[i] ?? null])));
   return JSON.stringify(objects, null, 2);
+}
+
+/** One INSERT per row, values as literals (the server casts them). `table`
+ *  is the browsed table, or a placeholder for an arbitrary query's rows. */
+export function toInsertSql(backend: DbBackend, table: string, columns: string[], rows: Cell[][]): string {
+  const t = quoteIdent(backend, table);
+  const cols = columns.map((c) => quoteIdent(backend, c)).join(', ');
+  return (
+    rows
+      .map((r) => `INSERT INTO ${t} (${cols}) VALUES (${r.map((v) => sqlValue(backend, v)).join(', ')});`)
+      .join('\n') + '\n'
+  );
+}
+
+/** A GitHub-flavored Markdown table. Pipes and newlines in cells are escaped
+ *  so a value can't break the row; NULL shows as `NULL`. */
+export function toMarkdown(columns: string[], rows: Cell[][]): string {
+  const cell = (v: Cell) => (v === null ? 'NULL' : v.replace(/\|/g, '\\|').replace(/\r?\n/g, '<br>'));
+  const line = (cells: string[]) => `| ${cells.join(' | ')} |`;
+  return (
+    [line(columns.map(cell)), line(columns.map(() => '---')), ...rows.map((r) => line(r.map(cell)))].join('\n') +
+    '\n'
+  );
 }

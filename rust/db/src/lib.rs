@@ -674,6 +674,33 @@ impl Drop for Registered<'_> {
     }
 }
 
+/// `after_connect` hooks for read-only connections: the server's own
+/// read-only switch, set on every connection as the pool opens it.
+fn pg_read_only(
+    c: &mut sqlx::PgConnection,
+    _: sqlx::pool::PoolConnectionMetadata,
+) -> futures_util::future::BoxFuture<'_, std::result::Result<(), sqlx::Error>> {
+    Box::pin(async move {
+        sqlx::Executor::execute(c, "SET SESSION CHARACTERISTICS AS TRANSACTION READ ONLY").await.map(|_| ())
+    })
+}
+
+fn mysql_read_only(
+    c: &mut sqlx::MySqlConnection,
+    _: sqlx::pool::PoolConnectionMetadata,
+) -> futures_util::future::BoxFuture<'_, std::result::Result<(), sqlx::Error>> {
+    Box::pin(async move {
+        sqlx::Executor::execute(c, "SET SESSION TRANSACTION READ ONLY").await.map(|_| ())
+    })
+}
+
+fn sqlite_read_only(
+    c: &mut sqlx::SqliteConnection,
+    _: sqlx::pool::PoolConnectionMetadata,
+) -> futures_util::future::BoxFuture<'_, std::result::Result<(), sqlx::Error>> {
+    Box::pin(async move { sqlx::Executor::execute(c, "PRAGMA query_only = ON").await.map(|_| ()) })
+}
+
 /// Live connection pools, keyed by the frontend's connection id. Cheap to
 /// clone (the DashMap is behind the manager, which is `.manage()`d once).
 #[derive(Default)]
@@ -690,7 +717,11 @@ impl DbManager {
     /// Open a pool for `url` and register it under `id`, replacing (and
     /// closing) any pool already there. Round-trips a trivial query so a bad
     /// host/credential surfaces here rather than on the user's first SELECT.
-    pub async fn connect(&self, id: &str, url: &str) -> Result<Backend> {
+    ///
+    /// With `read_only`, every pooled connection is put in the server's own
+    /// read-only mode as it opens — the client's statement check is the
+    /// friendly refusal, this is the one a missed write still hits.
+    pub async fn connect(&self, id: &str, url: &str, read_only: bool) -> Result<Backend> {
         let backend = Backend::from_url(url)?;
         // Small pool: this is one human running one query at a time, and a
         // fat pool against a shared dev database is rude. Four leaves room
@@ -698,30 +729,39 @@ impl DbManager {
         // analytics view's poll.
         let pool = match backend {
             Backend::Postgres => Pool::Postgres(
-                PgPoolOptions::new()
-                    .max_connections(4)
-                    .acquire_timeout(CONNECT_TIMEOUT)
-                    .connect(url)
-                    .await
-                    .context("could not connect")?,
+                {
+                    let o = PgPoolOptions::new()
+                        .max_connections(4)
+                        .acquire_timeout(CONNECT_TIMEOUT);
+                    if read_only { o.after_connect(pg_read_only) } else { o }
+                }
+                .connect(url)
+                .await
+                .context("could not connect")?,
             ),
             Backend::Mysql => Pool::Mysql(
-                MySqlPoolOptions::new()
-                    .max_connections(4)
-                    .acquire_timeout(CONNECT_TIMEOUT)
-                    .connect(url)
-                    .await
-                    .context("could not connect")?,
+                {
+                    let o = MySqlPoolOptions::new()
+                        .max_connections(4)
+                        .acquire_timeout(CONNECT_TIMEOUT);
+                    if read_only { o.after_connect(mysql_read_only) } else { o }
+                }
+                .connect(url)
+                .await
+                .context("could not connect")?,
             ),
             // One connection: `sqlite::memory:` is a separate database per
             // connection.
             Backend::Sqlite => Pool::Sqlite(
-                SqlitePoolOptions::new()
-                    .max_connections(1)
-                    .acquire_timeout(CONNECT_TIMEOUT)
-                    .connect(url)
-                    .await
-                    .context("could not connect")?,
+                {
+                    let o = SqlitePoolOptions::new()
+                        .max_connections(1)
+                        .acquire_timeout(CONNECT_TIMEOUT);
+                    if read_only { o.after_connect(sqlite_read_only) } else { o }
+                }
+                .connect(url)
+                .await
+                .context("could not connect")?,
             ),
         };
         if let Some((_, old)) = self.entries.remove(id) {
@@ -1602,13 +1642,23 @@ mod tests {
         );
     }
 
+    /// A read-only connection reads but the server itself refuses writes.
+    #[tokio::test]
+    async fn sqlite_read_only_refuses_writes() {
+        let mgr = DbManager::new();
+        mgr.connect("ro", "sqlite::memory:", true).await.unwrap();
+        mgr.query("ro", "SELECT 1", None).await.unwrap();
+        let err = mgr.query("ro", "CREATE TABLE t (a INTEGER)", None).await.unwrap_err();
+        assert!(format!("{err:#}").contains("readonly"), "{err:#}");
+    }
+
     /// Streams well past MAX_ROWS to disk, with real JSON types, and cleans up
     /// after a cancel.
     #[tokio::test]
     async fn sqlite_export_beyond_cap() {
         const N: usize = MAX_ROWS + 5_000;
         let mgr = DbManager::new();
-        mgr.connect("e", "sqlite::memory:").await.unwrap();
+        mgr.connect("e", "sqlite::memory:", false).await.unwrap();
         mgr.query(
             "e",
             &format!(
@@ -1708,7 +1758,7 @@ mod tests {
     #[tokio::test]
     async fn sqlite_schema() {
         let mgr = DbManager::new();
-        mgr.connect("s", "sqlite::memory:").await.unwrap();
+        mgr.connect("s", "sqlite::memory:", false).await.unwrap();
         mgr.query(
             "s",
             "CREATE TABLE parent (id INTEGER PRIMARY KEY); \
@@ -1749,7 +1799,7 @@ mod tests {
     #[tokio::test]
     async fn sqlite_round_trip() {
         let mgr = DbManager::new();
-        mgr.connect("t", "sqlite::memory:").await.unwrap();
+        mgr.connect("t", "sqlite::memory:", false).await.unwrap();
 
         let ddl = mgr
             .query("t", "CREATE TABLE t (a INTEGER, b TEXT, c REAL, d BLOB)", None)
@@ -1829,7 +1879,7 @@ mod tests {
     #[tokio::test]
     async fn sqlite_schema_reports_checks_and_index_origins() {
         let mgr = DbManager::new();
-        mgr.connect("c", "sqlite::memory:").await.unwrap();
+        mgr.connect("c", "sqlite::memory:", false).await.unwrap();
         mgr.query(
             "c",
             "CREATE TABLE t (id INTEGER PRIMARY KEY, code TEXT UNIQUE, n INT CHECK (n >= 0)); \
@@ -1852,7 +1902,7 @@ mod tests {
     #[tokio::test]
     async fn manual_transactions_pin_one_connection() {
         let mgr = DbManager::new();
-        mgr.connect("x", "sqlite::memory:").await.unwrap();
+        mgr.connect("x", "sqlite::memory:", false).await.unwrap();
         mgr.query("x", "CREATE TABLE t (a INT)", None).await.unwrap();
         assert!(mgr.commit("x").await.is_err(), "nothing to commit yet");
 
@@ -1884,7 +1934,7 @@ mod tests {
     #[tokio::test]
     async fn apply_is_all_or_nothing() {
         let mgr = DbManager::new();
-        mgr.connect("a", "sqlite::memory:").await.unwrap();
+        mgr.connect("a", "sqlite::memory:", false).await.unwrap();
         mgr.query("a", "CREATE TABLE t (a INT PRIMARY KEY)", None).await.unwrap();
 
         let ok = vec!["INSERT INTO t VALUES (1)".into(), "INSERT INTO t VALUES (2)".into()];
@@ -1911,7 +1961,7 @@ mod tests {
     #[tokio::test]
     async fn a_running_sqlite_query_can_be_cancelled() {
         let mgr = Arc::new(DbManager::new());
-        mgr.connect("q", "sqlite::memory:").await.unwrap();
+        mgr.connect("q", "sqlite::memory:", false).await.unwrap();
         let running = {
             let mgr = mgr.clone();
             tokio::spawn(async move {
@@ -1950,7 +2000,7 @@ mod tests {
             return;
         };
         let mgr = Arc::new(DbManager::new());
-        mgr.connect("pg", &url).await.unwrap();
+        mgr.connect("pg", &url, false).await.unwrap();
         mgr.query(
             "pg",
             "DROP SCHEMA IF EXISTS arc_t CASCADE; CREATE SCHEMA arc_t; \
@@ -2044,7 +2094,7 @@ mod tests {
             return;
         };
         let mgr = Arc::new(DbManager::new());
-        mgr.connect("my", &url).await.unwrap();
+        mgr.connect("my", &url, false).await.unwrap();
         mgr.query(
             "my",
             "DROP TABLE IF EXISTS arc_child; DROP TABLE IF EXISTS arc_parent; \
@@ -2120,7 +2170,7 @@ mod tests {
     #[tokio::test]
     async fn csv_import_maps_columns_and_rolls_back_on_error() {
         let mgr = DbManager::new();
-        mgr.connect("i", "sqlite::memory:").await.unwrap();
+        mgr.connect("i", "sqlite::memory:", false).await.unwrap();
         mgr.query(
             "i",
             "CREATE TABLE people (id INTEGER PRIMARY KEY, name TEXT NOT NULL, nick TEXT)",
