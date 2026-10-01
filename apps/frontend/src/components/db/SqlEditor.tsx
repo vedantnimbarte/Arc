@@ -55,7 +55,10 @@ function language(backend: DbBackend | null, tables: Record<string, string[]>): 
 }
 
 const theme = EditorView.theme({
-  '&': { backgroundColor: 'transparent', height: '100%', color: MOCHA.text },
+  '&': { backgroundColor: 'transparent', color: MOCHA.text },
+  // Scoped to .cm-editor: the tooltip container appended to <body> also gets
+  // these theme classes, and a 100% height there doubles the page height.
+  '&.cm-editor': { height: '100%' },
   '.cm-scroller': { fontFamily: 'inherit', overflow: 'auto' },
   '.cm-content': { caretColor: '#d4d6dc', padding: '8px 0' },
   '.cm-gutters': { backgroundColor: 'transparent', color: MOCHA.overlay0, border: 'none' },
