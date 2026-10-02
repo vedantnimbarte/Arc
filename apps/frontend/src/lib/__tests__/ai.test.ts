@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { AiError, parseCommand, parseExplanation } from '../ai';
+import { AiError, parseCommand, parseExplanation, parseSqlExplanation } from '../ai';
 
 const message = (content: unknown[], extra: Record<string, unknown> = {}) =>
   JSON.stringify({ type: 'message', stop_reason: 'end_turn', content, ...extra });
@@ -81,5 +81,24 @@ describe('parseExplanation', () => {
       'bad key',
     );
     expect(() => parseExplanation(200, ok(''))).toThrow(AiError);
+  });
+});
+
+describe('parseSqlExplanation', () => {
+  const ok = (text: string) => message([{ type: 'text', text }]);
+
+  it('splits off a trailing sql fence as the fix', () => {
+    const out = parseSqlExplanation(
+      200,
+      ok('The seq scan on orders filters 2M rows.\n\n```sql\nCREATE INDEX ON orders (customer_id);\n```'),
+    );
+    expect(out).toEqual({
+      explanation: 'The seq scan on orders filters 2M rows.',
+      fix: 'CREATE INDEX ON orders (customer_id);',
+    });
+  });
+
+  it('has no fix when there is no fence', () => {
+    expect(parseSqlExplanation(200, ok('Column "nme" does not exist; it is "name".')).fix).toBeNull();
   });
 });

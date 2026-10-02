@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { toCsv, toJson } from '../dbExport';
+import { toCsv, toInsertSql, toJson, toMarkdown } from '../dbExport';
 
 describe('toCsv', () => {
   it('quotes only fields that need it, with CRLF rows', () => {
@@ -34,5 +34,20 @@ describe('toJson', () => {
 
   it('is an empty array for no rows', () => {
     expect(JSON.parse(toJson(['a'], []))).toEqual([]);
+  });
+});
+
+describe('toInsertSql / toMarkdown', () => {
+  it('writes one INSERT per row with NULLs and quoting', () => {
+    expect(toInsertSql('postgres', 'public.t', ['id', 'name'], [['1', "it's"], ['2', null]])).toBe(
+      `INSERT INTO "public"."t" ("id", "name") VALUES ('1', 'it''s');\n` +
+        `INSERT INTO "public"."t" ("id", "name") VALUES ('2', NULL);\n`,
+    );
+  });
+
+  it('escapes pipes and newlines in Markdown cells', () => {
+    expect(toMarkdown(['a', 'b'], [['x|y', 'two\nlines'], [null, '']])).toBe(
+      '| a | b |\n| --- | --- |\n| x\\|y | two<br>lines |\n| NULL |  |\n',
+    );
   });
 });

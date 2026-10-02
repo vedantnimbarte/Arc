@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { isSelectLike, unsafeStatements } from '../sqlSafety';
+import { isReadOnlySql, isSelectLike, unsafeStatements } from '../sqlSafety';
 
 describe('unsafeStatements', () => {
   it('passes filtered writes and plain reads', () => {
@@ -80,5 +80,22 @@ describe('isSelectLike', () => {
     expect(isSelectLike('WITH d AS (DELETE FROM t RETURNING *) SELECT * FROM d')).toBe(false);
     expect(isSelectLike('SELECT 1; SELECT 2')).toBe(false);
     expect(isSelectLike('  ')).toBe(false);
+  });
+});
+
+describe('isReadOnlySql', () => {
+  it('accepts reads and session control', () => {
+    expect(isReadOnlySql('SELECT 1; SHOW tables; EXPLAIN SELECT * FROM t')).toBe(true);
+    expect(isReadOnlySql('WITH a AS (SELECT 1) SELECT * FROM a')).toBe(true);
+    expect(isReadOnlySql("BEGIN; SET search_path = app; SELECT 'delete'; COMMIT")).toBe(true);
+  });
+
+  it('rejects writes, DDL, hidden writes and unknown verbs', () => {
+    expect(isReadOnlySql('INSERT INTO t VALUES (1)')).toBe(false);
+    expect(isReadOnlySql('SELECT 1; DROP TABLE t')).toBe(false);
+    expect(isReadOnlySql('WITH d AS (DELETE FROM t RETURNING *) SELECT * FROM d')).toBe(false);
+    expect(isReadOnlySql('EXPLAIN ANALYZE UPDATE t SET a = 1')).toBe(false);
+    expect(isReadOnlySql('VACUUM')).toBe(false);
+    expect(isReadOnlySql('CALL refresh()')).toBe(false);
   });
 });

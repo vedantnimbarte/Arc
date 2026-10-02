@@ -25,6 +25,16 @@
     --wash-1: 198 208 222;  /* cool platinum */
     --wash-2: 168 178 196;  /* steel */
     --wash-3: 130 148 172;  /* deeper cool */
+    /* Chart series (DB analytics). Three slots, validated colorblind-safe as
+       all-pairs against the dark surface; light steps below. */
+    --series-1: #3987e5;
+    --series-2: #d95926;
+    --series-3: #199e70;
+  }
+  html:not(.dark) {
+    --series-1: #2a78d6;
+    --series-2: #eb6834;
+    --series-3: #1baf7a;
   }
 
   html,

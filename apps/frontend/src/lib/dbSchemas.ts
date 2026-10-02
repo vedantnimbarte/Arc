@@ -23,3 +23,17 @@ export async function loadSchemas(
   // Keep the listing's order.
   return Object.fromEntries(tables.filter((t) => t in out).map((t) => [t, out[t]!]));
 }
+
+/** One line per table — `name(col type, …)` — for an AI prompt. Tables whose
+ *  schema hasn't loaded yet are listed by name only. */
+export function schemaSummary(tables: string[], schemas: Record<string, DbTableSchema> | null): string {
+  return tables
+    .map((t) => {
+      const s = schemas?.[t];
+      if (!s) return t;
+      const cols = s.columns.map((c) => `${c.name} ${c.data_type}${c.primary_key ? ' pk' : ''}`);
+      const fks = s.foreign_keys.map((f) => `fk ${f.columns} -> ${f.references}`);
+      return `${t}(${[...cols, ...fks].join(', ')})`;
+    })
+    .join('\n');
+}
