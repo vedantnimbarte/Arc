@@ -101,7 +101,7 @@ dependencies = [
 
 [[package]]
 name = "arc-claude-code"
-version = "0.16.0"
+version = "0.16.1"
 dependencies = [
  "anyhow",
  "arc-pty",
@@ -114,7 +114,7 @@ dependencies = [
 
 [[package]]
 name = "arc-dap"
-version = "0.16.0"
+version = "0.16.1"
 dependencies = [
  "arc-pty",
  "dashmap",
@@ -126,7 +126,7 @@ dependencies = [
 
 [[package]]
 name = "arc-db"
-version = "0.16.0"
+version = "0.16.1"
 dependencies = [
  "anyhow",
  "dashmap",
@@ -141,7 +141,7 @@ dependencies = [
 
 [[package]]
 name = "arc-desktop"
-version = "0.16.0"
+version = "0.16.1"
 dependencies = [
  "anyhow",
  "arc-claude-code",
@@ -183,7 +183,7 @@ dependencies = [
 
 [[package]]
 name = "arc-filesystem"
-version = "0.16.0"
+version = "0.16.1"
 dependencies = [
  "anyhow",
  "dirs 5.0.1",
@@ -200,7 +200,7 @@ dependencies = [
 
 [[package]]
 name = "arc-git"
-version = "0.16.0"
+version = "0.16.1"
 dependencies = [
  "anyhow",
  "serde",
@@ -210,7 +210,7 @@ dependencies = [
 
 [[package]]
 name = "arc-git-host"
-version = "0.16.0"
+version = "0.16.1"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -224,7 +224,7 @@ dependencies = [
 
 [[package]]
 name = "arc-http-client"
-version = "0.16.0"
+version = "0.16.1"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -237,7 +237,7 @@ dependencies = [
 
 [[package]]
 name = "arc-lsp"
-version = "0.16.0"
+version = "0.16.1"
 dependencies = [
  "arc-pty",
  "dashmap",
@@ -249,7 +249,7 @@ dependencies = [
 
 [[package]]
 name = "arc-project-config"
-version = "0.16.0"
+version = "0.16.1"
 dependencies = [
  "anyhow",
  "serde",
@@ -260,7 +260,7 @@ dependencies = [
 
 [[package]]
 name = "arc-pty"
-version = "0.16.0"
+version = "0.16.1"
 dependencies = [
  "anyhow",
  "dashmap",
@@ -275,7 +275,7 @@ dependencies = [
 
 [[package]]
 name = "arc-ptyhost"
-version = "0.16.0"
+version = "0.16.1"
 dependencies = [
  "anyhow",
  "arc-pty",
@@ -291,7 +291,7 @@ dependencies = [
 
 [[package]]
 name = "arc-session-manager"
-version = "0.16.0"
+version = "0.16.1"
 dependencies = [
  "anyhow",
  "chrono",
@@ -308,7 +308,7 @@ dependencies = [
 
 [[package]]
 name = "arc-ssh"
-version = "0.16.0"
+version = "0.16.1"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -330,7 +330,7 @@ dependencies = [
 
 [[package]]
 name = "arc-wingman"
-version = "0.16.0"
+version = "0.16.1"
 dependencies = [
  "anyhow",
  "futures",
