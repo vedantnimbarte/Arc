@@ -89,8 +89,20 @@ export async function ptyHostEndAll(): Promise<void> {
   await invoke('pty_host_end_all');
 }
 
-export async function ptyWrite(id: PtyId, data: string): Promise<void> {
-  await invoke('pty_write', { id, data });
+/** Tail of each PTY's write chain. `pty_write` runs on a blocking thread pool,
+ *  so two in-flight writes can reach the PTY in either order; chaining them
+ *  keeps keystrokes in the order they were typed. */
+const ptyWriteChains = new Map<PtyId, Promise<void>>();
+
+export function ptyWrite(id: PtyId, data: string): Promise<void> {
+  const next = (ptyWriteChains.get(id) ?? Promise.resolve())
+    .catch(() => {})
+    .then(() => invoke<void>('pty_write', { id, data }));
+  ptyWriteChains.set(id, next);
+  void next.finally(() => {
+    if (ptyWriteChains.get(id) === next) ptyWriteChains.delete(id);
+  }).catch(() => {});
+  return next;
 }
 
 export async function ptyResize(id: PtyId, cols: number, rows: number): Promise<void> {
