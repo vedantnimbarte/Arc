@@ -55,7 +55,7 @@
     "@xyflow/react": "^12.12.0",
     "clsx": "^2.1.1",
     "codemirror": "^6.0.2",
-    "dompurify": "^3.4.15",
+    "dompurify": "^3.4.16",
     "html-to-image": "1.11.11",
     "lucide-react": "^0.451.0",
     "marked": "^18.0.11",
