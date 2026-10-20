@@ -63,7 +63,7 @@ bytes = "1.7"
 #
 # There is no separate russh-keys any more — it was folded into russh as
 # `russh::keys` (its own last publish was an 0.50 beta).
-russh = { version = "0.63", default-features = false, features = ["ring"] }
+russh = { version = "0.64", default-features = false, features = ["ring"] }
 # SFTP client for remote workspaces, layered over a russh channel stream.
 russh-sftp = "2.4"
 # Both must match what ssh-key 0.7 uses, or the RNG traits are different
