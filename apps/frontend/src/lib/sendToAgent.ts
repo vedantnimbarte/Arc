@@ -5,6 +5,7 @@ import { useFiles } from '../state/files';
 import { copyText } from './clipboard';
 import { toast } from '../state/toast';
 import { getTerminal } from './terminalRegistry';
+import { useVibe } from '../state/vibe';
 
 /**
  * Which agent terminal a "send to agent" goes to: the active tab if it is an
@@ -48,7 +49,8 @@ export function sendToAgent(prompt: string, label = 'Agent prompt'): void {
   const claude = useClaudeCode.getState();
   if (claude.status === 'ready') {
     useFiles.getState().setAgentPanelTab('claude');
-    useFiles.getState().showSidebarView('agents');
+    // The floating card hosts the same Agents panel; don't also pop the sidebar.
+    if (!useVibe.getState().floatingAgentOpen) useFiles.getState().showSidebarView('agents');
     void claude.send(prompt);
     return;
   }

@@ -73,7 +73,9 @@ export interface Tab {
     | 'claude'
     | 'wingman-board'
     | 'wingman-review'
-    | 'agent-runs';
+    | 'agent-runs'
+    | 'usage'
+    | 'memory';
   /** Which workspace this tab belongs to. Every tab has one after hydrate;
    *  new tabs inherit the active workspace (stamped in `addTab`). */
   workspaceId?: string;
@@ -428,6 +430,10 @@ interface WorkspaceState {
   /** Open (or focus) the Agent runs tab — isolated agent races, compared
    *  side by side, with a winner merged back. */
   openAgentRuns: () => string;
+  /** Singleton agent usage dashboard (tokens and cost). Not persisted. */
+  openUsageDashboard: () => string;
+  /** Singleton view of the rules, skills and commands agents load. Not persisted. */
+  openProjectMemory: () => string;
   /** Open a new SSH tab for `host`. The tab spawns an xterm and dials via
    *  the SSH store on mount. Sets `sshHostId` on the tab; `sshSessionId`
    *  is filled once the connect resolves. */
@@ -1684,6 +1690,26 @@ export const useWorkspace = create<WorkspaceState>()((set, get) => ({
     get().addTab({ id, title: 'Agent Runs', kind: 'agent-runs' });
     return id;
   },
+  openUsageDashboard: () => {
+    const existing = get().tabs.find((t) => t.kind === 'usage');
+    if (existing) {
+      get().setActive(existing.id);
+      return existing.id;
+    }
+    const id = `usage-${Date.now()}`;
+    get().addTab({ id, title: 'Usage', kind: 'usage' });
+    return id;
+  },
+  openProjectMemory: () => {
+    const existing = get().tabs.find((t) => t.kind === 'memory');
+    if (existing) {
+      get().setActive(existing.id);
+      return existing.id;
+    }
+    const id = `memory-${Date.now()}`;
+    get().addTab({ id, title: 'Project Memory', kind: 'memory' });
+    return id;
+  },
   openWingmanBoard: () => {
     // The board spans every project the daemon serves, so a second tab would
     // show identical content — focus the existing one instead.
@@ -2155,7 +2181,7 @@ useWorkspace.subscribe((state, prev) => {
  *  Anything else is dropped by `toTabInputs` rather than sent: serde rejects
  *  an unknown variant at the IPC boundary, which fails the *whole* batch —
  *  so one Wingman tab used to silently stop the entire session from saving. */
-const PERSISTED_KINDS = new Set<Tab['kind']>([
+const PERSISTED_KINDS = new Set<TabInput['kind']>([
   'terminal',
   'editor',
   'preview',
@@ -2170,7 +2196,9 @@ const PERSISTED_KINDS = new Set<Tab['kind']>([
 
 function toTabInputs(tabs: Tab[]): TabInput[] {
   return tabs
-    .filter((t) => PERSISTED_KINDS.has(t.kind))
+    .filter((t): t is Tab & { kind: TabInput['kind'] } =>
+      PERSISTED_KINDS.has(t.kind as TabInput['kind']),
+    )
     .map((t) => ({
       id: t.id,
       title: t.title,

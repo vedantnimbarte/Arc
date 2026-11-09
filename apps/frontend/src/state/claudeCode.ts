@@ -14,6 +14,7 @@ import {
 import { useFiles } from './files';
 import { useSettings } from './settings';
 import { useWorkspace } from './workspace';
+import { claudeUsageRecorder } from './usageLog';
 
 /**
  * Claude Code integration state.
@@ -312,7 +313,9 @@ function sessionSlice(
       // folder, not at the file — that's what the git stack expects.
       const root = cfg().cwd;
       if (!root) return;
-      useWorkspace.getState().openDiff(path, root, 'worktree');
+      // 'head', not 'worktree': the index-to-worktree diff hides edits that are
+      // already staged, and the comment above promises a diff against HEAD.
+      useWorkspace.getState().openDiff(path, root, 'head');
     },
 
     send: async (prompt, attachments = []) => {
@@ -355,7 +358,11 @@ function sessionSlice(
         set({ activeTopic: topic });
 
         unlisten?.();
-        unlisten = await onClaudeTurn(topic, (ev) => applyEvent(set, ev));
+        const recordUsage = claudeUsageRecorder({ cwd, model });
+        unlisten = await onClaudeTurn(topic, (ev) => {
+          applyEvent(set, ev);
+          recordUsage(ev);
+        });
       } catch (e) {
         fail(e);
         set({ streaming: false, activeTopic: null });

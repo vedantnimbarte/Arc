@@ -247,6 +247,50 @@
     background: rgba(248, 248, 250, 0.90);
   }
 
+  /* Cortex is flat: solid surfaces instead of translucent vibrancy, with
+     cards one step above a darker canvas so panels read as separate. */
+  html[data-theme='cortex'] .material-sidebar,
+  html[data-theme='cortex'] .material-content {
+    background: rgb(var(--bg-base));
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+  }
+  html[data-theme='cortex'] .material-toolbar {
+    background: rgb(var(--bg-chrome));
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+    border-bottom-color: transparent;
+    box-shadow: none;
+  }
+  html[data-theme='cortex'] .shell-root,
+  html[data-theme='cortex'] .shell-rail,
+  html[data-theme='cortex'] .shell-sidebar-panel {
+    background: rgb(var(--bg-chrome));
+    border-right-color: transparent;
+  }
+  html[data-theme='cortex'] .shell-sidebar-panel {
+    padding: 4px 0 8px 4px;
+  }
+  html[data-theme='cortex'] .shell-sidebar-card {
+    overflow: hidden;
+    border-radius: 12px;
+    border: 1px solid var(--border-subtle);
+    background: rgb(var(--bg-base));
+  }
+  html[data-theme='cortex'] .material-sheet {
+    background: rgb(23 23 23 / 0.97);
+  }
+  html[data-theme='cortex'] .desktop-wash {
+    display: none;
+  }
+  html[data-theme='cortex'] .arc-tab-strip {
+    border-bottom-color: transparent;
+  }
+  html[data-theme='cortex'] .arc-tab[data-active='1'] {
+    background: rgb(var(--bg-panel));
+    box-shadow: inset 0 0 0 1px var(--border-strong);
+  }
+
   /* Subtle dot grid behind the terminal — kept very faint so the macOS
      graphite reads as the dominant texture. */
   .dot-grid {

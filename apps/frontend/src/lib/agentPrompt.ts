@@ -105,3 +105,37 @@ export function hunkPrompt(file: string, patch: string): string {
 export function selectionPrompt(text: string): string {
   return ['From my terminal:', '', '```', tailBlock(text), '```', ''].join('\n');
 }
+
+/** One-click "run the tests and fix them". The agent picks the command, since
+ *  it can read the project's manifests and ARC's test detection only covers
+ *  the frameworks it knows. Capped attempts so a flaky suite can't loop. */
+export const RUN_TESTS_AND_FIX_PROMPT = [
+  "Run this project's test suite and fix any failures.",
+  '',
+  '1. Work out the right test command from the project files (for example `pnpm test`, `npm test`, `cargo test`, `pytest`, `go test ./...`).',
+  '2. Run it.',
+  '3. If anything fails, read the failure, fix the root cause in the code (not the test, unless the test itself is wrong), and run the tests again.',
+  '4. Repeat until everything passes, but stop after 5 attempts.',
+  '',
+  'Finish with a short summary: what failed, what you changed, and the final test result.',
+].join('\n');
+
+export interface ChangedFile {
+  path: string;
+  added: number;
+  removed: number;
+}
+
+/** Ask the agent to account for its own edits before they're kept: per file,
+ *  what and why, then what deserves a closer look. Read-only on purpose. */
+export function explainChangesPrompt(files: readonly ChangedFile[]): string {
+  const list = files.map((f) => `- ${f.path} (+${f.added} -${f.removed})`).join('\n');
+  return [
+    'Before I review your edits, explain them.',
+    '',
+    'Changed files:',
+    list || '- (none detected)',
+    '',
+    'For each file: what changed and why. Then list anything risky I should look at closely (behavior changes, missing tests, edge cases). Do not make further edits.',
+  ].join('\n');
+}

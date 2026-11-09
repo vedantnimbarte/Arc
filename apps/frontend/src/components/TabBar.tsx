@@ -17,12 +17,14 @@ import {
   Sparkles,
   Keyboard,
   ChevronRight,
+  PanelRightOpen,
   type LucideIcon,
 } from 'lucide-react';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { LAYOUT_MODES, layoutModeOf, useWorkspace, type LayoutMode } from '../state/workspace';
 import { LAYOUT_MODE_INFO, LayoutModeGlyph } from './LayoutModeGlyph';
 import { useFiles } from '../state/files';
+import { useVibe } from '../state/vibe';
 import { useClaudeCode } from '../state/claudeCode';
 import { runCommand } from '../state/commands';
 import { Tooltip } from './Tooltip';
@@ -255,6 +257,8 @@ export function TabBar() {
           </button>
         </Tooltip>
 
+        <VibeToggle />
+
         {/* Layout mode — tiles, tabs or floating. Per-workspace, so it reflects whichever
           workspace is active. Sits in the right cluster, inboard of the
           window controls. */}
@@ -429,6 +433,60 @@ const PICKER_W = 316;
  * opening a popover of three picture cards. Portaled to body so the toolbar's
  * backdrop-filter doesn't trap it.
  */
+/** Vibe (agent fills the window) vs IDE (your normal layout), plus the
+ *  floating agent card, which only makes sense outside Vibe. */
+function VibeToggle() {
+  const vibe = useVibe((s) => s.vibe);
+  const floatingOpen = useVibe((s) => s.floatingAgentOpen);
+  const segment = (active: boolean) =>
+    cn(
+      'rounded px-2 py-0.5 font-display text-[11px] font-medium tracking-tight',
+      'transition-all duration-150 ease-apple',
+      active ? 'bg-surface-3 text-fg-base' : 'text-fg-muted hover:text-fg-base',
+    );
+  return (
+    <div className="flex items-center gap-1">
+      {!vibe && (
+        <Tooltip label={floatingOpen ? 'Hide floating agent' : 'Show floating agent'} align="end">
+          <button
+            onClick={() => useVibe.getState().toggleFloatingAgent()}
+            aria-pressed={floatingOpen}
+            aria-label="Toggle floating agent"
+            className={cn(
+              'flex h-8 w-8 shrink-0 items-center justify-center rounded-md transition-all duration-200 ease-apple',
+              floatingOpen
+                ? 'bg-surface-3 text-fg-base'
+                : 'text-fg-muted hover:bg-surface-2 hover:text-fg-base',
+            )}
+          >
+            <PanelRightOpen size={14} strokeWidth={1.9} />
+          </button>
+        </Tooltip>
+      )}
+      <div
+        role="group"
+        aria-label="Workspace mode"
+        className="flex items-center gap-0.5 rounded-md bg-surface-1 p-0.5 ring-1 ring-inset ring-border-subtle"
+      >
+        <button
+          onClick={() => useVibe.getState().enterVibe()}
+          aria-pressed={vibe}
+          className={segment(vibe)}
+        >
+          Vibe
+        </button>
+        <button
+          onClick={() => useVibe.getState().exitVibe()}
+          aria-pressed={!vibe}
+          className={segment(!vibe)}
+        >
+          IDE
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function LayoutModePicker({
   mode,
   onSelect,

@@ -67,10 +67,17 @@ import {
   LayoutGrid,
   ListOrdered,
   NotebookPen,
+  BarChart3,
+  BookOpen,
+  FlaskConical,
+  PanelRightOpen,
   Sparkles,
   Target,
   TerminalSquare,
+  X,
 } from 'lucide-react';
+import { useVibe } from './state/vibe';
+import { AgentsPanel } from './components/AgentsPanel';
 // Side-effect import: subscribes to file-tree root changes and keeps the
 // project-config store fresh. Doesn't render anything itself.
 import './state/projectConfig';
@@ -89,7 +96,7 @@ import { getTerminal } from './lib/terminalRegistry';
 import { pickAgentTab, sendToAgent } from './lib/sendToAgent';
 import { useAgentQueue } from './state/agentQueue';
 import { askText } from './state/confirm';
-import { selectionPrompt } from './lib/agentPrompt';
+import { RUN_TESTS_AND_FIX_PROMPT, selectionPrompt } from './lib/agentPrompt';
 
 // Palettes and dialogs mount only while open, so their code loads on first use.
 const CommandPalette = lazy(() =>
@@ -114,6 +121,12 @@ const WingmanPromptDialog = lazy(() =>
 // CodeMirror is heavy — defer its bundle until a file is actually opened.
 const Editor = lazy(() => import('./components/Editor').then((m) => ({ default: m.Editor })));
 const DiffView = lazy(() => import('./components/DiffView').then((m) => ({ default: m.DiffView })));
+const UsageDashboard = lazy(() =>
+  import('./components/UsageDashboard').then((m) => ({ default: m.UsageDashboard })),
+);
+const ProjectMemory = lazy(() =>
+  import('./components/ProjectMemory').then((m) => ({ default: m.ProjectMemory })),
+);
 const AgentRuns = lazy(() =>
   import('./components/AgentRuns').then((m) => ({ default: m.AgentRuns })),
 );
@@ -250,6 +263,14 @@ export default function App() {
         <Suspense fallback={<EditorFallback />}>
           <AgentRuns />
         </Suspense>
+      ) : tab.kind === 'usage' ? (
+        <Suspense fallback={<EditorFallback />}>
+          <UsageDashboard />
+        </Suspense>
+      ) : tab.kind === 'memory' ? (
+        <Suspense fallback={<EditorFallback />}>
+          <ProjectMemory />
+        </Suspense>
       ) : tab.kind === 'wingman-review' ? (
         <Suspense fallback={<EditorFallback />}>
           <WingmanReview />
@@ -304,6 +325,8 @@ export default function App() {
   // zero tabs — i.e. once, before you ever open anything. It's the app's best
   // map of what ARC can do, so it stays reachable as an overlay.
   const [launcherOpen, setLauncherOpen] = useState(false);
+  const vibe = useVibe((s) => s.vibe);
+  const floatingAgentOpen = useVibe((s) => s.floatingAgentOpen);
   const sidebarCollapsed = useFiles((s) => s.collapsed);
   const railLabels = useFiles((s) => s.railLabels);
   // One boolean gates the lazy git-overlay chunk. Each panel still self-gates
@@ -593,6 +616,49 @@ export default function App() {
   useEffect(() => {
     const extras: CommandAction[] = [
       {
+        id: 'view.toggle-vibe',
+        title: 'Toggle Vibe Mode',
+        description: 'Agent fills the window; run again to return to the IDE layout',
+        group: 'View',
+        keywords: ['vibe', 'ide', 'agent', 'focus', 'claude', 'fullscreen', 'zen'],
+        icon: Sparkles,
+        run: () => useVibe.getState().toggleVibe(),
+      },
+      {
+        id: 'ai.run-tests-fix',
+        title: 'Run Tests & Fix',
+        description: 'Ask your agent to run the test suite and fix failures',
+        group: 'Claude Code',
+        keywords: ['test', 'tests', 'fix', 'agent', 'ci', 'failing'],
+        icon: FlaskConical,
+        run: () => sendToAgent(RUN_TESTS_AND_FIX_PROMPT, 'Run tests & fix prompt'),
+      },
+      {
+        id: 'view.usage-dashboard',
+        title: 'Open Usage Dashboard',
+        group: 'View',
+        keywords: ['usage', 'tokens', 'cost', 'spend', 'claude', 'billing'],
+        icon: BarChart3,
+        run: () => useWorkspace.getState().openUsageDashboard(),
+      },
+      {
+        id: 'view.project-memory',
+        title: 'Open Project Memory',
+        description: 'Rules files, skills and commands your agent loads',
+        group: 'View',
+        keywords: ['memory', 'rules', 'claude.md', 'agents.md', 'skills', 'commands', 'context'],
+        icon: BookOpen,
+        run: () => useWorkspace.getState().openProjectMemory(),
+      },
+      {
+        id: 'view.toggle-floating-agent',
+        title: 'Toggle Floating Agent',
+        group: 'View',
+        keywords: ['agent', 'floating', 'claude', 'wingman', 'overlay', 'chat'],
+        icon: PanelRightOpen,
+        run: () => useVibe.getState().toggleFloatingAgent(),
+      },
+      {
         id: 'workspace.open-folder',
         title: 'Open Folder…',
         group: 'Workspace',
@@ -838,7 +904,7 @@ export default function App() {
   }, []);
 
   return (
-    <div className="relative flex h-full w-full flex-col overflow-hidden bg-bg-base text-fg-base">
+    <div className="shell-root relative flex h-full w-full flex-col overflow-hidden bg-bg-base text-fg-base">
       <div className="desktop-wash" aria-hidden />
 
       {/* The title bar spans the full width — over the sidebar *and* the
@@ -851,7 +917,7 @@ export default function App() {
         <div className="flex min-h-0 min-w-0 flex-1">
           <aside
             ref={railAsideRef}
-            className="material-sidebar shrink-0 border-r border-border-hairline transition-[width] duration-200 ease-apple"
+            className="shell-rail material-sidebar shrink-0 border-r border-border-hairline transition-[width] duration-200 ease-apple"
             style={{ width: railLabels ? SIDEBAR_RAIL_WIDTH_LABELED : SIDEBAR_RAIL_WIDTH }}
           >
             <SidebarRail />
@@ -863,10 +929,12 @@ export default function App() {
             aria-hidden={sidebarCollapsed}
           >
             <div
-              className="material-sidebar h-full border-r border-border-hairline"
+              className="shell-sidebar-panel material-sidebar h-full border-r border-border-hairline"
               style={{ width: sidebarWidth }}
             >
-              <Sidebar />
+              <div className="shell-sidebar-card h-full">
+                <Sidebar />
+              </div>
             </div>
           </aside>
           {!sidebarCollapsed && (
@@ -890,6 +958,19 @@ export default function App() {
                 />
               </main>
             </div>
+
+            {floatingAgentOpen && !vibe && (
+              <div className="material-sheet absolute bottom-5 right-6 z-30 flex h-[72%] w-[420px] max-w-[calc(100%-3rem)] animate-sheet-in flex-col overflow-hidden rounded-window shadow-sheet ring-1 ring-border-subtle">
+                <button
+                  onClick={() => useVibe.getState().setFloatingAgentOpen(false)}
+                  aria-label="Close floating agent"
+                  className="absolute right-2 top-2 z-10 flex h-6 w-6 items-center justify-center rounded-md text-fg-muted transition-colors hover:bg-surface-2 hover:text-fg-base"
+                >
+                  <X size={13} strokeWidth={2} />
+                </button>
+                <AgentsPanel />
+              </div>
+            )}
 
             {sshLogPanelOpen && (
               <Suspense fallback={null}>

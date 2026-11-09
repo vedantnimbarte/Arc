@@ -142,6 +142,28 @@ pub async fn session_settings_save(
         .map_err(str_err)
 }
 
+/// Load the agent usage log JSON (see `apps/frontend/src/state/usageLog.ts`),
+/// or `null` if nothing has been recorded yet.
+#[tauri::command]
+pub async fn session_usage_log_load(
+    store: State<'_, SessionStore>,
+) -> Result<Option<String>, String> {
+    settings::load(store.pool(), "usage_log")
+        .await
+        .map_err(str_err)
+}
+
+/// Persist the agent usage log JSON.
+#[tauri::command]
+pub async fn session_usage_log_save(
+    store: State<'_, SessionStore>,
+    value: String,
+) -> Result<(), String> {
+    settings::save(store.pool(), "usage_log", &value)
+        .await
+        .map_err(str_err)
+}
+
 /// Finalize a command row once the shell reports it has finished (OSC 133 D).
 #[tauri::command]
 pub async fn session_command_finish(

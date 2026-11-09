@@ -14,6 +14,8 @@ import {
   Send,
   Server,
   Sparkles,
+  BarChart3,
+  BookOpen,
   Terminal as TerminalIcon,
   X,
   type LucideIcon,
@@ -64,6 +66,10 @@ export function iconForKind(kind: Tab['kind']): LucideIcon {
       return Github;
     case 'claude':
       return Sparkles;
+    case 'usage':
+      return BarChart3;
+    case 'memory':
+      return BookOpen;
     default:
       return FileCode;
   }

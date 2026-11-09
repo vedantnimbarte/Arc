@@ -24,6 +24,9 @@ import {
   type ClaudeSessionHook,
 } from '../../state/claudeCode';
 import { useFiles } from '../../state/files';
+import { gitDiffTrees, gitSnapshotTree, isTauri } from '../../lib/tauri';
+import { parseNumstat } from '../../lib/agentRuns';
+import { explainChangesPrompt } from '../../lib/agentPrompt';
 import { useSettings } from '../../state/settings';
 
 /**
@@ -322,27 +325,60 @@ function PermissionPrompt() {
 export function EditedFiles({ store }: { store: ClaudeSessionHook }) {
   const files = store((s) => s.editedFiles);
   const open = store((s) => s.openEditedFile);
+  const send = store((s) => s.send);
+  const streaming = store((s) => s.streaming);
+  // A Claude window carries its own folder; the panel works in the file tree's.
+  const windowCwd = store((s) => (s as { cwd?: string | null }).cwd ?? null);
+  const treeRoot = useFiles((s) => s.root);
+  const root = windowCwd ?? treeRoot;
   const [collapsed, setCollapsed] = useState(false);
+  const stats = useLineStats(root, files);
 
   if (files.length === 0) return null;
 
+  const statFor = (path: string) =>
+    root ? stats?.get(relativeTo(root, path).replace(/\\/g, '/')) : undefined;
+  const changed = files.map((f) => {
+    const s = statFor(f.path);
+    return { path: root ? relativeTo(root, f.path) : f.path, added: s?.added ?? 0, removed: s?.removed ?? 0 };
+  });
+  const totalAdded = changed.reduce((sum, f) => sum + f.added, 0);
+  const totalRemoved = changed.reduce((sum, f) => sum + f.removed, 0);
+
   return (
     <div className="shrink-0 border-t border-border-hairline">
-      <button
-        type="button"
-        onClick={() => setCollapsed((c) => !c)}
-        aria-expanded={!collapsed}
-        className="flex w-full items-center gap-1 px-2 py-1 font-mono text-2xs text-fg-subtle transition-colors hover:bg-surface-1 hover:text-fg-base"
-      >
-        {collapsed ? (
-          <ChevronRight size={10} strokeWidth={2.2} />
-        ) : (
-          <ChevronDown size={10} strokeWidth={2.2} />
-        )}
-        <span>
-          {files.length} file{files.length === 1 ? '' : 's'} edited
-        </span>
-      </button>
+      <div className="flex items-center">
+        <button
+          type="button"
+          onClick={() => setCollapsed((c) => !c)}
+          aria-expanded={!collapsed}
+          className="flex min-w-0 flex-1 items-center gap-1 px-2 py-1 font-mono text-2xs text-fg-subtle transition-colors hover:bg-surface-1 hover:text-fg-base"
+        >
+          {collapsed ? (
+            <ChevronRight size={10} strokeWidth={2.2} />
+          ) : (
+            <ChevronDown size={10} strokeWidth={2.2} />
+          )}
+          <span>
+            {files.length} file{files.length === 1 ? '' : 's'} edited
+          </span>
+          {stats && (
+            <span className="ml-1">
+              <span className="text-status-ok">+{totalAdded}</span>{' '}
+              <span className="text-status-err">-{totalRemoved}</span>
+            </span>
+          )}
+        </button>
+        <button
+          type="button"
+          disabled={streaming}
+          onClick={() => void send(explainChangesPrompt(changed))}
+          title="Ask Claude to explain these edits before you keep them"
+          className="mr-1 shrink-0 rounded px-1.5 py-0.5 text-2xs text-fg-muted transition-colors hover:bg-surface-2 hover:text-fg-base disabled:opacity-40"
+        >
+          Explain changes
+        </button>
+      </div>
       {!collapsed && (
         <ul className="max-h-40 overflow-y-auto pb-1">
           {files.map((f) => (
@@ -357,6 +393,12 @@ export function EditedFiles({ store }: { store: ClaudeSessionHook }) {
                 <span className="min-w-0 flex-1 truncate font-mono text-2xs text-fg-muted">
                   {basename(f.path)}
                 </span>
+                {statFor(f.path) && (
+                  <span className="shrink-0 font-mono text-2xs">
+                    <span className="text-status-ok">+{statFor(f.path)!.added}</span>{' '}
+                    <span className="text-status-err">-{statFor(f.path)!.removed}</span>
+                  </span>
+                )}
                 <span className="shrink-0 font-mono text-2xs text-fg-subtle">
                   {f.edits > 1 ? `${f.tool}×${f.edits}` : f.tool}
                 </span>
@@ -367,6 +409,46 @@ export function EditedFiles({ store }: { store: ClaudeSessionHook }) {
       )}
     </div>
   );
+}
+
+/** Per-file line counts against HEAD for the edited files, keyed by
+ *  slash-separated path relative to `root`. Diffing a snapshot tree rather
+ *  than the index means files Claude created (still untracked) are counted. */
+function useLineStats(
+  root: string | null,
+  files: readonly { path: string; edits: number }[],
+): Map<string, { added: number; removed: number }> | null {
+  const [stats, setStats] = useState<Map<string, { added: number; removed: number }> | null>(null);
+  const editsKey = files.map((f) => `${f.path}:${f.edits}`).join('|');
+  useEffect(() => {
+    if (!isTauri || !root || !editsKey) {
+      setStats(null);
+      return;
+    }
+    let cancelled = false;
+    void (async () => {
+      try {
+        const tree = await gitSnapshotTree(root);
+        const summary = parseNumstat(await gitDiffTrees(root, 'HEAD', tree, null, true));
+        if (cancelled) return;
+        setStats(
+          new Map(
+            summary.files.map((f) => [
+              f.path.replace(/\\/g, '/'),
+              { added: f.insertions, removed: f.deletions },
+            ]),
+          ),
+        );
+      } catch {
+        // Not a git repo, or no HEAD yet: the list still works, just unsized.
+        if (!cancelled) setStats(null);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [root, editsKey]);
+  return stats;
 }
 
 /** Last path segment, on either separator — paths come from the CLI, which

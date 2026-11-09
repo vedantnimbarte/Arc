@@ -195,8 +195,9 @@ export function PaneTabStrip({ paneId, variant = 'leaf' }: Props) {
                   }
                 : undefined
             }
+            data-active={isActive ? '1' : undefined}
             className={cn(
-              'flex h-[34px] min-w-[124px] max-w-[228px] items-center gap-2.5 rounded-lg px-3',
+              'arc-tab flex h-[34px] min-w-[124px] max-w-[228px] items-center gap-2.5 rounded-lg px-3',
               'font-display text-[13px] font-medium tracking-tight transition-all duration-150 ease-apple',
               groupActive
                 ? 'text-fg-base'
@@ -296,7 +297,7 @@ export function PaneTabStrip({ paneId, variant = 'leaf' }: Props) {
         variant === 'topbar'
           ? 'h-[40px] min-w-0'
           : cn(
-              'h-11 shrink-0 border-b px-2',
+              'arc-tab-strip h-11 shrink-0 border-b px-2',
               isFocused
                 ? 'border-border-hairline bg-bg-chrome/30'
                 : 'border-border-hairline/60 bg-transparent',
