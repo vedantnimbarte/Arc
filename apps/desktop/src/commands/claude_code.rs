@@ -238,6 +238,15 @@ pub async fn claude_session_load(cwd: String, id: String) -> Result<Vec<serde_js
         .collect())
 }
 
+/// Token usage of every assistant message the CLI has recorded, for the
+/// usage dashboard's history import.
+#[tauri::command]
+pub async fn claude_usage_history() -> Result<Vec<sessions::UsageRecord>, String> {
+    tokio::task::spawn_blocking(sessions::usage_history)
+        .await
+        .map_err(|e| e.to_string())
+}
+
 /// Delete a conversation from the CLI's history.
 #[tauri::command]
 pub async fn claude_session_delete(cwd: String, id: String) -> Result<(), String> {

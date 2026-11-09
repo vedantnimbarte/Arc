@@ -1150,6 +1150,15 @@ export async function sessionSettingsSave(settings: PersistedSettings): Promise<
   await invoke('session_settings_save', { value: JSON.stringify(settings) });
 }
 
+/** The agent usage log, as the raw JSON `state/usageLog.ts` wrote. */
+export async function sessionUsageLogLoad(): Promise<string | null> {
+  return invoke<string | null>('session_usage_log_load');
+}
+
+export async function sessionUsageLogSave(value: string): Promise<void> {
+  await invoke('session_usage_log_save', { value });
+}
+
 /** The running app's version, straight from tauri.conf.json. `null` in the
  *  browser-only build, where there is no bundle to ask. */
 export async function getAppVersion(): Promise<string | null> {
@@ -3113,6 +3122,25 @@ export async function claudeSessionsList(cwd: string): Promise<ClaudeSessionMeta
 /** A recorded conversation replayed as turn events, for the store's reducer. */
 export async function claudeSessionLoad(cwd: string, id: string): Promise<ClaudeStreamEvent[]> {
   return invoke<ClaudeStreamEvent[]>('claude_session_load', { cwd, id });
+}
+
+/** One assistant message's token usage from Claude Code's transcripts. */
+export interface ClaudeUsageRecord {
+  id: string;
+  timestamp: string;
+  model: string;
+  session_id: string;
+  cwd: string;
+  input_tokens: number;
+  output_tokens: number;
+  cache_creation_input_tokens: number;
+  cache_read_input_tokens: number;
+}
+
+/** Usage from every transcript Claude Code has recorded, streamed by the
+ *  backend because transcripts outgrow the file-read size cap. */
+export async function claudeUsageHistory(): Promise<ClaudeUsageRecord[]> {
+  return invoke<ClaudeUsageRecord[]>('claude_usage_history');
 }
 
 /** Delete a conversation from the CLI's history. `claude --resume` loses it too. */

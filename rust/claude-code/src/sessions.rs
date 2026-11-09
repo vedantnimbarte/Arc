@@ -269,8 +269,106 @@ pub fn transcript_events(text: &str) -> Vec<Event> {
     out
 }
 
+/// One assistant message's token usage, as the CLI recorded it. Transcripts
+/// carry no price, so cost is left to the caller.
+#[derive(Debug, Serialize, PartialEq, Eq)]
+pub struct UsageRecord {
+    /// The API message id. The CLI writes a message once per content block,
+    /// so the same id repeats; callers dedupe on it.
+    pub id: String,
+    pub timestamp: String,
+    pub model: String,
+    pub session_id: String,
+    pub cwd: String,
+    pub input_tokens: u64,
+    pub output_tokens: u64,
+    pub cache_creation_input_tokens: u64,
+    pub cache_read_input_tokens: u64,
+}
+
+/// Usage from one transcript line, when it is an assistant message.
+pub fn usage_from_line(line: &str) -> Option<UsageRecord> {
+    // Most lines aren't assistant messages; skip parsing them.
+    if !line.contains("\"usage\"") {
+        return None;
+    }
+    let value: Value = serde_json::from_str(line).ok()?;
+    if value.get("type")?.as_str()? != "assistant" {
+        return None;
+    }
+    let message = value.get("message")?;
+    let usage = message.get("usage")?;
+    let model = message.get("model").and_then(Value::as_str).unwrap_or("unknown");
+    if model == "<synthetic>" {
+        return None;
+    }
+    let text = |v: Option<&Value>| v.and_then(Value::as_str).unwrap_or_default().to_string();
+    let count = |key: &str| usage.get(key).and_then(Value::as_u64).unwrap_or(0);
+    Some(UsageRecord {
+        id: text(message.get("id")),
+        timestamp: text(value.get("timestamp")),
+        model: model.to_string(),
+        session_id: text(value.get("sessionId")),
+        cwd: text(value.get("cwd")),
+        input_tokens: count("input_tokens"),
+        output_tokens: count("output_tokens"),
+        cache_creation_input_tokens: count("cache_creation_input_tokens"),
+        cache_read_input_tokens: count("cache_read_input_tokens"),
+    })
+}
+
+/// Every assistant message's usage across all of the CLI's recorded projects.
+///
+/// Streams each transcript line by line: long sessions run to tens of MB,
+/// past what ARC's file-read command will hand the frontend. A file that can't
+/// be read is skipped rather than failing the whole scan.
+pub fn usage_history() -> Vec<UsageRecord> {
+    let Some(root) = config_dir().map(|d| d.join("projects")) else {
+        return Vec::new();
+    };
+    let Ok(projects) = fs::read_dir(&root) else {
+        return Vec::new();
+    };
+    let mut records = Vec::new();
+    for project in projects.flatten() {
+        let Ok(files) = fs::read_dir(project.path()) else {
+            continue;
+        };
+        for file in files.flatten() {
+            let path = file.path();
+            if path.extension().and_then(|e| e.to_str()) != Some("jsonl") {
+                continue;
+            }
+            let Ok(handle) = File::open(&path) else {
+                continue;
+            };
+            records.extend(
+                BufReader::new(handle)
+                    .lines()
+                    .map_while(std::result::Result::ok)
+                    .filter_map(|line| usage_from_line(&line)),
+            );
+        }
+    }
+    records
+}
+
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn usage_from_line_reads_assistant_usage_only() {
+        let line = r#"{"type":"assistant","sessionId":"s1","cwd":"/repo","timestamp":"2026-11-09T10:00:00Z","message":{"id":"m1","model":"claude-sonnet-4","usage":{"input_tokens":10,"output_tokens":5,"cache_read_input_tokens":3}}}"#;
+        let record = super::usage_from_line(line).expect("assistant usage");
+        assert_eq!(record.id, "m1");
+        assert_eq!(record.input_tokens, 10);
+        assert_eq!(record.cache_read_input_tokens, 3);
+        assert_eq!(record.cache_creation_input_tokens, 0);
+
+        assert!(super::usage_from_line(r#"{"type":"user","message":{"usage":{}}}"#).is_none());
+        let synthetic = r#"{"type":"assistant","message":{"id":"m2","model":"<synthetic>","usage":{}}}"#;
+        assert!(super::usage_from_line(synthetic).is_none());
+    }
+
     use super::*;
 
     #[test]

@@ -7,6 +7,8 @@ import {
   type CommandAction,
   type CommandGroup,
 } from '../state/commands';
+import { withAskAiFallback } from '../lib/askAi';
+import { sendToAgent } from '../lib/sendToAgent';
 
 interface Props {
   open: boolean;
@@ -45,11 +47,12 @@ export function CommandPalette({ open, onClose }: Props) {
         return a.title.localeCompare(b.title);
       });
     }
-    return all
+    const matches = all
       .map((a) => [a, scoreAction(a, query)] as const)
       .filter(([, s]) => s >= 0)
       .sort((a, b) => b[1] - a[1])
       .map(([a]) => a);
+    return withAskAiFallback(matches, query, (prompt) => sendToAgent(prompt, 'Ask AI prompt'));
   }, [actions, query]);
 
   // Clamp the selected index whenever the visible list shrinks.
@@ -220,5 +223,8 @@ const GROUP_ORDER: CommandGroup[] = [
   'Git',
   'SSH',
   'AI CLIs',
+  'Claude Code',
+  'Wingman',
+  'GitHub',
   'Help',
 ];

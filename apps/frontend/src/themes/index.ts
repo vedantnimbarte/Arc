@@ -293,10 +293,53 @@ const catppuccinLatte: ThemeDef = {
   },
 };
 
+// Near-black, flat and neutral: cards sit one step above a darker canvas so
+// panels read as separate surfaces without borders doing all the work.
+// fgMuted lands at ~8.5:1 and fgSubtle at ~5.2:1 on bgBase (AA floor).
+const cortex: ThemeDef = {
+  id: 'cortex',
+  name: 'Cortex',
+  mode: 'dark',
+  tokens: {
+    bgBase: '17 17 17',
+    bgPanel: '28 28 28',
+    bgHover: '38 38 38',
+    bgChrome: '10 10 10',
+    fgBase: '237 237 237',
+    accent: '212 212 212',
+    accentBright: '255 255 255',
+    accentMuted: '161 161 161',
+    bgSubtle: 'rgba(255, 255, 255, 0.03)',
+    borderSubtle: 'rgba(255, 255, 255, 0.07)',
+    borderStrong: 'rgba(255, 255, 255, 0.13)',
+    borderHairline: 'rgba(0, 0, 0, 0.6)',
+    fgMuted: 'rgba(237, 237, 237, 0.70)',
+    fgSubtle: 'rgba(237, 237, 237, 0.52)',
+    accentSoft: 'rgba(255, 255, 255, 0.08)',
+    accentGlow: 'rgba(255, 255, 255, 0.30)',
+    wash1: '40 40 40',
+    wash2: '30 30 30',
+    wash3: '20 20 20',
+  },
+  xterm: {
+    background: '#111111',
+    foreground: '#ededed',
+    cursor: '#e5e5e5',
+    cursorAccent: '#111111',
+    selectionBackground: 'rgba(255, 255, 255, 0.20)',
+    black: '#1c1c1c', red: '#ff5252', green: '#3ad28a', yellow: '#f0a958',
+    blue: '#9cb5d4', magenta: '#bf9ff2', cyan: '#7ec8d0', white: '#d4d4d4',
+    brightBlack: '#6b6b6b', brightRed: '#ff7a78', brightGreen: '#65e0a4',
+    brightYellow: '#ffc370', brightBlue: '#c1d2e6', brightMagenta: '#d8b7ff',
+    brightCyan: '#a8d6dc', brightWhite: '#f5f5f5',
+  },
+};
+
 /** Built-in themes, indexed by id. Custom user themes layer on top of this
  *  via `registerTheme`. Order matters: the settings picker renders themes
  *  in insertion order, so dark/light come first. */
 export const THEMES: Record<string, ThemeDef> = {
+  cortex,
   dark,
   light,
   'catppuccin-mocha': catppuccinMocha,
@@ -315,9 +358,9 @@ export function systemPrefersDark(): boolean {
  *  Kept for the (few) call-sites that don't have access to themeId.
  *  Prefer `resolveActiveTheme` for new code. */
 export function resolveTheme(appearance: Appearance): ThemeDef {
-  if (appearance === 'dark') return dark;
+  if (appearance === 'dark') return cortex;
   if (appearance === 'light') return light;
-  return systemPrefersDark() ? dark : light;
+  return systemPrefersDark() ? cortex : light;
 }
 
 /** Resolve the theme to render. `themeId` (when set + registered) wins over

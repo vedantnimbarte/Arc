@@ -13,8 +13,14 @@ import {
   Command as CommandIcon,
   Sparkles,
   Pencil,
+  ArrowUp,
+  FlaskConical,
+  BarChart3,
+  BookOpen,
   type LucideIcon,
 } from 'lucide-react';
+import { sendToAgent } from '../lib/sendToAgent';
+import { runCommand } from '../state/commands';
 import { useWorkspace } from '../state/workspace';
 import { useFiles } from '../state/files';
 import { useClaudeCode } from '../state/claudeCode';
@@ -193,9 +199,14 @@ export function EmptyWorkspace({ onOpenCommandPalette }: Props) {
             </button>
           )}
           <h1 className="font-display text-xl font-semibold tracking-tight text-fg-base">
-            Pick a tool to get started
+            What would you like to build?
           </h1>
+          <p className="mt-1 text-xs text-fg-muted">Ask your agent, or pick a tool below</p>
         </header>
+
+        <BuildComposer agentReady={claudeReady} />
+
+        <SectionLabel>Tools</SectionLabel>
 
         {/* Core tools — one glass card per tab type. */}
         <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-4">
@@ -334,6 +345,72 @@ export function EmptyWorkspace({ onOpenCommandPalette }: Props) {
           document.body,
         )}
     </div>
+  );
+}
+
+const QUICK_ACTIONS: { label: string; icon: LucideIcon; command: string }[] = [
+  { label: 'Run tests & fix', icon: FlaskConical, command: 'ai.run-tests-fix' },
+  { label: 'Usage', icon: BarChart3, command: 'view.usage-dashboard' },
+  { label: 'Project memory', icon: BookOpen, command: 'view.project-memory' },
+];
+
+/** The empty workspace's first question is what to build, not which tool to
+ *  open: Enter hands the prompt to whichever agent `sendToAgent` picks. */
+function BuildComposer({ agentReady }: { agentReady: boolean }) {
+  const [prompt, setPrompt] = useState('');
+  const send = () => {
+    const text = prompt.trim();
+    if (!text) return;
+    sendToAgent(text, 'Prompt');
+    setPrompt('');
+  };
+  return (
+    <section className="mb-6">
+      <div className="rounded-xl border border-border-subtle bg-surface-1 p-3 transition-colors focus-within:border-border-strong">
+        <textarea
+          value={prompt}
+          onChange={(e) => setPrompt(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' && !e.shiftKey) {
+              e.preventDefault();
+              send();
+            }
+          }}
+          rows={2}
+          placeholder="Send a prompt to your agent…"
+          aria-label="Prompt for your agent"
+          className="w-full resize-none bg-transparent text-sm text-fg-base placeholder:text-fg-subtle focus:outline-none"
+        />
+        <div className="mt-2 flex items-center gap-2">
+          <span className="text-2xs text-fg-subtle">
+            {agentReady
+              ? 'Goes to a running agent terminal, or Claude Code'
+              : 'No agent connected: install Claude Code or start an agent CLI. Until then prompts are copied to the clipboard.'}
+          </span>
+          <div className="flex-1" />
+          <button
+            onClick={send}
+            disabled={!prompt.trim()}
+            aria-label="Send prompt"
+            className="flex h-7 w-7 items-center justify-center rounded-full bg-fg-base text-bg-base transition-opacity disabled:opacity-30"
+          >
+            <ArrowUp size={14} strokeWidth={2.4} />
+          </button>
+        </div>
+      </div>
+      <div className="mt-2 flex flex-wrap justify-center gap-1.5">
+        {QUICK_ACTIONS.map(({ label, icon: Icon, command }) => (
+          <button
+            key={command}
+            onClick={() => void runCommand(command)}
+            className="flex items-center gap-1.5 rounded-md px-2 py-1 text-xs text-fg-muted transition-colors hover:bg-surface-2 hover:text-fg-base"
+          >
+            <Icon size={12} strokeWidth={2} />
+            {label}
+          </button>
+        ))}
+      </div>
+    </section>
   );
 }
 
