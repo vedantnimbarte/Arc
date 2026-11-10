@@ -82,7 +82,7 @@ export function SshTab({ sessionKey, hostId }: SshTabProps) {
       scrollback: 10_000,
       allowTransparency: true,
       smoothScrollDuration: 80,
-      theme: initialTheme.xterm,
+      theme: { ...initialTheme.xterm, background: '#00000000' }, // transparent: wallpaper shows through the frosted pane
     });
 
     const fit = new FitAddon();
@@ -154,7 +154,7 @@ export function SshTab({ sessionKey, hostId }: SshTabProps) {
         try {
           term.options.fontFamily = getFont(s.fontId).stack;
           term.options.fontSize = s.fontSize;
-          term.options.theme = resolveActiveTheme(s.appearance, s.themeId).xterm;
+          term.options.theme = { ...resolveActiveTheme(s.appearance, s.themeId).xterm, background: '#00000000' };
           safeFit();
         } catch {
           /* term may be disposed */
@@ -199,7 +199,7 @@ export function SshTab({ sessionKey, hostId }: SshTabProps) {
 
   if (!host) {
     return (
-      <div className="flex h-full w-full items-center justify-center bg-bg-base">
+      <div className="flex h-full w-full items-center justify-center">
         <div className="font-mono text-xs text-fg-subtle">
           host not found — open the SSH panel to add or pick one
         </div>
@@ -208,7 +208,7 @@ export function SshTab({ sessionKey, hostId }: SshTabProps) {
   }
 
   return (
-    <div className="relative flex h-full w-full flex-col bg-bg-base">
+    <div className="relative flex h-full w-full flex-col">
       <div className="flex items-center justify-between border-b border-border-subtle bg-bg-chrome/40 px-3 py-1">
         <div className="flex items-center gap-2">
           <span

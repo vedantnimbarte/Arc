@@ -30,6 +30,12 @@
     --series-1: #3987e5;
     --series-2: #d95926;
     --series-3: #199e70;
+    /* Frosted glass over the wallpaper. Panes, sidebar and title bar use
+       --glass-alpha; dialogs and menus sit on top of text, so they get a
+       denser --glass-sheet-alpha to stay readable. */
+    --glass-alpha: 0.5;
+    --glass-sheet-alpha: 0.65;
+    --glass-blur: 12px;
   }
   html:not(.dark) {
     --series-1: #2a78d6;
@@ -60,6 +66,8 @@
   }
 
   body {
+    /* On body (not the shell) so every window — main, Settings, Git — gets it. */
+    background: #000 url('./assets/wallpaper.jpg') center / cover fixed no-repeat;
     overscroll-behavior: none;
     user-select: none;
     -webkit-user-select: none;
@@ -143,20 +151,9 @@
   /* "Sidebar" material — heavier blur, slight saturation bump. Tuned
      slightly cooler so the silver accents float cleanly on top. */
   .material-sidebar {
-    background: linear-gradient(
-      180deg,
-      rgba(42, 43, 47, 0.74) 0%,
-      rgba(32, 33, 37, 0.80) 100%
-    );
-    backdrop-filter: blur(40px) saturate(170%);
-    -webkit-backdrop-filter: blur(40px) saturate(170%);
-  }
-  html:not(.dark) .material-sidebar {
-    background: linear-gradient(
-      180deg,
-      rgba(247, 247, 248, 0.82) 0%,
-      rgba(238, 238, 240, 0.88) 100%
-    );
+    background: rgb(var(--bg-chrome) / var(--glass-alpha));
+    backdrop-filter: blur(var(--glass-blur)) saturate(160%);
+    -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(160%);
   }
 
   /* Brushed-platinum surface — the only place we deliberately step out of
@@ -198,74 +195,41 @@
 
   /* "Toolbar / titlebar" material — slightly lighter, used for window chrome. */
   .material-toolbar {
-    background: linear-gradient(
-      180deg,
-      rgba(48, 48, 50, 0.78) 0%,
-      rgba(40, 40, 42, 0.72) 100%
-    );
-    backdrop-filter: blur(32px) saturate(180%);
-    -webkit-backdrop-filter: blur(32px) saturate(180%);
+    background: rgb(var(--bg-chrome) / var(--glass-alpha));
+    backdrop-filter: blur(var(--glass-blur)) saturate(160%);
+    -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(160%);
     border-bottom: 1px solid rgba(0, 0, 0, 0.35);
     box-shadow: inset 0 1px 0 0 rgba(255, 255, 255, 0.06);
   }
   html:not(.dark) .material-toolbar {
-    background: linear-gradient(
-      180deg,
-      rgba(240, 240, 243, 0.82) 0%,
-      rgba(232, 232, 236, 0.76) 100%
-    );
     border-bottom: 1px solid rgba(0, 0, 0, 0.12);
     box-shadow: inset 0 1px 0 0 rgba(255, 255, 255, 0.55);
   }
 
   /* "Content" material — the inner panes (terminal, chat). Lighter so text
      reads cleanly without the chrome competing. */
-  .material-content {
-    background: linear-gradient(
-      180deg,
-      rgba(28, 28, 30, 0.68) 0%,
-      rgba(24, 24, 26, 0.74) 100%
-    );
-    backdrop-filter: blur(28px) saturate(160%);
-    -webkit-backdrop-filter: blur(28px) saturate(160%);
-  }
-  html:not(.dark) .material-content {
-    background: linear-gradient(
-      180deg,
-      rgba(255, 255, 255, 0.74) 0%,
-      rgba(248, 249, 251, 0.80) 100%
-    );
+  .material-content,
+  .glass-pane {
+    background: rgb(var(--bg-base) / var(--glass-alpha));
+    backdrop-filter: blur(var(--glass-blur)) saturate(160%);
+    -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(160%);
   }
 
   /* Sheet / dialog material — heaviest blur, what macOS uses for modals. */
   .material-sheet {
-    background: rgba(38, 38, 40, 0.82);
-    backdrop-filter: blur(44px) saturate(200%);
-    -webkit-backdrop-filter: blur(44px) saturate(200%);
-  }
-  html:not(.dark) .material-sheet {
-    background: rgba(248, 248, 250, 0.90);
+    background: rgb(var(--bg-panel) / var(--glass-sheet-alpha));
+    backdrop-filter: blur(var(--glass-blur)) saturate(180%);
+    -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(180%);
   }
 
-  /* Cortex is flat: solid surfaces instead of translucent vibrancy, with
-     cards one step above a darker canvas so panels read as separate. */
-  html[data-theme='cortex'] .material-sidebar,
-  html[data-theme='cortex'] .material-content {
-    background: rgb(var(--bg-base));
-    backdrop-filter: none;
-    -webkit-backdrop-filter: none;
-  }
+  /* Cortex: flat chrome edges, with sidebar cards one step above the
+     panel so they read as separate. */
   html[data-theme='cortex'] .material-toolbar {
-    background: rgb(var(--bg-chrome));
-    backdrop-filter: none;
-    -webkit-backdrop-filter: none;
     border-bottom-color: transparent;
     box-shadow: none;
   }
-  html[data-theme='cortex'] .shell-root,
   html[data-theme='cortex'] .shell-rail,
   html[data-theme='cortex'] .shell-sidebar-panel {
-    background: rgb(var(--bg-chrome));
     border-right-color: transparent;
   }
   html[data-theme='cortex'] .shell-sidebar-panel {
@@ -275,13 +239,7 @@
     overflow: hidden;
     border-radius: 12px;
     border: 1px solid var(--border-subtle);
-    background: rgb(var(--bg-base));
-  }
-  html[data-theme='cortex'] .material-sheet {
-    background: rgb(23 23 23 / 0.97);
-  }
-  html[data-theme='cortex'] .desktop-wash {
-    display: none;
+    background: rgb(var(--bg-base) / 0.35);
   }
   html[data-theme='cortex'] .arc-tab-strip {
     border-bottom-color: transparent;
@@ -559,10 +517,11 @@ html:not(.dark) ::-webkit-scrollbar-thumb:hover {
   background-color: rgba(0, 0, 0, 0.34) !important;
 }
 
-/* xterm — fill the pane edge-to-edge (no inset), transparent viewport */
+/* xterm — small left inset so text doesn't hug the pane edge. Padding goes on
+   .xterm itself because FitAddon subtracts it when sizing rows/cols. */
 .xterm {
   height: 100%;
-  padding: 0;
+  padding: 0 0 0 10px;
 }
 .xterm .xterm-viewport {
   background: transparent !important;

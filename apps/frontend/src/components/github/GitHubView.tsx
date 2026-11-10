@@ -53,19 +53,19 @@ export function GitHubView() {
   if (signedIn === undefined) {
     // One frame of nothing beats flashing the sign-in screen at someone who
     // is already signed in.
-    return <div className="h-full bg-bg-base" />;
+    return <div className="h-full" />;
   }
 
   if (!signedIn) {
     return (
-      <div className="h-full overflow-y-auto bg-bg-base">
+      <div className="h-full overflow-y-auto">
         <SignIn onSignedIn={() => void checkAuth()} />
       </div>
     );
   }
 
   return (
-    <div className="flex h-full flex-col bg-bg-base">
+    <div className="flex h-full flex-col">
       <AccountBar />
       <div className="flex min-h-0 flex-1">
         <SectionRail />

@@ -53,7 +53,7 @@ export function WingmanBoard() {
   }
 
   return (
-    <div className="relative flex h-full min-h-0 flex-col bg-bg-base">
+    <div className="relative flex h-full min-h-0 flex-col">
       <div className="flex shrink-0 items-center justify-between border-b border-border-hairline px-3 py-1.5">
         <span className="font-display text-xs font-medium tracking-tight text-fg-base">
           Pilot board
@@ -95,7 +95,7 @@ export function WingmanBoard() {
           {WINGMAN_COLUMNS.map((col) => {
             const inCol = cards.filter((c) => c.column === col.id);
             return (
-              <section key={col.id} className="flex h-full w-64 flex-col bg-bg-base">
+              <section key={col.id} className="flex h-full w-64 flex-col">
                 <header className="flex shrink-0 items-baseline gap-1.5 px-2 py-1.5">
                   <h3 className="font-mono text-2xs uppercase tracking-wider text-fg-muted">
                     {col.label}

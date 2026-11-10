@@ -154,7 +154,7 @@ export function WorkspaceSwitcher() {
           <div
             ref={panelRef}
             style={{ position: 'fixed', top: pos.top, left: pos.left, width: PANEL_W }}
-            className="material-sheet z-50 animate-popover-in overflow-hidden rounded-lg bg-bg-panel shadow-sheet ring-1 ring-edge-2"
+            className="material-sheet z-50 animate-popover-in overflow-hidden rounded-lg shadow-sheet ring-1 ring-edge-2"
           >
             {editId ? (
               <div className="p-3">

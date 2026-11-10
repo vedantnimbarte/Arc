@@ -130,7 +130,7 @@ export function PaneLeafView({ paneId, hostsRef, stageRef, header }: Props) {
   return (
     <div
       ref={rootRef}
-      className="flex h-full min-h-0 w-full animate-pane-in flex-col overflow-hidden rounded-lg bg-bg-base ring-1 ring-border-subtle"
+      className="flex h-full min-h-0 w-full animate-pane-in flex-col overflow-hidden rounded-lg glass-pane ring-1 ring-border-subtle"
     >
       {header}
       <div

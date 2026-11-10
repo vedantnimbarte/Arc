@@ -195,7 +195,7 @@ function StackCard({
       }}
       aria-current={current || undefined}
       className={cn(
-        'group relative animate-pane-in overflow-hidden rounded-lg bg-bg-base shadow-[0_8px_18px_-8px_rgba(0,0,0,0.55)] transition-[margin] duration-200 ease-apple motion-reduce:animate-none motion-reduce:transition-none',
+        'group relative animate-pane-in overflow-hidden rounded-lg glass-pane shadow-[0_8px_18px_-8px_rgba(0,0,0,0.55)] transition-[margin] duration-200 ease-apple motion-reduce:animate-none motion-reduce:transition-none',
         current ? 'ring-1 ring-accent/50' : 'ring-1 ring-border-subtle',
       )}
     >

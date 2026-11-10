@@ -255,7 +255,7 @@ function SelectPopover<T extends string>({
     <div
       ref={panelRef}
       style={{ position: 'fixed', top: pos.top, left: pos.left, width: pos.width }}
-      className="animate-popover-in z-[60] overflow-hidden rounded-lg bg-bg-panel shadow-sheet ring-1 ring-edge-2"
+      className="animate-popover-in z-[60] overflow-hidden rounded-lg material-sheet shadow-sheet ring-1 ring-edge-2"
     >
       <div
         ref={listRef}

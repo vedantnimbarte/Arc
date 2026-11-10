@@ -341,7 +341,7 @@ function OverflowMenu({
     <div
       role="menu"
       style={{ position: 'fixed', top: y, left, width: WIDTH }}
-      className="material-sheet z-[60] animate-popover-in overflow-hidden rounded-md bg-bg-panel py-1 shadow-sheet ring-1 ring-edge-2"
+      className="material-sheet z-[60] animate-popover-in overflow-hidden rounded-md py-1 shadow-sheet ring-1 ring-edge-2"
       onMouseDown={(e) => e.stopPropagation()}
     >
       {branch && (

@@ -236,7 +236,7 @@ export function SettingsPage() {
   }, []);
 
   return (
-    <div className="flex h-screen w-screen flex-col bg-bg-base text-fg-base">
+    <div className="flex h-screen w-screen flex-col text-fg-base">
       {/* Title bar — frameless window needs an explicit drag region. */}
       <div
         data-tauri-drag-region

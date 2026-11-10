@@ -28,7 +28,7 @@ export function ProjectMemory() {
   const open = (path: string) => useWorkspace.getState().openFile(path);
 
   return (
-    <div className="h-full overflow-y-auto bg-bg-base p-6">
+    <div className="h-full overflow-y-auto p-6">
       <div className="mx-auto flex max-w-3xl flex-col gap-4">
         <header className="flex items-start justify-between gap-4">
           <div>

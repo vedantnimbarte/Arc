@@ -1064,7 +1064,7 @@ export function DbClient({ tabId }: Props) {
   const nEdits = editCount(edits);
 
   return (
-    <div className="flex h-full overflow-hidden bg-bg-base text-sm">
+    <div className="flex h-full overflow-hidden text-sm">
       {/* ── Connections rail ── */}
       <div className="flex w-56 shrink-0 flex-col border-r border-border-hairline bg-bg-panel/40">
         <div className="flex items-center gap-1.5 px-3 py-2">

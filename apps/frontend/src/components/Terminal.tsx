@@ -152,7 +152,7 @@ export function Terminal({ sessionKey }: Props) {
       scrollback: 10_000,
       allowTransparency: true,
       smoothScrollDuration: 80,
-      theme: initialTheme.xterm,
+      theme: { ...initialTheme.xterm, background: '#00000000' }, // transparent: wallpaper shows through the frosted pane
     });
     termRef.current = term;
 
@@ -408,7 +408,7 @@ export function Terminal({ sessionKey }: Props) {
         try {
           term.options.fontFamily = getFont(s.fontId).stack;
           term.options.fontSize = s.fontSize;
-          term.options.theme = resolveActiveTheme(s.appearance, s.themeId).xterm;
+          term.options.theme = { ...resolveActiveTheme(s.appearance, s.themeId).xterm, background: '#00000000' };
           safeFit();
         } catch {
           /* term may be disposed */
@@ -1161,7 +1161,7 @@ export function Terminal({ sessionKey }: Props) {
   }, [sessionKey]);
 
   return (
-    <div className="relative h-full w-full bg-bg-base">
+    <div className="relative h-full w-full bg-transparent">
       <div
         ref={containerRef}
         className="selectable h-full w-full"

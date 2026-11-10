@@ -149,7 +149,7 @@ export function ClaudeWindow({ tabId }: { tabId: string }) {
 
   if (status !== 'ready') {
     return (
-      <div className="flex h-full flex-col items-center justify-center gap-2 bg-bg-base px-6 text-center">
+      <div className="flex h-full flex-col items-center justify-center gap-2 px-6 text-center">
         <Sparkles size={20} strokeWidth={1.6} className="text-fg-subtle" />
         {status === 'checking' ? (
           <p className="font-display text-sm text-fg-subtle">Looking for the Claude Code CLI…</p>
@@ -183,7 +183,7 @@ export function ClaudeWindow({ tabId }: { tabId: string }) {
   const empty = chat.length === 0 && !pending;
 
   return (
-    <div className="relative flex h-full min-h-0 bg-bg-base">
+    <div className="relative flex h-full min-h-0">
       {!hidden && (
         <ClaudeHistoryRail
           cwd={cwd}
