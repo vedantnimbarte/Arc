@@ -904,7 +904,7 @@ export default function App() {
   }, []);
 
   return (
-    <div className="shell-root relative flex h-full w-full flex-col overflow-hidden bg-bg-base text-fg-base">
+    <div className="shell-root relative flex h-full w-full flex-col overflow-hidden text-fg-base">
       <div className="desktop-wash" aria-hidden />
 
       {/* The title bar spans the full width — over the sidebar *and* the
@@ -947,7 +947,7 @@ export default function App() {
           )}
 
           <div className="relative flex min-h-0 min-w-0 flex-1 px-3 pb-2 pt-1">
-            <div className="material-content flex min-h-0 w-full overflow-hidden rounded-window shadow-panel ring-1 ring-border-subtle">
+            <div className="flex min-h-0 w-full overflow-hidden rounded-window shadow-panel ring-1 ring-border-subtle">
               <main className="relative min-w-0 flex-1 overflow-hidden p-1.5">
                 {/* Split-pane tree — each leaf hosts a tab and can be split
                       right/down into a new pane, with draggable dividers. */}

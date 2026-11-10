@@ -28,7 +28,7 @@ export function UsageDashboard() {
   const peakModel = Math.max(1, summary.byModel[0]?.tokens ?? 0);
 
   return (
-    <div className="h-full overflow-y-auto bg-bg-base p-6">
+    <div className="h-full overflow-y-auto p-6">
       <div className="mx-auto flex max-w-5xl flex-col gap-4">
         <header className="flex items-start justify-between gap-4">
           <div>

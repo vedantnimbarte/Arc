@@ -233,7 +233,7 @@ export function DiffView({ filePath, diffRoot, diffScope, diffCommit }: Props) {
         : ['Parent', 'HEAD'];
 
   return (
-    <div className="flex h-full flex-col overflow-hidden bg-bg-base text-sm">
+    <div className="flex h-full flex-col overflow-hidden text-sm">
       {/* ── File header ── */}
       <div className="flex shrink-0 items-center gap-2 border-b border-border-hairline px-3 py-1.5">
         <span className="truncate font-mono text-sm text-fg-base">{fileName}</span>

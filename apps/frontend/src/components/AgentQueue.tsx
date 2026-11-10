@@ -99,7 +99,7 @@ function QueuePopover({ tab, anchor, onClose }: { tab: Tab; anchor: DOMRect; onC
         left: Math.max(8, Math.min(anchor.left, window.innerWidth - WIDTH - 8)),
         width: WIDTH,
       }}
-      className="material-sheet z-[60] animate-popover-in overflow-hidden rounded-md bg-bg-panel shadow-sheet ring-1 ring-edge-2"
+      className="material-sheet z-[60] animate-popover-in overflow-hidden rounded-md shadow-sheet ring-1 ring-edge-2"
       // React bubbles portal events through the component tree, which here
       // runs through the tab pill's own click and mousedown handlers.
       onMouseDown={(e) => e.stopPropagation()}

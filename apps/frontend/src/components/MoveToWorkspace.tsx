@@ -194,7 +194,7 @@ export function WorkspaceFlyout({
       onClick={(e) => e.stopPropagation()}
       style={{ position: 'fixed', left, top, width: FLYOUT_W, zIndex: 10000 }}
       className={cn(
-        'material-sheet animate-popover-in rounded-lg bg-bg-panel p-1 shadow-sheet ring-1 ring-edge-2 motion-reduce:animate-none',
+        'material-sheet animate-popover-in rounded-lg p-1 shadow-sheet ring-1 ring-edge-2 motion-reduce:animate-none',
         flipped ? 'origin-top-right' : 'origin-top-left',
       )}
     >

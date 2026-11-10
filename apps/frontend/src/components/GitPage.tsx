@@ -214,7 +214,7 @@ export function GitPage() {
   };
 
   return (
-    <div className="relative flex h-screen w-screen flex-col overflow-hidden bg-bg-base text-fg-base">
+    <div className="relative flex h-screen w-screen flex-col overflow-hidden text-fg-base">
       {/* Ambient backdrop — a quiet pair of radial washes that drift behind
           the content so the surface feels lit rather than flat. */}
       <div

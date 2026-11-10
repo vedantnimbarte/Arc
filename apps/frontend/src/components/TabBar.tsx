@@ -277,7 +277,7 @@ export function TabBar() {
             role="menu"
             style={{ position: 'fixed', top: menuPos.top, left: menuPos.left }}
             className={cn(
-              'material-sheet z-50 animate-popover-in overflow-hidden rounded-md bg-bg-panel shadow-sheet ring-1 ring-edge-2',
+              'material-sheet z-50 animate-popover-in overflow-hidden rounded-md shadow-sheet ring-1 ring-edge-2',
               menuView === 'root' && 'w-52',
             )}
           >
@@ -574,7 +574,7 @@ function LayoutModePicker({
             aria-label="Layout"
             onKeyDown={onMenuKey}
             style={{ position: 'fixed', top: pos.top, left: pos.left, width: PICKER_W }}
-            className="material-sheet z-50 grid origin-top-right animate-popover-in grid-cols-3 gap-1.5 rounded-lg bg-bg-panel p-1.5 shadow-sheet ring-1 ring-edge-2 motion-reduce:animate-none"
+            className="material-sheet z-50 grid origin-top-right animate-popover-in grid-cols-3 gap-1.5 rounded-lg p-1.5 shadow-sheet ring-1 ring-edge-2 motion-reduce:animate-none"
           >
             {LAYOUT_MODES.map((m) => {
               const active = m === mode;
@@ -701,7 +701,7 @@ function AiCliMenuButton({ clis }: { clis: AiCliInfo[] }) {
           <div
             ref={menuRef}
             style={{ position: 'fixed', top: pos.top, left: pos.left }}
-            className="material-sheet z-50 max-h-[calc(100vh-16px)] animate-popover-in overflow-y-auto rounded-lg bg-bg-panel shadow-sheet ring-1 ring-edge-2"
+            className="material-sheet z-50 max-h-[calc(100vh-16px)] animate-popover-in overflow-y-auto rounded-lg shadow-sheet ring-1 ring-edge-2"
           >
             <Suspense fallback={null}>
               <AgentLauncher detected={clis} onDone={() => setOpen(false)} />

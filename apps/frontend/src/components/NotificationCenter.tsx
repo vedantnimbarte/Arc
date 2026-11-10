@@ -163,7 +163,7 @@ export function NotificationCenter() {
           <div
             ref={panelRef}
             style={{ position: 'fixed', top: pos.top, left: pos.left, width: PANEL_W }}
-            className="material-sheet z-50 flex max-h-[calc(100vh-16px)] animate-popover-in flex-col overflow-hidden rounded-lg bg-bg-panel shadow-sheet ring-1 ring-edge-2"
+            className="material-sheet z-50 flex max-h-[calc(100vh-16px)] animate-popover-in flex-col overflow-hidden rounded-lg shadow-sheet ring-1 ring-edge-2"
           >
             <header className="flex shrink-0 items-center gap-1.5 border-b border-border-hairline px-3 py-2">
               <h2 className="flex-1 font-display text-sm font-semibold tracking-tight text-fg-base">

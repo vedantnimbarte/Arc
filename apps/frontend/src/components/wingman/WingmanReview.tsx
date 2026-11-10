@@ -54,7 +54,7 @@ export function WingmanReview() {
   ).length;
 
   return (
-    <div className="flex h-full min-h-0 flex-col bg-bg-base">
+    <div className="flex h-full min-h-0 flex-col">
       <div className="flex shrink-0 items-baseline justify-between gap-2 border-b border-border-hairline px-3 py-1.5">
         <div className="flex items-baseline gap-2">
           <span className="font-display text-xs font-medium tracking-tight text-fg-base">

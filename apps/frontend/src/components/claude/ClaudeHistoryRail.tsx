@@ -90,7 +90,7 @@ export function ClaudeHistoryRail({
   return (
     <aside
       aria-label="Conversations"
-      className="flex w-64 shrink-0 flex-col border-r border-border-hairline bg-bg-chrome"
+      className="flex w-64 shrink-0 flex-col border-r border-border-hairline material-sidebar"
     >
       <div className="flex shrink-0 items-center gap-1 px-2 pt-2">
         <label className="flex h-7 min-w-0 flex-1 items-center gap-1.5 rounded-md bg-surface-1 px-2 ring-1 ring-edge-1 focus-within:ring-accent/40">

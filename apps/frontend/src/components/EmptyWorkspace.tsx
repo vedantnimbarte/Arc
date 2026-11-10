@@ -323,7 +323,7 @@ export function EmptyWorkspace({ onOpenCommandPalette }: Props) {
             data-agent-popover
             data-launcher-stay
             style={{ position: 'fixed', top: agentPos.y, left: agentPos.x }}
-            className="material-sheet z-50 max-h-[calc(100vh-24px)] animate-popover-in overflow-y-auto rounded-lg bg-bg-panel shadow-sheet ring-1 ring-edge-2"
+            className="material-sheet z-50 max-h-[calc(100vh-24px)] animate-popover-in overflow-y-auto rounded-lg shadow-sheet ring-1 ring-edge-2"
           >
             <Suspense fallback={null}>
               <AgentLauncher detected={aiClis} onDone={() => setAgentPos(null)} />
@@ -338,7 +338,7 @@ export function EmptyWorkspace({ onOpenCommandPalette }: Props) {
           <div
             data-edit-popover
             style={{ position: 'fixed', top: editPos.y, left: editPos.x }}
-            className="material-sheet z-50 w-[248px] animate-popover-in rounded-md bg-bg-panel p-3 shadow-sheet ring-1 ring-edge-2"
+            className="material-sheet z-50 w-[248px] animate-popover-in rounded-md p-3 shadow-sheet ring-1 ring-edge-2"
           >
             <WorkspaceEditPanel workspaceId={active.id} onDone={() => setEditPos(null)} />
           </div>,
