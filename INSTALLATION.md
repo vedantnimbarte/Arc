@@ -29,11 +29,17 @@ download](#verifying-a-download) below if you want to check that yourself.
 Gatekeeper will say ARC "cannot be opened because it is from an unidentified
 developer," or that it is damaged.
 
-Right-click (or Control-click) **ARC.app** in Applications and choose **Open**,
-then **Open** again in the dialog. The choice is remembered; normal launching
-works from then on.
+**macOS 15 (Sequoia) and newer:** open ARC once and dismiss the warning. Then go
+to **System Settings → Privacy & Security**, scroll to the Security section and
+click **Open Anyway** next to the message about ARC. Confirm with your password.
+The choice is remembered; normal launching works from then on.
 
-If macOS insists the app is damaged, the quarantine attribute needs clearing:
+**macOS 12–14:** right-click (or Control-click) **ARC.app** in Applications and
+choose **Open**, then **Open** again in the dialog. (On macOS 15+ this dialog no
+longer offers Open — use the steps above.)
+
+If macOS says the app is damaged, or there's no **Open Anyway** button, clear the
+quarantine attribute instead:
 
 ```bash
 xattr -dr com.apple.quarantine /Applications/ARC.app
