@@ -1,11 +1,28 @@
 import { useCallback, useEffect, useState } from 'react';
-import { ExternalLink, FlaskConical, PencilLine, RefreshCw, Tag } from 'lucide-react';
-import { gitHostReleaseList, shellOpenExternal, type GitHostRelease } from '../../lib/tauri';
+import { FlaskConical, PencilLine, Tag, User } from 'lucide-react';
+import { gitHostReleaseList, type GitHostRelease } from '../../lib/tauri';
 import { splitRepoKey, useGitHub } from '../../state/github';
-import { cn } from '../../lib/cn';
-import { ListRow } from './ListRow';
-import { meta, relative } from './format';
-import { ErrorTray, SplitPane } from './parts';
+import { ListRow, laneEnds } from './ListRow';
+import type { Glyph } from './stateGlyph';
+import {
+  BranchChip,
+  Count,
+  DetailHeader,
+  EmptyNote,
+  ErrorTray,
+  Fact,
+  Loading,
+  RefreshButton,
+  SplitPane,
+  ago,
+} from './parts';
+
+/** Draft, pre-release or published — the three states a release can be in. */
+function releaseGlyph(r: GitHostRelease): Glyph {
+  if (r.draft) return { icon: PencilLine, className: 'text-fg-subtle', label: 'Draft' };
+  if (r.prerelease) return { icon: FlaskConical, className: 'text-status-warn', label: 'Pre-release' };
+  return { icon: Tag, className: 'text-status-ok', label: 'Published' };
+}
 
 export function ReleasesView() {
   const repoKey = useGitHub((s) => s.repo);
@@ -42,52 +59,43 @@ export function ReleasesView() {
     <SplitPane
       toolbar={
         <>
-          <span className="font-display text-2xs text-fg-subtle">
-            {releases.length} releases
-          </span>
+          {!loading && <Count n={releases.length} one="release" many="releases" />}
           <div className="flex-1" />
-          <button
-            onClick={() => void load()}
-            aria-label="Refresh"
-            title="Refresh"
-            className="flex h-6 w-6 items-center justify-center rounded-full text-fg-subtle transition-colors hover:bg-surface-2 hover:text-fg-base focus-visible:outline-none focus-visible:shadow-focus"
-          >
-            <RefreshCw size={12} strokeWidth={2} className={cn(loading && 'animate-spin')} />
-          </button>
+          <RefreshButton loading={loading} onClick={() => void load()} />
         </>
       }
       list={
         <>
           {error && <ErrorTray message={error} />}
+          {releases.length === 0 && loading && <Loading />}
           {releases.length === 0 && !loading && !error ? (
-            <p className="px-2 py-8 text-center font-display text-xs text-fg-subtle">
-              No releases published from this repository.
-            </p>
+            <EmptyNote>No releases published from this repository.</EmptyNote>
           ) : (
-            releases.map((r) => (
-              <ListRow
-                key={r.tag}
-                glyph={r.draft ? PencilLine : r.prerelease ? FlaskConical : Tag}
-                glyphClass={
-                  r.draft
-                    ? 'text-fg-subtle'
-                    : r.prerelease
-                      ? 'text-status-warn'
-                      : 'text-status-ok'
-                }
-                title={r.name}
-                title_={r.name}
-                meta={meta(
-                  r.tag,
-                  r.author,
-                  r.published_at ? relative(r.published_at) : 'unpublished',
-                  r.draft && 'draft',
-                  r.prerelease && 'pre-release',
-                )}
-                selected={selected === r.tag}
-                onClick={() => setSelected(r.tag)}
-              />
-            ))
+            <div className={laneEnds}>
+              {releases.map((r) => {
+                const g = releaseGlyph(r);
+                return (
+                  <ListRow
+                    key={r.tag}
+                    glyph={g.icon}
+                    glyphClass={g.className}
+                    title={r.name || r.tag}
+                    title_={`${g.label}: ${r.name || r.tag}`}
+                    meta={
+                      <>
+                        <BranchChip name={r.tag} icon={Tag} />
+                        <Fact>{r.published_at ? ago(r.published_at) : 'not published'}</Fact>
+                        {(r.draft || r.prerelease) && (
+                          <span className={`font-display text-2xs ${g.className}`}>{g.label}</span>
+                        )}
+                      </>
+                    }
+                    selected={selected === r.tag}
+                    onClick={() => setSelected(r.tag)}
+                  />
+                );
+              })}
+            </div>
           )}
         </>
       }
@@ -100,34 +108,26 @@ export function ReleasesView() {
           </div>
         ) : (
           <div className="flex h-full flex-col">
-            <div className="shrink-0 px-4 pb-2 pt-3.5">
-              <h2 className="font-display text-sm font-semibold tracking-tight text-fg-base">
-                {active.name}
-              </h2>
-              <p className="mt-1 font-mono text-2xs tabular-nums text-fg-subtle">
-                {meta(
-                  active.tag,
-                  active.author,
-                  active.published_at ? relative(active.published_at) : 'unpublished',
-                )}
-              </p>
-              <button
-                onClick={() => void shellOpenExternal(active.html_url)}
-                className="mt-1 flex items-center gap-1 font-display text-2xs text-fg-subtle transition-colors hover:text-accent-bright focus-visible:outline-none focus-visible:shadow-focus"
-              >
-                <ExternalLink size={10} strokeWidth={2} />
-                Open on github.com
-              </button>
-            </div>
-            <div className="min-h-0 flex-1 overflow-y-auto border-t border-edge-1 px-4 py-3">
+            <DetailHeader
+              glyph={releaseGlyph(active)}
+              number={active.tag}
+              title={active.name || active.tag}
+              facts={
+                <>
+                  <BranchChip name={active.tag} icon={Tag} />
+                  <Fact icon={User}>{active.author}</Fact>
+                  <Fact>{active.published_at ? `published ${ago(active.published_at)}` : 'not published'}</Fact>
+                </>
+              }
+              htmlUrl={active.html_url}
+            />
+            <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
               {active.body.trim() ? (
-                <p className="whitespace-pre-wrap break-words font-display text-xs leading-relaxed text-fg-base/90">
+                <p className="max-w-[72ch] whitespace-pre-wrap break-words font-display text-xs leading-relaxed text-fg-base/90">
                   {active.body}
                 </p>
               ) : (
-                <p className="font-display text-xs italic text-fg-subtle">
-                  This release has no notes.
-                </p>
+                <p className="font-display text-xs italic text-fg-subtle">This release has no notes.</p>
               )}
             </div>
           </div>

@@ -1600,6 +1600,10 @@ struct GhPr {
     body: Option<String>,
     state: String,        // open / closed
     merged: Option<bool>, // present on the detail endpoint
+    /// Present on the list endpoint too, which has no `merged` — without it a
+    /// merged PR in a list reads as merely closed.
+    #[serde(default)]
+    merged_at: Option<String>,
     draft: bool,
     html_url: String,
     updated_at: String,
@@ -1654,7 +1658,7 @@ struct GhFile {
 
 impl From<GhPr> for PrSummary {
     fn from(p: GhPr) -> Self {
-        let state = if p.merged.unwrap_or(false) {
+        let state = if p.merged.unwrap_or(false) || p.merged_at.is_some() {
             PrState::Merged
         } else {
             match p.state.as_str() {
@@ -1685,6 +1689,22 @@ impl From<GhPr> for PrSummary {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn list_pr_with_merged_at_is_merged() {
+        let pr = |merged_at: &str| -> GhPr {
+            serde_json::from_str(&format!(
+                r#"{{"number":1,"title":"t","body":null,"state":"closed","draft":false,
+                    "html_url":"u","updated_at":"x","user":null,"mergeable":null,
+                    "head":{{"ref":"f"}},"base":{{"ref":"main"}}{merged_at}}}"#
+            ))
+            .unwrap()
+        };
+        let merged: PrSummary = pr(r#","merged_at":"2026-11-11T10:03:32Z""#).into();
+        let closed: PrSummary = pr(r#","merged_at":null"#).into();
+        assert!(matches!(merged.state, PrState::Merged));
+        assert!(matches!(closed.state, PrState::Closed));
+    }
 
     #[test]
     fn parses_https_url() {

@@ -4,7 +4,6 @@ import {
   GitCommitHorizontal,
   GitPullRequest,
   MessagesSquare,
-  RefreshCw,
   Tag,
   type LucideIcon,
 } from 'lucide-react';
@@ -14,10 +13,19 @@ import {
   type GitHostNotification,
 } from '../../lib/tauri';
 import { useGitHub, type GitHubSection } from '../../state/github';
-import { cn } from '../../lib/cn';
-import { ListRow } from './ListRow';
-import { meta, relative } from './format';
-import { ErrorTray, StateFilter } from './parts';
+import { ListRow, laneEnds } from './ListRow';
+import { laneColor } from './format';
+import {
+  Count,
+  EmptyNote,
+  ErrorTray,
+  Fact,
+  Loading,
+  RefreshButton,
+  StateFilter,
+  Toolbar,
+  ago,
+} from './parts';
 
 /** Why it reached you, in words a person would use. */
 const REASON: Record<string, string> = {
@@ -103,9 +111,19 @@ export function InboxView() {
     if (target) setSection(target);
   };
 
+  // One group per repository, in the order its newest notification arrived —
+  // the inbox is a set of conversations, and they live in repos.
+  const groups: { repo: string; items: GitHostNotification[] }[] = [];
+  for (const n of items) {
+    const g = groups.find((x) => x.repo === n.repo);
+    if (g) g.items.push(n);
+    else groups.push({ repo: n.repo, items: [n] });
+  }
+  const unread = items.filter((n) => n.unread).length;
+
   return (
     <div className="flex h-full min-w-0 flex-col">
-      <div className="flex shrink-0 items-center gap-2 border-b border-edge-1 px-3 py-2">
+      <Toolbar>
         <StateFilter
           value={showAll ? 'all' : 'unread'}
           onChange={(v) => setShowAll(v === 'all')}
@@ -114,40 +132,62 @@ export function InboxView() {
             { value: 'all', label: 'All' },
           ]}
         />
+        {!loading && <Count n={unread} one="unread" many="unread" />}
         <div className="flex-1" />
-        <button
-          onClick={() => void load()}
-          aria-label="Refresh"
-          title="Refresh"
-          className="flex h-6 w-6 items-center justify-center rounded-full text-fg-subtle transition-colors hover:bg-surface-2 hover:text-fg-base focus-visible:outline-none focus-visible:shadow-focus"
-        >
-          <RefreshCw size={12} strokeWidth={2} className={cn(loading && 'animate-spin')} />
-        </button>
-      </div>
+        <RefreshButton loading={loading} onClick={() => void load()} />
+      </Toolbar>
 
-      <div className="min-h-0 flex-1 overflow-y-auto px-2 py-1.5">
+      <div className="min-h-0 flex-1 overflow-y-auto px-4 py-3">
         {error && <ErrorTray message={error} />}
+        {items.length === 0 && loading && <Loading />}
         {items.length === 0 && !loading && !error ? (
-          <p className="px-2 py-8 text-center font-display text-xs text-fg-subtle">
+          <EmptyNote>
             {showAll ? 'Nothing in your inbox.' : 'Nothing unread. You are caught up.'}
-          </p>
+          </EmptyNote>
         ) : (
-          items.map((n) => (
-            <ListRow
-              key={n.id}
-              glyph={subjectIcon(n.subject_type)}
-              glyphClass={n.unread ? 'text-accent-bright' : 'text-fg-subtle'}
-              title={n.title}
-              title_={`${n.repo} — ${REASON[n.reason] ?? n.reason}`}
-              meta={meta(
-                n.repo,
-                n.number != null && `#${n.number}`,
-                REASON[n.reason] ?? n.reason,
-                relative(n.updated_at),
-              )}
-              onClick={() => open(n)}
-            />
-          ))
+          <div className="mx-auto max-w-4xl space-y-4">
+            {groups.map((g) => (
+              <section key={g.repo}>
+                <h3 className="mb-1 flex items-center gap-2 px-1 font-mono text-2xs">
+                  <span
+                    className="h-2 w-2 shrink-0 rounded-full"
+                    style={{ backgroundColor: laneColor(g.repo) }}
+                    aria-hidden
+                  />
+                  <span className="truncate font-semibold text-fg-muted">{g.repo}</span>
+                  <span className="text-fg-subtle">{g.items.length}</span>
+                </h3>
+                <div className={laneEnds}>
+                  {g.items.map((n) => (
+                    <ListRow
+                      key={n.id}
+                      glyph={subjectIcon(n.subject_type)}
+                      glyphClass={n.unread ? 'text-accent-bright' : 'text-fg-subtle'}
+                      title={
+                        <span className={n.unread ? 'font-semibold text-fg-base' : 'text-fg-muted'}>
+                          {n.title}
+                        </span>
+                      }
+                      number={n.number != null ? `#${n.number}` : undefined}
+                      title_={`${n.repo}: ${REASON[n.reason] ?? n.reason}`}
+                      meta={
+                        <>
+                          <Fact>{REASON[n.reason] ?? n.reason}</Fact>
+                          <Fact>{ago(n.updated_at)}</Fact>
+                        </>
+                      }
+                      right={
+                        n.unread ? (
+                          <span className="h-2 w-2 rounded-full bg-accent" aria-label="Unread" />
+                        ) : undefined
+                      }
+                      onClick={() => open(n)}
+                    />
+                  ))}
+                </div>
+              </section>
+            ))}
+          </div>
         )}
       </div>
     </div>
