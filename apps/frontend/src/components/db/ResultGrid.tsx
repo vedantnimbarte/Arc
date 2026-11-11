@@ -5,15 +5,18 @@ import {
   ArrowUpRight,
   ChevronLeft,
   ChevronRight,
+  ChevronsLeft,
   Copy,
   CopyPlus,
   Plus,
   RotateCcw,
+  Search,
   Trash2,
   Undo2,
   X,
 } from 'lucide-react';
-import type { DbBackend, DbQueryResult } from '../../lib/tauri';
+import type { DbBackend, DbQueryResult, DbTableSchema } from '../../lib/tauri';
+import { ObjIcon, ToolButton, ToolSep } from './chrome';
 import type { StagedEdits } from '../../lib/dbSql';
 import type { Browse } from '../../lib/dbBrowse';
 import { toCsv, toInsertSql, toJson, toMarkdown } from '../../lib/dbExport';
@@ -60,13 +63,18 @@ interface Props {
   links?: Record<string, { to: string; follow: (row: Array<string | null>) => void }>;
   /** For "copy as INSERT": the dialect, and the table name to insert into. */
   copyAs: { backend: DbBackend; table: string | null };
+  /** The table's columns when the grid shows one table: types and keys for
+   *  the headers. Absent for an arbitrary query. */
+  columnInfo?: DbTableSchema['columns'];
 }
 
-const TH =
-  'whitespace-nowrap border-b border-r border-border-hairline px-2.5 py-1 font-sans text-2xs uppercase tracking-widest text-fg-subtle/70';
-const TD = 'max-w-md truncate border-b border-r border-border-hairline px-2.5 py-0.5 font-mono text-xs';
+const TH = 'whitespace-nowrap border-b border-r border-edge-1 px-2.5 py-1 text-left align-bottom font-normal';
+const TD = 'h-6 max-w-md truncate border-b border-r border-edge-1 px-2.5 font-mono text-xs';
+const GUTTER = 'sticky left-0 z-[1] border-b border-r border-edge-2 bg-bg-chrome';
 const BAR_BTN =
-  'flex items-center gap-1 rounded px-1.5 py-0.5 font-sans text-2xs text-fg-muted transition hover:bg-surface-2 hover:text-fg-base';
+  'flex h-6 items-center gap-1 rounded px-1.5 font-display text-2xs text-fg-muted transition hover:bg-surface-2 hover:text-fg-base';
+/** Integers and decimals read right-aligned, the way a spreadsheet sets them. */
+const NUMERIC = /^-?\d+(\.\d+)?$/;
 
 type CopyFormat = 'csv' | 'json' | 'sql' | 'markdown';
 
@@ -76,7 +84,8 @@ type CopyFormat = 'csv' | 'json' | 'sql' | 'markdown';
  * selection, and — for a table preview with a primary key — double-click a
  * cell to edit. Edits are only staged here; the parent turns them into SQL.
  */
-export function ResultGrid({ result, editing, readOnlyReason, browsing, links, copyAs }: Props) {
+export function ResultGrid({ result, editing, readOnlyReason, browsing, links, copyAs, columnInfo }: Props) {
+  const info = useMemo(() => new Map((columnInfo ?? []).map((c) => [c.name, c])), [columnInfo]);
   const [sort, setSort] = useState<Sort>(null);
   const [filter, setFilter] = useState('');
   const [editingCell, setEditingCell] = useState<{ row: number | `new-${number}`; col: number } | null>(null);
@@ -226,27 +235,41 @@ export function ResultGrid({ result, editing, readOnlyReason, browsing, links, c
 
   const pageOffset = browsing ? browsing.browse.page * browsing.browse.pageSize : 0;
   const nSel = selected.size;
+  const page = browsing?.browse.page ?? 0;
+  const go = (p: number) => browsing && browsing.onChange({ ...browsing.browse, page: p });
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <div className="flex shrink-0 items-center gap-2 border-b border-border-hairline px-3 py-1">
+      {/* Grid toolbar: paging and the filter, or what to do with the selection. */}
+      <div className="flex h-8 shrink-0 items-center gap-0.5 border-b border-edge-1 px-2">
+        {browsing && (
+          <>
+            <ToolButton icon={ChevronsLeft} label="First page" onClick={() => go(0)} disabled={page === 0} />
+            <ToolButton icon={ChevronLeft} label="Previous page" onClick={() => go(page - 1)} disabled={page === 0} />
+            <span className="px-1 font-mono text-2xs tabular-nums text-fg-muted" title="Rows on this page">
+              {result.rows.length === 0 ? '0' : `${pageOffset + 1}–${pageOffset + result.rows.length}`}
+            </span>
+            <ToolButton icon={ChevronRight} label="Next page" onClick={() => go(page + 1)} disabled={!browsing.hasNext} />
+            <ToolSep />
+          </>
+        )}
         {nSel > 0 ? (
           <>
-            <span className="font-sans text-2xs text-fg-base">
+            <span className="px-1 font-display text-2xs text-fg-base">
               {nSel} row{nSel === 1 ? '' : 's'} selected
             </span>
-            <span className="font-sans text-2xs text-fg-subtle">Copy as</span>
+            <span className="px-1 font-display text-2xs text-fg-subtle">Copy as</span>
             {(['csv', 'json', 'sql', 'markdown'] as const).map((f) => (
               <button key={f} type="button" onClick={() => void copySelection(f)} className={BAR_BTN}>
-                <Copy size={10} />
+                <Copy size={11} />
                 {f === 'sql' ? 'INSERT' : f === 'markdown' ? 'Markdown' : f.toUpperCase()}
               </button>
             ))}
             {editing && (
               <>
-                <span className="mx-0.5 h-3 w-px bg-border-hairline" />
+                <ToolSep />
                 <button type="button" onClick={duplicateSelection} className={BAR_BTN} title="Stage copies as new rows">
-                  <CopyPlus size={10} /> Duplicate
+                  <CopyPlus size={11} /> Duplicate
                 </button>
                 <button
                   type="button"
@@ -254,83 +277,100 @@ export function ResultGrid({ result, editing, readOnlyReason, browsing, links, c
                   className={cn(BAR_BTN, 'hover:text-status-err')}
                   title="Stage these rows for deletion"
                 >
-                  <Trash2 size={10} /> Delete
+                  <Trash2 size={11} /> Delete
                 </button>
               </>
             )}
             <button type="button" onClick={() => setSelected(new Set())} className={cn(BAR_BTN, 'ml-auto')}>
-              <X size={10} /> Clear
+              <X size={11} /> Clear selection
             </button>
           </>
         ) : (
           <>
             {browsing ? (
-              <span className="font-sans text-2xs text-fg-subtle/80">
-                Filter in a column: text, <code>=v</code>, <code>&gt;v</code>, <code>null</code>
+              <span className="px-1 font-display text-2xs text-fg-subtle">
+                Filter under each header: text, <code className="font-mono">=v</code>,{' '}
+                <code className="font-mono">&gt;v</code>, <code className="font-mono">null</code>
               </span>
             ) : (
-              <input
-                value={filter}
-                onChange={(e) => setFilter(e.target.value)}
-                placeholder="Filter rows"
-                spellCheck={false}
-                className="w-48 rounded-md border border-border-subtle bg-bg-base/60 px-2 py-0.5 font-sans text-xs text-fg-base placeholder:text-fg-subtle focus:border-accent/45 focus:outline-none"
-              />
+              <label className="flex h-6 w-56 items-center gap-1.5 rounded bg-surface-1 px-2 ring-1 ring-inset ring-edge-1 focus-within:ring-accent/50">
+                <Search size={11} className="shrink-0 text-fg-subtle" />
+                <input
+                  value={filter}
+                  onChange={(e) => setFilter(e.target.value)}
+                  placeholder="Filter rows"
+                  aria-label="Filter rows"
+                  spellCheck={false}
+                  className="min-w-0 flex-1 bg-transparent font-mono text-xs text-fg-base placeholder:font-display placeholder:text-fg-subtle/70 focus:outline-none"
+                />
+              </label>
             )}
             {!browsing && (filter || sort) && (
-              <span className="font-sans text-2xs text-fg-subtle">
+              <span className="px-1.5 font-mono text-2xs tabular-nums text-fg-subtle">
                 {order.length} of {result.rows.length}
               </span>
             )}
+            <span className="flex-1" />
             {editing ? (
               <>
-                <span className="font-sans text-2xs text-fg-subtle/70">Double-click a cell to edit</span>
-                <button
-                  type="button"
-                  onClick={() => update((e) => void e.inserts.push(new Map()))}
-                  className={cn(BAR_BTN, 'ml-auto')}
-                >
-                  <Plus size={10} /> Add row
+                <span className="px-1 font-display text-2xs text-fg-subtle">Double-click a cell to edit</span>
+                <button type="button" onClick={() => update((e) => void e.inserts.push(new Map()))} className={BAR_BTN}>
+                  <Plus size={11} /> Add row
                 </button>
               </>
             ) : (
-              readOnlyReason && <span className="ml-auto font-sans text-2xs text-fg-subtle/70">{readOnlyReason}</span>
+              readOnlyReason && <span className="px-1 font-display text-2xs text-fg-subtle">{readOnlyReason}</span>
             )}
           </>
         )}
       </div>
 
       <div className="min-h-0 flex-1 overflow-auto">
-        <table className="w-max min-w-full border-collapse text-left">
-          <thead className="sticky top-0 z-[1] bg-bg-chrome">
+        {/* Columns size to their content, like an IDE grid — stretching them
+            to the pane's width pushed right-aligned numbers far from the
+            header they belong to. */}
+        <table className="w-max border-separate border-spacing-0 text-left">
+          <thead className="sticky top-0 z-[2] bg-bg-chrome">
             <tr>
-              <th className={cn(TH, 'w-8 px-1 text-right normal-case tracking-normal')} />
+              <th className={cn(TH, GUTTER, 'z-[3] w-10 px-1')} />
               {editing && <th className={cn(TH, 'w-6 px-1')} />}
               {result.columns.map((c, i) => {
                 const dir = sortOf(i);
                 const link = links?.[c];
+                const col = info.get(c);
                 return (
                   <th
                     key={`${c}-${i}`}
-                    className={cn(TH, 'cursor-pointer select-none hover:text-fg-base')}
+                    className={cn(TH, 'cursor-pointer select-none hover:bg-surface-1')}
                     onClick={() => headerClick(i)}
-                    title={link ? `References ${link.to}` : undefined}
+                    title={[link && `References ${link.to}`, col && `${col.data_type}${col.nullable ? '' : ' not null'}`].filter(Boolean).join('\n') || undefined}
+                    aria-sort={dir === 1 ? 'ascending' : dir === -1 ? 'descending' : undefined}
                   >
-                    <span className="inline-flex items-center gap-1">
-                      {c}
-                      {link && <ArrowUpRight size={9} className="text-accent" />}
-                      {dir !== null && (dir === 1 ? <ArrowUp size={9} /> : <ArrowDown size={9} />)}
+                    <span className="flex items-center gap-1">
+                      {col?.primary_key ? <ObjIcon kind="pk" size={11} /> : link ? <ObjIcon kind="fk" size={11} /> : null}
+                      <span className="font-mono text-xs font-semibold text-fg-base">{c}</span>
+                      {link && <ArrowUpRight size={10} className="text-accent" />}
+                      {dir !== null && (
+                        <span className="text-accent-bright">
+                          {dir === 1 ? <ArrowUp size={10} /> : <ArrowDown size={10} />}
+                        </span>
+                      )}
                     </span>
+                    {col && (
+                      <span className="mt-px block font-mono text-[10px] lowercase leading-3 text-fg-subtle">
+                        {col.data_type}
+                      </span>
+                    )}
                   </th>
                 );
               })}
             </tr>
             {browsing && (
               <tr>
-                <th className="border-b border-r border-border-hairline" />
-                {editing && <th className="border-b border-r border-border-hairline" />}
+                <th className={cn(GUTTER, 'z-[3] border-t-0')} />
+                {editing && <th className="border-b border-r border-edge-1" />}
                 {result.columns.map((c, i) => (
-                  <th key={`${c}-${i}-f`} className="border-b border-r border-border-hairline p-0">
+                  <th key={`${c}-${i}-f`} className="border-b border-r border-edge-1 p-0 font-normal">
                     <ColumnFilter
                       value={browsing.browse.filters[c] ?? ''}
                       onCommit={(v) =>
@@ -347,42 +387,48 @@ export function ResultGrid({ result, editing, readOnlyReason, browsing, links, c
             )}
           </thead>
           <tbody>
-            {order.map((ri, pos) => {
+            {order.map((ri) => {
               const deleted = edits?.deletes.has(ri) ?? false;
               const isSel = selected.has(ri);
               return (
                 <tr
                   key={ri}
                   className={cn(
-                    pos % 2 ? 'bg-surface-1' : undefined,
-                    deleted && 'bg-status-err/10',
-                    isSel && 'bg-accent/15',
+                    'group/row hover:bg-surface-1',
+                    deleted && 'bg-status-err/[0.09]',
+                    isSel && 'bg-accent/[0.14] hover:bg-accent/[0.18]',
                   )}
                 >
                   <td
                     onClick={(e) => clickRowNumber(ri, e)}
                     className={cn(
-                      'w-8 cursor-pointer select-none border-b border-r border-border-hairline px-1.5 text-right font-sans text-2xs tabular-nums',
-                      isSel ? 'text-fg-base' : 'text-fg-subtle/60 hover:text-fg-base',
+                      GUTTER,
+                      'h-6 w-10 cursor-pointer select-none px-1.5 text-right font-mono text-2xs tabular-nums',
+                      isSel ? 'text-fg-base' : 'text-fg-subtle hover:text-fg-base',
                     )}
                     title="Select row (shift: range, ⌘/Ctrl: add)"
                   >
+                    {isSel && <span aria-hidden className="absolute inset-y-0 left-0 w-[2px] bg-accent" />}
                     {pageOffset + ri + 1}
                   </td>
                   {editing && (
-                    <td className="w-6 border-b border-r border-border-hairline px-1 text-center">
+                    <td className="h-6 w-6 border-b border-r border-edge-1 px-1 text-center">
                       <button
                         type="button"
                         title={deleted ? 'Keep this row' : 'Delete this row'}
+                        aria-label={deleted ? 'Keep this row' : 'Delete this row'}
                         onClick={() =>
                           update((e) => {
                             if (e.deletes.has(ri)) e.deletes.delete(ri);
                             else e.deletes.add(ri);
                           })
                         }
-                        className="text-fg-subtle transition hover:text-status-err"
+                        className={cn(
+                          'text-fg-subtle transition hover:text-status-err focus-visible:opacity-100',
+                          !deleted && 'opacity-0 group-hover/row:opacity-100',
+                        )}
                       >
-                        {deleted ? <Undo2 size={10} /> : <Trash2 size={10} />}
+                        {deleted ? <Undo2 size={11} /> : <Trash2 size={11} />}
                       </button>
                     </td>
                   )}
@@ -398,8 +444,9 @@ export function ResultGrid({ result, editing, readOnlyReason, browsing, links, c
                         className={cn(
                           TD,
                           'group/cell',
-                          deleted ? 'text-fg-subtle line-through' : 'text-fg-base/85',
-                          dirty && 'bg-status-warn/15',
+                          value !== null && NUMERIC.test(value) && 'text-right tabular-nums',
+                          deleted ? 'text-fg-subtle line-through' : 'text-fg-base/90',
+                          dirty && 'bg-[#4f8cff]/[0.16] text-fg-base',
                           isEditing && 'p-0',
                         )}
                       >
@@ -416,9 +463,10 @@ export function ResultGrid({ result, editing, readOnlyReason, browsing, links, c
                               type="button"
                               onClick={() => link.follow(result.rows[ri]!)}
                               title={`Open the ${link.to} row this points to`}
+                              aria-label={`Open the ${link.to} row this points to`}
                               className="text-accent/70 transition hover:text-accent"
                             >
-                              <ArrowUpRight size={10} />
+                              <ArrowUpRight size={11} />
                             </button>
                           </span>
                         ) : (
@@ -431,18 +479,19 @@ export function ResultGrid({ result, editing, readOnlyReason, browsing, links, c
               );
             })}
             {edits?.inserts.map((row, ii) => (
-              <tr key={`new-${ii}`} className="bg-status-ok/10">
-                <td className="w-8 border-b border-r border-border-hairline px-1.5 text-right font-sans text-2xs text-status-ok">
+              <tr key={`new-${ii}`} className="bg-status-ok/[0.08]">
+                <td className={cn(GUTTER, 'h-6 w-10 px-1.5 text-right font-display text-2xs font-semibold text-status-ok')}>
                   new
                 </td>
-                <td className="w-6 border-b border-r border-border-hairline px-1 text-center">
+                <td className="h-6 w-6 border-b border-r border-edge-1 px-1 text-center">
                   <button
                     type="button"
                     title="Discard this new row"
+                    aria-label="Discard this new row"
                     onClick={() => update((e) => void e.inserts.splice(ii, 1))}
                     className="text-fg-subtle transition hover:text-status-err"
                   >
-                    <RotateCcw size={10} />
+                    <RotateCcw size={11} />
                   </button>
                 </td>
                 {result.columns.map((c, ci) => {
@@ -453,7 +502,7 @@ export function ResultGrid({ result, editing, readOnlyReason, browsing, links, c
                     <td
                       key={ci}
                       onDoubleClick={() => setEditingCell({ row: key, col: ci })}
-                      className={cn(TD, 'text-fg-base/85', isEditing && 'p-0')}
+                      className={cn(TD, 'text-fg-base/90', isEditing && 'p-0')}
                     >
                       {isEditing ? (
                         <CellEditor
@@ -464,7 +513,7 @@ export function ResultGrid({ result, editing, readOnlyReason, browsing, links, c
                       ) : has ? (
                         <CellText value={row.get(c) ?? null} />
                       ) : (
-                        <span className="italic text-fg-subtle/60">default</span>
+                        <span className="italic text-fg-subtle/60">&lt;default&gt;</span>
                       )}
                     </td>
                   );
@@ -474,30 +523,6 @@ export function ResultGrid({ result, editing, readOnlyReason, browsing, links, c
           </tbody>
         </table>
       </div>
-
-      {browsing && (browsing.browse.page > 0 || browsing.hasNext) && (
-        <div className="flex shrink-0 items-center justify-end gap-1 border-t border-border-hairline px-3 py-1 font-sans text-2xs text-fg-subtle">
-          <span className="mr-1 tabular-nums">
-            Rows {pageOffset + 1}–{pageOffset + result.rows.length}
-          </span>
-          <button
-            type="button"
-            disabled={browsing.browse.page === 0}
-            onClick={() => browsing.onChange({ ...browsing.browse, page: browsing.browse.page - 1 })}
-            className={cn(BAR_BTN, 'disabled:opacity-40')}
-          >
-            <ChevronLeft size={10} /> Previous
-          </button>
-          <button
-            type="button"
-            disabled={!browsing.hasNext}
-            onClick={() => browsing.onChange({ ...browsing.browse, page: browsing.browse.page + 1 })}
-            className={cn(BAR_BTN, 'disabled:opacity-40')}
-          >
-            Next <ChevronRight size={10} />
-          </button>
-        </div>
-      )}
     </div>
   );
 }
@@ -521,10 +546,14 @@ function ColumnFilter({ value, onCommit }: { value: string; onCommit: (v: string
         }
       }}
       onBlur={commit}
+      // An input asks for ~20 characters by default, which would set every
+      // column's width; let the header and the data decide instead.
+      size={1}
+      aria-label="Filter this column"
       placeholder="filter"
       spellCheck={false}
       className={cn(
-        'w-full min-w-[5rem] bg-transparent px-2.5 py-0.5 font-mono text-xs font-normal normal-case tracking-normal text-fg-base placeholder:text-fg-subtle/40 focus:bg-bg-base focus:outline-none',
+        'h-6 w-full min-w-[5rem] bg-transparent px-2.5 font-mono text-xs font-normal normal-case tracking-normal text-fg-base placeholder:text-fg-subtle/40 focus:bg-bg-base focus:outline-none',
         value && 'bg-accent-soft',
       )}
     />
@@ -532,7 +561,7 @@ function ColumnFilter({ value, onCommit }: { value: string; onCommit: (v: string
 }
 
 function CellText({ value }: { value: string | null }) {
-  return value === null ? <span className="italic text-fg-subtle/60">NULL</span> : <>{value}</>;
+  return value === null ? <span className="italic text-fg-subtle/60">&lt;null&gt;</span> : <>{value}</>;
 }
 
 /** In-cell input. Enter commits, Escape cancels, the NULL button commits NULL. */

@@ -61,7 +61,12 @@ const theme = EditorView.theme({
   '&.cm-editor': { height: '100%' },
   '.cm-scroller': { fontFamily: 'inherit', overflow: 'auto' },
   '.cm-content': { caretColor: '#d4d6dc', padding: '8px 0' },
-  '.cm-gutters': { backgroundColor: 'transparent', color: MOCHA.overlay0, border: 'none' },
+  '.cm-gutters': {
+    backgroundColor: 'transparent',
+    color: MOCHA.overlay0,
+    border: 'none',
+    borderRight: '1px solid var(--edge-1, rgba(255, 255, 255, 0.05))',
+  },
   '.cm-activeLine, .cm-activeLineGutter': { backgroundColor: 'rgba(255,255,255,0.025)' },
   '.cm-cursor, .cm-dropCursor': { borderLeftColor: '#d4d6dc', borderLeftWidth: '2px' },
   '&.cm-focused > .cm-scroller > .cm-selectionLayer .cm-selectionBackground, .cm-selectionBackground, ::selection':

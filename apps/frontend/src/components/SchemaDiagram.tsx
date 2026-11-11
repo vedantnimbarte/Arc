@@ -19,7 +19,7 @@ import {
 import '@xyflow/react/dist/base.css';
 import dagre from '@dagrejs/dagre';
 import { toPng, toSvg } from 'html-to-image';
-import { Copy, ImageDown, KeyRound, Link2, Table2, X } from 'lucide-react';
+import { Copy, FileImage, ImageDown, KeyRound, Network, Search, Table2, X } from 'lucide-react';
 import {
   fsPickSaveFile,
   fsWriteBytes,
@@ -33,6 +33,7 @@ import { createTableSql } from '../lib/schemaDiff';
 import { formatRowCount } from '../lib/dbFormat';
 import { toast, toastError } from '../state/toast';
 import { cn } from '../lib/cn';
+import { ObjIcon, Placeholder, ToolButton, ToolSep, ToolTitle, ToolWindowHeader, textBtn } from './db/chrome';
 
 interface Props {
   backend: DbBackend;
@@ -84,21 +85,22 @@ function TableNode({ data, selected }: NodeProps<Node<TableNodeData>>) {
   return (
     <div
       className={cn(
-        'overflow-hidden rounded-lg border bg-bg-panel shadow-panel transition-opacity',
-        selected ? 'border-accent ring-1 ring-accent/60' : 'border-border-hairline',
+        'overflow-hidden rounded border bg-bg-panel shadow-panel transition-opacity',
+        selected ? 'border-accent ring-1 ring-accent/60' : 'border-edge-2',
         data.dim && 'opacity-30',
       )}
       style={{ width: NODE_W }}
     >
-      <div className="flex items-center gap-1.5 border-b border-border-hairline bg-surface-1 px-2 py-1.5">
-        <span className="min-w-0 flex-1 truncate font-mono text-xs text-fg-base">{data.table}</span>
+      <div className="flex items-center gap-1.5 border-b border-edge-2 bg-surface-2 px-2" style={{ height: HEADER_H }}>
+        <ObjIcon kind="table" size={12} />
+        <span className="min-w-0 flex-1 truncate font-mono text-xs font-semibold text-fg-base">{data.table}</span>
         {data.rows && (
-          <span className="shrink-0 font-sans text-[9px] text-fg-subtle" title="rows">
+          <span className="shrink-0 font-mono text-[10px] tabular-nums text-fg-subtle" title="rows">
             {data.rows}
           </span>
         )}
         {data.isJunction && (
-          <span className="shrink-0 rounded bg-status-merged/15 px-1 py-0.5 font-sans text-[9px] uppercase tracking-wide text-status-merged">
+          <span className="shrink-0 rounded bg-status-merged/15 px-1 font-mono text-[10px] leading-4 text-status-merged">
             M:N
           </span>
         )}
@@ -109,21 +111,17 @@ function TableNode({ data, selected }: NodeProps<Node<TableNodeData>>) {
           <div
             key={c.name}
             className={cn(
-              'relative flex items-center gap-1.5 border-b border-border-hairline/60 px-2 py-1 last:border-b-0',
+              'relative flex items-center gap-1.5 border-b border-edge-1 px-2 last:border-b-0',
               isHighlighted && 'bg-accent-soft',
             )}
             style={{ height: ROW_H }}
           >
             <Handle type="target" position={Position.Left} id={`t:${c.name}`} style={handleStyle('left')} />
-            {c.primary_key ? (
-              <KeyRound size={9} className="shrink-0 text-accent" />
-            ) : fkColumns.has(c.name) ? (
-              <Link2 size={9} className="shrink-0 text-fg-subtle" />
-            ) : (
-              <span className="w-[9px] shrink-0" />
-            )}
-            <span className="min-w-0 flex-1 truncate font-mono text-2xs text-fg-base/85">{c.name}</span>
-            <span className="shrink-0 truncate font-mono text-2xs text-fg-subtle/70">{c.data_type}</span>
+            <ObjIcon kind={c.primary_key ? 'pk' : fkColumns.has(c.name) ? 'fk' : 'column'} size={10} />
+            <span className={cn('min-w-0 flex-1 truncate font-mono text-2xs', c.primary_key ? 'font-semibold text-fg-base' : 'text-fg-base/85')}>
+              {c.name}
+            </span>
+            <span className="shrink-0 truncate font-mono text-[10px] lowercase text-fg-subtle">{c.data_type}</span>
             <Handle type="source" position={Position.Right} id={`s:${c.name}`} style={handleStyle('right')} />
           </div>
         );
@@ -147,13 +145,13 @@ function handleStyle(side: 'left' | 'right'): CSSProperties {
 
 const KIND_PILL: Record<RelationKind, string> = {
   '1:1': 'bg-accent-soft text-fg-base ring-1 ring-accent/40',
-  '1:N': 'bg-surface-2 text-fg-muted',
+  '1:N': 'bg-surface-2 text-fg-muted ring-1 ring-edge-2',
   'M:N': 'bg-status-merged/15 text-status-merged',
 };
 
 const KIND_STROKE: Record<RelationKind, string> = {
   '1:1': 'rgb(var(--accent-bright, 230 232 236))',
-  '1:N': 'var(--fg-subtle, rgba(220, 226, 238, 0.4))',
+  '1:N': 'rgba(164, 147, 255, 0.55)',
   'M:N': '#9f8cf2',
 };
 
@@ -415,17 +413,55 @@ export function SchemaDiagram({ backend, schemas, rowCounts, onOpenTable, render
 
   if (Object.keys(schemas).length === 0) {
     return (
-      <div className="flex h-full items-center justify-center font-sans text-xs text-fg-subtle">No tables.</div>
+      <Placeholder>No tables.</Placeholder>
     );
   }
 
   const selectedSchema = selected ? schemas[selected] : null;
-  const toolBtn =
-    'flex items-center gap-1 rounded px-1.5 py-0.5 font-sans text-2xs text-fg-muted transition hover:bg-surface-2 hover:text-fg-base';
-
   return (
     <div className="flex h-full">
-      <div ref={container} className="relative min-w-0 flex-1" onClick={() => setMenu(null)}>
+      <div className="flex min-w-0 flex-1 flex-col">
+      <ToolWindowHeader
+        actions={
+          <>
+            <ToolButton icon={ImageDown} label="Export PNG" onClick={() => void exportImage('png')}>
+              PNG
+            </ToolButton>
+            <ToolButton icon={FileImage} label="Export SVG" onClick={() => void exportImage('svg')}>
+              SVG
+            </ToolButton>
+            <ToolSep />
+            <ToolButton icon={X} label="Back to results" onClick={onClose} />
+          </>
+        }
+      >
+        <ToolTitle icon={Network} title="Diagram" subtitle={`${Object.keys(schemas).length} tables`} />
+        <ToolSep />
+        <label className="flex h-6 w-44 shrink-0 items-center gap-1.5 rounded bg-surface-1 px-2 ring-1 ring-inset ring-edge-1 focus-within:ring-accent/50">
+          <Search size={11} className="shrink-0 text-fg-subtle" />
+          <input
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Find table"
+            aria-label="Find table"
+            spellCheck={false}
+            className="min-w-0 flex-1 bg-transparent font-mono text-xs text-fg-base placeholder:font-display placeholder:text-fg-subtle/70 focus:outline-none"
+          />
+        </label>
+        {matches && <span className="shrink-0 px-1 font-mono text-2xs tabular-nums text-fg-subtle">{matches.size}</span>}
+        {Object.keys(junctions).length > 0 && (
+          <label className={cn(textBtn, 'cursor-pointer')} title="Draw each junction table as one M:N edge">
+            <input
+              type="checkbox"
+              checked={collapseJunctions}
+              onChange={(e) => setCollapseJunctions(e.target.checked)}
+              className="h-3 w-3 accent-accent"
+            />
+            Collapse M:N
+          </label>
+        )}
+      </ToolWindowHeader>
+      <div ref={container} className="relative min-h-0 flex-1" onClick={() => setMenu(null)}>
         <ReactFlow
           nodes={decoratedNodes}
           edges={decoratedEdges}
@@ -447,58 +483,32 @@ export function SchemaDiagram({ backend, schemas, rowCounts, onOpenTable, render
           minZoom={0.1}
           proOptions={{ hideAttribution: true }}
         >
-          <Background gap={20} size={1} color="var(--border-hairline, rgba(0,0,0,0.42))" />
+          <Background gap={20} size={1} color="var(--edge-2, rgba(255,255,255,0.1))" />
           <Controls showInteractive={false} />
-          <MiniMap pannable zoomable className="!bg-bg-panel" style={{ width: 140, height: 90 }} />
+          {/* React Flow's defaults are light grey on a near-white mask; use
+              the theme's own surfaces so it reads on every theme. */}
+          <MiniMap
+            pannable
+            zoomable
+            className="!bg-bg-panel ring-1 ring-edge-2"
+            nodeColor="var(--surface-3, rgba(255,255,255,0.11))"
+            nodeStrokeColor="var(--edge-2, rgba(255,255,255,0.10))"
+            maskColor="var(--scrim-1, rgba(0,0,0,0.22))"
+            style={{ width: 140, height: 90 }}
+          />
         </ReactFlow>
 
-        <div className="absolute left-2 top-2 z-10 flex items-center gap-1 rounded-lg bg-bg-panel/90 p-1 shadow-control ring-1 ring-edge-1">
-          <input
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder="Find table"
-            spellCheck={false}
-            className="w-36 rounded border border-border-subtle bg-bg-base/60 px-1.5 py-0.5 font-sans text-2xs text-fg-base placeholder:text-fg-subtle focus:border-accent/45 focus:outline-none"
-          />
-          {matches && <span className="px-1 font-sans text-2xs text-fg-subtle">{matches.size}</span>}
-          {Object.keys(junctions).length > 0 && (
-            <label className={cn(toolBtn, 'cursor-pointer')} title="Draw each junction table as one M:N edge">
-              <input
-                type="checkbox"
-                checked={collapseJunctions}
-                onChange={(e) => setCollapseJunctions(e.target.checked)}
-                className="h-3 w-3 accent-accent"
-              />
-              Collapse M:N
-            </label>
-          )}
-          <button type="button" onClick={() => void exportImage('png')} className={toolBtn} title="Export PNG">
-            <ImageDown size={11} /> PNG
-          </button>
-          <button type="button" onClick={() => void exportImage('svg')} className={toolBtn} title="Export SVG">
-            SVG
-          </button>
-        </div>
-
-        <button
-          type="button"
-          onClick={onClose}
-          title="Back to results"
-          className="absolute right-2 top-2 z-10 flex h-6 w-6 items-center justify-center rounded bg-bg-panel text-fg-subtle shadow-control hover:text-fg-base"
-        >
-          <X size={12} />
-        </button>
 
         {menu && (
           <div
-            className="absolute z-20 min-w-[11rem] rounded-lg bg-bg-panel py-1 shadow-panel ring-1 ring-edge-2"
+            className="absolute z-20 min-w-[11rem] rounded-md bg-bg-panel p-1 shadow-sheet ring-1 ring-edge-2"
             style={{ left: menu.x, top: menu.y }}
             onClick={(e) => e.stopPropagation()}
           >
             {[
-              { label: 'Open data', icon: <Table2 size={11} />, run: () => onOpenTable(menu.table) },
-              { label: 'Show details', icon: <KeyRound size={11} />, run: () => setSelected(menu.table) },
-              { label: 'Copy CREATE TABLE', icon: <Copy size={11} />, run: () => void copyDdl(menu.table) },
+              { label: 'Open data', icon: <Table2 size={12} />, run: () => onOpenTable(menu.table) },
+              { label: 'Show details', icon: <KeyRound size={12} />, run: () => setSelected(menu.table) },
+              { label: 'Copy CREATE TABLE', icon: <Copy size={12} />, run: () => void copyDdl(menu.table) },
             ].map((item) => (
               <button
                 key={item.label}
@@ -507,7 +517,7 @@ export function SchemaDiagram({ backend, schemas, rowCounts, onOpenTable, render
                   setMenu(null);
                   item.run();
                 }}
-                className="flex w-full items-center gap-2 px-3 py-1 text-left font-sans text-xs text-fg-base/90 hover:bg-surface-2"
+                className="flex h-7 w-full items-center gap-2 rounded px-2 text-left font-display text-xs text-fg-base/90 hover:bg-surface-2 focus-visible:outline-none focus-visible:bg-surface-2"
               >
                 <span className="text-fg-subtle">{item.icon}</span>
                 {item.label}
@@ -516,8 +526,9 @@ export function SchemaDiagram({ backend, schemas, rowCounts, onOpenTable, render
           </div>
         )}
       </div>
+      </div>
       {selected && selectedSchema && (
-        <div className="w-72 shrink-0 overflow-auto border-l border-border-hairline">
+        <div className="w-72 shrink-0 overflow-auto border-l border-edge-1">
           {renderDetails(selected, selectedSchema, () => setSelected(null))}
         </div>
       )}
