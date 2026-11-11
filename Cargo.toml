@@ -63,7 +63,7 @@ bytes = "1.7"
 #
 # There is no separate russh-keys any more — it was folded into russh as
 # `russh::keys` (its own last publish was an 0.50 beta).
-russh = { version = "0.63", default-features = false, features = ["ring"] }
+russh = { version = "0.65", default-features = false, features = ["ring"] }
 # SFTP client for remote workspaces, layered over a russh channel stream.
 russh-sftp = "2.4"
 # Both must match what ssh-key 0.7 uses, or the RNG traits are different
@@ -123,7 +123,12 @@ tauri-build = { version = "2", features = [] }
 tauri-plugin-autostart = "2"
 tauri-plugin-window-state = "2"
 tauri-plugin-notification = "2"
-tauri-plugin-updater = "2"
+# Without the default `zip` feature: it only unpacks `.zip` update bundles on
+# Windows and `.tar.gz` AppImages on Linux, and our releases ship neither
+# (latest.json serves the raw .exe/.msi and .AppImage; macOS .app.tar.gz uses
+# tar/flate2 unconditionally). Dropping it removes `zip` 4.x, which has open
+# advisories (incl. a critical one) and no 2.x updater on a fixed version.
+tauri-plugin-updater = { version = "2", default-features = false, features = ["rustls-tls", "system-proxy"] }
 tauri-plugin-process = "2"
 
 # Internal crates

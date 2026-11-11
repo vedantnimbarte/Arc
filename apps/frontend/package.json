@@ -55,7 +55,7 @@
     "@xyflow/react": "^12.12.0",
     "clsx": "^2.1.1",
     "codemirror": "^6.0.2",
-    "dompurify": "^3.4.15",
+    "dompurify": "^3.4.17",
     "html-to-image": "1.11.11",
     "lucide-react": "^0.451.0",
     "marked": "^18.0.11",
@@ -74,7 +74,7 @@
     "postcss": "^8.5.28",
     "tailwindcss": "^3.4.19",
     "typescript": "^5.9.3",
-    "vite": "^6.4.3",
-    "vitest": "^4.1.11"
+    "vite": "^6.4.5",
+    "vitest": "^4.1.12"
   }
 }
