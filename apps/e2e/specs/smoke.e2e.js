@@ -33,21 +33,10 @@ async function assertNoCrash() {
 /** Type `echo <marker>` into terminal `id` with real key events and wait for
  *  the shell's output line (the echoed command line itself doesn't count). */
 async function echoRoundTrip(id) {
-  // `ee` on purpose: a repeated key must survive the trip. A random marker
-  // only hit a doubled letter now and then, which made this look flaky.
+  // `ee` on purpose: a repeated key must survive the trip. The marker used to
+  // be fully random, so it only hit a doubled letter now and then — and the
+  // test failed only then, which looked like flakiness.
   const marker = `arc-e2e-${Math.random().toString(36).slice(2, 10)}-ee`;
-  // DIAGNOSTIC (temporary): record every key event the page receives.
-  await browser.execute(() => {
-    if (window.__keylog) return;
-    window.__keylog = [];
-    for (const t of ['keydown', 'keypress', 'input', 'keyup']) {
-      document.addEventListener(
-        t,
-        (e) => window.__keylog.push(`${t}:${e.key ?? ''}${e.data != null ? `|${e.data}` : ''}`),
-        true,
-      );
-    }
-  });
   await browser.execute((id) => window.__arcTest.useWorkspace.getState().setActive(id), id);
   // The shell has printed its prompt, so it is reading input.
   await browser.waitUntil(async () => (await terminalText(id)).trim().length > 0, {
@@ -55,7 +44,7 @@ async function echoRoundTrip(id) {
     timeoutMsg: `terminal ${id} never printed a prompt`,
   });
   await browser.execute((id) => window.__arcTest.getTerminal(id).focus(), id);
-  await browser.keys(`echo ${marker}`);
+  await typeKeys(`echo ${marker}`);
   await browser.keys(ENTER);
   await browser
     .waitUntil(
@@ -63,13 +52,15 @@ async function echoRoundTrip(id) {
       { timeout: 60_000 },
     )
     .catch(async () => {
-      const keys = await browser.execute(() => window.__keylog.slice(-120).join(' '));
-      throw new Error(
-        `"${marker}" never appeared in terminal ${id}:\n${await terminalText(id)}\nKEYLOG: ${keys}`,
-      );
+      throw new Error(`"${marker}" never appeared in terminal ${id}:\n${await terminalText(id)}`);
     });
-  // DIAGNOSTIC (temporary): print the log on success too, to compare.
-  console.log(`KEYLOG ${id}:`, await browser.execute(() => window.__keylog.splice(0).join(' ')));
+}
+
+/** Type `text` one key per action. Linux's WebKitWebDriver merges two
+ *  identical keys sent in one `browser.keys()` call — `ee` reaches the page as
+ *  a single keydown — so each key goes out, and is released, on its own. */
+async function typeKeys(text) {
+  for (const ch of text) await browser.keys(ch);
 }
 
 describe('ARC smoke', () => {
