@@ -25,7 +25,23 @@ vi.mock('../../lib/tauri', () => ({
   },
 }));
 
-const { useGitHub, repoKey, splitRepoKey } = await import('../github');
+const { useGitHub, repoKey, splitRepoKey, githubRepoFromRemote } = await import('../github');
+
+describe('local clones', () => {
+  it('reads owner/name from https and ssh remotes', () => {
+    expect(githubRepoFromRemote('https://github.com/vedantnimbarte/Arc.git')).toBe('vedantnimbarte/Arc');
+    expect(githubRepoFromRemote('https://github.com/a/b')).toBe('a/b');
+    expect(githubRepoFromRemote('git@github.com:a/my.repo.git')).toBe('a/my.repo');
+    expect(githubRepoFromRemote('https://gitlab.com/a/b.git')).toBeNull();
+  });
+
+  it('matches a clone regardless of case, and forgets it', () => {
+    useGitHub.getState().rememberClone('Owner/Repo', '/src/repo');
+    expect(useGitHub.getState().clones['owner/repo']).toBe('/src/repo');
+    useGitHub.getState().forgetClone('OWNER/REPO');
+    expect(useGitHub.getState().clones['owner/repo']).toBeUndefined();
+  });
+});
 
 beforeEach(() => {
   calls.prList = 0;

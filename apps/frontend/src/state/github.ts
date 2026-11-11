@@ -86,6 +86,40 @@ interface GitHubState {
   refreshRateLimit: () => Promise<void>;
   /** Drop the stored token and return to the sign-in screen. */
   signOut: () => Promise<void>;
+
+  /** Where each repository is cloned on this machine, `owner/name` → folder.
+   *  Learned from clones made in this tab and from workspaces that were open
+   *  with a GitHub remote, so it only knows what Arc has seen. */
+  clones: Record<RepoKey, string>;
+  rememberClone: (repo: RepoKey, path: string) => void;
+  forgetClone: (repo: RepoKey) => void;
+}
+
+// ponytail: only knows clones Arc has seen; scanning the disk for every
+// checkout would need a Rust-side walker — add one if this misses too often.
+const CLONES_KEY = 'arc.github.clones';
+
+function readClones(): Record<RepoKey, string> {
+  try {
+    const raw = localStorage.getItem(CLONES_KEY);
+    return raw ? (JSON.parse(raw) as Record<RepoKey, string>) : {};
+  } catch {
+    return {};
+  }
+}
+
+function writeClones(clones: Record<RepoKey, string>) {
+  try {
+    localStorage.setItem(CLONES_KEY, JSON.stringify(clones));
+  } catch {
+    /* storage blocked — the map still works for this session */
+  }
+}
+
+/** `owner/name` from a GitHub remote URL (https or ssh), or null. */
+export function githubRepoFromRemote(url: string): RepoKey | null {
+  const m = /github\.com[:/]([^/\s]+)\/([^/\s]+?)(?:\.git)?\/?$/i.exec(url.trim());
+  return m ? `${m[1]}/${m[2]}` : null;
 }
 
 export const useGitHub = create<GitHubState>((set, get) => ({
@@ -95,6 +129,23 @@ export const useGitHub = create<GitHubState>((set, get) => ({
   repo: null,
   rateRemaining: null,
   prs: {},
+  clones: readClones(),
+
+  rememberClone: (repo, path) => {
+    // GitHub keys are case-insensitive; file them lower-cased so a remote
+    // spelled differently from the API's `full_name` still matches.
+    const key = repo.toLowerCase();
+    if (get().clones[key] === path) return;
+    const clones = { ...get().clones, [key]: path };
+    writeClones(clones);
+    set({ clones });
+  },
+
+  forgetClone: (repo) => {
+    const { [repo.toLowerCase()]: _gone, ...clones } = get().clones;
+    writeClones(clones);
+    set({ clones });
+  },
 
   loadPrs: async (owner, name, filter, force) => {
     const key = `${owner}/${name}:${filter}`;

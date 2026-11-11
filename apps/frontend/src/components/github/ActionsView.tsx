@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { ExternalLink, RefreshCw, RotateCcw, Square } from 'lucide-react';
+import { ExternalLink, RotateCcw, Square, User, Zap } from 'lucide-react';
 import {
   gitHostRunCancel,
   gitHostRunJobs,
@@ -11,10 +11,22 @@ import {
 } from '../../lib/tauri';
 import { splitRepoKey, useGitHub } from '../../state/github';
 import { cn } from '../../lib/cn';
-import { ListRow } from './ListRow';
+import { ListRow, laneEnds } from './ListRow';
 import { runGlyph } from './stateGlyph';
-import { meta, relative } from './format';
-import { ErrorTray, SplitPane } from './parts';
+import {
+  BranchChip,
+  Count,
+  DetailHeader,
+  EmptyNote,
+  ErrorTray,
+  Fact,
+  Loading,
+  RefreshButton,
+  SplitPane,
+  ago,
+  buttonGhost,
+  buttonQuiet,
+} from './parts';
 
 export function ActionsView() {
   const repoKey = useGitHub((s) => s.repo);
@@ -49,50 +61,45 @@ export function ActionsView() {
     <SplitPane
       toolbar={
         <>
-          <span className="font-display text-2xs text-fg-subtle">
-            Latest {runs.length} runs
-          </span>
+          {!loading && <Count n={runs.length} one="recent run" many="recent runs" />}
           <div className="flex-1" />
-          <button
-            onClick={() => void load()}
-            aria-label="Refresh"
-            title="Refresh"
-            className="flex h-6 w-6 items-center justify-center rounded-full text-fg-subtle transition-colors hover:bg-surface-2 hover:text-fg-base focus-visible:outline-none focus-visible:shadow-focus"
-          >
-            <RefreshCw size={12} strokeWidth={2} className={cn(loading && 'animate-spin')} />
-          </button>
+          <RefreshButton loading={loading} onClick={() => void load()} />
         </>
       }
       list={
         <>
           {error && <ErrorTray message={error} />}
+          {runs.length === 0 && loading && <Loading />}
           {runs.length === 0 && !loading && !error ? (
-            <p className="px-2 py-8 text-center font-display text-xs text-fg-subtle">
+            <EmptyNote>
               No workflow runs yet. Push a commit, or add a workflow under
               <span className="font-mono"> .github/workflows</span>.
-            </p>
+            </EmptyNote>
           ) : (
-            runs.map((r) => {
-              const g = runGlyph(r.status, r.conclusion);
-              return (
-                <ListRow
-                  key={r.id}
-                  glyph={g.icon}
-                  glyphClass={g.className}
-                  title={r.title || r.name}
-                  title_={`${g.label} · ${r.name}`}
-                  meta={meta(
-                    r.name,
-                    `#${r.run_number}`,
-                    r.branch,
-                    r.actor,
-                    relative(r.created_at),
-                  )}
-                  selected={selected === r.id}
-                  onClick={() => setSelected(r.id)}
-                />
-              );
-            })
+            <div className={laneEnds}>
+              {runs.map((r) => {
+                const g = runGlyph(r.status, r.conclusion);
+                return (
+                  <ListRow
+                    key={r.id}
+                    glyph={g.icon}
+                    glyphClass={g.className}
+                    title={r.title || r.name}
+                    number={`#${r.run_number}`}
+                    title_={`${g.label}: ${r.name}`}
+                    meta={
+                      <>
+                        {r.branch && <BranchChip name={r.branch} />}
+                        <Fact icon={Zap}>{r.name}</Fact>
+                        <Fact>{ago(r.created_at)}</Fact>
+                      </>
+                    }
+                    selected={selected === r.id}
+                    onClick={() => setSelected(r.id)}
+                  />
+                );
+              })}
+            </div>
           )}
         </>
       }
@@ -158,100 +165,107 @@ function RunDetail({
   };
 
   const g = runGlyph(run.status, run.conclusion);
-  const Icon = g.icon;
   const running = run.status !== 'completed';
   const failed = run.conclusion === 'failure' || run.conclusion === 'timed_out';
 
   return (
     <div className="flex h-full flex-col">
-      <div className="shrink-0 px-4 pb-2 pt-3.5">
-        <div className="flex items-start gap-2">
-          <span className="mt-[3px] flex w-5 shrink-0 justify-center">
-            <Icon size={15} strokeWidth={2} className={g.className} />
-            <span className="sr-only">{g.label}</span>
-          </span>
-          <h2 className="min-w-0 flex-1 font-display text-sm font-semibold leading-snug tracking-tight text-fg-base">
-            {run.title || run.name}
-          </h2>
-          <div className="flex shrink-0 items-center gap-1">
-            {running ? (
-              <button
-                onClick={() => void act(() => gitHostRunCancel(owner, name, run.id))}
-                disabled={busy}
-                className="flex h-7 items-center gap-1 rounded-lg px-2 font-display text-xs text-fg-muted transition-colors hover:bg-surface-1 hover:text-fg-base focus-visible:outline-none focus-visible:shadow-focus disabled:opacity-40"
-              >
-                <Square size={11} strokeWidth={2} />
-                Cancel
-              </button>
-            ) : (
-              <button
-                onClick={() => void act(() => gitHostRunRerun(owner, name, run.id, failed))}
-                disabled={busy}
-                title={failed ? 'Re-run only the jobs that failed' : 'Re-run every job'}
-                className="flex h-7 items-center gap-1 rounded-lg bg-surface-2 px-2.5 font-display text-xs font-medium text-fg-base ring-1 ring-inset ring-edge-2 transition-all duration-200 ease-apple hover:bg-surface-3 active:scale-[0.98] focus-visible:outline-none focus-visible:shadow-focus disabled:opacity-40"
-              >
-                <RotateCcw size={11} strokeWidth={2} />
-                {failed ? 'Re-run failed jobs' : 'Re-run'}
-              </button>
-            )}
-          </div>
+      <DetailHeader
+        glyph={g}
+        number={`${run.name} #${run.run_number}`}
+        title={run.title || run.name}
+        facts={
+          <>
+            {run.branch && <BranchChip name={run.branch} />}
+            <Fact icon={Zap}>{run.event}</Fact>
+            <Fact icon={User}>{run.actor}</Fact>
+            <Fact>started {ago(run.created_at)}</Fact>
+          </>
+        }
+        htmlUrl={run.html_url}
+        actions={
+          running ? (
+            <button
+              onClick={() => void act(() => gitHostRunCancel(owner, name, run.id))}
+              disabled={busy}
+              className={buttonGhost}
+            >
+              <Square size={12} strokeWidth={2} />
+              Cancel run
+            </button>
+          ) : (
+            <button
+              onClick={() => void act(() => gitHostRunRerun(owner, name, run.id, failed))}
+              disabled={busy}
+              title={failed ? 'Re-run only the jobs that failed' : 'Re-run every job'}
+              className={buttonQuiet}
+            >
+              <RotateCcw size={12} strokeWidth={2} />
+              {failed ? 'Re-run failed jobs' : 'Re-run'}
+            </button>
+          )
+        }
+      />
+
+      <div className="min-h-0 flex-1 overflow-y-auto p-4">
+        {error && <ErrorTray message={error} />}
+        {jobs === null && !error && <Loading />}
+        {jobs?.length === 0 && <EmptyNote>This run has no jobs.</EmptyNote>}
+        <div className="grid gap-3 [grid-template-columns:repeat(auto-fill,minmax(260px,1fr))]">
+          {jobs?.map((j) => <JobCard key={j.id} job={j} />)}
         </div>
-        <p className="mt-1 pl-7 font-mono text-2xs tabular-nums text-fg-subtle">
-          {meta(run.name, `#${run.run_number}`, run.branch, run.event, run.actor, relative(run.created_at))}
-        </p>
+      </div>
+    </div>
+  );
+}
+
+/** One job as a pipeline card: its result on top, its steps as a lane below,
+ *  so the step that broke the job is the one red node in the column. */
+function JobCard({ job }: { job: GitHostJob }) {
+  const jg = runGlyph(job.status, job.conclusion);
+  const JIcon = jg.icon;
+  return (
+    <div className="flex flex-col overflow-hidden rounded-lg bg-surface-1 ring-1 ring-inset ring-edge-1">
+      <div className="flex items-center gap-2 border-b border-edge-1 px-3 py-2.5">
+        <JIcon size={14} strokeWidth={2.2} className={cn('shrink-0', jg.className)} />
+        <span className="min-w-0 flex-1 truncate font-display text-xs font-semibold text-fg-base">
+          {job.name}
+        </span>
+        <span className={cn('shrink-0 font-display text-2xs', jg.className)}>{jg.label}</span>
         <button
-          onClick={() => void shellOpenExternal(run.html_url)}
-          className="mt-1 ml-7 flex items-center gap-1 font-display text-2xs text-fg-subtle transition-colors hover:text-accent-bright focus-visible:outline-none focus-visible:shadow-focus"
+          onClick={() => void shellOpenExternal(job.html_url)}
+          aria-label={`Open the ${job.name} log on GitHub`}
+          title="Open the log on GitHub"
+          className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-fg-subtle transition-colors hover:bg-surface-2 hover:text-fg-base focus-visible:outline-none focus-visible:shadow-focus"
         >
-          <ExternalLink size={10} strokeWidth={2} />
-          Open the full log on github.com
+          <ExternalLink size={12} strokeWidth={2} />
         </button>
       </div>
-
-      <div className="min-h-0 flex-1 overflow-y-auto border-t border-edge-1 px-2 py-1.5">
-        {error && (
-          <div className="px-1">
-            <ErrorTray message={error} />
-          </div>
-        )}
-        {jobs === null && !error && (
-          <div className="flex justify-center py-8">
-            <span className="h-1.5 w-1.5 animate-pulse-soft rounded-full bg-accent" />
-          </div>
-        )}
-        {jobs?.map((j) => {
-          const jg = runGlyph(j.status, j.conclusion);
+      <ol className="px-3 py-2">
+        {job.steps.map((s, i) => {
+          const sg = runGlyph(s.status, s.conclusion);
+          const SIcon = sg.icon;
+          const last = i === job.steps.length - 1;
           return (
-            <div key={j.id} className="mb-1">
-              <ListRow
-                glyph={jg.icon}
-                glyphClass={jg.className}
-                title={j.name}
-                title_={`${jg.label} · ${j.name}`}
-                meta={meta(jg.label.toLowerCase(), `${j.steps.length} steps`)}
-                onClick={() => void shellOpenExternal(j.html_url)}
-              />
-              <ol className="ml-9 border-l border-edge-1 pl-3">
-                {j.steps.map((s) => {
-                  const sg = runGlyph(s.status, s.conclusion);
-                  const SIcon = sg.icon;
-                  return (
-                    <li
-                      key={`${s.number}-${s.name}`}
-                      className="flex items-center gap-1.5 py-0.5"
-                    >
-                      <SIcon size={10} strokeWidth={2} className={cn('shrink-0', sg.className)} />
-                      <span className="truncate font-display text-2xs text-fg-muted">
-                        {s.name}
-                      </span>
-                    </li>
-                  );
-                })}
-              </ol>
-            </div>
+            <li key={`${s.number}-${s.name}`} className="flex gap-2">
+              <span className="flex w-3 shrink-0 flex-col items-center" aria-hidden>
+                <span className={cn('h-1 w-px', i === 0 ? 'bg-transparent' : 'bg-edge-2')} />
+                <SIcon size={11} strokeWidth={2.2} className={cn('shrink-0', sg.className)} />
+                <span className={cn('w-px flex-1', last ? 'bg-transparent' : 'bg-edge-2')} />
+              </span>
+              <span
+                className={cn(
+                  'min-w-0 flex-1 truncate py-[3px] font-display text-2xs',
+                  sg.label === 'Failed' ? 'font-medium text-status-err' : 'text-fg-muted',
+                )}
+                title={`${sg.label}: ${s.name}`}
+              >
+                {s.name}
+              </span>
+            </li>
           );
         })}
-      </div>
+      </ol>
     </div>
   );
 }

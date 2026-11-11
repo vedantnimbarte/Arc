@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { ExternalLink, Plus, RefreshCw } from 'lucide-react';
+import { ExternalLink, MessageSquare, Plus } from 'lucide-react';
 import {
   gitHostIssueComment,
   gitHostIssueCreate,
@@ -17,10 +17,26 @@ import { splitRepoKey, useGitHub } from '../../state/github';
 import { askConfirm } from '../../state/confirm';
 import { cn } from '../../lib/cn';
 import { Select } from '../Select';
-import { ListRow } from './ListRow';
+import { ListRow, laneEnds } from './ListRow';
 import { issueGlyph } from './stateGlyph';
-import { meta, relative } from './format';
-import { CommentThread, DetailHeader, ErrorTray, SplitPane, StateFilter } from './parts';
+import {
+  Avatar,
+  CommentThread,
+  Count,
+  DetailHeader,
+  EmptyNote,
+  ErrorTray,
+  Fact,
+  LabelChip,
+  Loading,
+  RefreshButton,
+  SplitPane,
+  StateFilter,
+  ago,
+  buttonGhost,
+  buttonPrimary,
+  buttonQuiet,
+} from './parts';
 
 export function IssuesView() {
   const repoKey = useGitHub((s) => s.repo);
@@ -114,55 +130,53 @@ export function IssuesView() {
               ]}
             />
           )}
+          {!loading && <Count n={issues.length} one="issue" many="issues" />}
           <div className="flex-1" />
-          <button
-            onClick={() => setComposing(true)}
-            className="flex h-7 items-center gap-1 rounded-md px-2 font-display text-2xs text-fg-muted transition-colors hover:bg-surface-2 hover:text-fg-base focus-visible:outline-none focus-visible:shadow-focus"
-          >
-            <Plus size={11} strokeWidth={2.2} />
+          <RefreshButton loading={loading} onClick={() => void load()} />
+          <button onClick={() => setComposing(true)} className={buttonQuiet}>
+            <Plus size={12} strokeWidth={2.2} />
             New issue
-          </button>
-          <button
-            onClick={() => void load()}
-            aria-label="Refresh"
-            title="Refresh"
-            className="flex h-6 w-6 items-center justify-center rounded-full text-fg-subtle transition-colors hover:bg-surface-2 hover:text-fg-base focus-visible:outline-none focus-visible:shadow-focus"
-          >
-            <RefreshCw size={12} strokeWidth={2} className={cn(loading && 'animate-spin')} />
           </button>
         </>
       }
       list={
         <>
           {error && <ErrorTray message={error} />}
+          {issues.length === 0 && loading && <Loading />}
           {issues.length === 0 && !loading && !error ? (
-            <p className="px-2 py-8 text-center font-display text-xs text-fg-subtle">
+            <EmptyNote>
               {state === 'open'
                 ? 'No open issues in this repository.'
                 : `No ${state} issues here.`}
-            </p>
+            </EmptyNote>
           ) : (
-            issues.map((i) => {
-              const g = issueGlyph(i.state);
-              return (
-                <ListRow
-                  key={i.number}
-                  glyph={g.icon}
-                  glyphClass={g.className}
-                  title={i.title}
-                  title_={`${g.label} · ${i.title}`}
-                  meta={meta(
-                    `#${i.number}`,
-                    i.author,
-                    relative(i.updated_at),
-                    i.comments > 0 && `${i.comments} comments`,
-                    ...i.labels.slice(0, 2).map((l) => l.name),
-                  )}
-                  selected={selected === i.number}
-                  onClick={() => setSelected(i.number)}
-                />
-              );
-            })
+            <div className={laneEnds}>
+              {issues.map((i) => {
+                const g = issueGlyph(i.state);
+                return (
+                  <ListRow
+                    key={i.number}
+                    glyph={g.icon}
+                    glyphClass={g.className}
+                    title={i.title}
+                    number={`#${i.number}`}
+                    title_={`${g.label}: ${i.title}`}
+                    meta={
+                      <>
+                        <Avatar src={i.author_avatar} login={i.author} />
+                        <Fact>{ago(i.updated_at)}</Fact>
+                        {i.comments > 0 && <Fact icon={MessageSquare}>{i.comments}</Fact>}
+                        {i.labels.slice(0, 2).map((l) => (
+                          <LabelChip key={l.name} name={l.name} color={l.color} />
+                        ))}
+                      </>
+                    }
+                    selected={selected === i.number}
+                    onClick={() => setSelected(i.number)}
+                  />
+                );
+              })}
+            </div>
           )}
         </>
       }
@@ -267,13 +281,7 @@ function IssueDetail({
       </div>
     );
   }
-  if (!issue) {
-    return (
-      <div className="flex h-full items-center justify-center">
-        <span className="h-1.5 w-1.5 animate-pulse-soft rounded-full bg-accent" />
-      </div>
-    );
-  }
+  if (!issue) return <Loading />;
 
   const g = issueGlyph(issue.state);
 
@@ -281,42 +289,34 @@ function IssueDetail({
     <div className="flex h-full flex-col">
       <DetailHeader
         glyph={g}
-        number={issue.number}
+        number={`#${issue.number}`}
         title={issue.title}
-        subtitle={meta(issue.author, `opened ${relative(issue.updated_at)} ago`)}
+        facts={
+          <>
+            <Avatar src={issue.author_avatar} login={issue.author} />
+            <Fact>updated {ago(issue.updated_at)}</Fact>
+            {issue.thread.length > 0 && <Fact icon={MessageSquare}>{issue.thread.length}</Fact>}
+            {issue.assignees.length > 0 && <Fact>assigned to {issue.assignees.join(', ')}</Fact>}
+            {issue.labels.map((l) => (
+              <LabelChip key={l.name} name={l.name} color={l.color} />
+            ))}
+          </>
+        }
         htmlUrl={issue.html_url}
         actions={
-          <button
-            onClick={() => void toggleState()}
-            disabled={busy}
-            className="h-7 rounded-lg bg-surface-2 px-3 font-display text-xs font-medium text-fg-base ring-1 ring-inset ring-edge-2 transition-all duration-200 ease-apple hover:bg-surface-3 active:scale-[0.98] focus-visible:outline-none focus-visible:shadow-focus disabled:opacity-40"
-          >
+          <button onClick={() => void toggleState()} disabled={busy} className={buttonQuiet}>
             {issue.state === 'open' ? 'Close issue' : 'Reopen issue'}
           </button>
         }
       />
 
-      {issue.labels.length > 0 && (
-        <div className="flex flex-wrap gap-1 px-4 pb-2">
-          {issue.labels.map((l) => (
-            <span
-              key={l.name}
-              className="rounded-full px-2 py-0.5 font-display text-2xs"
-              style={{
-                // The label's own colour is the information — it's how the
-                // repo's maintainers chose to group things.
-                color: `#${l.color || '888888'}`,
-                backgroundColor: `#${l.color || '888888'}1a`,
-                boxShadow: `inset 0 0 0 1px #${l.color || '888888'}33`,
-              }}
-            >
-              {l.name}
-            </span>
-          ))}
-        </div>
-      )}
-
-      <CommentThread body={issue.body} author={issue.author} comments={issue.thread} onPost={postComment} />
+      <CommentThread
+        body={issue.body}
+        author={issue.author}
+        authorAvatar={issue.author_avatar}
+        comments={issue.thread}
+        onPost={postComment}
+      />
     </div>
   );
 }
@@ -359,10 +359,11 @@ function NewIssueForm({
   };
 
   return (
-    <div className="flex h-full flex-col p-4">
-      <h2 className="font-display text-sm font-semibold tracking-tight text-fg-base">
-        New issue in <span className="font-mono font-normal">{owner}/{name}</span>
-      </h2>
+    <div className="flex h-full flex-col p-5">
+      <h2 className="font-display text-lg font-semibold tracking-tight text-fg-base">New issue</h2>
+      <p className="mt-0.5 font-mono text-2xs text-fg-subtle">
+        {owner}/{name}
+      </p>
 
       <input
         value={title}
@@ -411,17 +412,10 @@ function NewIssueForm({
       {error && <div className="mt-2"><ErrorTray message={error} /></div>}
 
       <div className="mt-3 flex items-center gap-2">
-        <button
-          onClick={() => void submit()}
-          disabled={busy || !title.trim()}
-          className="h-7 rounded-lg bg-surface-2 px-3 font-display text-xs font-medium text-fg-base ring-1 ring-inset ring-edge-2 transition-all duration-200 ease-apple hover:bg-surface-3 active:scale-[0.98] focus-visible:outline-none focus-visible:shadow-focus disabled:opacity-40"
-        >
+        <button onClick={() => void submit()} disabled={busy || !title.trim()} className={buttonPrimary}>
           {busy ? 'Creating…' : 'Create issue'}
         </button>
-        <button
-          onClick={onCancel}
-          className="h-7 rounded-lg px-3 font-display text-xs text-fg-muted transition-colors hover:bg-surface-1 hover:text-fg-base focus-visible:outline-none focus-visible:shadow-focus"
-        >
+        <button onClick={onCancel} className={buttonGhost}>
           Cancel
         </button>
         <div className="flex-1" />
