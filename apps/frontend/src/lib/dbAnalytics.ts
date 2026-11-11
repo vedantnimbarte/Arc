@@ -370,8 +370,10 @@ const SQLITE: Dialect = {
   (SELECT journal_mode FROM pragma_journal_mode()) AS journal_mode`,
   tables: {
     // dbstat is a compile-time option; without it the section says so.
-    sql: `SELECT name, SUM(pgsize) AS total_bytes FROM dbstat
-GROUP BY name ORDER BY 2 DESC LIMIT 20`,
+    // `kind` (table/index) only picks the row's icon; it isn't a column.
+    sql: `SELECT d.name, m.type AS kind, SUM(d.pgsize) AS total_bytes
+FROM dbstat d LEFT JOIN sqlite_master m ON m.name = d.name
+GROUP BY d.name ORDER BY 3 DESC LIMIT 20`,
     columns: [
       { key: 'name', label: 'Table or index' },
       { key: 'total_bytes', label: 'Size', format: 'bytes', numeric: true },

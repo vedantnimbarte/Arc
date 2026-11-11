@@ -1,5 +1,7 @@
 import { useState } from 'react';
 import { Variable } from 'lucide-react';
+import { cn } from '../../lib/cn';
+import { inputCls, primaryBtn, textBtn } from './chrome';
 
 /**
  * Ask for the values of a query's `:name` parameters before it runs. A
@@ -34,9 +36,9 @@ export function QueryParamsDialog({
           onRun(values);
         }}
       >
-        <div className="flex items-center gap-2 border-b border-border-hairline px-4 py-2.5">
-          <Variable size={13} className="text-fg-subtle" />
-          <span className="font-display text-sm text-fg-base">Query parameters</span>
+        <div className="flex h-9 items-center gap-2 border-b border-edge-1 bg-surface-1 px-3">
+          <Variable size={13} className="text-accent-bright" />
+          <span className="font-display text-xs font-semibold text-fg-base">Query parameters</span>
         </div>
         <div className="flex flex-col gap-2.5 px-4 py-3">
           {names.map((n, i) => (
@@ -48,25 +50,25 @@ export function QueryParamsDialog({
                 autoFocus={i === 0}
                 placeholder="NULL"
                 spellCheck={false}
-                className="min-w-0 flex-1 rounded-md border border-border-subtle bg-bg-base/60 px-2 py-1 font-mono text-xs text-fg-base placeholder:text-fg-subtle/50 focus:border-accent/45 focus:outline-none"
+                className={cn(inputCls, 'min-w-0 flex-1')}
               />
             </label>
           ))}
-          <p className="font-sans text-2xs text-fg-subtle">
-            Numbers go in as numbers, blank or <code>null</code> as NULL, anything else as quoted text.
+          <p className="font-display text-2xs text-fg-subtle">
+            Numbers go in as numbers, blank or <code className="font-mono">null</code> as NULL, anything else as quoted text.
           </p>
         </div>
-        <div className="flex justify-end gap-2 border-t border-border-hairline px-4 py-2">
+        <div className="flex justify-end gap-1.5 border-t border-edge-1 px-3 py-2">
           <button
             type="button"
             onClick={onClose}
-            className="rounded-lg px-2.5 py-1 font-sans text-xs text-fg-muted transition-colors hover:bg-surface-2 hover:text-fg-base"
+            className={textBtn}
           >
             Cancel
           </button>
           <button
             type="submit"
-            className="rounded-lg bg-accent-soft px-2.5 py-1 font-sans text-xs text-fg-base ring-1 ring-accent/45 transition-colors hover:bg-accent/20"
+            className={primaryBtn}
           >
             Run
           </button>

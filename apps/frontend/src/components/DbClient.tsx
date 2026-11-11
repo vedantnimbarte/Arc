@@ -1,32 +1,36 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
 import {
   ArrowLeft,
+  ArrowUpFromLine,
+  BarChart3,
   Bookmark,
+  Check,
   ChevronRight,
+  CircleAlert,
+  Columns3,
   Copy,
-  Database,
   Download,
+  FileCode2,
   FileUp,
+  Gauge,
   GitCompareArrows,
+  Hand,
   HardDriveDownload,
   HardDriveUpload,
   History,
   ListTree,
   Loader2,
-  Lock,
   Network,
-  Pencil,
   Play,
   Plug,
-  PlugZap,
   Plus,
-  RefreshCw,
-  ShieldAlert,
+  Rows3,
   Sparkles,
   Square,
   TableProperties,
-  Trash2,
+  Undo2,
   X,
+  Zap,
 } from 'lucide-react';
 import {
   dbApply,
@@ -96,6 +100,23 @@ import { DbAnalytics } from './db/DbAnalytics';
 import { TableDesigner } from './db/TableDesigner';
 import { AskClaudeBar, ClaudeExplain } from './db/ClaudeSql';
 import { QueryParamsDialog } from './db/QueryParamsDialog';
+import { ConnectionSwitcher } from './db/ConnectionSwitcher';
+import {
+  EnvBadge,
+  EnvDot,
+  ObjIcon,
+  Placeholder,
+  StatusBar,
+  ToolButton,
+  ToolSep,
+  ToolTab,
+  Toolbar,
+  ToolWindowHeader,
+  envOf,
+  inputCls,
+  primaryBtn,
+  textBtn,
+} from './db/chrome';
 
 interface Props {
   tabId: string;
@@ -1063,87 +1084,33 @@ export function DbClient({ tabId }: Props) {
 
   const nEdits = editCount(edits);
 
+  const env = envOf(safety);
+  const resultTabs: Array<{ id: Pane; label: string; icon: typeof Rows3; show: boolean }> = [
+    { id: 'grid', label: 'Result', icon: Rows3, show: true },
+    { id: 'schema', label: schema ? `Schema: ${schema.table}` : 'Schema', icon: Columns3, show: !!schema },
+    { id: 'plan', label: 'Plan', icon: ListTree, show: !!plan },
+    { id: 'diagram', label: 'Diagram', icon: Network, show: connected && tables.length > 0 },
+    { id: 'diff', label: 'Compare', icon: GitCompareArrows, show: connected && tables.length > 0 },
+    { id: 'design', label: design?.table ? `Alter ${design.table}` : 'New table', icon: TableProperties, show: !!design },
+  ];
+  const showExport = !exporting && result && result.columns.length > 0 && pane === 'grid';
+
   return (
     <div className="flex h-full overflow-hidden text-sm">
-      {/* ── Connections rail ── */}
-      <div className="flex w-56 shrink-0 flex-col border-r border-border-hairline bg-bg-panel/40">
-        <div className="flex items-center gap-1.5 px-3 py-2">
-          <span className="flex-1 font-sans text-2xs uppercase tracking-widest text-fg-subtle/60">
-            Connections
-          </span>
-          <button
-            type="button"
-            onClick={() => setForm({ editing: null })}
-            title="Add a connection"
-            className="flex h-5 w-5 items-center justify-center rounded text-fg-muted transition hover:bg-surface-2 hover:text-fg-base"
-          >
-            <Plus size={12} />
-          </button>
-        </div>
-        <div className="min-h-0 flex-1 overflow-auto pb-2">
-          {connections.length === 0 && !form && (
-            <p className="px-3 py-2 font-sans text-xs leading-relaxed text-fg-subtle">
-              No connections yet. Add one to browse a database.
-            </p>
-          )}
-          {connections.map((c) => (
-            <div
-              key={c.id}
-              className={cn(
-                'group flex items-center gap-2 px-3 py-1.5',
-                activeId === c.id ? 'bg-surface-2' : 'hover:bg-surface-1',
-              )}
-            >
-              <button
-                type="button"
-                onClick={() => void select(c.id, c.name)}
-                className="flex min-w-0 flex-1 items-center gap-2 text-left"
-              >
-                <Database size={12} className="shrink-0 text-fg-subtle" />
-                <span className="min-w-0 flex-1">
-                  <span className="flex items-center gap-1 truncate font-sans text-xs text-fg-base">
-                    <span className="truncate">{c.name}</span>
-                    {c.ssh && (
-                      <span className="shrink-0 rounded bg-surface-2 px-1 font-sans text-[9px] text-fg-subtle" title={`via SSH ${c.ssh.user}@${c.ssh.host}`}>
-                        SSH
-                      </span>
-                    )}
-                    {c.safety === 'production' && (
-                      <span className="shrink-0 rounded bg-status-err/15 px-1 font-sans text-[9px] text-status-err" title="Production: every write asks first">
-                        PROD
-                      </span>
-                    )}
-                    {c.safety === 'readonly' && (
-                      <span className="shrink-0 rounded bg-surface-2 px-1 font-sans text-[9px] text-fg-subtle" title="Read-only">
-                        RO
-                      </span>
-                    )}
-                  </span>
-                  <span className="block truncate font-mono text-2xs text-fg-subtle/70">
-                    {c.url}
-                  </span>
-                </span>
-              </button>
-              <button
-                type="button"
-                onClick={() => setForm({ editing: c })}
-                title="Edit connection"
-                className="shrink-0 text-fg-subtle opacity-0 transition hover:text-fg-base group-hover:opacity-100"
-              >
-                <Pencil size={11} />
-              </button>
-              <button
-                type="button"
-                onClick={() => void remove(c)}
-                title="Delete connection"
-                className="shrink-0 text-fg-subtle opacity-0 transition hover:text-status-err group-hover:opacity-100"
-              >
-                <Trash2 size={11} />
-              </button>
-            </div>
-          ))}
-
-          {/* Tables of the connected database, grouped by schema. */}
+      {/* ── Explorer: the connection, then its tables ── */}
+      <div className="flex w-60 shrink-0 flex-col border-r border-edge-1 bg-bg-panel/40">
+        <ConnectionSwitcher
+          connections={connections}
+          active={active}
+          connected={connected}
+          connecting={connecting}
+          onSelect={(c) => void select(c.id, c.name)}
+          onAdd={() => setForm({ editing: null })}
+          onEdit={(c) => setForm({ editing: c })}
+          onDelete={(c) => void remove(c)}
+          onToggleConnection={() => void (connected ? disconnect() : connect())}
+        />
+        <div className="min-h-0 flex-1 overflow-auto">
           {connected && tables.length > 0 && (
             <TableTree
               tables={tables}
@@ -1161,161 +1128,186 @@ export function DbClient({ tabId }: Props) {
                 void showSchema(t);
               }}
               onCreateTable={readOnly ? undefined : () => openDesigner(null)}
+              onRefresh={() => void refreshCatalog(activeId!).catch((e) => toastError(String(e)))}
             />
           )}
           {connected && tables.length === 0 && (
-            <p className="px-3 py-2 font-sans text-xs text-fg-subtle">
-              No tables.{' '}
+            <Placeholder>
+              This database has no tables.
               {!readOnly && (
-                <button type="button" onClick={() => openDesigner(null)} className="text-fg-muted underline hover:text-fg-base">
-                  Create one
+                <button type="button" onClick={() => openDesigner(null)} className={textBtn}>
+                  <Plus size={12} /> New table
                 </button>
               )}
-            </p>
+            </Placeholder>
+          )}
+          {active && !connected && (
+            <Placeholder>
+              {connecting ? 'Connecting…' : `Connect to browse ${active.name}.`}
+              {!connecting && (
+                <button type="button" onClick={() => void connect()} className={primaryBtn}>
+                  <Plug size={12} /> Connect
+                </button>
+              )}
+            </Placeholder>
+          )}
+          {!active && connections.length === 0 && !form && (
+            <Placeholder>
+              No saved connections yet.
+              <button type="button" onClick={() => setForm({ editing: null })} className={primaryBtn}>
+                <Plus size={12} /> New connection
+              </button>
+            </Placeholder>
           )}
         </div>
       </div>
 
-      {/* ── Query pane ── */}
+      {/* ── Workspace ── */}
       <div className="flex min-w-0 flex-1 flex-col">
-        <div className="flex shrink-0 items-center gap-2 border-b border-border-hairline px-3 py-1.5">
-          <span className="truncate font-sans text-sm text-fg-base">
-            {active ? active.name : 'No connection selected'}
-          </span>
+        {/* Main toolbar. The stripe along its top is the environment colour. */}
+        <Toolbar env={connected ? env : null}>
+          {view === 'query' && (
+            <>
+              {running ? (
+                <ToolButton
+                  icon={Square}
+                  tone="stop"
+                  label="Ask the server to stop this statement"
+                  onClick={() => runningId && void dbCancel(runningId).catch((e) => toastError(String(e)))}
+                >
+                  Cancel
+                </ToolButton>
+              ) : (
+                <ToolButton
+                  icon={Play}
+                  tone="run"
+                  label="Run the selection, or everything (⌘/Ctrl + Enter)"
+                  onClick={() => void run(editor.current?.selectionOrAll() ?? sql)}
+                  disabled={!connected || !sql.trim()}
+                >
+                  Run
+                </ToolButton>
+              )}
+              <ToolButton
+                icon={ListTree}
+                label="Show the query plan"
+                onClick={() => void explain(editor.current?.selectionOrAll() ?? sql)}
+                disabled={!connected || running || !sql.trim()}
+              >
+                Explain
+              </ToolButton>
+              {active?.backend === 'postgres' && (
+                <ToolButton
+                  icon={Gauge}
+                  label={
+                    analyze
+                      ? 'Analyze is on: Explain executes the statement (writes included) to measure real rows and timings'
+                      : 'Explain with ANALYZE — executes the statement to measure real rows and timings'
+                  }
+                  active={analyze}
+                  onClick={() => setAnalyze((a) => !a)}
+                >
+                  {analyze ? <span className="text-status-warn">Analyze</span> : 'Analyze'}
+                </ToolButton>
+              )}
+              <ToolSep />
+              <ToolButton
+                icon={autoCommit ? Zap : Hand}
+                label={
+                  inTx
+                    ? 'Commit or roll back the open transaction first'
+                    : autoCommit
+                      ? 'Auto-commit: each statement commits on its own. Click for manual transactions'
+                      : 'Manual: statements run inside a transaction you commit or roll back. Click for auto-commit'
+                }
+                onClick={() => setAutoCommit((a) => !a)}
+                disabled={inTx || !connected}
+              >
+                Tx: {autoCommit ? 'Auto' : 'Manual'}
+              </ToolButton>
+              {inTx && (
+                <>
+                  <span className="ml-1 shrink-0 font-display text-2xs font-medium text-status-warn">Transaction open</span>
+                  <ToolButton icon={Check} label="Commit the open transaction" onClick={() => void finishTx(true)}>
+                    Commit
+                  </ToolButton>
+                  <ToolButton icon={Undo2} label="Roll back the open transaction" onClick={() => void finishTx(false)}>
+                    Rollback
+                  </ToolButton>
+                </>
+              )}
+              <ToolSep />
+              <ToolButton
+                icon={Sparkles}
+                label="Describe a query and let Claude write it"
+                active={askOpen}
+                onClick={() => setAskOpen((o) => !o)}
+                disabled={!connected}
+              >
+                Ask Claude
+              </ToolButton>
+              {savingName === null ? (
+                <ToolButton
+                  icon={Bookmark}
+                  label="Save this query on the connection"
+                  onClick={() => setSavingName('')}
+                  disabled={!activeId || !sql.trim()}
+                />
+              ) : (
+                <input
+                  autoFocus
+                  value={savingName}
+                  onChange={(e) => setSavingName(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') void saveQuery(savingName);
+                    if (e.key === 'Escape') setSavingName(null);
+                  }}
+                  onBlur={() => !savingName.trim() && setSavingName(null)}
+                  placeholder="Name, then Enter"
+                  aria-label="Saved query name"
+                  className={cn(inputCls, 'h-6 w-40 font-display')}
+                />
+              )}
+            </>
+          )}
           {active && (
-            <span className="shrink-0 rounded bg-surface-2 px-1.5 py-0.5 font-sans text-2xs text-fg-subtle">
-              {active.backend}
+            <ToolButton
+              icon={History}
+              label="History and saved queries"
+              active={!!panel}
+              onClick={() => setPanel((p) => (p ? null : 'history'))}
+            />
+          )}
+
+          <span className="flex-1" />
+
+          {connected && env && (
+            <span title={safety === 'production' ? 'Production: every write asks for confirmation' : 'Read-only: writes are refused here and by the server'}>
+              <EnvBadge env={env} />
             </span>
           )}
           {connected && (
-            <div
-              role="tablist"
-              aria-label="View"
-              className="ml-2 flex shrink-0 rounded-md bg-surface-1 p-0.5 ring-1 ring-border-hairline"
-            >
-              {(['query', 'analytics'] as const).map((v) => (
-                <button
-                  key={v}
-                  type="button"
-                  role="tab"
-                  aria-selected={view === v}
-                  onClick={() => setView(v)}
-                  className={cn(
-                    'rounded px-2.5 py-0.5 font-sans text-xs transition-colors',
-                    view === v ? 'bg-surface-3 text-fg-base' : 'text-fg-muted hover:text-fg-base',
-                  )}
-                >
-                  {v === 'query' ? 'Query' : 'Analytics'}
-                </button>
-              ))}
-            </div>
-          )}
-          {inTx && (
-            <span className="flex shrink-0 items-center gap-1 rounded bg-status-warn/15 px-1.5 py-0.5 font-sans text-2xs text-status-warn">
-              transaction open
-              <button type="button" onClick={() => void finishTx(true)} className="ml-1 rounded px-1 text-fg-base hover:bg-status-warn/20">
-                Commit
-              </button>
-              <button type="button" onClick={() => void finishTx(false)} className="rounded px-1 text-fg-base hover:bg-status-warn/20">
-                Rollback
-              </button>
-            </span>
-          )}
-          <div className="ml-auto flex items-center gap-1.5">
-            {active && (
-              <button
-                type="button"
-                onClick={() => void (connected ? disconnect() : connect())}
-                disabled={connecting}
-                className={cn(
-                  'flex items-center gap-1 rounded-lg px-2.5 py-1 font-sans text-xs transition-colors disabled:opacity-40',
-                  connected
-                    ? 'text-fg-muted hover:bg-surface-2 hover:text-fg-base'
-                    : 'bg-accent-soft text-fg-base ring-1 ring-accent/45 hover:bg-accent/20',
-                )}
-              >
-                {connecting ? (
-                  <Loader2 size={11} className="animate-spin" />
-                ) : connected ? (
-                  <PlugZap size={11} />
-                ) : (
-                  <Plug size={11} />
-                )}
-                {connecting ? 'connecting…' : connected ? 'Disconnect' : 'Connect'}
-              </button>
-            )}
-            {connected && (
-              <button
-                type="button"
-                onClick={() => void refreshCatalog(activeId!).catch((e) => toastError(String(e)))}
-                title="Refresh tables"
-                className={cn(ICON_BTN, 'text-fg-muted')}
-              >
-                <RefreshCw size={12} />
-              </button>
-            )}
-            {connected && tables.length > 0 && (
-              <>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setView('query');
-                    setPane((p) => (p === 'diagram' ? 'grid' : 'diagram'));
-                  }}
-                  title="Schema diagram"
-                  className={cn(ICON_BTN, pane === 'diagram' ? 'bg-surface-2 text-fg-base' : 'text-fg-muted')}
-                >
-                  <Network size={12} />
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setView('query');
-                    setPane((p) => (p === 'diff' ? 'grid' : 'diff'));
-                  }}
-                  title="Compare schema with another connection"
-                  className={cn(ICON_BTN, pane === 'diff' ? 'bg-surface-2 text-fg-base' : 'text-fg-muted')}
-                >
-                  <GitCompareArrows size={12} />
-                </button>
-              </>
-            )}
-            {connected && (
-              <>
-                <button
-                  type="button"
-                  onClick={() => void backup()}
+            <>
+              <ToolSep />
+              <ToolButton
+                icon={backingUp === 'dump' ? Loader2 : HardDriveDownload}
+                spin={backingUp === 'dump'}
+                label={active?.backend === 'sqlite' ? 'Back up: save a copy of the database file' : 'Back up: dump the database to a SQL file'}
+                onClick={() => void backup()}
+                disabled={backingUp !== null}
+              />
+              {!readOnly && (
+                <ToolButton
+                  icon={backingUp === 'restore' ? Loader2 : HardDriveUpload}
+                  spin={backingUp === 'restore'}
+                  label="Restore: run a SQL script or dump file against this database"
+                  onClick={() => void restore()}
                   disabled={backingUp !== null}
-                  title={active?.backend === 'sqlite' ? 'Back up: save a copy of the database file' : 'Back up: dump the database to a SQL file'}
-                  className={cn(ICON_BTN, 'text-fg-muted disabled:opacity-40')}
-                >
-                  {backingUp === 'dump' ? <Loader2 size={12} className="animate-spin" /> : <HardDriveDownload size={12} />}
-                </button>
-                {!readOnly && (
-                  <button
-                    type="button"
-                    onClick={() => void restore()}
-                    disabled={backingUp !== null}
-                    title="Restore: run a SQL script or dump file against this database"
-                    className={cn(ICON_BTN, 'text-fg-muted disabled:opacity-40')}
-                  >
-                    {backingUp === 'restore' ? <Loader2 size={12} className="animate-spin" /> : <HardDriveUpload size={12} />}
-                  </button>
-                )}
-              </>
-            )}
-            {active && (
-              <button
-                type="button"
-                onClick={() => setPanel((p) => (p ? null : 'history'))}
-                title="History and saved queries"
-                className={cn(ICON_BTN, panel ? 'bg-surface-2 text-fg-base' : 'text-fg-muted')}
-              >
-                <History size={12} />
-              </button>
-            )}
-          </div>
-        </div>
+                />
+              )}
+            </>
+          )}
+        </Toolbar>
 
         {form && (
           <ConnectionForm
@@ -1331,32 +1323,20 @@ export function DbClient({ tabId }: Props) {
           />
         )}
 
-        {connected && safety === 'production' && (
-          <div className="flex shrink-0 items-center gap-1.5 border-b border-status-err/30 bg-status-err/10 px-3 py-1 font-sans text-xs text-status-err">
-            <ShieldAlert size={12} />
-            Production database — every write asks for confirmation.
-          </div>
-        )}
-        {connected && readOnly && (
-          <div className="flex shrink-0 items-center gap-1.5 border-b border-border-hairline bg-surface-1 px-3 py-1 font-sans text-xs text-fg-muted">
-            <Lock size={11} />
-            Read-only — writes are refused here and by the server.
-          </div>
-        )}
-
         {error && (
-          <div className="flex shrink-0 items-start gap-2 border-b border-border-hairline bg-status-err/10 px-3 py-1.5 font-sans text-xs text-status-err">
-            <span className="min-w-0 flex-1 whitespace-pre-wrap break-words">{error}</span>
+          <div className="flex shrink-0 items-start gap-2 border-b border-status-err/25 bg-status-err/[0.08] px-3 py-1.5 font-display text-xs text-status-err">
+            <CircleAlert size={13} className="mt-px shrink-0" />
+            <span className="min-w-0 flex-1 whitespace-pre-wrap break-words font-mono">{error}</span>
             {failedSql && aiContext && (
               <button
                 type="button"
                 onClick={() => setAiExplain((x) => ({ n: (x?.n ?? 0) + 1, sql: failedSql, problem: { error } }))}
-                className="flex shrink-0 items-center gap-1 rounded px-1.5 text-fg-base hover:bg-status-err/15"
+                className={cn(textBtn, 'text-status-err hover:text-status-err')}
               >
                 <Sparkles size={11} /> Explain with Claude
               </button>
             )}
-            <button type="button" onClick={() => setError(null)} className="shrink-0 hover:opacity-70">
+            <button type="button" onClick={() => setError(null)} aria-label="Dismiss error" className="shrink-0 rounded p-0.5 hover:bg-status-err/15">
               <X size={12} />
             </button>
           </div>
@@ -1376,6 +1356,83 @@ export function DbClient({ tabId }: Props) {
           />
         )}
 
+        {/* Console tabs, and the switch between consoles and analytics. */}
+        {connected && (
+          <div className="flex h-8 shrink-0 items-end gap-0.5 border-b border-edge-1 bg-surface-1/60 pl-1 pr-2">
+            {view === 'query' ? (
+              <div className="flex min-w-0 flex-1 items-end gap-0.5 overflow-x-auto">
+                {queryTabs.map((t) => {
+                  const isActive = t.id === activeTabId;
+                  const label = (isActive ? resultTable : t.resultTable) ?? t.name;
+                  return (
+                    <div
+                      key={t.id}
+                      className={cn(
+                        'group relative flex h-7 shrink-0 items-center gap-1.5 rounded-t-md pl-2.5 pr-1.5 font-mono text-xs',
+                        isActive ? 'bg-bg-base text-fg-base' : 'text-fg-muted hover:bg-surface-2 hover:text-fg-base',
+                      )}
+                      style={isActive && env ? { boxShadow: `inset 0 2px 0 ${env.color}`, backgroundColor: `${env.color}12` } : undefined}
+                    >
+                      <FileCode2 size={12} className={cn('shrink-0', isActive ? 'text-accent-bright' : 'text-fg-subtle')} />
+                      <button
+                        type="button"
+                        onClick={() => void switchTab(t.id)}
+                        disabled={running}
+                        className="max-w-[12rem] truncate focus-visible:outline-none disabled:cursor-not-allowed"
+                        title={label}
+                      >
+                        {label}
+                      </button>
+                      {queryTabs.length > 1 && (
+                        <button
+                          type="button"
+                          onClick={() => void closeTab(t.id)}
+                          title="Close console"
+                          aria-label={`Close ${label}`}
+                          className="rounded p-0.5 text-fg-subtle opacity-0 transition hover:bg-surface-3 hover:text-fg-base focus-visible:opacity-100 group-hover:opacity-100"
+                        >
+                          <X size={10} />
+                        </button>
+                      )}
+                    </div>
+                  );
+                })}
+                <button
+                  type="button"
+                  onClick={() => void newTab()}
+                  disabled={running}
+                  title="New console"
+                  aria-label="New console"
+                  className="mb-0.5 ml-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded text-fg-muted transition hover:bg-surface-2 hover:text-fg-base disabled:opacity-40"
+                >
+                  <Plus size={12} />
+                </button>
+              </div>
+            ) : (
+              <span className="flex h-7 flex-1 items-center gap-1.5 px-1.5 font-display text-xs text-fg-base">
+                <BarChart3 size={12} className="text-accent-bright" /> Analytics
+              </span>
+            )}
+            <div role="tablist" aria-label="View" className="mb-1 flex shrink-0 rounded bg-surface-1 p-0.5 ring-1 ring-inset ring-edge-1">
+              {(['query', 'analytics'] as const).map((v) => (
+                <button
+                  key={v}
+                  type="button"
+                  role="tab"
+                  aria-selected={view === v}
+                  onClick={() => setView(v)}
+                  className={cn(
+                    'rounded-sm px-2 py-px font-display text-2xs transition-colors',
+                    view === v ? 'bg-surface-3 text-fg-base' : 'text-fg-muted hover:text-fg-base',
+                  )}
+                >
+                  {v === 'query' ? 'Console' : 'Analytics'}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
         {view === 'analytics' && connected && active && activeId ? (
           <div className="min-h-0 flex-1">
             <DbAnalytics
@@ -1388,431 +1445,295 @@ export function DbClient({ tabId }: Props) {
           </div>
         ) : (
           <>
-          {/* Query tabs */}
-          {connected && (
-            <div className="flex shrink-0 items-center gap-0.5 overflow-x-auto border-b border-border-hairline px-2 pt-1">
-              {queryTabs.map((t) => {
-                const isActive = t.id === activeTabId;
-                const label = (isActive ? resultTable : t.resultTable) ?? t.name;
-                return (
-                  <div
-                    key={t.id}
-                    className={cn(
-                      'group flex shrink-0 items-center gap-1 rounded-t-md border border-b-0 px-2.5 py-1 font-sans text-xs',
-                      isActive
-                        ? 'border-border-hairline bg-bg-base text-fg-base'
-                        : 'border-transparent text-fg-muted hover:bg-surface-1 hover:text-fg-base',
-                    )}
-                  >
-                    <button
-                      type="button"
-                      onClick={() => void switchTab(t.id)}
-                      disabled={running}
-                      className="max-w-[12rem] truncate disabled:cursor-not-allowed"
-                      title={label}
-                    >
-                      {label}
-                    </button>
-                    {queryTabs.length > 1 && (
-                      <button
-                        type="button"
-                        onClick={() => void closeTab(t.id)}
-                        title="Close tab"
-                        className="text-fg-subtle opacity-0 transition hover:text-fg-base group-hover:opacity-100"
-                      >
-                        <X size={10} />
-                      </button>
-                    )}
-                  </div>
-                );
-              })}
-              <button
-                type="button"
-                onClick={() => void newTab()}
-                disabled={running}
-                title="New query tab"
-                className="ml-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded text-fg-muted transition hover:bg-surface-2 hover:text-fg-base disabled:opacity-40"
-              >
-                <Plus size={11} />
-              </button>
-            </div>
-          )}
-
-          {askOpen && aiContext && connected && (
-            <AskClaudeBar
-              ctx={aiContext}
-              onUse={(text) => {
-                setAskOpen(false);
-                sendToEditor(text, 'Claude’s query is in the editor — review it, then Run');
-              }}
-              onClose={() => setAskOpen(false)}
-            />
-          )}
-
-          {/* SQL editor */}
-          <div className="shrink-0 border-b border-border-hairline">
-            <div className="h-32 min-h-[64px] resize-y overflow-hidden">
-              <SqlEditor
-                ref={editor}
-                value={sql}
-                onChange={setSql}
-                onRun={(text) => void run(text)}
-                backend={active?.backend ?? null}
-                completion={completion}
-                disabled={!connected}
-                placeholder={connected ? 'SELECT …    (⌘/Ctrl + Enter runs the selection or everything)' : 'Connect first'}
+            {askOpen && aiContext && connected && (
+              <AskClaudeBar
+                ctx={aiContext}
+                onUse={(text) => {
+                  setAskOpen(false);
+                  sendToEditor(text, 'Claude’s query is in the editor — review it, then Run');
+                }}
+                onClose={() => setAskOpen(false)}
               />
+            )}
+
+            {/* SQL console */}
+            <div className="shrink-0 border-b border-edge-1 bg-bg-base">
+              <div className="h-40 min-h-[64px] resize-y overflow-hidden">
+                <SqlEditor
+                  ref={editor}
+                  value={sql}
+                  onChange={setSql}
+                  onRun={(text) => void run(text)}
+                  backend={active?.backend ?? null}
+                  completion={completion}
+                  disabled={!connected}
+                  placeholder={connected ? 'SELECT …    (⌘/Ctrl + Enter runs the selection or everything)' : 'Connect first'}
+                />
+              </div>
             </div>
-            <div className="flex flex-wrap items-center gap-x-2 gap-y-1 px-3 pb-1.5 pt-1 [&>*]:shrink-0 [&>*]:whitespace-nowrap">
-              {running ? (
-                <button
-                  type="button"
-                  onClick={() => runningId && void dbCancel(runningId).catch((e) => toastError(String(e)))}
-                  title="Ask the server to stop this statement"
-                  className="flex items-center gap-1 rounded-lg bg-status-err/15 px-2.5 py-1 font-sans text-xs text-status-err ring-1 ring-status-err/40 transition-colors hover:bg-status-err/25"
-                >
-                  <Square size={10} />
-                  Cancel
-                </button>
-              ) : (
-                <button
-                  type="button"
-                  onClick={() => void run(editor.current?.selectionOrAll() ?? sql)}
-                  disabled={!connected || !sql.trim()}
-                  title="Run the selection, or everything (⌘/Ctrl + Enter)"
-                  className="flex items-center gap-1 rounded-lg bg-accent-soft px-2.5 py-1 font-sans text-xs text-fg-base ring-1 ring-accent/45 transition-colors hover:bg-accent/20 disabled:cursor-not-allowed disabled:opacity-40"
-                >
-                  <Play size={11} />
-                  Run
-                </button>
-              )}
-              <button
-                type="button"
-                onClick={() => void explain(editor.current?.selectionOrAll() ?? sql)}
-                disabled={!connected || running || !sql.trim()}
-                title="Show the query plan"
-                className="flex items-center gap-1 rounded-lg px-2.5 py-1 font-sans text-xs text-fg-muted transition-colors hover:bg-surface-2 hover:text-fg-base disabled:cursor-not-allowed disabled:opacity-40"
-              >
-                <ListTree size={11} />
-                Explain
-              </button>
-              <button
-                type="button"
-                onClick={() => setAskOpen((o) => !o)}
-                disabled={!connected}
-                title="Describe a query and let Claude write it"
-                className={cn(
-                  'flex items-center gap-1 rounded-lg px-2.5 py-1 font-sans text-xs transition-colors hover:bg-surface-2 hover:text-fg-base disabled:cursor-not-allowed disabled:opacity-40',
-                  askOpen ? 'bg-surface-2 text-fg-base' : 'text-fg-muted',
-                )}
-              >
-                <Sparkles size={11} />
-                Ask Claude
-              </button>
-              {savingName === null ? (
-                <button
-                  type="button"
-                  onClick={() => setSavingName('')}
-                  disabled={!activeId || !sql.trim()}
-                  title="Save this query on the connection"
-                  className="flex items-center gap-1 rounded-lg px-2.5 py-1 font-sans text-xs text-fg-muted transition-colors hover:bg-surface-2 hover:text-fg-base disabled:cursor-not-allowed disabled:opacity-40"
-                >
-                  <Bookmark size={11} />
-                  Save
-                </button>
-              ) : (
-                <input
-                  autoFocus
-                  value={savingName}
-                  onChange={(e) => setSavingName(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') void saveQuery(savingName);
-                    if (e.key === 'Escape') setSavingName(null);
-                  }}
-                  onBlur={() => !savingName.trim() && setSavingName(null)}
-                  placeholder="Name, then Enter"
-                  className="w-40 rounded-md border border-accent/45 bg-bg-base px-2 py-0.5 font-sans text-xs text-fg-base focus:outline-none"
-                />
-              )}
-              <label
-                className="flex items-center gap-1 font-sans text-xs text-fg-subtle"
-                title={
-                  inTx
-                    ? 'Commit or roll back the open transaction first'
-                    : 'Off: statements run inside a transaction you commit or roll back yourself'
-                }
-              >
-                <input
-                  type="checkbox"
-                  checked={autoCommit}
-                  disabled={inTx || !connected}
-                  onChange={(e) => setAutoCommit(e.target.checked)}
-                  className="h-3 w-3 accent-accent"
-                />
-                Auto-commit
-              </label>
-              {active?.backend === 'postgres' && (
-                <label
-                  className="flex items-center gap-1 font-sans text-xs text-fg-subtle"
-                  title="EXPLAIN ANALYZE executes the statement — writes included — to measure real rows and timings."
-                >
-                  <input
-                    type="checkbox"
-                    checked={analyze}
-                    onChange={(e) => setAnalyze(e.target.checked)}
-                    className="h-3 w-3 accent-accent"
-                  />
-                  Analyze
-                  {analyze && <span className="text-status-warn">(executes the query)</span>}
-                </label>
-              )}
-              {result && pane === 'grid' && (
-                <span className="font-sans text-xs text-fg-subtle">
-                  {result.columns.length > 0
-                    ? `${result.rows.length} row${result.rows.length === 1 ? '' : 's'}`
-                    : `${result.rows_affected} row${result.rows_affected === 1 ? '' : 's'} affected`}
-                  {' · '}
-                  {result.duration_ms} ms
-                  {result.truncated && ' · truncated'}
-                </span>
-              )}
-              {exporting ? (
-                <div className="ml-auto flex items-center gap-1.5 font-sans text-xs text-fg-subtle">
-                  <Loader2 size={11} className="animate-spin" />
-                  Exporting… {exporting.rows.toLocaleString()} rows
-                  <button
-                    type="button"
-                    onClick={() => void dbJobCancel(exporting.id)}
-                    className="rounded px-1.5 py-0.5 text-fg-muted transition hover:bg-surface-2 hover:text-fg-base"
-                  >
-                    Cancel
+
+            {/* Pending edits, the way an IDE shows them: a count, the SQL, Submit. */}
+            {pane === 'grid' && nEdits > 0 && (
+              <div className="shrink-0 border-b border-status-warn/25 bg-status-warn/[0.07]">
+                <div className="flex h-8 items-center gap-2 px-3 font-display text-xs">
+                  <span className="h-1.5 w-1.5 rounded-full bg-status-warn" />
+                  <span className="text-status-warn">
+                    {nEdits} pending change{nEdits === 1 ? '' : 's'} to <span className="font-mono">{resultTable}</span>
+                  </span>
+                  <button type="button" onClick={() => setShowEditSql((v) => !v)} className={textBtn}>
+                    <ChevronRight size={11} className={cn('transition-transform', showEditSql && 'rotate-90')} />
+                    Preview SQL
+                  </button>
+                  <span className="flex-1" />
+                  <button type="button" onClick={() => setEdits(emptyEdits())} className={textBtn}>
+                    <Undo2 size={11} /> Revert
+                  </button>
+                  <button type="button" onClick={() => void applyEdits()} disabled={running} className={primaryBtn}>
+                    <ArrowUpFromLine size={11} /> Submit{autoCommit ? '' : ' in transaction'}
                   </button>
                 </div>
-              ) : (
-                result &&
-                result.columns.length > 0 &&
-                pane === 'grid' && (
-                  <div className="ml-auto flex items-center gap-1">
+                {showEditSql && (
+                  <pre className="max-h-40 overflow-auto whitespace-pre-wrap break-all border-t border-status-warn/15 px-3 py-2 font-mono text-2xs text-fg-base/80">
+                    {statements.map((s) => `${s};`).join('\n')}
+                  </pre>
+                )}
+              </div>
+            )}
+
+            {/* ── Results tool window ── */}
+            <ToolWindowHeader
+              actions={
+                exporting ? (
+                  <span className="flex items-center gap-1.5 font-display text-2xs text-fg-subtle">
+                    <Loader2 size={11} className="animate-spin" />
+                    Exporting {exporting.rows.toLocaleString()} rows
+                    <button type="button" onClick={() => void dbJobCancel(exporting.id)} className={textBtn}>
+                      Cancel
+                    </button>
+                  </span>
+                ) : showExport ? (
+                  <>
+                    <span className="mr-0.5 font-display text-2xs text-fg-subtle">Export</span>
                     {(['csv', 'json'] as const).map((format) => (
                       <button
                         key={format}
                         type="button"
                         onClick={() => void exportResult(format)}
-                        title={`Export these rows as ${format.toUpperCase()}`}
-                        className="flex items-center gap-1 rounded px-1.5 py-0.5 font-sans text-2xs uppercase text-fg-muted transition hover:bg-surface-2 hover:text-fg-base"
+                        title={`Export the rows shown as ${format.toUpperCase()}`}
+                        className={cn(textBtn, 'h-6 px-1.5 font-mono text-2xs')}
                       >
-                        <Download size={10} />
-                        {format}
+                        <Download size={11} />
+                        {format.toUpperCase()}
                       </button>
                     ))}
-                    <span className="mx-0.5 h-3 w-px bg-border-hairline" />
+                    <span aria-hidden className="mx-0.5 h-3.5 w-px bg-edge-2" />
                     {(['csv', 'json'] as const).map((format) => (
                       <button
                         key={format}
                         type="button"
                         onClick={() => void exportFull(format)}
-                        title={`Export full result as ${format.toUpperCase()} — re-runs the query and streams every row to the file, past the grid's cap`}
-                        className="flex items-center gap-1 rounded px-1.5 py-0.5 font-sans text-2xs uppercase text-fg-muted transition hover:bg-surface-2 hover:text-fg-base"
+                        title={`Export the full result as ${format.toUpperCase()}: re-runs the query and streams every row to the file, past the grid's cap`}
+                        className={cn(textBtn, 'h-6 px-1.5 font-mono text-2xs')}
                       >
-                        <Download size={10} />
-                        full {format}
+                        <Download size={11} />
+                        All {format.toUpperCase()}
                       </button>
                     ))}
-                  </div>
+                  </>
+                ) : undefined
+              }
+            >
+              {resultTabs
+                .filter((t) => t.show)
+                .map((t) => (
+                  <ToolTab
+                    key={t.id}
+                    icon={t.icon}
+                    active={pane === t.id}
+                    onClick={() => {
+                      if (t.id === 'design') return setPane('design');
+                      setPane(t.id);
+                    }}
+                  >
+                    {t.label}
+                  </ToolTab>
+                ))}
+            </ToolWindowHeader>
+
+            <div className="min-h-0 flex-1 overflow-hidden">
+              {pane === 'diagram' && active ? (
+                schemas ? (
+                  <SchemaDiagram
+                    backend={active.backend}
+                    schemas={schemas}
+                    rowCounts={rowCounts}
+                    onOpenTable={(t) => void previewTable(t)}
+                    renderDetails={(t, s, onCloseDetails) => (
+                      <SchemaView table={t} schema={s} onClose={onCloseDetails} />
+                    )}
+                    onClose={() => setPane('grid')}
+                  />
+                ) : (
+                  <Waiting label="Loading schema…" />
                 )
-              )}
-            </div>
-          </div>
-
-          {/* Staged edits bar */}
-          {pane === 'grid' && nEdits > 0 && (
-            <div className="shrink-0 border-b border-border-hairline bg-status-warn/10">
-              <div className="flex items-center gap-2 px-3 py-1 font-sans text-xs">
-                <span className="text-status-warn">
-                  {nEdits} pending change{nEdits === 1 ? '' : 's'} to {resultTable}
-                </span>
-                <button
-                  type="button"
-                  onClick={() => setShowEditSql((v) => !v)}
-                  className="flex items-center gap-0.5 text-fg-muted hover:text-fg-base"
-                >
-                  <ChevronRight size={10} className={cn('transition-transform', showEditSql && 'rotate-90')} />
-                  SQL
-                </button>
-                <span className="flex-1" />
-                <button
-                  type="button"
-                  onClick={() => setEdits(emptyEdits())}
-                  className="rounded px-2 py-0.5 text-fg-muted transition hover:bg-surface-2 hover:text-fg-base"
-                >
-                  Discard
-                </button>
-                <button
-                  type="button"
-                  onClick={() => void applyEdits()}
-                  disabled={running}
-                  className="rounded-md bg-accent-soft px-2.5 py-0.5 text-fg-base ring-1 ring-accent/45 transition-colors hover:bg-accent/20 disabled:opacity-40"
-                >
-                  Apply {autoCommit ? '' : '(in transaction)'}
-                </button>
-              </div>
-              {showEditSql && (
-                <pre className="max-h-40 overflow-auto whitespace-pre-wrap break-all px-3 pb-2 font-mono text-2xs text-fg-base/80">
-                  {statements.map((s) => `${s};`).join('\n')}
-                </pre>
-              )}
-            </div>
-          )}
-
-          {/* ── Results area ── */}
-          <div className="min-h-0 flex-1 overflow-hidden">
-            {pane === 'diagram' && active ? (
-              schemas ? (
-                <SchemaDiagram
-                  backend={active.backend}
-                  schemas={schemas}
-                  rowCounts={rowCounts}
-                  onOpenTable={(t) => void previewTable(t)}
-                  renderDetails={(t, s, onCloseDetails) => (
-                    <SchemaView table={t} schema={s} onClose={onCloseDetails} />
-                  )}
-                  onClose={() => setPane('grid')}
-                />
-              ) : (
-                <Waiting label="Loading schema…" />
-              )
-            ) : pane === 'diff' && active ? (
-              schemas ? (
-                <SchemaDiff
-                  active={active}
-                  schemas={schemas}
-                  connections={connections}
-                  onSendToEditor={(text) => {
-                    setSql(text);
-                    setPane('grid');
-                    toast('Migration SQL loaded — review it, then Run');
-                  }}
-                  onClose={() => setPane('grid')}
-                />
-              ) : (
-                <Waiting label="Loading schema…" />
-              )
-            ) : pane === 'schema' && schema ? (
-              <div className="h-full overflow-auto">
-                <SchemaView
-                  table={schema.table}
-                  schema={schema.data}
-                  onClose={() => setPane('grid')}
-                  actions={schemaActions(schema.table, schema.data)}
-                />
-              </div>
-            ) : pane === 'design' && design && active && design.table && !schemas?.[design.table] ? (
-              <Waiting label="Loading schema…" />
-            ) : pane === 'design' && design && active ? (
-              <TableDesigner
-                key={design.table ?? '+new'}
-                backend={active.backend}
-                current={
-                  design.table && schemas?.[design.table]
-                    ? { table: design.table, schema: schemas[design.table]! }
-                    : null
-                }
-                defaultSchema="public"
-                onSendToEditor={(text) =>
-                  sendToEditor(text, design.table ? 'ALTER statements are in the editor — review them, then Run' : 'CREATE TABLE is in the editor — review it, then Run')
-                }
-                onClose={() => {
-                  setDesign(null);
-                  setPane('grid');
-                }}
-              />
-            ) : pane === 'plan' && plan ? (
-              <div className="flex h-full flex-col">
-                {aiContext && !aiExplain && (
-                  <div className="flex shrink-0 justify-end border-b border-border-hairline px-3 py-1">
-                    <button
-                      type="button"
-                      onClick={() =>
-                        setAiExplain((x) => ({
-                          n: (x?.n ?? 0) + 1,
-                          sql: editor.current?.selectionOrAll() ?? sql,
-                          problem: { plan: planText(plan.roots) },
-                        }))
-                      }
-                      className="flex items-center gap-1 rounded px-1.5 py-0.5 font-sans text-2xs text-fg-muted transition hover:bg-surface-2 hover:text-fg-base"
-                    >
-                      <Sparkles size={10} /> Explain this plan with Claude
-                    </button>
-                  </div>
-                )}
-                <div className="min-h-0 flex-1 overflow-auto">
-                  <PlanView roots={plan.roots} analyze={plan.analyze} onClose={() => setPane('grid')} />
-                </div>
-              </div>
-            ) : result && result.columns.length > 0 ? (
-              <div className="flex h-full flex-col">
-                {trail.length > 0 && (
-                  <div className="flex shrink-0 items-center gap-2 border-b border-border-hairline px-3 py-1 font-sans text-2xs text-fg-subtle">
-                    <button
-                      type="button"
-                      onClick={() => void goBack()}
-                      disabled={running}
-                      className="flex items-center gap-1 rounded px-1.5 py-0.5 text-fg-muted transition hover:bg-surface-2 hover:text-fg-base"
-                    >
-                      <ArrowLeft size={10} /> Back to {trail.at(-1)!.table}
-                    </button>
-                    <span className="truncate">{[...trail.map((b) => b.table), resultTable].join(' → ')}</span>
-                  </div>
-                )}
-                <div className="min-h-0 flex-1">
-                  <ResultGrid
-                    result={result}
-                    editing={editable ? { edits, onChange: setEdits, pk } : undefined}
-                    readOnlyReason={readOnlyReason}
-                    browsing={browse ? { browse, hasNext, onChange: (b) => void changeBrowse(b) } : undefined}
-                    links={browse ? links : undefined}
-                    copyAs={{ backend: active?.backend ?? 'postgres', table: resultTable }}
+              ) : pane === 'diff' && active ? (
+                schemas ? (
+                  <SchemaDiff
+                    active={active}
+                    schemas={schemas}
+                    connections={connections}
+                    onSendToEditor={(text) => {
+                      setSql(text);
+                      setPane('grid');
+                      toast('Migration SQL loaded — review it, then Run');
+                    }}
+                    onClose={() => setPane('grid')}
+                  />
+                ) : (
+                  <Waiting label="Loading schema…" />
+                )
+              ) : pane === 'schema' && schema ? (
+                <div className="h-full overflow-auto">
+                  <SchemaView
+                    table={schema.table}
+                    schema={schema.data}
+                    onClose={() => setPane('grid')}
+                    actions={schemaActions(schema.table, schema.data)}
                   />
                 </div>
-              </div>
-            ) : (
-              <div className="flex h-32 flex-col items-center justify-center gap-2 font-sans text-xs text-fg-subtle">
-                {running ? (
-                  <Loader2 size={13} className="animate-spin" />
-                ) : browse ? (
-                  <>
-                    {Object.values(browse.filters).some((f) => f.trim())
-                      ? `No rows in ${browse.table} match these filters.`
-                      : `${browse.table} has no rows${browse.page > 0 ? ' on this page' : ''}.`}
-                    <span className="flex gap-2">
-                      {Object.values(browse.filters).some((f) => f.trim()) && (
-                        <button
-                          type="button"
-                          onClick={() => void changeBrowse({ ...browse, filters: {}, page: 0 })}
-                          className="text-fg-muted underline hover:text-fg-base"
-                        >
-                          Clear filters
-                        </button>
-                      )}
-                      {trail.length > 0 && (
-                        <button type="button" onClick={() => void goBack()} className="text-fg-muted underline hover:text-fg-base">
-                          Back to {trail.at(-1)!.table}
-                        </button>
-                      )}
-                    </span>
-                  </>
-                ) : result ? (
-                  'Statement ran — no rows returned.'
-                ) : connected ? (
-                  'Run a query, or pick a table on the left.'
-                ) : (
-                  'Not connected.'
-                )}
-              </div>
-            )}
-          </div>
+              ) : pane === 'design' && design && active && design.table && !schemas?.[design.table] ? (
+                <Waiting label="Loading schema…" />
+              ) : pane === 'design' && design && active ? (
+                <TableDesigner
+                  key={design.table ?? '+new'}
+                  backend={active.backend}
+                  current={
+                    design.table && schemas?.[design.table]
+                      ? { table: design.table, schema: schemas[design.table]! }
+                      : null
+                  }
+                  defaultSchema="public"
+                  onSendToEditor={(text) =>
+                    sendToEditor(text, design.table ? 'ALTER statements are in the editor — review them, then Run' : 'CREATE TABLE is in the editor — review it, then Run')
+                  }
+                  onClose={() => {
+                    setDesign(null);
+                    setPane('grid');
+                  }}
+                />
+              ) : pane === 'plan' && plan ? (
+                <div className="flex h-full flex-col">
+                  {aiContext && !aiExplain && (
+                    <div className="flex shrink-0 justify-end border-b border-edge-1 px-2 py-1">
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setAiExplain((x) => ({
+                            n: (x?.n ?? 0) + 1,
+                            sql: editor.current?.selectionOrAll() ?? sql,
+                            problem: { plan: planText(plan.roots) },
+                          }))
+                        }
+                        className={textBtn}
+                      >
+                        <Sparkles size={11} /> Explain this plan with Claude
+                      </button>
+                    </div>
+                  )}
+                  <div className="min-h-0 flex-1 overflow-auto">
+                    <PlanView roots={plan.roots} analyze={plan.analyze} onClose={() => setPane('grid')} />
+                  </div>
+                </div>
+              ) : result && result.columns.length > 0 ? (
+                <div className="flex h-full flex-col">
+                  {trail.length > 0 && (
+                    <div className="flex h-7 shrink-0 items-center gap-2 border-b border-edge-1 px-2 font-mono text-2xs text-fg-subtle">
+                      <button type="button" onClick={() => void goBack()} disabled={running} className={textBtn}>
+                        <ArrowLeft size={11} /> Back
+                      </button>
+                      <span className="flex min-w-0 items-center gap-1 truncate">
+                        {[...trail.map((b) => b.table), resultTable].map((t, i, all) => (
+                          <span key={`${t}-${i}`} className="flex items-center gap-1">
+                            <ObjIcon kind="table" size={11} />
+                            <span className={i === all.length - 1 ? 'text-fg-base' : undefined}>{t}</span>
+                            {i < all.length - 1 && <ChevronRight size={10} />}
+                          </span>
+                        ))}
+                      </span>
+                    </div>
+                  )}
+                  <div className="min-h-0 flex-1">
+                    <ResultGrid
+                      result={result}
+                      editing={editable ? { edits, onChange: setEdits, pk } : undefined}
+                      readOnlyReason={readOnlyReason}
+                      browsing={browse ? { browse, hasNext, onChange: (b) => void changeBrowse(b) } : undefined}
+                      links={browse ? links : undefined}
+                      columnInfo={resultTable ? schemas?.[resultTable]?.columns : undefined}
+                      copyAs={{ backend: active?.backend ?? 'postgres', table: resultTable }}
+                    />
+                  </div>
+                </div>
+              ) : (
+                <Placeholder>
+                  {running ? (
+                    <Loader2 size={14} className="animate-spin" />
+                  ) : browse ? (
+                    <>
+                      {Object.values(browse.filters).some((f) => f.trim())
+                        ? `No rows in ${browse.table} match these filters.`
+                        : `${browse.table} has no rows${browse.page > 0 ? ' on this page' : ''}.`}
+                      <span className="flex gap-1">
+                        {Object.values(browse.filters).some((f) => f.trim()) && (
+                          <button type="button" onClick={() => void changeBrowse({ ...browse, filters: {}, page: 0 })} className={textBtn}>
+                            Clear filters
+                          </button>
+                        )}
+                        {trail.length > 0 && (
+                          <button type="button" onClick={() => void goBack()} className={textBtn}>
+                            <ArrowLeft size={11} /> Back to {trail.at(-1)!.table}
+                          </button>
+                        )}
+                      </span>
+                    </>
+                  ) : result ? (
+                    'Statement ran. It returned no rows.'
+                  ) : connected ? (
+                    'Run a query, or open a table from the explorer.'
+                  ) : (
+                    'Not connected.'
+                  )}
+                </Placeholder>
+              )}
+            </div>
           </>
         )}
+
+        {/* Status bar */}
+        <StatusBar>
+          {active ? (
+            <span className="flex min-w-0 items-center gap-1.5">
+              <EnvDot env={env} on={connected} />
+              <span className="truncate text-fg-muted">{active.name}</span>
+              <span className="truncate font-mono">{connecting ? 'connecting…' : connected ? active.backend : 'disconnected'}</span>
+            </span>
+          ) : (
+            <span>No connection</span>
+          )}
+          {connected && (
+            <span className="shrink-0">{inTx ? <span className="text-status-warn">Transaction open</span> : autoCommit ? 'Auto-commit' : 'Manual commit'}</span>
+          )}
+          <span className="flex-1" />
+          {result && view === 'query' && (
+            <span className="shrink-0 font-mono tabular-nums">
+              {result.columns.length > 0
+                ? `${result.rows.length.toLocaleString()} row${result.rows.length === 1 ? '' : 's'}`
+                : `${result.rows_affected.toLocaleString()} row${result.rows_affected === 1 ? '' : 's'} affected`}
+              {result.truncated && <span className="text-status-warn"> (truncated)</span>}
+            </span>
+          )}
+          {result && view === 'query' && <span className="shrink-0 font-mono tabular-nums">{result.duration_ms} ms</span>}
+        </StatusBar>
       </div>
 
       {panel && activeId && (
@@ -1910,10 +1831,10 @@ export function DbClient({ tabId }: Props) {
 
 function Waiting({ label }: { label: string }) {
   return (
-    <div className="flex h-full items-center justify-center gap-2 font-sans text-xs text-fg-subtle">
-      <Loader2 size={13} className="animate-spin" />
+    <Placeholder>
+      <Loader2 size={14} className="animate-spin" />
       {label}
-    </div>
+    </Placeholder>
   );
 }
 
@@ -1968,24 +1889,18 @@ function PlanView({
   const hot = useMemo(() => hotNodes(roots), [roots]);
   return (
     <div className="pb-3">
-      <div className="flex items-center gap-2 border-b border-border-hairline px-3 py-1.5">
-        <ListTree size={12} className="shrink-0 text-fg-subtle" />
-        <span className="font-sans text-xs text-fg-base">
-          {analyze ? 'Query plan (analyzed)' : 'Query plan'}
+      <ToolWindowHeader actions={<ToolButton icon={X} label="Back to results" onClick={onClose} />}>
+        <span className="flex min-w-0 items-center gap-1.5 px-1">
+          <ListTree size={12} className="shrink-0 text-fg-subtle" />
+          <span className="font-display text-xs font-medium text-fg-base">
+            {analyze ? 'Query plan (analyzed)' : 'Query plan'}
+          </span>
+          <span className="ml-2 flex items-center gap-1 font-display text-2xs text-fg-subtle">
+            <span className="h-2 w-2 rounded-sm bg-status-warn/70" /> most expensive
+          </span>
         </span>
-        <span className="font-sans text-2xs text-status-warn">■ most expensive</span>
-        <button
-          type="button"
-          onClick={onClose}
-          title="Back to results"
-          className="ml-auto shrink-0 text-fg-subtle hover:text-fg-base"
-        >
-          <X size={12} />
-        </button>
-      </div>
-      {roots.length === 0 && (
-        <p className="px-3 py-2 font-sans text-xs text-fg-subtle">The plan is empty.</p>
-      )}
+      </ToolWindowHeader>
+      {roots.length === 0 && <Placeholder>The plan is empty.</Placeholder>}
       {roots.map((n, i) => (
         <PlanNodeRow key={i} node={n} depth={0} hot={hot} />
       ))}
@@ -1997,47 +1912,63 @@ function PlanNodeRow({ node, depth, hot }: { node: PlanNode; depth: number; hot:
   const [open, setOpen] = useState(true);
   const isHot = hot.has(node);
   const fmt = (n: number) => n.toLocaleString(undefined, { maximumFractionDigits: 2 });
-  const stats = [
-    node.estRows !== undefined && `est ${fmt(node.estRows)} rows`,
-    node.estCost !== undefined && `cost ${fmt(node.estCost)}`,
-    node.actualRows !== undefined && `actual ${fmt(node.actualRows)} rows`,
-    node.actualMs !== undefined && `${fmt(node.actualMs)} ms`,
-  ].filter(Boolean);
+  const stats: Array<[string, string] | false> = [
+    node.estRows !== undefined && ['est rows', fmt(node.estRows)],
+    node.estCost !== undefined && ['cost', fmt(node.estCost)],
+    node.actualRows !== undefined && ['actual rows', fmt(node.actualRows)],
+    node.actualMs !== undefined && ['ms', fmt(node.actualMs)],
+  ];
   return (
     <>
       <div
         className={cn(
-          'flex items-center gap-1.5 py-0.5 pr-3 hover:bg-surface-1',
-          isHot && 'bg-status-warn/10',
+          'relative flex h-6 items-center gap-1.5 pr-3 hover:bg-surface-1',
+          isHot && 'bg-status-warn/10 hover:bg-status-warn/15',
         )}
-        style={{ paddingLeft: 12 + depth * 16 }}
+        style={{ paddingLeft: 8 + depth * 16 }}
       >
+        {/* Indent guides, one per ancestor. */}
+        {Array.from({ length: depth }, (_, d) => (
+          <span key={d} aria-hidden className="absolute inset-y-0 w-px bg-edge-1" style={{ left: 15 + d * 16 }} />
+        ))}
+        {isHot && <span aria-hidden className="absolute inset-y-0 left-0 w-[2px] bg-status-warn" />}
         <button
           type="button"
           onClick={() => setOpen((o) => !o)}
+          aria-label={open ? 'Collapse' : 'Expand'}
+          aria-expanded={open}
           className={cn(
-            'flex h-4 w-4 shrink-0 items-center justify-center text-fg-subtle',
+            'flex h-4 w-4 shrink-0 items-center justify-center rounded text-fg-subtle hover:text-fg-base focus-visible:outline-none focus-visible:shadow-focus',
             node.children.length === 0 && 'invisible',
           )}
         >
-          <ChevronRight size={10} className={cn('transition-transform', open && 'rotate-90')} />
+          <ChevronRight size={11} className={cn('transition-transform', open && 'rotate-90')} />
         </button>
-        <span className={cn('font-mono text-xs', isHot ? 'text-status-warn' : 'text-fg-base')}>
+        <span className={cn('shrink-0 font-mono text-xs font-medium', isHot ? 'text-status-warn' : 'text-fg-base')}>
           {node.label}
         </span>
         {node.relation && !node.label.includes(node.relation) && (
-          <span className="font-mono text-xs text-accent">{node.relation}</span>
+          <span className="flex shrink-0 items-center gap-1 font-mono text-xs text-fg-muted">
+            <ObjIcon kind="table" size={11} />
+            {node.relation}
+          </span>
         )}
         {node.detail && (
-          <span className="truncate font-mono text-2xs text-fg-subtle" title={node.detail}>
+          <span className="min-w-0 truncate font-mono text-2xs text-fg-subtle" title={node.detail}>
             {node.detail}
           </span>
         )}
-        {stats.length > 0 && (
-          <span className="ml-auto shrink-0 pl-3 font-sans text-2xs text-fg-subtle/80">
-            {stats.join(' · ')}
-          </span>
-        )}
+        <span className="ml-auto flex shrink-0 items-center gap-3 pl-3">
+          {stats.map(
+            (s) =>
+              s && (
+                <span key={s[0]} className="flex items-baseline gap-1 font-mono text-2xs tabular-nums" title={s[0]}>
+                  <span className="text-fg-subtle/70">{s[0]}</span>
+                  <span className={cn('min-w-[3.5rem] text-right', isHot ? 'text-status-warn' : 'text-fg-muted')}>{s[1]}</span>
+                </span>
+              ),
+          )}
+        </span>
       </div>
       {open && node.children.map((c, i) => <PlanNodeRow key={i} node={c} depth={depth + 1} hot={hot} />)}
     </>
@@ -2046,8 +1977,14 @@ function PlanNodeRow({ node, depth, hot }: { node: PlanNode; depth: number; hot:
 
 // ─── Connection form ─────────────────────────────────────────────────────────
 
-const INPUT =
-  'rounded-lg border border-border-subtle bg-bg-base/60 px-2.5 py-1.5 font-sans text-xs text-fg-base placeholder:text-fg-subtle focus:border-accent/45 focus:outline-none';
+function Field({ label, children, className }: { label: string; children: React.ReactNode; className?: string }) {
+  return (
+    <label className={cn('flex min-w-0 flex-col gap-1', className)}>
+      <span className="font-display text-2xs text-fg-muted">{label}</span>
+      {children}
+    </label>
+  );
+}
 
 function ConnectionForm({
   editing,
@@ -2129,154 +2066,201 @@ function ConnectionForm({
     if (e.key === 'Escape') onCancel();
   };
 
+  const env = envOf(safety);
+
   return (
-    <div className="shrink-0 space-y-2 border-b border-border-hairline bg-bg-panel/40 px-3 py-2.5">
-      <div className="flex items-center gap-2">
-        <input
-          ref={nameRef}
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-          placeholder="Name (optional)"
-          spellCheck={false}
-          className={cn(INPUT, 'w-40 shrink-0')}
-        />
-        <input
-          value={url}
-          onChange={(e) => setUrl(e.target.value)}
-          onKeyDown={keys}
-          placeholder={placeholder}
-          spellCheck={false}
-          autoComplete="off"
-          className={cn(INPUT, 'min-w-0 flex-1 font-mono')}
-        />
-      </div>
-      <div className="flex items-center gap-2">
-        <input
-          type="password"
-          value={password}
-          onChange={(e) => setPassword(e.target.value)}
-          onKeyDown={keys}
-          placeholder={
-            editing?.has_password
-              ? 'Password (leave blank to keep the saved one)'
-              : 'Password (optional — or paste it in the URL)'
-          }
-          autoComplete="off"
-          className={cn(INPUT, 'min-w-0 flex-1')}
-        />
-        <label className="flex shrink-0 items-center gap-1.5 font-sans text-xs text-fg-muted">
-          <input
-            type="checkbox"
-            checked={useSsh}
-            onChange={(e) => setUseSsh(e.target.checked)}
-            disabled={backend === 'sqlite'}
-            className="h-3 w-3 accent-accent"
-          />
-          SSH tunnel
-        </label>
-        <button
-          type="button"
-          onClick={() => void save()}
-          disabled={saving || !url.trim()}
-          className="shrink-0 rounded-lg bg-accent-soft px-3 py-1.5 font-sans text-xs text-fg-base ring-1 ring-accent/45 transition-colors hover:bg-accent/20 disabled:opacity-40"
-        >
-          {saving ? 'saving…' : 'save'}
-        </button>
-        <button
-          type="button"
-          onClick={onCancel}
-          className="shrink-0 rounded-lg px-2.5 py-1.5 font-sans text-xs text-fg-muted transition hover:bg-surface-2 hover:text-fg-base"
-        >
-          cancel
-        </button>
-      </div>
-      {useSsh && backend !== 'sqlite' && (
-        <div className="space-y-2 rounded-lg border border-border-subtle px-2.5 py-2">
-          <div className="flex items-center gap-2">
+    <div
+      className="shrink-0 border-b border-edge-1 bg-bg-panel/60"
+      style={env ? { boxShadow: `inset 3px 0 0 ${env.color}` } : undefined}
+    >
+      <ToolWindowHeader>
+        <span className="flex items-center gap-1.5 px-1">
+          <Plug size={12} className="shrink-0 text-fg-subtle" />
+          <span className="font-display text-xs font-medium text-fg-base">
+            {editing ? `Edit ${editing.name}` : 'New connection'}
+          </span>
+          {env && <EnvBadge env={env} />}
+        </span>
+      </ToolWindowHeader>
+
+      <div className="space-y-3 px-3 py-3">
+        <div className="flex items-end gap-2">
+          <Field label="Name" className="w-44 shrink-0">
             <input
-              value={sshUser}
-              onChange={(e) => setSshUser(e.target.value)}
-              onKeyDown={keys}
-              placeholder="SSH user"
+              ref={nameRef}
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder="Optional"
               spellCheck={false}
-              className={cn(INPUT, 'w-28 shrink-0')}
+              className={cn(inputCls, 'font-display')}
             />
-            <span className="font-sans text-xs text-fg-subtle">@</span>
+          </Field>
+          <Field label="URL" className="flex-1">
             <input
-              value={sshHost}
-              onChange={(e) => setSshHost(e.target.value)}
+              value={url}
+              onChange={(e) => setUrl(e.target.value)}
               onKeyDown={keys}
-              placeholder="bastion.example.com"
+              placeholder={placeholder}
               spellCheck={false}
-              className={cn(INPUT, 'min-w-0 flex-1 font-mono')}
+              autoComplete="off"
+              className={inputCls}
             />
-            <span className="font-sans text-xs text-fg-subtle">:</span>
-            <input
-              value={sshPort}
-              onChange={(e) => setSshPort(e.target.value)}
-              onKeyDown={keys}
-              inputMode="numeric"
-              className={cn(INPUT, 'w-16 shrink-0 font-mono')}
-            />
-          </div>
-          <div className="flex items-center gap-2">
-            <input
-              value={sshKey}
-              onChange={(e) => setSshKey(e.target.value)}
-              onKeyDown={keys}
-              placeholder="Private key path (~/.ssh/id_ed25519)"
-              spellCheck={false}
-              className={cn(INPUT, 'min-w-0 flex-1 font-mono')}
-            />
-            <button
-              type="button"
-              onClick={() => void fsPickFiles().then(([f]) => f && setSshKey(f))}
-              className="shrink-0 rounded-lg px-2.5 py-1.5 font-sans text-xs text-fg-muted ring-1 ring-edge-2 transition hover:bg-surface-2 hover:text-fg-base"
-            >
-              Browse…
-            </button>
+          </Field>
+        </div>
+
+        <div className="flex items-end gap-2">
+          <Field label="Password" className="flex-1">
             <input
               type="password"
-              value={sshPassphrase}
-              onChange={(e) => setSshPassphrase(e.target.value)}
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
               onKeyDown={keys}
-              placeholder={editing?.ssh ? 'Key passphrase (blank keeps it)' : 'Key passphrase (if any)'}
+              placeholder={
+                editing?.has_password
+                  ? 'Leave blank to keep the saved one'
+                  : 'Optional — or paste it in the URL'
+              }
               autoComplete="off"
-              className={cn(INPUT, 'w-48 shrink-0')}
+              className={cn(inputCls, 'placeholder:font-display')}
             />
-          </div>
-          <p className="font-sans text-2xs leading-relaxed text-fg-subtle">
-            The URL&apos;s host and port are as seen from the SSH server — often{' '}
-            <span className="font-mono">localhost</span>. Public-key auth only; the host key is
-            checked against <span className="font-mono">~/.ssh/known_hosts</span>. TLS modes that
-            verify the hostname (<span className="font-mono">verify-full</span>) won&apos;t match
-            through the tunnel.
-          </p>
-        </div>
-      )}
-      <div className="flex flex-wrap items-center gap-x-3 gap-y-1" role="radiogroup" aria-label="Safety">
-        <span className="font-sans text-xs text-fg-muted">Safety</span>
-        {SAFETY_LEVELS.map((s) => (
-          <label key={s.id} className="flex items-center gap-1.5 font-sans text-xs text-fg-muted" title={s.hint}>
+          </Field>
+          <label className="flex h-7 shrink-0 items-center gap-1.5 font-display text-xs text-fg-muted">
             <input
-              type="radio"
-              name="db-safety"
-              checked={safety === s.id}
-              onChange={() => setSafety(s.id)}
+              type="checkbox"
+              checked={useSsh}
+              onChange={(e) => setUseSsh(e.target.checked)}
+              disabled={backend === 'sqlite'}
               className="h-3 w-3 accent-accent"
             />
-            {s.label}
+            SSH tunnel
           </label>
-        ))}
-        <span className="font-sans text-2xs text-fg-subtle">
-          {SAFETY_LEVELS.find((s) => s.id === safety)!.hint}
-        </span>
+        </div>
+
+        {useSsh && backend !== 'sqlite' && (
+          <div className="space-y-2 rounded-md bg-surface-1 p-2.5 ring-1 ring-inset ring-edge-1">
+            <div className="flex items-end gap-2">
+              <Field label="SSH user" className="w-32 shrink-0">
+                <input
+                  value={sshUser}
+                  onChange={(e) => setSshUser(e.target.value)}
+                  onKeyDown={keys}
+                  placeholder="deploy"
+                  spellCheck={false}
+                  className={inputCls}
+                />
+              </Field>
+              <span className="pb-1.5 font-mono text-xs text-fg-subtle">@</span>
+              <Field label="Host" className="flex-1">
+                <input
+                  value={sshHost}
+                  onChange={(e) => setSshHost(e.target.value)}
+                  onKeyDown={keys}
+                  placeholder="bastion.example.com"
+                  spellCheck={false}
+                  className={inputCls}
+                />
+              </Field>
+              <span className="pb-1.5 font-mono text-xs text-fg-subtle">:</span>
+              <Field label="Port" className="w-16 shrink-0">
+                <input
+                  value={sshPort}
+                  onChange={(e) => setSshPort(e.target.value)}
+                  onKeyDown={keys}
+                  inputMode="numeric"
+                  className={inputCls}
+                />
+              </Field>
+            </div>
+            <div className="flex items-end gap-2">
+              <Field label="Private key" className="flex-1">
+                <input
+                  value={sshKey}
+                  onChange={(e) => setSshKey(e.target.value)}
+                  onKeyDown={keys}
+                  placeholder="~/.ssh/id_ed25519"
+                  spellCheck={false}
+                  className={inputCls}
+                />
+              </Field>
+              <button
+                type="button"
+                onClick={() => void fsPickFiles().then(([f]) => f && setSshKey(f))}
+                className={cn(textBtn, 'h-7 ring-1 ring-inset ring-edge-2')}
+              >
+                Browse…
+              </button>
+              <Field label="Key passphrase" className="w-48 shrink-0">
+                <input
+                  type="password"
+                  value={sshPassphrase}
+                  onChange={(e) => setSshPassphrase(e.target.value)}
+                  onKeyDown={keys}
+                  placeholder={editing?.ssh ? 'Blank keeps it' : 'If any'}
+                  autoComplete="off"
+                  className={cn(inputCls, 'placeholder:font-display')}
+                />
+              </Field>
+            </div>
+            <p className="font-display text-2xs leading-relaxed text-fg-subtle">
+              The URL&apos;s host and port are as seen from the SSH server — often{' '}
+              <span className="font-mono">localhost</span>. Public-key auth only; the host key is
+              checked against <span className="font-mono">~/.ssh/known_hosts</span>. TLS modes that
+              verify the hostname (<span className="font-mono">verify-full</span>) won&apos;t match
+              through the tunnel.
+            </p>
+          </div>
+        )}
+
+        <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+          <span className="font-display text-2xs text-fg-muted">Safety</span>
+          <div role="radiogroup" aria-label="Safety" className="flex rounded bg-surface-1 p-0.5 ring-1 ring-inset ring-edge-1">
+            {SAFETY_LEVELS.map((s) => {
+              const e = envOf(s.id);
+              const on = safety === s.id;
+              return (
+                <button
+                  key={s.id}
+                  type="button"
+                  role="radio"
+                  aria-checked={on}
+                  onClick={() => setSafety(s.id)}
+                  title={s.hint}
+                  className={cn(
+                    'flex items-center gap-1.5 rounded-sm px-2 py-0.5 font-display text-xs transition-colors',
+                    'focus-visible:outline-none focus-visible:shadow-focus',
+                    on ? 'bg-surface-3 text-fg-base' : 'text-fg-muted hover:text-fg-base',
+                  )}
+                >
+                  <span
+                    aria-hidden
+                    className={cn('h-2 w-2 rounded-full', !e && 'bg-fg-subtle')}
+                    style={e ? { backgroundColor: e.color } : undefined}
+                  />
+                  {s.label}
+                </button>
+              );
+            })}
+          </div>
+          <span className="font-display text-2xs text-fg-subtle">
+            {SAFETY_LEVELS.find((s) => s.id === safety)!.hint}
+          </span>
+        </div>
+
+        {error && <p className="font-mono text-xs text-status-err">{error}</p>}
+
+        <div className="flex items-center gap-2">
+          <button type="button" onClick={() => void save()} disabled={saving || !url.trim()} className={primaryBtn}>
+            {saving ? 'Saving…' : 'Save'}
+          </button>
+          <button type="button" onClick={onCancel} className={textBtn}>
+            Cancel
+          </button>
+          <p className="ml-auto font-display text-2xs leading-relaxed text-fg-subtle">
+            Passwords and passphrases are stored in your OS credential vault, never in ARC&apos;s
+            database — the saved URL keeps only <span className="font-mono">user@host</span>.
+          </p>
+        </div>
       </div>
-      <p className="font-sans text-2xs leading-relaxed text-fg-subtle">
-        Passwords and passphrases are stored in your OS credential vault, never in ARC&apos;s
-        database — the saved URL keeps only <span className="font-mono">user@host</span>.
-      </p>
-      {error && <p className="font-sans text-xs text-status-err">{error}</p>}
     </div>
   );
 }

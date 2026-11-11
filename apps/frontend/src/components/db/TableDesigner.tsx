@@ -11,6 +11,7 @@ import {
   type DraftColumn,
 } from '../../lib/tableDesign';
 import { cn } from '../../lib/cn';
+import { ObjIcon, ToolButton, ToolWindowHeader, inputCls, primaryBtn, textBtn } from './chrome';
 
 interface Props {
   backend: DbBackend;
@@ -22,8 +23,8 @@ interface Props {
   onClose: () => void;
 }
 
-const INPUT =
-  'w-full rounded border border-border-subtle bg-bg-base/60 px-2 py-0.5 font-mono text-xs text-fg-base placeholder:text-fg-subtle/50 focus:border-accent/45 focus:outline-none';
+const INPUT = cn(inputCls, 'h-6 w-full');
+const TH = 'h-7 border-b border-edge-1 px-1.5 text-left font-display text-2xs font-medium text-fg-subtle';
 
 /**
  * Create or alter a table through a form. It only writes SQL — the statements
@@ -61,28 +62,31 @@ export function TableDesigner({ backend, current, defaultSchema, onSendToEditor,
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <div className="flex shrink-0 items-center gap-2 border-b border-border-hairline px-4 py-2">
-        <span className="font-sans text-sm text-fg-base">{current ? `Alter ${current.table}` : 'New table'}</span>
-        <button
-          type="button"
-          onClick={onClose}
-          title="Close"
-          className="ml-auto flex h-6 w-6 items-center justify-center rounded text-fg-muted transition hover:bg-surface-2 hover:text-fg-base"
-        >
-          <X size={12} />
-        </button>
-      </div>
+      <ToolWindowHeader actions={<ToolButton icon={X} label="Close" onClick={onClose} />}>
+        <span className="flex min-w-0 items-center gap-1.5 px-1">
+          <ObjIcon kind="table" />
+          <span className="truncate font-display text-xs font-medium text-fg-base">
+            {current ? (
+              <>
+                Alter <span className="font-mono">{current.table}</span>
+              </>
+            ) : (
+              'New table'
+            )}
+          </span>
+        </span>
+      </ToolWindowHeader>
 
       <div className="min-h-0 flex-1 overflow-auto px-4 py-3">
         <label className="mb-3 flex max-w-sm flex-col gap-1">
-          <span className="font-sans text-2xs text-fg-subtle">Table name</span>
+          <span className="font-display text-2xs text-fg-muted">Table name</span>
           <input
             value={draft.table}
             onChange={(e) => setDraft((d) => ({ ...d, table: e.target.value }))}
             placeholder={backend === 'postgres' ? `${defaultSchema}.orders` : 'orders'}
             spellCheck={false}
             autoFocus={!current}
-            className={INPUT}
+            className={cn(inputCls, 'w-full')}
           />
         </label>
 
@@ -92,43 +96,44 @@ export function TableDesigner({ backend, current, defaultSchema, onSendToEditor,
           ))}
         </datalist>
 
-        <table className="w-full max-w-4xl border-collapse font-sans text-xs">
+        <table className="w-full max-w-4xl border-separate border-spacing-0 font-display text-xs">
           <thead>
-            <tr className="text-left text-2xs text-fg-subtle">
-              <th className="w-12 py-1 font-normal" />
-              <th className="py-1 pr-2 font-normal">Column</th>
-              <th className="py-1 pr-2 font-normal">Type</th>
-              <th className="py-1 pr-2 text-center font-normal">Not null</th>
-              <th className="py-1 pr-2 font-normal">{backend === 'mysql' ? 'Default value' : 'Default (SQL)'}</th>
-              <th className="py-1 pr-2 text-center font-normal" title={current ? 'Change the primary key by hand' : undefined}>
+            <tr>
+              <th className={cn(TH, 'w-14')} />
+              <th className={TH}>Column</th>
+              <th className={TH}>Type</th>
+              <th className={cn(TH, 'text-center')}>Not null</th>
+              <th className={TH}>{backend === 'mysql' ? 'Default value' : 'Default (SQL)'}</th>
+              <th className={cn(TH, 'text-center')} title={current ? 'Change the primary key by hand' : undefined}>
                 Key
               </th>
-              <th className="w-6" />
+              <th className={cn(TH, 'w-7')} />
             </tr>
           </thead>
           <tbody>
             {draft.columns.map((c, i) => (
-              <tr key={i} className="align-middle">
-                <td className="py-1">
-                  <span className="flex text-fg-subtle">
-                    <button type="button" onClick={() => move(i, -1)} title="Move up" className="p-0.5 hover:text-fg-base">
-                      <ArrowUp size={10} />
+              <tr key={i} className="align-middle hover:bg-surface-1">
+                <td className="h-8 border-b border-edge-1 px-1">
+                  <span className="flex items-center gap-0.5 text-fg-subtle">
+                    <ObjIcon kind={c.primary_key ? 'pk' : 'column'} size={11} />
+                    <button type="button" onClick={() => move(i, -1)} title="Move up" aria-label="Move up" className="rounded p-0.5 hover:bg-surface-2 hover:text-fg-base">
+                      <ArrowUp size={11} />
                     </button>
-                    <button type="button" onClick={() => move(i, 1)} title="Move down" className="p-0.5 hover:text-fg-base">
-                      <ArrowDown size={10} />
+                    <button type="button" onClick={() => move(i, 1)} title="Move down" aria-label="Move down" className="rounded p-0.5 hover:bg-surface-2 hover:text-fg-base">
+                      <ArrowDown size={11} />
                     </button>
                   </span>
                 </td>
-                <td className="py-1 pr-2">
+                <td className="border-b border-edge-1 px-1.5">
                   <input
                     value={c.name}
                     onChange={(e) => setCol(i, { name: e.target.value })}
                     spellCheck={false}
-                    className={cn(INPUT, c.original && c.original !== c.name.trim() && 'border-status-warn/60')}
+                    className={cn(INPUT, c.original && c.original !== c.name.trim() && 'ring-status-warn/60')}
                     title={c.original && c.original !== c.name.trim() ? `Renamed from ${c.original}` : undefined}
                   />
                 </td>
-                <td className="py-1 pr-2">
+                <td className="border-b border-edge-1 px-1.5">
                   <input
                     value={c.data_type}
                     onChange={(e) => setCol(i, { data_type: e.target.value })}
@@ -137,7 +142,7 @@ export function TableDesigner({ backend, current, defaultSchema, onSendToEditor,
                     className={INPUT}
                   />
                 </td>
-                <td className="py-1 pr-2 text-center">
+                <td className="border-b border-edge-1 px-1.5 text-center">
                   <input
                     type="checkbox"
                     checked={!c.nullable}
@@ -145,7 +150,7 @@ export function TableDesigner({ backend, current, defaultSchema, onSendToEditor,
                     className="h-3 w-3 accent-accent"
                   />
                 </td>
-                <td className="py-1 pr-2">
+                <td className="border-b border-edge-1 px-1.5">
                   <input
                     value={c.default ?? ''}
                     onChange={(e) => setCol(i, { default: e.target.value || null })}
@@ -154,7 +159,7 @@ export function TableDesigner({ backend, current, defaultSchema, onSendToEditor,
                     className={INPUT}
                   />
                 </td>
-                <td className="py-1 pr-2 text-center">
+                <td className="border-b border-edge-1 px-1.5 text-center">
                   <input
                     type="checkbox"
                     checked={c.primary_key}
@@ -163,12 +168,13 @@ export function TableDesigner({ backend, current, defaultSchema, onSendToEditor,
                     className="h-3 w-3 accent-accent disabled:opacity-40"
                   />
                 </td>
-                <td className="py-1">
+                <td className="border-b border-edge-1 px-1 text-center">
                   <button
                     type="button"
                     onClick={() => setDraft((d) => ({ ...d, columns: d.columns.filter((_, j) => j !== i) }))}
                     title={c.original ? `Drop column ${c.original}` : 'Remove'}
-                    className="p-0.5 text-fg-subtle transition hover:text-status-err"
+                    aria-label={c.original ? `Drop column ${c.original}` : 'Remove column'}
+                    className="rounded p-1 text-fg-subtle transition hover:bg-surface-2 hover:text-status-err"
                   >
                     <Trash2 size={11} />
                   </button>
@@ -195,32 +201,33 @@ export function TableDesigner({ backend, current, defaultSchema, onSendToEditor,
               ],
             }))
           }
-          className="mt-1 flex items-center gap-1 rounded px-1.5 py-0.5 font-sans text-xs text-fg-muted transition hover:bg-surface-2 hover:text-fg-base"
+          className={cn(textBtn, 'mt-1.5')}
         >
-          <Plus size={11} /> Add column
+          <Plus size={12} /> Add column
         </button>
 
         <div className="mt-4 max-w-4xl">
-          <div className="mb-1 font-sans text-2xs text-fg-subtle">SQL</div>
-          <pre className="max-h-64 overflow-auto whitespace-pre-wrap rounded-md bg-surface-1 px-3 py-2 font-mono text-xs text-fg-base/85 ring-1 ring-border-hairline">
+          <div className="mb-1 font-display text-2xs text-fg-muted">SQL preview</div>
+          <pre
+            className={cn(
+              'max-h-64 overflow-auto whitespace-pre-wrap rounded-md bg-surface-1 px-3 py-2 font-mono text-xs ring-1 ring-inset ring-edge-1',
+              problem ? 'text-status-warn' : 'text-fg-base/85',
+            )}
+          >
             {problem ?? (sql || '-- No changes yet.')}
           </pre>
         </div>
       </div>
 
-      <div className="flex shrink-0 items-center justify-end gap-2 border-t border-border-hairline px-4 py-2">
-        <button
-          type="button"
-          onClick={onClose}
-          className="rounded-lg px-2.5 py-1 font-sans text-xs text-fg-muted transition-colors hover:bg-surface-2 hover:text-fg-base"
-        >
+      <div className="flex shrink-0 items-center justify-end gap-2 border-t border-edge-1 px-4 py-2">
+        <button type="button" onClick={onClose} className={textBtn}>
           Cancel
         </button>
         <button
           type="button"
           disabled={!!problem || !sql}
           onClick={() => onSendToEditor(sql)}
-          className="rounded-lg bg-accent-soft px-2.5 py-1 font-sans text-xs text-fg-base ring-1 ring-accent/45 transition-colors hover:bg-accent/20 disabled:cursor-not-allowed disabled:opacity-40"
+          className={primaryBtn}
         >
           Open SQL in editor
         </button>

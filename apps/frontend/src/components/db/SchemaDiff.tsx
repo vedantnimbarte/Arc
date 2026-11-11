@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { ArrowRight, Copy, Download, GitCompareArrows, Loader2, SquarePen, X } from 'lucide-react';
+import { ArrowLeftRight, ArrowRight, Copy, Download, GitCompareArrows, Loader2, Minus, Pencil, Plus, SquarePen, X } from 'lucide-react';
 import {
   dbConnect,
   dbDisconnect,
@@ -14,6 +14,7 @@ import { loadSchemas } from '../../lib/dbSchemas';
 import { diffSchemas, migrationSql, type TableDiff } from '../../lib/schemaDiff';
 import { toast, toastError } from '../../state/toast';
 import { cn } from '../../lib/cn';
+import { ObjIcon, Placeholder, ToolButton, ToolWindowHeader, inputCls, primaryBtn, textBtn } from './chrome';
 
 interface Props {
   active: DbConnection;
@@ -29,6 +30,14 @@ const STATUS_STYLE: Record<TableDiff['status'], string> = {
   added: 'text-status-ok',
   removed: 'text-status-err',
   changed: 'text-status-warn',
+};
+
+/** The +/−/~ gutter mark a diff viewer draws beside each table. */
+const STATUS_ICON = { added: Plus, removed: Minus, changed: Pencil } as const;
+const STATUS_BG: Record<TableDiff['status'], string> = {
+  added: 'bg-status-ok/[0.07]',
+  removed: 'bg-status-err/[0.07]',
+  changed: 'bg-status-warn/[0.06]',
 };
 
 /**
@@ -94,11 +103,13 @@ export function SchemaDiff({ active, schemas, connections, onSendToEditor, onClo
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <div className="flex shrink-0 flex-wrap items-center gap-2 border-b border-border-hairline px-3 py-1.5">
-        <GitCompareArrows size={12} className="shrink-0 text-fg-subtle" />
-        <span className="font-sans text-xs text-fg-base">Schema diff</span>
+      <ToolWindowHeader actions={<ToolButton icon={X} label="Back to results" onClick={onClose} />}>
+        <span className="flex min-w-0 items-center gap-1.5 px-1">
+          <GitCompareArrows size={12} className="shrink-0 text-fg-subtle" />
+          <span className="font-display text-xs font-medium text-fg-base">Compare schemas</span>
+        </span>
         {others.length === 0 ? (
-          <span className="font-sans text-xs text-fg-subtle">
+          <span className="px-1 font-display text-xs text-fg-subtle">
             Save another {active.backend} connection to compare against.
           </span>
         ) : (
@@ -106,7 +117,8 @@ export function SchemaDiff({ active, schemas, connections, onSendToEditor, onClo
             <select
               value={otherId}
               onChange={(e) => setOtherId(e.target.value)}
-              className="rounded-md border border-border-subtle bg-bg-base/60 px-1.5 py-0.5 font-sans text-xs text-fg-base focus:border-accent/45 focus:outline-none"
+              aria-label="Connection to compare with"
+              className={cn(inputCls, 'ml-1 h-6 font-display')}
             >
               {others.map((c) => (
                 <option key={c.id} value={c.id}>
@@ -118,45 +130,40 @@ export function SchemaDiff({ active, schemas, connections, onSendToEditor, onClo
               type="button"
               onClick={() => setApplyToOther((v) => !v)}
               title="Swap which side changes"
-              className="flex items-center gap-1 rounded px-1.5 py-0.5 font-sans text-xs text-fg-muted ring-1 ring-edge-2 transition hover:bg-surface-2 hover:text-fg-base"
+              className={cn(textBtn, 'ring-1 ring-inset ring-edge-2')}
             >
-              make <span className="font-medium text-fg-base">{target}</span> match{' '}
-              <span className="font-medium text-fg-base">{source}</span>
+              <ArrowLeftRight size={11} />
+              Make <span className="font-mono text-fg-base">{target}</span> match{' '}
+              <span className="font-mono text-fg-base">{source}</span>
             </button>
-            <button
-              type="button"
-              onClick={() => void compare()}
-              disabled={loading || !other}
-              className="flex items-center gap-1 rounded-lg bg-accent-soft px-2.5 py-0.5 font-sans text-xs text-fg-base ring-1 ring-accent/45 transition-colors hover:bg-accent/20 disabled:opacity-40"
-            >
+            <button type="button" onClick={() => void compare()} disabled={loading || !other} className={primaryBtn}>
               {loading && <Loader2 size={11} className="animate-spin" />}
               {loaded ? 'Compare again' : 'Compare'}
             </button>
           </>
         )}
-        <button type="button" onClick={onClose} title="Back to results" className="ml-auto shrink-0 text-fg-subtle hover:text-fg-base">
-          <X size={12} />
-        </button>
-      </div>
+      </ToolWindowHeader>
 
-      {error && <p className="px-3 py-2 font-sans text-xs text-status-err">{error}</p>}
+      {error && <p className="border-b border-status-err/25 bg-status-err/[0.08] px-3 py-1.5 font-mono text-xs text-status-err">{error}</p>}
 
       {diffs && (
         <div className="flex min-h-0 flex-1">
-          <div className="w-72 shrink-0 overflow-auto border-r border-border-hairline py-1">
-            {diffs.length === 0 && (
-              <p className="px-3 py-2 font-sans text-xs text-fg-subtle">The schemas match.</p>
-            )}
-            {diffs.map((d) => (
-              <div key={d.table} className="px-3 py-1">
-                <div className="flex items-center gap-1.5">
-                  <span className={cn('font-sans text-2xs uppercase tracking-widest', STATUS_STYLE[d.status])}>
-                    {d.status}
-                  </span>
+          <div className="w-72 shrink-0 overflow-auto border-r border-edge-1">
+            <div className="flex h-7 items-center gap-2 border-b border-edge-1 px-3 font-display text-2xs text-fg-subtle">
+              {diffs.length === 0 ? 'The schemas match.' : `${diffs.length} table${diffs.length === 1 ? '' : 's'} differ`}
+            </div>
+            {diffs.map((d) => {
+              const Mark = STATUS_ICON[d.status];
+              return (
+              <div key={d.table} className={cn('border-b border-edge-1 px-2 py-1', STATUS_BG[d.status])}>
+                <div className="flex h-5 items-center gap-1.5">
+                  <Mark size={11} strokeWidth={2.4} className={cn('shrink-0', STATUS_STYLE[d.status])} aria-label={d.status} />
+                  <ObjIcon kind="table" size={11} />
                   <span className="truncate font-mono text-xs text-fg-base">{d.table}</span>
+                  <span className={cn('ml-auto shrink-0 font-display text-2xs', STATUS_STYLE[d.status])}>{d.status}</span>
                 </div>
                 {d.status === 'changed' && (
-                  <ul className="mt-0.5 space-y-0.5 pl-2">
+                  <ul className="mt-0.5 space-y-0.5 pl-5">
                     {d.changes.map((c, i) => (
                       <li
                         key={i}
@@ -173,12 +180,13 @@ export function SchemaDiff({ active, schemas, connections, onSendToEditor, onClo
                   </ul>
                 )}
               </div>
-            ))}
+              );
+            })}
           </div>
           <div className="flex min-w-0 flex-1 flex-col">
-            <div className="flex shrink-0 items-center gap-1 border-b border-border-hairline px-3 py-1">
-              <span className="font-sans text-2xs uppercase tracking-widest text-fg-subtle/60">
-                SQL to run on {target}
+            <div className="flex h-7 shrink-0 items-center gap-1 border-b border-edge-1 px-3">
+              <span className="font-display text-2xs text-fg-subtle">
+                SQL to run on <span className="font-mono text-fg-muted">{target}</span>
               </span>
               <span className="flex-1" />
               {sql && (
@@ -186,25 +194,21 @@ export function SchemaDiff({ active, schemas, connections, onSendToEditor, onClo
                   <button
                     type="button"
                     onClick={() => void navigator.clipboard.writeText(sql).then(() => toast('SQL copied'))}
-                    className="flex items-center gap-1 rounded px-1.5 py-0.5 font-sans text-2xs text-fg-muted transition hover:bg-surface-2 hover:text-fg-base"
+                    className={textBtn}
                   >
-                    <Copy size={10} /> Copy
+                    <Copy size={11} /> Copy
                   </button>
-                  <button
-                    type="button"
-                    onClick={() => void save()}
-                    className="flex items-center gap-1 rounded px-1.5 py-0.5 font-sans text-2xs text-fg-muted transition hover:bg-surface-2 hover:text-fg-base"
-                  >
-                    <Download size={10} /> Save .sql
+                  <button type="button" onClick={() => void save()} className={textBtn}>
+                    <Download size={11} /> Save .sql
                   </button>
                   {!applyToOther && (
                     <button
                       type="button"
                       onClick={() => onSendToEditor(sql)}
                       title="Load into this connection's editor to review and run"
-                      className="flex items-center gap-1 rounded px-1.5 py-0.5 font-sans text-2xs text-fg-muted transition hover:bg-surface-2 hover:text-fg-base"
+                      className={primaryBtn}
                     >
-                      <SquarePen size={10} /> Open in editor
+                      <SquarePen size={11} /> Open in editor
                     </button>
                   )}
                 </>
@@ -217,10 +221,12 @@ export function SchemaDiff({ active, schemas, connections, onSendToEditor, onClo
         </div>
       )}
       {!diffs && !loading && others.length > 0 && !error && (
-        <p className="px-3 py-3 font-sans text-xs leading-relaxed text-fg-subtle">
-          Pick a connection and Compare. Nothing runs from here: review the generated SQL, then copy
-          it, save it, or open it in the editor of the database it targets.
-        </p>
+        <Placeholder>
+          <span className="max-w-md leading-relaxed">
+            Pick a connection and Compare. Nothing runs from here: review the generated SQL, then copy
+            it, save it, or open it in the editor of the database it targets.
+          </span>
+        </Placeholder>
       )}
     </div>
   );

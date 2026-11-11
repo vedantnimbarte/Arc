@@ -9,6 +9,7 @@ import {
   type DbTableSchema,
 } from '../../lib/tauri';
 import { cn } from '../../lib/cn';
+import { ObjIcon, ToolButton, primaryBtn, textBtn } from './chrome';
 
 interface Props {
   connId: string;
@@ -116,14 +117,14 @@ export function ImportCsvDialog({ connId, table, schema, inTransaction, beforeIm
         className="material-sheet mt-[10vh] flex max-h-[80vh] w-[640px] max-w-[94vw] animate-sheet-in flex-col overflow-hidden rounded-window shadow-sheet ring-1 ring-edge-2"
         onKeyDown={(e) => e.key === 'Escape' && !job && onClose()}
       >
-        <div className="flex items-center gap-2 border-b border-border-hairline px-4 py-2.5">
-          <FileUp size={13} className="text-fg-subtle" />
-          <span className="font-display text-sm text-fg-base">
-            Import CSV into <span className="font-mono">{table}</span>
+        <div className="flex h-9 items-center gap-2 border-b border-edge-1 bg-surface-1 px-3">
+          <FileUp size={13} className="text-accent-bright" />
+          <span className="flex min-w-0 items-center gap-1.5 font-display text-xs font-semibold text-fg-base">
+            Import CSV into <ObjIcon kind="table" /> <span className="truncate font-mono">{table}</span>
           </span>
-          <button type="button" onClick={onClose} disabled={!!job} className="ml-auto text-fg-subtle hover:text-fg-base disabled:opacity-40">
-            <X size={13} />
-          </button>
+          <span className="ml-auto">
+            <ToolButton icon={X} label="Close" onClick={onClose} disabled={!!job} />
+          </span>
         </div>
 
         <div className="min-h-0 flex-1 space-y-3 overflow-auto px-4 py-3">
@@ -132,7 +133,7 @@ export function ImportCsvDialog({ connId, table, schema, inTransaction, beforeIm
               type="button"
               onClick={() => void pick()}
               disabled={!!job}
-              className="shrink-0 rounded-md px-2.5 py-1 font-sans text-xs text-fg-muted ring-1 ring-edge-2 transition hover:bg-surface-2 hover:text-fg-base disabled:opacity-40"
+              className={cn(textBtn, 'ring-1 ring-inset ring-edge-2')}
             >
               {path ? 'Choose another file…' : 'Choose CSV file…'}
             </button>
@@ -143,7 +144,7 @@ export function ImportCsvDialog({ connId, table, schema, inTransaction, beforeIm
 
           {preview && (
             <>
-              <div className="flex items-center gap-3 font-sans text-xs text-fg-muted">
+              <div className="flex items-center gap-3 font-display text-xs text-fg-muted">
                 <label className="flex items-center gap-1.5">
                   <input
                     type="checkbox"
@@ -159,11 +160,12 @@ export function ImportCsvDialog({ connId, table, schema, inTransaction, beforeIm
               </div>
 
               <div>
-                <div className="pb-1 font-sans text-2xs uppercase tracking-widest text-fg-subtle/60">Columns</div>
+                <div className="pb-1.5 font-display text-2xs font-semibold text-fg-muted">Map columns</div>
                 <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)] gap-x-3 gap-y-1">
                   {schema.columns.map((c) => (
                     <label key={c.name} className="contents">
                       <span className="flex items-center gap-1.5 truncate font-mono text-xs text-fg-base/85">
+                        <ObjIcon kind={c.primary_key ? 'pk' : 'column'} size={11} />
                         {c.name}
                         <span className="text-2xs text-fg-subtle/70">{c.data_type}</span>
                       </span>
@@ -171,7 +173,7 @@ export function ImportCsvDialog({ connId, table, schema, inTransaction, beforeIm
                         value={mapping[c.name] ?? SKIP}
                         onChange={(e) => setMapping((m) => ({ ...m, [c.name]: Number(e.target.value) }))}
                         disabled={!!job}
-                        className="rounded-md border border-border-subtle bg-bg-base/60 px-1.5 py-0.5 font-sans text-xs text-fg-base focus:border-accent/45 focus:outline-none"
+                        className="h-6 rounded bg-surface-1 px-1.5 font-mono text-xs text-fg-base ring-1 ring-inset ring-edge-2 focus:outline-none focus:ring-accent/60"
                       >
                         <option value={SKIP}>— skip (default) —</option>
                         {Array.from({ length: width }, (_, i) => (
@@ -187,13 +189,13 @@ export function ImportCsvDialog({ connId, table, schema, inTransaction, beforeIm
 
               {mapped.length > 0 && dataRows.length > 0 && (
                 <div>
-                  <div className="pb-1 font-sans text-2xs uppercase tracking-widest text-fg-subtle/60">Preview</div>
-                  <div className="overflow-auto rounded-md ring-1 ring-edge-1">
+                  <div className="pb-1.5 font-display text-2xs font-semibold text-fg-muted">Preview</div>
+                  <div className="overflow-auto rounded ring-1 ring-edge-1">
                     <table className="w-max min-w-full border-collapse text-left">
                       <thead className="bg-bg-chrome">
                         <tr>
                           {mapped.map((c) => (
-                            <th key={c.name} className="whitespace-nowrap border-b border-r border-border-hairline px-2 py-0.5 font-sans text-2xs uppercase tracking-widest text-fg-subtle/70">
+                            <th key={c.name} className="whitespace-nowrap border-b border-r border-edge-1 px-2 py-0.5 font-mono text-2xs font-semibold text-fg-base">
                               {c.name}
                             </th>
                           ))}
@@ -205,8 +207,8 @@ export function ImportCsvDialog({ connId, table, schema, inTransaction, beforeIm
                             {mapped.map((c) => {
                               const v = r[mapping[c.name]!] ?? null;
                               return (
-                                <td key={c.name} className="max-w-[12rem] truncate border-b border-r border-border-hairline px-2 py-0.5 font-mono text-2xs text-fg-base/85">
-                                  {v === null ? <span className="italic text-fg-subtle/60">NULL</span> : v}
+                                <td key={c.name} className="h-6 max-w-[12rem] truncate border-b border-r border-edge-1 px-2 font-mono text-2xs text-fg-base/85">
+                                  {v === null ? <span className="italic text-fg-subtle/60">&lt;null&gt;</span> : v}
                                 </td>
                               );
                             })}
@@ -220,40 +222,38 @@ export function ImportCsvDialog({ connId, table, schema, inTransaction, beforeIm
             </>
           )}
           {inTransaction && (
-            <p className="font-sans text-xs text-status-warn">
+            <p className="font-display text-xs text-status-warn">
               A transaction is open: the rows join it and are only kept when you commit.
             </p>
           )}
-          {error && <p className="whitespace-pre-wrap break-words font-sans text-xs text-status-err">{error}</p>}
+          {error && <p className="whitespace-pre-wrap break-words font-mono text-xs text-status-err">{error}</p>}
         </div>
 
-        <div className="flex items-center justify-end gap-2 border-t border-border-hairline bg-bg-base/30 px-4 py-2">
+        <div className="flex items-center justify-end gap-1.5 border-t border-edge-1 bg-surface-1 px-3 py-2">
           {job ? (
             <>
-              <span className="mr-auto flex items-center gap-1.5 font-sans text-xs text-fg-subtle">
+              <span className="mr-auto flex items-center gap-1.5 font-display text-xs tabular-nums text-fg-subtle">
                 <Loader2 size={11} className="animate-spin" />
                 Imported {job.rows.toLocaleString()} of {total.toLocaleString()}…
               </span>
               <button
                 type="button"
                 onClick={() => void dbJobCancel(job.id)}
-                className="rounded px-2.5 py-1 font-display text-xs text-fg-muted hover:bg-surface-1 hover:text-fg-base"
+                className={textBtn}
               >
                 Cancel import
               </button>
             </>
           ) : (
             <>
-              <button type="button" onClick={onClose} className="rounded px-2.5 py-1 font-display text-xs text-fg-muted hover:bg-surface-1 hover:text-fg-base">
+              <button type="button" onClick={onClose} className={textBtn}>
                 Close
               </button>
               <button
                 type="button"
                 onClick={() => void run()}
                 disabled={!path || mapped.length === 0}
-                className={cn(
-                  'rounded-md bg-accent-soft px-3 py-1 font-display text-xs text-fg-base ring-1 ring-accent/45 transition-colors hover:bg-accent/20 disabled:opacity-40',
-                )}
+                className={primaryBtn}
               >
                 Import {total > 0 ? `${total.toLocaleString()} rows` : ''}
               </button>

@@ -1,8 +1,9 @@
 import { useMemo, useState } from 'react';
-import { ChevronRight, Columns3, FileUp, Plus, Search, Table2, X } from 'lucide-react';
+import { ChevronRight, Columns3, FileUp, Plus, RefreshCw, Search, X } from 'lucide-react';
 import type { DbRowCount } from '../../lib/tauri';
 import { formatRowCount } from '../../lib/dbFormat';
 import { cn } from '../../lib/cn';
+import { ObjIcon, ToolButton } from './chrome';
 
 interface Props {
   /** Table names as the backend lists them — `schema.table` on Postgres. */
@@ -18,6 +19,8 @@ interface Props {
   onSchema: (table: string) => void;
   /** Opens the table designer; absent on a read-only connection. */
   onCreateTable?: () => void;
+  /** Re-read the catalog: tables and their row counts. */
+  onRefresh?: () => void;
 }
 
 /** Split `schema.table` at the first dot; bare names go to the default group. */
@@ -26,8 +29,12 @@ function splitName(full: string, fallback: string): [string, string] {
   return dot > 0 ? [full.slice(0, dot), full.slice(dot + 1)] : [fallback, full];
 }
 
-/** Tables grouped by schema, collapsible, with a filter. Only `public` (or the
- *  sole group) starts open — databases with many schemas stay scannable. */
+/**
+ * The database explorer: tables grouped by schema, collapsible, with a filter.
+ * Only `public` (or the sole group) starts open — databases with many schemas
+ * stay scannable. Rows are IDE-dense: one line per table, its row count right
+ * aligned, its actions on hover.
+ */
 export function TableTree({
   tables,
   rowCounts,
@@ -38,6 +45,7 @@ export function TableTree({
   onImport,
   onSchema,
   onCreateTable,
+  onRefresh,
 }: Props) {
   const [filter, setFilter] = useState('');
   /** Explicit open/closed choices; schemas absent here use the default. */
@@ -65,148 +73,117 @@ export function TableTree({
     q !== '' || (open[schema] ?? (schema === 'public' || groups.length === 1));
 
   return (
-    <div className="mt-2 border-t border-border-hairline pt-2">
-      <label className="mx-2 mb-1.5 flex items-center gap-1.5 rounded-md bg-surface-1 px-2 py-1 ring-1 ring-transparent transition focus-within:ring-accent/45">
-        <Search size={11} className="shrink-0 text-fg-subtle" />
-        <input
-          value={filter}
-          onChange={(e) => setFilter(e.target.value)}
-          onKeyDown={(e) => e.key === 'Escape' && setFilter('')}
-          placeholder={`Filter ${tables.length} table${tables.length === 1 ? '' : 's'}`}
-          className="min-w-0 flex-1 bg-transparent font-sans text-xs text-fg-base placeholder:text-fg-subtle/70 focus:outline-none"
-        />
-        {filter && (
-          <button
-            type="button"
-            onClick={() => setFilter('')}
-            title="Clear filter"
-            className="shrink-0 text-fg-subtle hover:text-fg-base"
-          >
-            <X size={11} />
-          </button>
-        )}
-        {onCreateTable && (
-          <button
-            type="button"
-            onClick={onCreateTable}
-            title="New table"
-            className="shrink-0 text-fg-subtle transition hover:text-fg-base"
-          >
-            <Plus size={11} />
-          </button>
-        )}
-      </label>
+    <div className="pb-2">
+      <div className="sticky top-0 z-20 flex items-center gap-1 border-b border-edge-1 bg-bg-panel px-2 py-1.5">
+        <label className="flex h-6 min-w-0 flex-1 items-center gap-1.5 rounded bg-surface-1 px-2 ring-1 ring-inset ring-edge-1 transition focus-within:ring-accent/50">
+          <Search size={11} className="shrink-0 text-fg-subtle" />
+          <input
+            value={filter}
+            onChange={(e) => setFilter(e.target.value)}
+            onKeyDown={(e) => e.key === 'Escape' && setFilter('')}
+            placeholder={`Filter ${tables.length} table${tables.length === 1 ? '' : 's'}`}
+            aria-label="Filter tables"
+            spellCheck={false}
+            className="min-w-0 flex-1 bg-transparent font-mono text-xs text-fg-base placeholder:font-display placeholder:text-fg-subtle/70 focus:outline-none"
+          />
+          {filter && (
+            <button type="button" onClick={() => setFilter('')} aria-label="Clear filter" className="shrink-0 text-fg-subtle hover:text-fg-base">
+              <X size={11} />
+            </button>
+          )}
+        </label>
+        {onCreateTable && <ToolButton icon={Plus} label="New table" onClick={onCreateTable} />}
+        {onRefresh && <ToolButton icon={RefreshCw} label="Refresh tables and row counts" onClick={onRefresh} />}
+      </div>
 
       {visible.length === 0 && (
-        <p className="px-3 py-2 font-sans text-xs text-fg-subtle">
-          No tables match “{filter.trim()}”.
-        </p>
+        <p className="px-3 py-3 font-display text-xs text-fg-subtle">No tables match “{filter.trim()}”.</p>
       )}
 
       {visible.map(([schema, list]) => {
         const expanded = isOpen(schema);
         return (
-          <div key={schema}>
+          <div key={schema} role="group" aria-label={schema}>
             <button
               type="button"
               onClick={() => setOpen((o) => ({ ...o, [schema]: !expanded }))}
               aria-expanded={expanded}
-              className="sticky top-0 z-10 flex w-full items-center gap-1.5 bg-bg-panel px-2 py-1 text-left transition hover:bg-surface-1"
+              className="sticky top-[37px] z-10 flex h-6 w-full items-center gap-1.5 bg-bg-panel px-2 text-left transition hover:bg-surface-1"
             >
               <ChevronRight
                 size={11}
-                className={cn(
-                  'shrink-0 text-fg-subtle transition-transform',
-                  expanded && 'rotate-90',
-                )}
+                className={cn('shrink-0 text-fg-subtle transition-transform', expanded && 'rotate-90')}
               />
-              <span className="min-w-0 flex-1 truncate font-mono text-xs text-fg-muted">
-                {schema}
-              </span>
-              <span className="shrink-0 rounded-full bg-surface-2 px-1.5 font-sans text-[10px] leading-4 tabular-nums text-fg-subtle">
-                {list.length}
-              </span>
+              <ObjIcon kind="schema" />
+              <span className="min-w-0 flex-1 truncate font-mono text-xs font-medium text-fg-muted">{schema}</span>
+              <span className="shrink-0 font-mono text-2xs tabular-nums text-fg-subtle">{list.length}</span>
             </button>
 
-            {expanded && (
-              <div className="ml-[13px] border-l border-border-hairline pb-1">
-                {list.map(({ full, name }) => {
-                  const rc = rowCounts[full];
-                  const count = formatRowCount(rc);
-                  const selected = activeTable === full;
-                  return (
-                    <div
-                      key={full}
-                      className={cn(
-                        'group relative -ml-px flex items-center gap-2 border-l py-1 pl-2.5 pr-2',
-                        selected
-                          ? 'border-accent bg-surface-2'
-                          : 'border-transparent hover:bg-surface-1',
-                      )}
+            {expanded &&
+              list.map(({ full, name }) => {
+                const rc = rowCounts[full];
+                const count = formatRowCount(rc);
+                const selected = activeTable === full;
+                return (
+                  <div
+                    key={full}
+                    className={cn(
+                      'group relative flex h-6 items-center gap-1.5 pl-[22px] pr-2',
+                      selected ? 'bg-surface-2' : 'hover:bg-surface-1',
+                    )}
+                  >
+                    {/* Indent guide, and the selection bar over it. */}
+                    <span aria-hidden className="absolute inset-y-0 left-[14px] w-px bg-edge-1" />
+                    {selected && <span aria-hidden className="absolute inset-y-1 left-0 w-[2px] rounded-full bg-accent" />}
+                    <button
+                      type="button"
+                      onClick={() => onPreview(full)}
+                      title={`Open ${full}`}
+                      className="flex min-w-0 flex-1 items-center gap-1.5 text-left focus-visible:outline-none"
                     >
+                      <ObjIcon kind="table" />
+                      <span className={cn('truncate font-mono text-xs', selected ? 'text-fg-base' : 'text-fg-base/85')}>
+                        {name}
+                      </span>
+                    </button>
+                    {count && (
                       <button
                         type="button"
-                        onClick={() => onPreview(full)}
-                        title={full}
-                        className="flex min-w-0 flex-1 items-center gap-2 text-left"
+                        onClick={() => rc?.estimated && onExactCount(full)}
+                        title={rc?.estimated ? 'Estimated row count. Click for the exact number' : 'Rows'}
+                        className={cn(
+                          'shrink-0 font-mono text-2xs tabular-nums group-hover:hidden',
+                          rc?.estimated ? 'text-fg-subtle/70 underline decoration-dotted underline-offset-2 hover:text-fg-base' : 'text-fg-subtle',
+                        )}
                       >
-                        <Table2
-                          size={11}
-                          className={cn('shrink-0', selected ? 'text-accent' : 'text-fg-subtle')}
-                        />
-                        <span
-                          className={cn(
-                            'truncate font-mono text-xs',
-                            selected ? 'text-fg-base' : 'text-fg-base/80',
-                          )}
-                        >
-                          {name}
-                        </span>
+                        {count}
                       </button>
-                      {count && (
+                    )}
+                    <span className="hidden shrink-0 items-center group-hover:flex">
+                      {onImport && (
                         <button
                           type="button"
-                          onClick={() => rc?.estimated && onExactCount(full)}
-                          title={
-                            rc?.estimated
-                              ? 'Estimated row count — click for the exact number'
-                              : 'Rows'
-                          }
-                          className={cn(
-                            'shrink-0 rounded-full px-1.5 font-sans text-[10px] leading-4 tabular-nums text-fg-subtle group-hover:hidden',
-                            rc?.estimated
-                              ? 'border border-dashed border-border-hairline hover:border-fg-subtle hover:text-fg-base'
-                              : 'bg-surface-2',
-                          )}
+                          onClick={() => onImport(full)}
+                          title="Import CSV"
+                          aria-label={`Import CSV into ${full}`}
+                          className="rounded p-1 text-fg-subtle transition hover:bg-surface-3 hover:text-fg-base"
                         >
-                          {count}
+                          <FileUp size={11} />
                         </button>
                       )}
-                      <span className="hidden shrink-0 items-center gap-1.5 group-hover:flex">
-                        {onImport && (
-                          <button
-                            type="button"
-                            onClick={() => onImport(full)}
-                            title="Import CSV"
-                            className="text-fg-subtle transition hover:text-fg-base"
-                          >
-                            <FileUp size={11} />
-                          </button>
-                        )}
-                        <button
-                          type="button"
-                          onClick={() => onSchema(full)}
-                          title="Show schema"
-                          className="text-fg-subtle transition hover:text-fg-base"
-                        >
-                          <Columns3 size={11} />
-                        </button>
-                      </span>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
+                      <button
+                        type="button"
+                        onClick={() => onSchema(full)}
+                        title="Show columns, keys and indexes"
+                        aria-label={`Show schema of ${full}`}
+                        className="rounded p-1 text-fg-subtle transition hover:bg-surface-3 hover:text-fg-base"
+                      >
+                        <Columns3 size={11} />
+                      </button>
+                    </span>
+                  </div>
+                );
+              })}
           </div>
         );
       })}

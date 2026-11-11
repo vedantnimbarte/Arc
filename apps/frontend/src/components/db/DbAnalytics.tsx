@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { Ban, CornerDownLeft, Loader2, Pause, Play, Power, RefreshCw } from 'lucide-react';
+import { Activity, Ban, CornerDownLeft, Gauge, Loader2, Pause, Play, Power, RefreshCw } from 'lucide-react';
 import { dbStats, type DbBackend, type DbSafety } from '../../lib/tauri';
 import {
   DIALECTS,
@@ -18,6 +18,7 @@ import {
 import { askConfirm } from '../../state/confirm';
 import { toast, toastError } from '../../state/toast';
 import { cn } from '../../lib/cn';
+import { ObjIcon, ToolButton, ToolTab, ToolTitle, ToolWindowHeader, textBtn } from './chrome';
 
 interface Props {
   connId: string;
@@ -185,26 +186,13 @@ export function DbAnalytics({ connId, backend, safety, onOpenSql }: Props) {
     if (tab === 'activity' && d.stop && row.pid && !isSelf(row)) {
       return (
         <>
-          <button type="button" onClick={() => void stop(row.pid!, false)} title="Cancel the running query" className={ROW_BTN}>
-            <Ban size={12} />
-          </button>
-          <button
-            type="button"
-            onClick={() => void stop(row.pid!, true)}
-            title="Terminate the session"
-            className="rounded p-1 text-fg-subtle transition hover:bg-status-err/15 hover:text-status-err"
-          >
-            <Power size={12} />
-          </button>
+          <ToolButton icon={Ban} label="Cancel the running query" onClick={() => void stop(row.pid!, false)} />
+          <ToolButton icon={Power} label="Terminate the session" onClick={() => void stop(row.pid!, true)} />
         </>
       );
     }
     if (tab === 'topQueries' && row.query) {
-      return (
-        <button type="button" onClick={() => onOpenSql(row.query!)} title="Open in the query editor" className={ROW_BTN}>
-          <CornerDownLeft size={12} />
-        </button>
-      );
+      return <ToolButton icon={CornerDownLeft} label="Open in the query editor" onClick={() => onOpenSql(row.query!)} />;
     }
     if ((tab === 'tables' || tab === 'scanHeavy') && row.name && safety !== 'readonly') {
       return d.maintenance.map((m) => {
@@ -216,7 +204,7 @@ export function DbAnalytics({ connId, backend, safety, onOpenSql }: Props) {
             disabled={maintaining !== null}
             onClick={() => void maintain(row.name!, m)}
             title={m.title}
-            className="flex items-center gap-1 rounded px-1.5 py-0.5 text-2xs text-fg-subtle transition hover:bg-surface-2 hover:text-fg-base disabled:opacity-40"
+            className={cn(textBtn, 'px-1.5 font-mono text-2xs')}
           >
             {busy && <Loader2 size={10} className="animate-spin" />}
             {m.label}
@@ -235,118 +223,94 @@ export function DbAnalytics({ connId, backend, safety, onOpenSql }: Props) {
 
   return (
     <div ref={root} className="h-full overflow-auto">
-      {/* Overview strip + live controls */}
-      <div className="flex flex-wrap items-stretch gap-y-2 border-b border-border-hairline px-4 py-3">
-        <dl className="flex min-w-0 flex-1 flex-wrap gap-x-6 gap-y-2">
-          {facts.map(([label, value]) => (
-            <div key={label} className="min-w-0">
-              <dt className="font-sans text-2xs text-fg-subtle">{label}</dt>
-              <dd
-                className="truncate font-sans text-base tabular-nums tracking-tight text-fg-base"
-                title={value}
-              >
-                {value}
-              </dd>
-            </div>
-          ))}
-        </dl>
-        <div className="flex items-center gap-1.5 self-center">
-          {d.counters && (
-            <>
-              <span className="flex items-center gap-1.5 pr-1 font-sans text-xs text-fg-muted">
-                <span
-                  className={cn(
-                    'h-1.5 w-1.5 rounded-full',
-                    paused ? 'bg-fg-subtle' : 'bg-status-ok',
-                  )}
-                  aria-hidden
+      {/* Overview: a properties strip, with the live controls on its title row. */}
+      <ToolWindowHeader
+        actions={
+          <>
+            {d.counters && (
+              <>
+                <span className="flex items-center gap-1.5 px-1 font-display text-2xs text-fg-muted">
+                  <span
+                    className={cn('h-1.5 w-1.5 rounded-full', paused ? 'bg-fg-subtle' : 'animate-pulse-soft bg-status-ok')}
+                    aria-hidden
+                  />
+                  {paused ? 'Paused' : 'Live'}
+                </span>
+                <select
+                  value={intervalMs}
+                  onChange={(e) => setIntervalMs(Number(e.target.value))}
+                  title="Refresh interval"
+                  aria-label="Refresh interval"
+                  className="h-6 rounded bg-surface-1 px-1.5 font-mono text-2xs text-fg-base ring-1 ring-inset ring-edge-2 focus:outline-none focus:ring-accent/60"
+                >
+                  {INTERVALS.map((ms) => (
+                    <option key={ms} value={ms}>
+                      every {ms / 1000}s
+                    </option>
+                  ))}
+                </select>
+                <ToolButton
+                  icon={paused ? Play : Pause}
+                  label={paused ? 'Resume live updates' : 'Pause live updates'}
+                  onClick={() => setPaused((p) => !p)}
                 />
-                {paused ? 'Paused' : 'Live'}
-              </span>
-              <select
-                value={intervalMs}
-                onChange={(e) => setIntervalMs(Number(e.target.value))}
-                title="Refresh interval"
-                className="rounded-md bg-surface-1 px-1.5 py-0.5 font-sans text-xs text-fg-base ring-1 ring-border-hairline focus:outline-none focus:ring-accent/45"
-              >
-                {INTERVALS.map((ms) => (
-                  <option key={ms} value={ms}>
-                    every {ms / 1000}s
-                  </option>
-                ))}
-              </select>
-              <button
-                type="button"
-                onClick={() => setPaused((p) => !p)}
-                title={paused ? 'Resume live updates' : 'Pause live updates'}
-                className="flex h-6 w-6 items-center justify-center rounded-md text-fg-muted transition hover:bg-surface-2 hover:text-fg-base"
-              >
-                {paused ? <Play size={12} /> : <Pause size={12} />}
-              </button>
-            </>
-          )}
-          <button
-            type="button"
-            onClick={() => {
-              void refreshStatic();
-              void poll();
-            }}
-            title="Refresh sizes and sessions now"
-            className="flex h-6 w-6 items-center justify-center rounded-md text-fg-muted transition hover:bg-surface-2 hover:text-fg-base"
-          >
-            {refreshing ? <Loader2 size={12} className="animate-spin" /> : <RefreshCw size={12} />}
-          </button>
-        </div>
-      </div>
+              </>
+            )}
+            <ToolButton
+              icon={refreshing ? Loader2 : RefreshCw}
+              spin={refreshing}
+              label="Refresh sizes and sessions now"
+              onClick={() => {
+                void refreshStatic();
+                void poll();
+              }}
+            />
+          </>
+        }
+      >
+        <ToolTitle icon={Gauge} title="Overview" />
+      </ToolWindowHeader>
+      <dl className="flex flex-wrap border-b border-edge-1">
+        {facts.map(([label, value]) => (
+          <div key={label} className="min-w-0 border-r border-edge-1 px-4 py-2">
+            <dt className="font-display text-2xs text-fg-subtle">{label}</dt>
+            <dd className="truncate font-mono text-sm tabular-nums text-fg-base" title={value}>
+              {value}
+            </dd>
+          </div>
+        ))}
+      </dl>
 
       {/* Live charts */}
       {d.counters ? (
         pollError ? (
-          <p className="border-b border-border-hairline px-4 py-3 font-sans text-xs text-status-err">
+          <p className="border-b border-edge-1 px-4 py-3 font-mono text-xs text-status-err">
             Live stats failed: {pollError}
           </p>
         ) : (
-          <div className="grid grid-cols-[repeat(auto-fill,minmax(300px,1fr))] gap-px border-b border-border-hairline bg-border-hairline">
+          <div className="grid grid-cols-[repeat(auto-fill,minmax(300px,1fr))] gap-px border-b border-edge-1 bg-edge-1">
             {d.charts.map((spec) => (
               <LiveChart key={spec.title} spec={spec} samples={samples} />
             ))}
           </div>
         )
       ) : (
-        <p className="border-b border-border-hairline px-4 py-3 font-sans text-xs text-fg-subtle">
+        <p className="border-b border-edge-1 px-4 py-3 font-display text-xs text-fg-subtle">
           SQLite runs inside this app, so there are no server counters to chart. Sizes below are
           read from the file.
         </p>
       )}
 
       {/* Detail tables */}
-      <div className="flex items-center gap-1 px-3 pt-2" role="tablist">
-        {tabs.map((k) => {
-          const rows = sections[k]?.rows;
-          return (
-            <button
-              key={k}
-              type="button"
-              role="tab"
-              aria-selected={tab === k}
-              onClick={() => setTab(k)}
-              className={cn(
-                'flex items-center gap-1.5 rounded-md px-2.5 py-1 font-sans text-xs transition',
-                tab === k
-                  ? 'bg-surface-2 text-fg-base'
-                  : 'text-fg-muted hover:bg-surface-1 hover:text-fg-base',
-              )}
-            >
+      <ToolWindowHeader>
+        <span role="tablist" className="flex items-center">
+          {tabs.map((k) => (
+            <ToolTab key={k} active={tab === k} onClick={() => setTab(k)} count={sections[k]?.rows?.length}>
               {TAB_LABELS[k]}
-              {rows && (
-                <span className="rounded-full bg-surface-2 px-1.5 font-sans text-[10px] leading-4 tabular-nums text-fg-subtle">
-                  {rows.length}
-                </span>
-              )}
-            </button>
-          );
-        })}
-      </div>
+            </ToolTab>
+          ))}
+        </span>
+      </ToolWindowHeader>
       <SectionTable section={d[tab]!} loaded={sections[tab]} actions={rowActions} />
     </div>
   );
@@ -424,29 +388,30 @@ function LiveChart({ spec, samples }: { spec: ChartSpec; samples: Sample[] }) {
   };
 
   return (
-    <figure className="m-0 bg-bg-base px-4 pb-3 pt-2.5">
-      <figcaption className="mb-1.5 flex flex-wrap items-baseline gap-x-3 gap-y-0.5">
-        <span className="font-sans text-xs text-fg-base">
+    <figure className="m-0 bg-bg-base">
+      <figcaption className="flex min-h-8 flex-wrap items-center gap-x-3 gap-y-0.5 border-b border-edge-1 bg-surface-1 px-3 py-1">
+        <span className="flex items-center gap-1.5 font-display text-xs font-medium text-fg-base">
+          <Activity size={12} className="text-fg-subtle" aria-hidden />
           {spec.title}
-          {spec.unit && <span className="text-fg-subtle"> per second</span>}
+          {spec.unit && <span className="font-normal text-fg-subtle">per second</span>}
         </span>
         <span className="ml-auto flex flex-wrap items-center gap-x-2.5">
           {spec.series.map((s, si) => (
-            <span key={s.key} className="flex items-center gap-1 font-sans text-2xs text-fg-muted">
+            <span key={s.key} className="flex items-center gap-1 font-display text-2xs text-fg-muted">
               <span
                 className="h-0.5 w-2.5 rounded-full"
                 style={{ background: `var(--series-${si + 1})` }}
                 aria-hidden
               />
               {s.label}
-              <span className="tabular-nums text-fg-base">
+              <span className="font-mono tabular-nums text-fg-base">
                 {shown ? formatNumber(shown[si] ?? 0) : '—'}
               </span>
             </span>
           ))}
         </span>
       </figcaption>
-      <div ref={box} className="relative" onMouseMove={onMove} onMouseLeave={() => setHover(null)}>
+      <div ref={box} className="relative mx-3 mb-2.5 mt-2" onMouseMove={onMove} onMouseLeave={() => setHover(null)}>
         <svg
           width={width}
           height={CHART_H + 1}
@@ -470,7 +435,7 @@ function LiveChart({ spec, samples }: { spec: ChartSpec; samples: Sample[] }) {
           <text
             x={0}
             y={PAD_TOP - 1}
-            className="fill-fg-subtle font-sans text-[10px]"
+            className="fill-fg-subtle font-mono text-[10px]"
             dominantBaseline="auto"
           >
             {formatNumber(max)}
@@ -511,12 +476,12 @@ function LiveChart({ spec, samples }: { spec: ChartSpec; samples: Sample[] }) {
           )}
         </svg>
         {hover !== null && (
-          <span className="pointer-events-none absolute bottom-1 right-0 font-sans text-[10px] text-fg-subtle">
+          <span className="pointer-events-none absolute bottom-1 right-0 font-mono text-[10px] text-fg-subtle">
             {Math.round((Date.now() - samples[hover]!.t) / 1000)}s ago
           </span>
         )}
         {points.filter(Boolean).length < 2 && (
-          <span className="absolute inset-0 flex items-center justify-center font-sans text-2xs text-fg-subtle">
+          <span className="absolute inset-0 flex items-center justify-center font-display text-2xs text-fg-subtle">
             Collecting…
           </span>
         )}
@@ -534,8 +499,6 @@ function niceMax(v: number): number {
 
 const isSelf = (r: Row) => r.self === 't' || r.self === 'true' || r.self === '1';
 
-const ROW_BTN = 'rounded p-1 text-fg-subtle transition hover:bg-surface-2 hover:text-fg-base';
-
 function SectionTable({
   section,
   loaded,
@@ -546,61 +509,66 @@ function SectionTable({
   /** Buttons shown on row hover. */
   actions?: (row: Row) => ReactNode;
 }) {
-  if (!loaded) return <p className="px-4 py-4 font-sans text-xs text-fg-subtle">Loading…</p>;
+  if (!loaded) return <p className="px-4 py-4 font-display text-xs text-fg-subtle">Loading…</p>;
   if (loaded.rows === null)
-    return <p className="px-4 py-4 font-sans text-xs text-fg-subtle">{loaded.error}</p>;
+    return <p className="px-4 py-4 font-display text-xs text-fg-subtle">{loaded.error}</p>;
   if (loaded.rows.length === 0)
-    return <p className="px-4 py-4 font-sans text-xs text-fg-subtle">Nothing to show.</p>;
+    return <p className="px-4 py-4 font-display text-xs text-fg-subtle">Nothing to show.</p>;
   return (
-    <div className="overflow-x-auto px-3 pb-4 pt-1">
-      {section.hint && <p className="px-2 pb-1 font-sans text-xs text-fg-subtle">{section.hint}</p>}
-      <table className="w-full border-collapse font-sans text-xs">
-        <thead>
-          <tr className="text-left text-fg-subtle">
+    <div className="overflow-x-auto pb-4">
+      {section.hint && (
+        <p className="border-b border-edge-1 px-3 py-1.5 font-display text-2xs text-fg-subtle">{section.hint}</p>
+      )}
+      <table className="w-full border-separate border-spacing-0 font-mono text-xs">
+        <thead className="sticky top-0 z-[1] bg-bg-chrome">
+          <tr className="text-left">
             {section.columns.map((c) => (
               <th
                 key={c.key}
                 className={cn(
-                  'whitespace-nowrap px-2 py-1.5 font-normal',
+                  'h-7 whitespace-nowrap border-b border-r border-edge-1 px-2.5 font-display text-2xs font-semibold text-fg-muted',
                   c.numeric && 'text-right',
                 )}
               >
                 {c.label}
               </th>
             ))}
-            {actions && <th className="w-16" />}
+            {actions && <th className="w-16 border-b border-edge-1" />}
           </tr>
         </thead>
         <tbody>
           {loaded.rows.map((r, i) => {
             const self = isSelf(r);
             return (
-              <tr key={i} className="group border-t border-border-hairline hover:bg-surface-1">
+              <tr key={i} className="group hover:bg-surface-1">
                 {section.columns.map((c) => (
                   <td
                     key={c.key}
                     title={c.key === 'query' ? (r[c.key] ?? undefined) : undefined}
                     className={cn(
-                      'px-2 py-1.5 text-fg-base/85',
+                      'h-6 border-b border-r border-edge-1 px-2.5 text-fg-base/85',
                       c.numeric
                         ? 'whitespace-nowrap text-right tabular-nums'
                         : 'max-w-[28rem] truncate',
-                      (c.key === 'query' || c.key === 'name' || c.key === 'index_name') &&
-                        'font-mono',
                       r[c.key] === 'waiting' && 'text-status-warn',
                     )}
                   >
+                    {(c.key === 'name' || c.key === 'index_name') && r[c.key] && (
+                      <span className="mr-1.5 inline-flex align-[-2px]">
+                        <ObjIcon kind={c.key === 'index_name' || r.kind === 'index' ? 'index' : 'table'} size={11} />
+                      </span>
+                    )}
                     {formatCell(r[c.key] ?? null, c.format)}
                     {c.key === 'pid' && self && (
-                      <span className="ml-1.5 rounded-full bg-surface-2 px-1.5 text-[10px] text-fg-subtle">
+                      <span className="ml-1.5 rounded bg-surface-2 px-1.5 font-display text-[10px] text-fg-subtle">
                         this view
                       </span>
                     )}
                   </td>
                 ))}
                 {actions && (
-                  <td className="whitespace-nowrap px-2 py-1 text-right">
-                    <span className="invisible flex justify-end gap-1 group-focus-within:visible group-hover:visible">
+                  <td className="h-6 whitespace-nowrap border-b border-edge-1 px-1 text-right">
+                    <span className="invisible flex justify-end gap-0.5 group-focus-within:visible group-hover:visible">
                       {actions(r)}
                     </span>
                   </td>
