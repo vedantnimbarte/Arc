@@ -33,7 +33,10 @@ async function assertNoCrash() {
 /** Type `echo <marker>` into terminal `id` with real key events and wait for
  *  the shell's output line (the echoed command line itself doesn't count). */
 async function echoRoundTrip(id) {
-  const marker = `arc-e2e-${Math.random().toString(36).slice(2, 10)}`;
+  // `ee` on purpose: a repeated key must survive the trip. The marker used to
+  // be fully random, so it only hit a doubled letter now and then — and the
+  // test failed only then, which looked like flakiness.
+  const marker = `arc-e2e-${Math.random().toString(36).slice(2, 10)}-ee`;
   await browser.execute((id) => window.__arcTest.useWorkspace.getState().setActive(id), id);
   // The shell has printed its prompt, so it is reading input.
   await browser.waitUntil(async () => (await terminalText(id)).trim().length > 0, {
@@ -41,7 +44,7 @@ async function echoRoundTrip(id) {
     timeoutMsg: `terminal ${id} never printed a prompt`,
   });
   await browser.execute((id) => window.__arcTest.getTerminal(id).focus(), id);
-  await browser.keys(`echo ${marker}`);
+  await typeKeys(`echo ${marker}`);
   await browser.keys(ENTER);
   await browser
     .waitUntil(
@@ -51,6 +54,13 @@ async function echoRoundTrip(id) {
     .catch(async () => {
       throw new Error(`"${marker}" never appeared in terminal ${id}:\n${await terminalText(id)}`);
     });
+}
+
+/** Type `text` one key per action. Linux's WebKitWebDriver merges two
+ *  identical keys sent in one `browser.keys()` call — `ee` reaches the page as
+ *  a single keydown — so each key goes out, and is released, on its own. */
+async function typeKeys(text) {
+  for (const ch of text) await browser.keys(ch);
 }
 
 describe('ARC smoke', () => {
