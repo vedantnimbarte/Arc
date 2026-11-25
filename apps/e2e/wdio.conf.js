@@ -20,6 +20,12 @@ const application = join(
 // native driver -> app.
 process.env.ARC_DATA_DIR ||= mkdtempSync(join(tmpdir(), 'arc-e2e-'));
 
+// A fake ACP agent (run with node) the app offers next to the real ones, so the
+// agent chat can be tested without any agent installed or signed in. Its
+// sessions live in the throwaway data dir too.
+process.env.ARC_TEST_ACP_AGENT ||= join(repoRoot, 'rust', 'acp', 'tests', 'fake-acp-agent.mjs');
+process.env.FAKE_ACP_STATE ||= join(process.env.ARC_DATA_DIR, 'fake-acp-sessions.json');
+
 let tauriDriver;
 
 export const config = {
