@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const started: unknown[] = [];
+const order: [string, string][] = [];
 vi.mock('../../lib/tauri', async (orig) => ({
   ...(await orig<typeof import('../../lib/tauri')>()),
   claudeSessionLoad: async () => [
@@ -9,11 +10,15 @@ vi.mock('../../lib/tauri', async (orig) => ({
     { kind: 'tool_result', payload: { id: 't', output: 'ok', is_error: false } },
     { kind: 'text_delta', payload: { text: 'Done.' } },
   ],
-  claudeTurnStart: async (opts: unknown) => {
+  claudeTurnStart: async (opts: { topic: string }) => {
     started.push(opts);
-    return 'claude://turn/1';
+    order.push(['start', opts.topic]);
+    return opts.topic;
   },
-  onClaudeTurn: async () => () => {},
+  onClaudeTurn: async (topic: string) => {
+    order.push(['listen', topic]);
+    return () => {};
+  },
 }));
 
 const { claudeWindow, __resetClaudeForTests } = await import('../claudeCode');
@@ -56,7 +61,12 @@ describe('claude code windows', () => {
     w.setState({ model: 'haiku', permissionMode: 'plan', cwd: '/other' });
     await w.getState().send('hi');
     expect(started[0]).toEqual(
-      expect.objectContaining({ cwd: '/other', model: 'haiku', permissionMode: 'plan', resume: null }),
+      expect.objectContaining({
+        cwd: '/other',
+        model: 'haiku',
+        permissionMode: 'plan',
+        resume: null,
+      }),
     );
   });
 
@@ -84,6 +94,23 @@ describe('claude code windows', () => {
   });
 });
 
+describe('turn events', () => {
+  beforeEach(() => {
+    __resetClaudeForTests();
+    order.length = 0;
+  });
+
+  it('are listened for before the turn starts', async () => {
+    // A fast agent's first events arrive before the start call returns; an
+    // event nobody listens for yet is lost.
+    const w = claudeWindow('tab-1', prefs);
+    await w.getState().send('hi');
+    expect(order.map(([what]) => what)).toEqual(['listen', 'start']);
+    expect(order[0]![1]).toBe(order[1]![1]);
+    expect(w.getState().activeTopic).toBe(order[0]![1]);
+  });
+});
+
 describe('slash commands on send', () => {
   beforeEach(() => {
     __resetClaudeForTests();
@@ -93,7 +120,10 @@ describe('slash commands on send', () => {
   it('shows what was typed and sends the expansion', async () => {
     const w = claudeWindow('tab-1', prefs);
     await w.getState().send('/advisor should this be a queue?');
-    expect(w.getState().chat[0]).toEqual({ kind: 'user', text: '/advisor should this be a queue?' });
+    expect(w.getState().chat[0]).toEqual({
+      kind: 'user',
+      text: '/advisor should this be a queue?',
+    });
     const sent = (started[0] as { content: { text: string }[] }).content[0]!.text;
     expect(sent).toContain('Get a second opinion from another agent on: should this be a queue?');
   });
@@ -147,7 +177,10 @@ describe('agent windows over another transport', () => {
     const from = claudeWindow('tab-a', prefs, t);
     await from.getState().loadSession('/r', 'ses_1');
     const taken = takeConversation(from);
-    expect(taken).toMatchObject({ sessionId: 'ses_1', chat: [{ kind: 'user' }, { kind: 'assistant' }] });
+    expect(taken).toMatchObject({
+      sessionId: 'ses_1',
+      chat: [{ kind: 'user' }, { kind: 'assistant' }],
+    });
     expect(from.getState().sessionId).toBeNull();
     expect(from.getState().chat).toEqual([]);
     expect(closed).toEqual([]);

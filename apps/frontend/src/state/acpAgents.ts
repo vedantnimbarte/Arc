@@ -99,6 +99,7 @@ export function acpTransport(provider: string): SessionTransport {
         resume: o.resume,
         config: useAcpPrefs.getState().choices[provider],
         mcpUrl: o.mcpUrl,
+        topic: o.topic,
       }),
     respond: ({ topic, requestId, allow }) => acpPermissionRespond({ topic, requestId, allow }),
     cancel: acpTurnCancel,
@@ -127,7 +128,7 @@ export function acpSession(provider: string): UseBoundStore<StoreApi<ClaudeSessi
     sessions.set(provider, store);
     registerChat(
       `panel:${provider}`,
-      AI_CLIS[provider as AiCliId] ?? provider,
+      agentLabel(provider),
       { kind: 'panel', provider },
       store,
       () => useFiles.getState().root,
@@ -210,7 +211,14 @@ export async function chooseConfig(
 
 /** An agent's display name: `claude` or an ACP agent's CLI id. */
 export function agentLabel(agent: string): string {
-  return agent === 'claude' ? 'Claude Code' : (AI_CLIS[agent as AiCliId] ?? agent);
+  if (agent === 'claude') return 'Claude Code';
+  return (
+    AI_CLIS[agent as AiCliId] ??
+    // An agent the built-in table doesn't know (the e2e suite's test agent):
+    // the backend names it.
+    useAcpAgents.getState().providers.find((p) => p.id === agent)?.label ??
+    agent
+  );
 }
 
 /** Every chat agent installed right now, as `[id, label]`: Claude Code and the

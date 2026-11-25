@@ -3082,6 +3082,8 @@ export async function claudeTurnStart(opts: {
   maxBudgetUsd?: number | null;
   /** Arc's MCP server for this conversation (agent orchestration). */
   mcpUrl?: string | null;
+  /** Topic to emit on, already listened to; one is made up when omitted. */
+  topic?: string | null;
 }): Promise<string> {
   return invoke<string>('claude_turn_start', {
     cwd: opts.cwd,
@@ -3091,6 +3093,7 @@ export async function claudeTurnStart(opts: {
     permissionMode: opts.permissionMode ?? null,
     maxBudgetUsd: opts.maxBudgetUsd ?? null,
     mcpUrl: opts.mcpUrl ?? null,
+    topic: opts.topic ?? null,
   });
 }
 
@@ -3197,6 +3200,8 @@ export async function acpTurnStart(opts: {
   config?: Record<string, string>;
   /** Arc's MCP server for this conversation (agent orchestration). */
   mcpUrl?: string | null;
+  /** Topic to emit on, already listened to; one is made up when omitted. */
+  topic?: string | null;
 }): Promise<string> {
   return invoke<string>('acp_turn_start', {
     provider: opts.provider,
@@ -3205,6 +3210,7 @@ export async function acpTurnStart(opts: {
     resume: opts.resume ?? null,
     config: opts.config ?? null,
     mcpUrl: opts.mcpUrl ?? null,
+    topic: opts.topic ?? null,
   });
 }
 
