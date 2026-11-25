@@ -3156,6 +3156,82 @@ export async function onClaudeTurn(
   return listen<ClaudeStreamEvent>(topic, (e) => handler(e.payload));
 }
 
+// ─── ACP agents ────────────────────────────────────────────────────────────
+//
+// Agents that speak the Agent Client Protocol (Gemini CLI, OpenCode, Qwen, …)
+// run as one long-lived child per conversation (see rust/acp). Turns use the
+// same topic/event contract as Claude Code, so `onClaudeTurn` listens to both.
+
+/** An installed agent ARC can drive over ACP. `id` is its `AiCliId`. */
+export interface AcpProvider {
+  id: AiCliId;
+  label: string;
+  path: string;
+}
+
+export async function acpProviders(): Promise<AcpProvider[]> {
+  return invoke<AcpProvider[]>('acp_providers');
+}
+
+/** Start a turn. `resume` is the `session_id` from an earlier turn's `init`;
+ *  without it the agent is spawned for a new conversation. */
+export async function acpTurnStart(opts: {
+  provider: string;
+  cwd: string;
+  content: unknown[];
+  resume?: string | null;
+}): Promise<string> {
+  return invoke<string>('acp_turn_start', {
+    provider: opts.provider,
+    cwd: opts.cwd,
+    content: opts.content,
+    resume: opts.resume ?? null,
+  });
+}
+
+export async function acpPermissionRespond(opts: {
+  topic: string;
+  requestId: string;
+  allow: boolean;
+}): Promise<void> {
+  return invoke('acp_permission_respond', opts);
+}
+
+export async function acpTurnCancel(topic: string): Promise<void> {
+  return invoke('acp_turn_cancel', { topic });
+}
+
+/** One earlier session as the agent lists it (`session/list`). */
+export interface AcpSessionInfo {
+  sessionId: string;
+  title?: string | null;
+  /** ISO 8601. */
+  updatedAt?: string | null;
+}
+
+/** The agent's earlier sessions in `cwd`, or null when it can't list them. */
+export async function acpSessionsList(
+  provider: string,
+  cwd: string,
+): Promise<AcpSessionInfo[] | null> {
+  return invoke<AcpSessionInfo[] | null>('acp_sessions_list', { provider, cwd });
+}
+
+/** Reopen an earlier session; resolves with its history as turn events. The
+ *  agent stays running, so the next turn resumes with the same id. */
+export async function acpSessionLoad(
+  provider: string,
+  cwd: string,
+  id: string,
+): Promise<ClaudeStreamEvent[]> {
+  return invoke<ClaudeStreamEvent[]>('acp_session_load', { provider, cwd, id });
+}
+
+/** End a conversation and kill its agent process. */
+export async function acpConversationClose(conversation: string): Promise<void> {
+  return invoke('acp_conversation_close', { conversation });
+}
+
 // ─── remote filesystem (SFTP) ────────────────────────────────────────────
 //
 // The raw transport for remote workspaces. Callers should generally use the

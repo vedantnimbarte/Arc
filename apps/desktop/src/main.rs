@@ -110,6 +110,7 @@ fn main() {
         .manage(WatchState::default())
         .manage(commands::wingman::WingmanState::default())
         .manage(commands::claude_code::ClaudeState::default())
+        .manage(commands::acp::AcpState::default())
         .manage(commands::db::DbState::default())
         .invoke_handler(tauri::generate_handler![
             commands::pty::pty_spawn,
@@ -388,6 +389,13 @@ fn main() {
             commands::claude_code::claude_session_load,
             commands::claude_code::claude_usage_history,
             commands::claude_code::claude_session_delete,
+            commands::acp::acp_providers,
+            commands::acp::acp_turn_start,
+            commands::acp::acp_turn_cancel,
+            commands::acp::acp_permission_respond,
+            commands::acp::acp_conversation_close,
+            commands::acp::acp_sessions_list,
+            commands::acp::acp_session_load,
             commands::diagnostics::diagnostics_collect,
             commands::diagnostics::diagnostics_summary,
             commands::diagnostics::diagnostics_clear,

@@ -6,6 +6,7 @@ import {
   diffStat,
   editedPath,
   summarizeToolInput,
+  toolRowSummary,
   useClaudeCode,
 } from '../claudeCode';
 import type { ClaudeStreamEvent } from '../../lib/tauri';
@@ -71,6 +72,35 @@ describe('claude code stream folding', () => {
       { kind: 'tool_start', payload: { id: '3', name: 'Write', input: { file_path: '/r/c.ts' } } },
     );
     expect(s.editedFiles.map((f) => f.path)).toEqual(['/r/b.ts', '/r/c.ts']);
+  });
+
+  it('upserts an ACP tool call that is filled in as it runs', () => {
+    // ACP agents send a call with empty input, then re-send it by id with the
+    // real input and the files it wrote (`paths`, each named once).
+    const s = feed(
+      { kind: 'tool_start', payload: { id: 't', name: 'write', input: {}, paths: [] } },
+      {
+        kind: 'tool_start',
+        payload: { id: 't', name: 'write', input: { filePath: '/r/b.txt' }, paths: ['/r/b.txt'] },
+      },
+      { kind: 'tool_result', payload: { id: 't', output: 'ok', is_error: false } },
+    );
+    expect(s.chat).toHaveLength(1);
+    expect(s.chat[0]).toMatchObject({
+      kind: 'tool',
+      name: 'write',
+      input: { filePath: '/r/b.txt' },
+      output: 'ok',
+    });
+    expect(s.editedFiles).toEqual([{ path: '/r/b.txt', tool: 'write', edits: 1 }]);
+  });
+
+  it("prefers an ACP agent's own permission summary", () => {
+    const s = feed({
+      kind: 'permission_request',
+      payload: { request_id: '1', tool_name: 'bash', input: { cmd: 'x' }, summary: 'rm -rf build' },
+    });
+    expect(s.pending?.summary).toBe('rm -rf build');
   });
 
   it('counts repeat edits instead of duplicating the row', () => {
@@ -180,6 +210,16 @@ describe('permission prompts', () => {
   it('does nothing when there is no prompt to answer', async () => {
     await useClaudeCode.getState().respond(true);
     expect(useClaudeCode.getState().chat).toHaveLength(0);
+  });
+});
+
+describe('toolRowSummary', () => {
+  it('shows what an ACP call touched instead of its JSON', () => {
+    expect(toolRowSummary('write', { content: 'bye', filePath: '/r/b.txt' })).toBe('/r/b.txt');
+    // OpenCode titles a shell call with the command itself.
+    expect(toolRowSummary('echo done', { command: 'echo done', cwd: '/r' })).toBe('');
+    expect(toolRowSummary('mcp__x__y', { a: 1 })).toBe('{"a":1}');
+    expect(toolRowSummary('Bash', { command: 'ls' })).toBe('ls');
   });
 });
 

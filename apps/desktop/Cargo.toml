@@ -44,6 +44,7 @@ arc-lsp = { workspace = true }
 arc-dap = { workspace = true }
 arc-wingman = { workspace = true }
 arc-claude-code = { workspace = true }
+arc-acp = { workspace = true }
 arc-db = { workspace = true }
 dashmap = { workspace = true }
 parking_lot = { workspace = true }
