@@ -113,3 +113,26 @@ jobs:
       - name: Run e2e
         if: runner.os == 'Linux'
         run: xvfb-run --auto-servernum pnpm e2e
+
+      # DIAGNOSTIC (experiment branch only): does the debug app start at all on
+      # the Windows runner, and do the WebView2 runtime and driver agree?
+      - name: Diagnose Windows app start
+        if: always() && runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $key = 'HKLM:\SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}'
+          "WebView2 runtime: $((Get-ItemProperty $key -ErrorAction SilentlyContinue).pv)"
+          "msedgedriver: $(& msedgedriver --version 2>&1)"
+          "session: $([Environment]::UserInteractive) user=$env:USERNAME"
+          $data = Join-Path $env:RUNNER_TEMP 'arc-diag'
+          New-Item -ItemType Directory -Force $data | Out-Null
+          $env:ARC_DATA_DIR = $data
+          $out = Join-Path $env:RUNNER_TEMP 'arc-out.txt'
+          $err = Join-Path $env:RUNNER_TEMP 'arc-err.txt'
+          $p = Start-Process -FilePath target\debug\arc-desktop.exe -RedirectStandardOutput $out -RedirectStandardError $err -PassThru
+          Start-Sleep -Seconds 25
+          "app exited: $($p.HasExited)  code: $(if ($p.HasExited) { $p.ExitCode })"
+          "--- stdout"; Get-Content $out -Tail 60
+          "--- stderr"; Get-Content $err -Tail 60
+          "--- data dir"; Get-ChildItem -Recurse $data -ErrorAction SilentlyContinue | Select-Object -First 40 -ExpandProperty FullName
+          if (-not $p.HasExited) { Stop-Process -Id $p.Id -Force }
