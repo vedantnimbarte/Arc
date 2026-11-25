@@ -209,6 +209,8 @@ export interface SessionTransport {
     resume: string | null;
     model: string;
     permissionMode: string;
+    /** Arc's MCP server for this conversation, when it may start agents. */
+    mcpUrl: string | null;
   }) => Promise<string>;
   respond: (opts: {
     topic: string;
@@ -222,7 +224,15 @@ export interface SessionTransport {
   /** Per-turn event tap, e.g. to log usage. */
   recorder?: (ctx: { cwd: string; model: string }) => (ev: ClaudeStreamEvent) => void;
   /** A recorded conversation replayed as events. Defaults to Claude's history. */
-  load?: (cwd: string, id: string) => Promise<ClaudeStreamEvent[]>;
+  load?: (cwd: string, id: string, mcpUrl: string | null) => Promise<ClaudeStreamEvent[]>;
+}
+
+/** Arc's MCP endpoint for a conversation, by its caller key — installed by
+ *  `state/orchestrator.ts`, which owns the server's tokens and caps. Null (the
+ *  default, and for a helper too deep to start more) means no orchestration. */
+let mcpUrlFor: (caller: string) => Promise<string | null> = async () => null;
+export function setMcpUrlProvider(fn: (caller: string) => Promise<string | null>): void {
+  mcpUrlFor = fn;
 }
 
 const claudeTransport: SessionTransport = {
@@ -276,6 +286,9 @@ export function sessionSlice(
   api: unknown,
   cfg: () => TurnConfig,
   transport: SessionTransport = claudeTransport,
+  /** This conversation's key in the chat registry (`window:<tab>`, `panel:…`):
+   *  who is calling when its agent uses Arc's MCP tools. */
+  caller?: string,
 ): ClaudeSession {
   const set = rawSet as SessionSet;
   const get = rawGet as () => ClaudeSession;
@@ -308,7 +321,11 @@ export function sessionSlice(
       const seq = ++loadSeq;
       let events: ClaudeStreamEvent[];
       try {
-        events = await (transport.load ?? claudeSessionLoad)(cwd, id);
+        events = await (transport.load ?? claudeSessionLoad)(
+          cwd,
+          id,
+          caller ? await mcpUrlFor(caller) : null,
+        );
       } catch (e) {
         if (seq === loadSeq) fail(e);
         return;
@@ -411,7 +428,9 @@ export function sessionSlice(
       }));
 
       try {
+        const mcpUrl = caller ? await mcpUrlFor(caller).catch(() => null) : null;
         const topic = await transport.start({
+          mcpUrl,
           cwd,
           content: buildContent(prompt, attachments),
           resume: sessionId,
@@ -461,7 +480,7 @@ export const useClaudeCode = create<ClaudeState>((set, get, api) => ({
       model: settings.claudeModel,
       permissionMode: settings.claudePermissionMode,
     };
-  }),
+  }, claudeTransport, 'panel:claude'),
 }));
 
 registerChat('panel:claude', 'Claude Code', { kind: 'panel' }, useClaudeCode, () =>
@@ -480,7 +499,7 @@ export function claudeWindow(
   let store = windows.get(tabId);
   if (!store) {
     store = create<ClaudeWindowSession>()((set, get, api) => ({
-      ...sessionSlice(set, get, api, () => get(), transport),
+      ...sessionSlice(set, get, api, () => get(), transport, `window:${tabId}`),
       ...prefs,
     }));
     windows.set(tabId, store);

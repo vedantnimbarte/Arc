@@ -75,6 +75,10 @@ pub struct TurnOptions {
     pub permission_mode: Option<String>,
     /// Hard spend ceiling for the turn, in USD.
     pub max_budget_usd: Option<f64>,
+    /// Arc's own MCP server (agent orchestration), as a streamable-HTTP URL.
+    /// Its tools are pre-allowed: Arc asks the user itself before an agent
+    /// starts another, so the CLI asking again per call would be noise.
+    pub mcp_url: Option<String>,
     /// Resolved `claude` binary. Discovered by [`binary`] when absent.
     pub binary: Option<String>,
 }
@@ -409,6 +413,12 @@ where
     }
     if let Some(p) = opts.permission_mode.as_deref().filter(|s| !s.trim().is_empty()) {
         cmd.arg("--permission-mode").arg(p);
+    }
+    if let Some(url) = opts.mcp_url.as_deref().filter(|u| !u.is_empty()) {
+        cmd.arg("--mcp-config")
+            .arg(json!({ "mcpServers": { "arc": { "type": "http", "url": url } } }).to_string())
+            .arg("--allowedTools")
+            .arg("mcp__arc");
     }
     if let Some(b) = opts.max_budget_usd.filter(|b| *b > 0.0) {
         cmd.arg("--max-budget-usd").arg(b.to_string());

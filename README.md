@@ -137,6 +137,15 @@ it.
   reasoning effort) appear as pickers by the composer; your choice sticks for that agent's next
   conversations. Expand a chat into a centered window, where agents that keep history list and
   reopen their earlier sessions.
+- **Agent Sessions** — One sidebar list of every agent wherever it runs (chat panels and windows,
+  terminal CLIs, worktree races, Wingman runs), grouped *Waiting on you / Working / Done*, with
+  stop, review, and follow-up right from the row. Chat agents notify when they finish or need a
+  permission, and count toward the status bar's "N waiting".
+- **Agents starting agents** — Chat agents get Arc's own MCP server (`arc`), so one agent can hand
+  work to another: start a helper with a prompt, wait for its reply, send follow-ups, stop it.
+  Helpers open as Arc windows behind your current tab, in their own git worktree by default. You
+  approve the first helper in each conversation; helpers nest at most two deep, four run at
+  once, and a Claude helper is never given a looser permission mode than its Claude parent.
 - **AI CLI Launcher** — Optionally launch external coding CLIs in a terminal tab when they're
   installed on your PATH: Claude Code, OpenAI Codex, OpenCode, Kimi Code, Gemini CLI, Qwen Code,
   Cursor Agent, GitHub Copilot, Amp, Aider, Crush, Factory Droid, and Wingman. Whatever's present
