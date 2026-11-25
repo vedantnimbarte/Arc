@@ -841,6 +841,11 @@ export function Terminal({ sessionKey }: Props) {
 
         unlistens.push(
           await onPtyExit(ptyId, (code) => {
+            // An agent that exited isn't waiting on anyone any more.
+            if (agentTab()) {
+              useWorkspace.getState().setAgentWaiting(sessionKey, null);
+              useWorkspace.getState().setAgentExited(sessionKey, true);
+            }
             if (!sawAnyData) {
               const cwd = initialCwd.current ?? '(default)';
               writeln(
@@ -862,6 +867,7 @@ export function Terminal({ sessionKey }: Props) {
         // Publish the PTY id so other components (file tree, chat) can write
         // into this terminal.
         useWorkspace.getState().setTabPtyId(sessionKey, ptyId);
+        useWorkspace.getState().setAgentExited(sessionKey, false);
 
         // The bell. Most agent CLIs ring it when a turn ends or they want input,
         // which makes it the widest-coverage signal available — and unlike the

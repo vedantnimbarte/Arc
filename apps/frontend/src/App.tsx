@@ -21,6 +21,7 @@ import { EmptyWorkspace } from './components/EmptyWorkspace';
 import { ResizeHandle } from './components/ResizeHandle';
 import { PaneTreeView } from './components/PaneTreeView';
 import { useWorkspace } from './state/workspace';
+import { focusChat, useChatSessions, waitingQueue } from './state/agentSessions';
 import { toast } from './state/toast';
 import { useProblems } from './state/problems';
 import { useDebug } from './state/debug';
@@ -509,10 +510,13 @@ export default function App() {
         return;
       }
       case 'next-waiting-agent': {
+        // Agent terminals that stopped and chat agents blocked on a
+        // permission, longest-waiting first.
         const { agentWaiting, setActive } = useWorkspace.getState();
-        const next = Object.entries(agentWaiting).sort((a, b) => a[1].at - b[1].at)[0];
-        if (next) setActive(next[0]);
-        else toast('No agent is waiting on you');
+        const next = waitingQueue(agentWaiting, useChatSessions.getState().snaps)[0];
+        if (!next) toast('No agent is waiting on you');
+        else if (next.kind === 'tab') setActive(next.tabId);
+        else focusChat(next.snap.surface);
         return;
       }
       case 'queue-agent-prompt': {

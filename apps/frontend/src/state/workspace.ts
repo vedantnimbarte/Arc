@@ -316,6 +316,10 @@ interface WorkspaceState {
    *  agent printing again. Transient. */
   agentWaiting: Record<string, { reason: string; at: number }>;
   setAgentWaiting: (id: string, reason: string | null) => void;
+  /** Agent tabs whose agent process has exited, with when. Cleared when the
+   *  tab starts a new process or closes. Transient. */
+  agentExited: Record<string, number>;
+  setAgentExited: (id: string, exited: boolean) => void;
   /** Mirror keystrokes typed into any terminal of the active workspace into
    *  all its other terminals (tmux `synchronize-panes`). Transient. */
   broadcastInput: boolean;
@@ -943,6 +947,7 @@ export const useWorkspace = create<WorkspaceState>()((set, get) => ({
   tabDirty: {},
   tabRunning: {},
   agentWaiting: {},
+  agentExited: {},
   broadcastInput: false,
   closedTabs: [],
   tabGroups: [],
@@ -965,6 +970,7 @@ export const useWorkspace = create<WorkspaceState>()((set, get) => ({
     }),
   closeTab: (id) => {
     get().setAgentWaiting(id, null);
+    get().setAgentExited(id, false);
     set((s) => {
       // Layout-aware close. Every tab is closable, the last one included:
       // closing the last tab in a *leaf* collapses the leaf (its sibling
@@ -1196,6 +1202,14 @@ export const useWorkspace = create<WorkspaceState>()((set, get) => ({
         return { agentWaiting: next };
       }
       return { agentWaiting: { ...s.agentWaiting, [id]: { reason, at: Date.now() } } };
+    }),
+  setAgentExited: (id, exited) =>
+    set((s) => {
+      if (exited) return { agentExited: { ...s.agentExited, [id]: Date.now() } };
+      if (!(id in s.agentExited)) return s;
+      const next = { ...s.agentExited };
+      delete next[id];
+      return { agentExited: next };
     }),
   toggleBroadcastInput: () => set((s) => ({ broadcastInput: !s.broadcastInput })),
 

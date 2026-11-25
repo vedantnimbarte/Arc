@@ -9,6 +9,7 @@ import {
   Search,
   Server,
   Sparkles,
+  ListChecks,
   type LucideIcon,
 } from 'lucide-react';
 import type { SidebarView } from '../state/files';
@@ -42,6 +43,7 @@ export const SIDEBAR_VIEWS: SidebarViewDef[] = [
   { id: 'docker', label: 'Containers', Icon: Boxes },
   { id: 'ssh', label: 'SSH', Icon: Server, shortcut: 'toggle-ssh-panel' },
   { id: 'agents', label: 'Agents', Icon: Sparkles },
+  { id: 'sessions', label: 'Sessions', Icon: ListChecks },
 ];
 
 /** Lookup by id — convenient for the body switch / customization UI. */

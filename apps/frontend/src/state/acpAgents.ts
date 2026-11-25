@@ -10,8 +10,11 @@ import {
   acpTurnCancel,
   acpTurnStart,
   isTauri,
+  AI_CLIS,
   type AcpProvider,
+  type AiCliId,
 } from '../lib/tauri';
+import { registerChat } from './agentSessions';
 import {
   claudeWindow,
   sessionSlice,
@@ -118,6 +121,13 @@ export function acpSession(provider: string): UseBoundStore<StoreApi<ClaudeSessi
       ),
     );
     sessions.set(provider, store);
+    registerChat(
+      `panel:${provider}`,
+      AI_CLIS[provider as AiCliId] ?? provider,
+      { kind: 'panel', provider },
+      store,
+      () => useFiles.getState().root,
+    );
   }
   return store;
 }
