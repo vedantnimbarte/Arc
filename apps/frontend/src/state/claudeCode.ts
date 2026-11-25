@@ -186,6 +186,45 @@ type SessionSet = (
   patch: Partial<ClaudeSession> | ((s: ClaudeSession) => Partial<ClaudeSession>),
 ) => void;
 
+/** How a session's turns reach its agent. Claude Code spawns a CLI per turn;
+ *  ACP agents (`state/acpAgents.ts`) keep a process per conversation. Both
+ *  speak the same topic/event contract, so everything above this is shared. */
+export interface SessionTransport {
+  /** Whether the agent is installed, checked at send time. */
+  ready: () => boolean;
+  start: (opts: {
+    cwd: string;
+    content: unknown[];
+    resume: string | null;
+    model: string;
+    permissionMode: string;
+  }) => Promise<string>;
+  respond: (opts: {
+    topic: string;
+    requestId: string;
+    allow: boolean;
+    message: string | null;
+  }) => Promise<void>;
+  cancel: (topic: string) => Promise<void>;
+  /** Drop a conversation the session is leaving (ACP kills its process). */
+  close?: (sessionId: string) => void;
+  /** Per-turn event tap, e.g. to log usage. */
+  recorder?: (ctx: { cwd: string; model: string }) => (ev: ClaudeStreamEvent) => void;
+}
+
+const claudeTransport: SessionTransport = {
+  ready: () => useClaudeCode.getState().status === 'ready',
+  start: (o) =>
+    claudeTurnStart({
+      ...o,
+      model: o.model || null,
+      maxBudgetUsd: useSettings.getState().claudeMaxBudgetUsd || null,
+    }),
+  respond: claudePermissionRespond,
+  cancel: claudeTurnCancel,
+  recorder: claudeUsageRecorder,
+};
+
 /** Every live session store, so a send can see whether the same conversation
  *  is already running in another window. */
 const registry = new Set<StoreApi<ClaudeSession>>();
@@ -214,13 +253,15 @@ const EMPTY_SESSION = {
   pending: null,
 };
 
-/** The conversation half of a store, shared by the panel and every window.
- *  `set`/`get`/`api` are the owning store's; `cfg` says where turns run. */
-function sessionSlice(
+/** The conversation half of a store, shared by the panel, every window and
+ *  every ACP agent. `set`/`get`/`api` are the owning store's; `cfg` says where
+ *  turns run and `transport` which agent runs them. */
+export function sessionSlice(
   rawSet: unknown,
   rawGet: unknown,
   api: unknown,
   cfg: () => TurnConfig,
+  transport: SessionTransport = claudeTransport,
 ): ClaudeSession {
   const set = rawSet as SessionSet;
   const get = rawGet as () => ClaudeSession;
@@ -240,6 +281,8 @@ function sessionSlice(
     ...EMPTY_SESSION,
 
     newChat: () => {
+      const id = get().sessionId;
+      if (id) transport.close?.(id);
       unlisten?.();
       unlisten = null;
       loadSeq++;
@@ -288,7 +331,7 @@ function sessionSlice(
         ],
       }));
       try {
-        await claudePermissionRespond({
+        await transport.respond({
           topic: activeTopic,
           requestId: pending.requestId,
           allow,
@@ -304,7 +347,7 @@ function sessionSlice(
       if (!topic) return;
       // The turn's own terminal event flips `streaming` — killing the child
       // produces one, so there's nothing to reset here.
-      await claudeTurnCancel(topic).catch(() => {});
+      await transport.cancel(topic).catch(() => {});
     },
 
     openEditedFile: (path) => {
@@ -323,10 +366,10 @@ function sessionSlice(
       const { cwd, model, permissionMode } = cfg();
       // One turn at a time: a second child would be a second conversation, and
       // both would race to resume the same session id.
-      if (useClaudeCode.getState().status !== 'ready' || streaming) return;
+      if (!transport.ready() || streaming) return;
       if (!prompt.trim() && attachments.length === 0) return;
       if (!cwd) {
-        fail(new Error('Open a folder before asking Claude about it.'));
+        fail(new Error('Open a folder before asking the agent about it.'));
         return;
       }
       if (sessionId && sessionBusyElsewhere(sessionId, self)) {
@@ -347,21 +390,20 @@ function sessionSlice(
       }));
 
       try {
-        const topic = await claudeTurnStart({
+        const topic = await transport.start({
           cwd,
           content: buildContent(prompt, attachments),
           resume: sessionId,
-          model: model || null,
+          model,
           permissionMode,
-          maxBudgetUsd: useSettings.getState().claudeMaxBudgetUsd || null,
         });
         set({ activeTopic: topic });
 
         unlisten?.();
-        const recordUsage = claudeUsageRecorder({ cwd, model });
+        const record = transport.recorder?.({ cwd, model });
         unlisten = await onClaudeTurn(topic, (ev) => {
           applyEvent(set, ev);
-          recordUsage(ev);
+          record?.(ev);
         });
       } catch (e) {
         fail(e);
@@ -524,22 +566,40 @@ function applyEvent(
           input: p.input,
           title: str(p.title) || null,
           description: str(p.description) || null,
-          summary: summarizeToolInput(str(p.tool_name), p.input),
+          // ACP agents send their own one-liner; Claude's is derived here.
+          summary: str(p.summary) || summarizeToolInput(str(p.tool_name), p.input),
         },
       }));
       return;
     }
 
     case 'tool_start': {
+      const id = str(p.id);
       const name = str(p.name);
-      const path = editedPath(name, p.input);
-      set((s) => ({
-        chat: [...s.chat, { kind: 'tool', id: str(p.id), name, input: p.input }],
+      // ACP agents name the files a call wrote (`paths`, each sent once);
+      // Claude's are read out of the tool input.
+      const paths = Array.isArray(p.paths)
+        ? p.paths.filter((x): x is string => typeof x === 'string')
+        : [editedPath(name, p.input)].filter((x): x is string => x !== null);
+      set((s) => {
         // Record the edit at call time, not on the result: a tool that fails
         // still leaves the file worth looking at, and the reviewer is better
         // served by a diff that turns out empty than by a missing entry.
-        editedFiles: path ? withEdit(s.editedFiles, path, name) : s.editedFiles,
-      }));
+        const editedFiles = paths.reduce((acc, path) => withEdit(acc, path, name), s.editedFiles);
+        // ACP agents fill a call in as it runs, re-sending it by id; update
+        // that row rather than adding a second one.
+        const at = s.chat.findIndex((c) => c.kind === 'tool' && c.id === id);
+        if (at !== -1) {
+          const chat = [...s.chat];
+          chat[at] = {
+            ...(chat[at] as Extract<ClaudeChatItem, { kind: 'tool' }>),
+            name,
+            input: p.input,
+          };
+          return { chat, editedFiles };
+        }
+        return { chat: [...s.chat, { kind: 'tool', id, name, input: p.input }], editedFiles };
+      });
       return;
     }
 
@@ -626,6 +686,23 @@ function applyEvent(
  * field that carries the substance; everything else falls back to compact JSON
  * rather than showing nothing.
  */
+/** The one-liner beside a tool row's name. Unlike a permission prompt, a row
+ *  can drop detail (its body shows the full input), so where
+ *  `summarizeToolInput` falls back to JSON — every ACP tool, and Claude's MCP
+ *  tools — this prefers the command or path the input carries, and drops a
+ *  summary that only repeats the name (ACP titles are often the command). */
+export function toolRowSummary(name: string, input: unknown): string {
+  let s = summarizeToolInput(name, input);
+  if (s.startsWith('{')) {
+    const o = input as Record<string, unknown>;
+    const k = ['command', 'filePath', 'file_path', 'path', 'url', 'query', 'pattern'].find(
+      (k) => typeof o[k] === 'string' && o[k],
+    );
+    if (k) s = o[k] as string;
+  }
+  return s === name ? '' : s;
+}
+
 export function summarizeToolInput(tool: string, input: unknown): string {
   if (!input || typeof input !== 'object') return '';
   const o = input as Record<string, unknown>;

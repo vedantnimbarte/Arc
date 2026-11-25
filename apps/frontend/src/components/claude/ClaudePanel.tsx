@@ -18,7 +18,7 @@ import { cn } from '../../lib/cn';
 import { ChatMarkdown } from '../ChatMarkdown';
 import {
   diffStat,
-  summarizeToolInput,
+  toolRowSummary,
   useClaudeCode,
   type ClaudeChatItem,
   type ClaudeSessionHook,
@@ -43,38 +43,14 @@ import { useSettings } from '../../state/settings';
  */
 export function ClaudePanel() {
   const status = useClaudeCode((s) => s.status);
-  const chat = useClaudeCode((s) => s.chat);
-  const streaming = useClaudeCode((s) => s.streaming);
-  const usage = useClaudeCode((s) => s.usage);
-  const costUsd = useClaudeCode((s) => s.costUsd);
-  const denials = useClaudeCode((s) => s.denials);
-  const editedFiles = useClaudeCode((s) => s.editedFiles);
-  const pending = useClaudeCode((s) => s.pending);
-  const send = useClaudeCode((s) => s.send);
-  const cancel = useClaudeCode((s) => s.cancel);
-  const newChat = useClaudeCode((s) => s.newChat);
   const detect = useClaudeCode((s) => s.detect);
-
-  const root = useFiles((s) => s.root);
   const mode = useSettings((s) => s.claudePermissionMode);
-
-  const [text, setText] = useState('');
-  const scrollRef = useRef<HTMLDivElement>(null);
 
   // Probe once on mount. The CLI can be installed while ARC is running, and a
   // PATH lookup is cheap enough not to need caching across panel opens.
   useEffect(() => {
     if (status === 'checking') void detect();
   }, [status, detect]);
-
-  // Follow the tail while a turn streams — but only when already near the
-  // bottom, so scrolling up to read an earlier tool result isn't yanked away.
-  useEffect(() => {
-    const el = scrollRef.current;
-    if (!el) return;
-    const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 120;
-    if (nearBottom) el.scrollTop = el.scrollHeight;
-  }, [chat, pending]);
 
   if (status === 'checking') {
     return (
@@ -95,6 +71,50 @@ export function ClaudePanel() {
     );
   }
 
+  return <SessionChat store={useClaudeCode} agent="Claude Code" mode={mode} />;
+}
+
+/**
+ * One agent conversation in the sidebar: transcript, permission prompt,
+ * edited-file review and composer. Shared by Claude Code and every ACP agent,
+ * whose stores all come from `sessionSlice`.
+ *
+ * `mode` is Claude's permission mode, shown as a badge; ACP agents apply their
+ * own permission settings and have none to show.
+ */
+export function SessionChat({
+  store,
+  agent,
+  mode,
+}: {
+  store: ClaudeSessionHook;
+  agent: string;
+  mode?: string;
+}) {
+  const chat = store((s) => s.chat);
+  const streaming = store((s) => s.streaming);
+  const usage = store((s) => s.usage);
+  const costUsd = store((s) => s.costUsd);
+  const denials = store((s) => s.denials);
+  const pending = store((s) => s.pending);
+  const send = store((s) => s.send);
+  const cancel = store((s) => s.cancel);
+  const newChat = store((s) => s.newChat);
+
+  const root = useFiles((s) => s.root);
+
+  const [text, setText] = useState('');
+  const scrollRef = useRef<HTMLDivElement>(null);
+
+  // Follow the tail while a turn streams — but only when already near the
+  // bottom, so scrolling up to read an earlier tool result isn't yanked away.
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 120;
+    if (nearBottom) el.scrollTop = el.scrollHeight;
+  }, [chat, pending]);
+
   const submit = () => {
     const t = text.trim();
     if (!t || streaming) return;
@@ -107,23 +127,25 @@ export function ClaudePanel() {
       <div className="flex shrink-0 items-center gap-1.5 border-b border-border-hairline px-2 py-1.5">
         <span
           className="min-w-0 flex-1 truncate font-mono text-2xs text-fg-subtle"
-          title={root ? `Claude runs in ${root}` : 'No folder open'}
+          title={root ? `${agent} runs in ${root}` : 'No folder open'}
         >
           {root ? basename(root) : 'no folder open'}
         </span>
         {/* The permission mode decides whether Claude can write to the repo
             without asking, so it stays on screen rather than only in Settings. */}
-        <span
-          className={cn(
-            'shrink-0 rounded px-1 py-0.5 font-mono text-2xs',
-            mode === 'bypassPermissions' || mode === 'dontAsk'
-              ? 'bg-status-warn/15 text-status-warn'
-              : 'text-fg-subtle',
-          )}
-          title={`Permission mode: ${mode}. Change it in Settings → Claude Code.`}
-        >
-          {mode}
-        </span>
+        {mode && (
+          <span
+            className={cn(
+              'shrink-0 rounded px-1 py-0.5 font-mono text-2xs',
+              mode === 'bypassPermissions' || mode === 'dontAsk'
+                ? 'bg-status-warn/15 text-status-warn'
+                : 'text-fg-subtle',
+            )}
+            title={`Permission mode: ${mode}. Change it in Settings → Claude Code.`}
+          >
+            {mode}
+          </span>
+        )}
         <button
           type="button"
           onClick={newChat}
@@ -139,8 +161,8 @@ export function ClaudePanel() {
       <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto px-2 py-2">
         {chat.length === 0 && !pending ? (
           <p className="px-1 py-6 text-center font-display text-2xs text-fg-subtle">
-            Ask Claude about this repo. It reads and edits files in the open folder; every
-            edit shows up below for review.
+            Ask {agent} about this repo. It reads and edits files in the open folder; every edit
+            shows up below for review.
           </p>
         ) : (
           <div className="flex flex-col gap-2">
@@ -154,7 +176,7 @@ export function ClaudePanel() {
             )}
           </div>
         )}
-        {pending && <PermissionPrompt />}
+        {pending && <PermissionPrompt store={store} />}
       </div>
 
       {/* A denial is silent otherwise: the turn just ends without the work
@@ -163,12 +185,13 @@ export function ClaudePanel() {
         <div className="flex shrink-0 items-start gap-1.5 border-t border-border-hairline bg-status-warn/10 px-2 py-1.5 font-mono text-2xs text-status-warn">
           <ShieldAlert size={11} strokeWidth={2} className="mt-px shrink-0" />
           <span className="min-w-0 break-words">
-            blocked by <span className="font-medium">{mode}</span>: {denials.join(', ')}
+            blocked by <span className="font-medium">{mode ?? 'permissions'}</span>:{' '}
+            {denials.join(', ')}
           </span>
         </div>
       )}
 
-      <EditedFiles store={useClaudeCode} />
+      <EditedFiles store={store} />
 
       <div className="shrink-0 border-t border-border-hairline px-2 py-2">
         <div className="flex items-end gap-1 rounded-md border border-edge-1 bg-surface-1 px-1.5 py-1 focus-within:border-accent/40">
@@ -188,10 +211,10 @@ export function ClaudePanel() {
               pending
                 ? 'Waiting on your approval above…'
                 : streaming
-                  ? 'Claude is working…'
-                  : 'Ask Claude Code…'
+                  ? `${agent} is working…`
+                  : `Ask ${agent}…`
             }
-            aria-label="Message Claude Code"
+            aria-label={`Message ${agent}`}
             className="min-w-0 flex-1 resize-none bg-transparent px-1 py-0.5 font-display text-xs text-fg-base placeholder:text-fg-subtle focus:outline-none disabled:opacity-60"
           />
           {streaming ? (
@@ -209,7 +232,7 @@ export function ClaudePanel() {
               type="button"
               onClick={submit}
               disabled={!text.trim()}
-              aria-label="Send to Claude Code"
+              aria-label={`Send to ${agent}`}
               title="Send (Enter)"
               className={cn(
                 'mb-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-md transition-all active:scale-95',
@@ -259,9 +282,9 @@ export function ClaudePanel() {
  * CLI's own settings file to own, and a per-session allowlist ARC invented
  * would silently diverge from what `claude` does in a terminal.
  */
-function PermissionPrompt() {
-  const pending = useClaudeCode((s) => s.pending);
-  const respond = useClaudeCode((s) => s.respond);
+function PermissionPrompt({ store }: { store: ClaudeSessionHook }) {
+  const pending = store((s) => s.pending);
+  const respond = store((s) => s.respond);
   if (!pending) return null;
 
   return (
@@ -488,7 +511,7 @@ export function ChatRow({ item, root }: { item: ClaudeChatItem; root?: string | 
       return <Foldable label="reasoning" body={item.text} markdown />;
 
     case 'tool': {
-      const raw = summarizeToolInput(item.name, item.input);
+      const raw = toolRowSummary(item.name, item.input);
       const summary = root ? relativeTo(root, raw) : raw;
       const stat = diffStat(item.name, item.input);
       return (

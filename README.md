@@ -127,6 +127,11 @@ it.
 - **⌘K Command Bar** — Describe a command in plain English and get it typed onto the
   shell prompt for review; nothing runs until you press Enter. Needs an Anthropic API key
   (**Settings → Terminal**), stored in your OS credential vault.
+- **ACP Agents** *(optional)* — Agents that speak the Agent Client Protocol get the same
+  sidebar chat as Claude Code: Gemini CLI, OpenCode, Qwen Code, Kimi Code, GitHub Copilot,
+  Cursor Agent and Factory Droid each get a tab in the Agents panel when installed, with streamed
+  replies, tool rows, approve/deny prompts and the edited-file review. ARC starts the agent in ACP
+  mode and keeps it running for the length of the conversation; sign-in stays with the CLI.
 - **AI CLI Launcher** — Optionally launch external coding CLIs in a terminal tab when they're
   installed on your PATH: Claude Code, OpenAI Codex, OpenCode, Kimi Code, Gemini CLI, Qwen Code,
   Cursor Agent, GitHub Copilot, Amp, Aider, Crush, Factory Droid, and Wingman. Whatever's present

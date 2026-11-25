@@ -15,6 +15,7 @@ members = [
     "rust/dap",
     "rust/wingman",
     "rust/claude-code",
+    "rust/acp",
     "rust/db",
 ]
 
@@ -145,6 +146,7 @@ arc-lsp = { path = "rust/lsp" }
 arc-dap = { path = "rust/dap" }
 arc-wingman = { path = "rust/wingman" }
 arc-claude-code = { path = "rust/claude-code" }
+arc-acp = { path = "rust/acp" }
 arc-db = { path = "rust/db" }
 
 [profile.dev]

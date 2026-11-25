@@ -91,6 +91,18 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "330a5ed07fa54e4702c9d6c4174f74427fc0ef6e214bbd677ae50a5099946470"
 
 [[package]]
+name = "arc-acp"
+version = "0.18.0"
+dependencies = [
+ "anyhow",
+ "arc-pty",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "arc-claude-code"
 version = "0.18.0"
 dependencies = [
@@ -135,6 +147,7 @@ name = "arc-desktop"
 version = "0.18.0"
 dependencies = [
  "anyhow",
+ "arc-acp",
  "arc-claude-code",
  "arc-dap",
  "arc-db",

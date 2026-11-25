@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
+import type { AiCliId } from '../lib/tauri';
 
 export const SIDEBAR_MIN = 180;
 export const SIDEBAR_MAX = 480;
@@ -24,11 +25,11 @@ export type SidebarView =
   | 'ssh'
   | 'agents';
 
-/** Which agent the Agents panel is showing. The two that ARC can drive
- *  headlessly get a chat surface; everything else launches in a terminal from
+/** Which agent the Agents panel is showing: Claude Code, Wingman, or an ACP
+ *  agent by its CLI id. The ones ARC can drive headlessly get a chat surface; everything else launches in a terminal from
  *  the same panel. Lives here rather than in the panel so the command palette
  *  can open the sidebar straight onto one of them. */
-export type AgentPanelTab = 'claude' | 'wingman';
+export type AgentPanelTab = 'claude' | 'wingman' | AiCliId;
 
 interface FilesState {
   /**
