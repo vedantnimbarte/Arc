@@ -163,6 +163,9 @@ pub struct SessionOptions {
     /// Config choices (`id`, `value`) to apply to a new session before its
     /// first prompt — the user's remembered model, mode, …
     pub config: Vec<(String, String)>,
+    /// Arc's own MCP server (agent orchestration) to hand the agent, as a
+    /// streamable-HTTP URL. Only agents that accept HTTP MCP servers get it.
+    pub mcp_url: Option<String>,
 }
 
 /// File-changing tool kinds, whose `locations` are the files they wrote.
@@ -753,13 +756,21 @@ where
                             }
                             let caps = &msg["result"]["agentCapabilities"];
                             images = caps["promptCapabilities"]["image"] == true;
+                            let mcp_servers = match &opts.mcp_url {
+                                Some(url) if caps["mcpCapabilities"]["http"] == true => json!([
+                                    { "type": "http", "name": "arc", "url": url, "headers": [] }
+                                ]),
+                                // ponytail: agents without HTTP MCP get no orchestration
+                                // tools; a stdio shim would reach them.
+                                _ => json!([]),
+                            };
                             match &opts.load {
                                 Some(_) if caps["loadSession"] != true => {
                                     on_event(Event::new("error", json!({ "message": "this agent can't reopen earlier sessions" })));
                                     break;
                                 }
-                                Some(id) => send(request(ID_NEW, "session/load", json!({ "sessionId": id, "cwd": opts.cwd, "mcpServers": [] }))),
-                                None => send(request(ID_NEW, "session/new", json!({ "cwd": opts.cwd, "mcpServers": [] }))),
+                                Some(id) => send(request(ID_NEW, "session/load", json!({ "sessionId": id, "cwd": opts.cwd, "mcpServers": mcp_servers }))),
+                                None => send(request(ID_NEW, "session/new", json!({ "cwd": opts.cwd, "mcpServers": mcp_servers }))),
                             }
                         } else if id == Some(ID_NEW) {
                             // `session/load` answers with no id; it's the one we asked for.
@@ -1076,6 +1087,7 @@ mod tests {
                 load: None,
                 // Applied before the first prompt is sent.
                 config: vec![("mode".into(), "plan".into())],
+                mcp_url: None,
             },
             rx,
             move |e| {
@@ -1146,6 +1158,7 @@ mod tests {
                 cwd,
                 load: Some(id),
                 config: vec![],
+                mcp_url: None,
             },
             rx,
             move |e| {

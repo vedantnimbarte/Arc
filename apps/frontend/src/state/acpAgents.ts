@@ -96,11 +96,12 @@ export function acpTransport(provider: string): SessionTransport {
         content: o.content,
         resume: o.resume,
         config: useAcpPrefs.getState().choices[provider],
+        mcpUrl: o.mcpUrl,
       }),
     respond: ({ topic, requestId, allow }) => acpPermissionRespond({ topic, requestId, allow }),
     cancel: acpTurnCancel,
     close: (id) => void acpConversationClose(id).catch(() => {}),
-    load: (cwd, id) => acpSessionLoad(provider, cwd, id),
+    load: (cwd, id, mcpUrl) => acpSessionLoad(provider, cwd, id, mcpUrl),
   };
 }
 
@@ -118,6 +119,7 @@ export function acpSession(provider: string): UseBoundStore<StoreApi<ClaudeSessi
         api,
         () => ({ cwd: useFiles.getState().root, model: '', permissionMode: '' }),
         acpTransport(provider),
+        `panel:${provider}`,
       ),
     );
     sessions.set(provider, store);

@@ -43,6 +43,7 @@ import { useCommands, type CommandAction, type CommandGroup } from './state/comm
 import { useTaskCommands } from './state/tasks';
 import { HostKeyPrompt } from './components/ssh/HostKeyPrompt';
 
+
 /** Languages offered as scratch buffers in the palette. Kept short on
  *  purpose — the point of a scratch buffer is not choosing one. */
 const SCRATCH_KINDS = [
@@ -82,6 +83,7 @@ import { AgentsPanel } from './components/AgentsPanel';
 // Side-effect import: subscribes to file-tree root changes and keeps the
 // project-config store fresh. Doesn't render anything itself.
 import './state/projectConfig';
+import { initOrchestrator } from './state/orchestrator';
 import { fsPickFolder, ptyListAiClis, settingsWindowOpen, type AiCliId } from './lib/tauri';
 import { CYCLE_MARKDOWN_PREVIEW_EVENT } from './lib/markdownLinks';
 import { PasteWarning } from './components/PasteWarning';
@@ -98,6 +100,9 @@ import { pickAgentTab, sendToAgent } from './lib/sendToAgent';
 import { useAgentQueue } from './state/agentQueue';
 import { askText } from './state/confirm';
 import { RUN_TESTS_AND_FIX_PROMPT, selectionPrompt } from './lib/agentPrompt';
+
+// Agents starting agents: answer Arc's MCP server from here.
+initOrchestrator();
 
 // Palettes and dialogs mount only while open, so their code loads on first use.
 const CommandPalette = lazy(() =>

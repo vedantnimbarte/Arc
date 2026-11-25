@@ -25,6 +25,7 @@ import { chatStore, focusChat, useChatSessions, type SessionStatus } from '../st
 import { useAgentRun } from '../state/agentRun';
 import { askConfirm } from '../state/confirm';
 import { useFiles } from '../state/files';
+import { useOrchestrator } from '../state/orchestrator';
 import { useWingman } from '../state/wingman';
 import { useWorkspace } from '../state/workspace';
 import { PanelTitle } from './PanelTitle';
@@ -199,6 +200,13 @@ function SessionItem({ row }: { row: SessionRow }) {
   const [asking, setAsking] = useState(false);
   const [text, setText] = useState('');
   const a = actionsFor(row);
+  // A helper another agent started (agent orchestration) names its parent.
+  const parent = useOrchestrator((st) => {
+    const src = row.source;
+    if (src.kind !== 'chat' || src.surface.kind !== 'window') return null;
+    return st.helpers[src.surface.tabId]?.parent ?? null;
+  });
+  const parentAgent = useChatSessions((st) => (parent ? st.snaps[parent]?.agent : undefined));
 
   const send = () => {
     const t = text.trim();
@@ -227,6 +235,11 @@ function SessionItem({ row }: { row: SessionRow }) {
             <span className="shrink-0 tabular-nums">${row.costUsd.toFixed(2)}</span>
           )}
         </span>
+        {parent && (
+          <span className="truncate font-display text-2xs text-fg-subtle">
+            ↳ helper started by {parentAgent ?? 'another agent'}
+          </span>
+        )}
         {row.detail && row.status !== 'done' && (
           <span className="truncate font-display text-2xs text-status-warn/90">{row.detail}</span>
         )}

@@ -122,6 +122,7 @@ pub async fn claude_turn_start(
     model: Option<String>,
     permission_mode: Option<String>,
     max_budget_usd: Option<f64>,
+    mcp_url: Option<String>,
 ) -> Result<String, String> {
     if cwd.trim().is_empty() {
         return Err("claude: no workspace folder is open".into());
@@ -145,6 +146,7 @@ pub async fn claude_turn_start(
         model,
         permission_mode,
         max_budget_usd,
+        mcp_url,
         binary: None,
     };
 

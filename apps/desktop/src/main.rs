@@ -111,6 +111,7 @@ fn main() {
         .manage(commands::wingman::WingmanState::default())
         .manage(commands::claude_code::ClaudeState::default())
         .manage(commands::acp::AcpState::default())
+        .manage(commands::orchestrator::OrchestratorState::default())
         .manage(commands::db::DbState::default())
         .invoke_handler(tauri::generate_handler![
             commands::pty::pty_spawn,
@@ -397,6 +398,8 @@ fn main() {
             commands::acp::acp_sessions_list,
             commands::acp::acp_session_load,
             commands::acp::acp_set_config,
+            commands::orchestrator::orchestrator_url,
+            commands::orchestrator::orchestrator_reply,
             commands::diagnostics::diagnostics_collect,
             commands::diagnostics::diagnostics_summary,
             commands::diagnostics::diagnostics_clear,

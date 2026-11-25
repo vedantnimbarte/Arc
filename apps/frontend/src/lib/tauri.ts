@@ -3071,6 +3071,8 @@ export async function claudeTurnStart(opts: {
   model?: string | null;
   permissionMode?: string | null;
   maxBudgetUsd?: number | null;
+  /** Arc's MCP server for this conversation (agent orchestration). */
+  mcpUrl?: string | null;
 }): Promise<string> {
   return invoke<string>('claude_turn_start', {
     cwd: opts.cwd,
@@ -3079,6 +3081,7 @@ export async function claudeTurnStart(opts: {
     model: opts.model ?? null,
     permissionMode: opts.permissionMode ?? null,
     maxBudgetUsd: opts.maxBudgetUsd ?? null,
+    mcpUrl: opts.mcpUrl ?? null,
   });
 }
 
@@ -3183,6 +3186,8 @@ export async function acpTurnStart(opts: {
   /** Config choices (option id → value) to apply before a new session's
    *  first prompt. Ignored when resuming. */
   config?: Record<string, string>;
+  /** Arc's MCP server for this conversation (agent orchestration). */
+  mcpUrl?: string | null;
 }): Promise<string> {
   return invoke<string>('acp_turn_start', {
     provider: opts.provider,
@@ -3190,6 +3195,7 @@ export async function acpTurnStart(opts: {
     content: opts.content,
     resume: opts.resume ?? null,
     config: opts.config ?? null,
+    mcpUrl: opts.mcpUrl ?? null,
   });
 }
 
@@ -3258,13 +3264,47 @@ export async function acpSessionLoad(
   provider: string,
   cwd: string,
   id: string,
+  mcpUrl?: string | null,
 ): Promise<ClaudeStreamEvent[]> {
-  return invoke<ClaudeStreamEvent[]>('acp_session_load', { provider, cwd, id });
+  return invoke<ClaudeStreamEvent[]>('acp_session_load', {
+    provider,
+    cwd,
+    id,
+    mcpUrl: mcpUrl ?? null,
+  });
 }
 
 /** End a conversation and kill its agent process. */
 export async function acpConversationClose(conversation: string): Promise<void> {
   return invoke('acp_conversation_close', { conversation });
+}
+
+// ─── Orchestration (Arc's MCP server) ──────────────────────────────────────
+//
+// Chat agents get Arc's MCP server so they can start and talk to other agents
+// (see apps/desktop/src/commands/orchestrator.rs). The server forwards each
+// tool call here; `state/orchestrator.ts` does the work and replies.
+
+/** The MCP endpoint for one conversation (`caller`), authorised by `token`. */
+export async function orchestratorUrl(caller: string, token: string): Promise<string> {
+  return invoke<string>('orchestrator_url', { caller, token });
+}
+
+export async function orchestratorReply(id: number, ok: boolean, text: string): Promise<void> {
+  return invoke('orchestrator_reply', { id, ok, text });
+}
+
+export interface OrchestratorCall {
+  id: number;
+  caller: string;
+  tool: string;
+  args: Record<string, unknown> | null;
+}
+
+export async function onOrchestratorCall(
+  handler: (call: OrchestratorCall) => void,
+): Promise<UnlistenFn> {
+  return listen<OrchestratorCall>('orchestrator://call', (e) => handler(e.payload));
 }
 
 // ─── remote filesystem (SFTP) ────────────────────────────────────────────

@@ -1,4 +1,5 @@
 pub mod acp;
+pub mod orchestrator;
 pub mod apiclient;
 pub mod claude_code;
 pub mod dap;

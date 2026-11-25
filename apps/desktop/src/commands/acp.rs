@@ -166,6 +166,7 @@ fn rekey(app: &AppHandle, key: &Mutex<String>, sid: &str) {
 
 /// Start a turn. Without `resume`, spawns the agent for a new conversation.
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
 pub async fn acp_turn_start(
     app: AppHandle,
     state: State<'_, AcpState>,
@@ -174,6 +175,7 @@ pub async fn acp_turn_start(
     content: Vec<Value>,
     resume: Option<String>,
     config: Option<std::collections::HashMap<String, String>>,
+    mcp_url: Option<String>,
 ) -> Result<String, String> {
     if cwd.trim().is_empty() {
         return Err("no workspace folder is open".into());
@@ -202,6 +204,7 @@ pub async fn acp_turn_start(
         cwd,
         load: None,
         config: config.unwrap_or_default().into_iter().collect(),
+        mcp_url,
     };
     spawn_conversation(app, &state, key, opts, topic.clone(), Some(content), None);
     Ok(topic)
@@ -250,6 +253,7 @@ pub async fn acp_session_load(
     provider: String,
     cwd: String,
     id: String,
+    mcp_url: Option<String>,
 ) -> Result<Vec<Value>, String> {
     if state.convs.contains_key(&id) {
         return Err("This conversation is already open in another window.".into());
@@ -262,6 +266,7 @@ pub async fn acp_session_load(
         cwd,
         load: Some(id.clone()),
         config: vec![],
+        mcp_url,
     };
     spawn_conversation(app, &state, id.clone(), opts, String::new(), None, Some(tx));
     match tokio::time::timeout(std::time::Duration::from_secs(60), rx).await {
