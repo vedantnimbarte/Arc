@@ -1,6 +1,9 @@
 import { create, type StoreApi, type UseBoundStore } from 'zustand';
 import type { UnlistenFn } from '@tauri-apps/api/event';
+import { registerChat, unregisterChat } from './agentSessions';
 import {
+  AI_CLIS,
+  type AiCliId,
   claudeAvailable,
   claudePermissionRespond,
   claudeSessionLoad,
@@ -461,6 +464,10 @@ export const useClaudeCode = create<ClaudeState>((set, get, api) => ({
   }),
 }));
 
+registerChat('panel:claude', 'Claude Code', { kind: 'panel' }, useClaudeCode, () =>
+  useFiles.getState().root,
+);
+
 const windows = new Map<string, UseBoundStore<StoreApi<ClaudeWindowSession>>>();
 
 /** The store for one Claude Code window, created on first use. `prefs` only
@@ -477,6 +484,11 @@ export function claudeWindow(
       ...prefs,
     }));
     windows.set(tabId, store);
+    const agent = prefs.provider
+      ? (AI_CLIS[prefs.provider as AiCliId] ?? prefs.provider)
+      : 'Claude Code';
+    const s = store;
+    registerChat(`window:${tabId}`, agent, { kind: 'window', tabId }, s, () => s.getState().cwd);
   }
   return store;
 }
@@ -507,6 +519,7 @@ export function disposeClaudeWindow(tabId: string): void {
   store.getState().newChat();
   registry.delete(store as unknown as StoreApi<ClaudeSession>);
   windows.delete(tabId);
+  unregisterChat(`window:${tabId}`);
 }
 
 /** The user message's content blocks. Text files are inlined into the prompt

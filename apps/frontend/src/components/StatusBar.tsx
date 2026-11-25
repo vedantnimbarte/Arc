@@ -15,6 +15,7 @@ import { useWorkspace } from '../state/workspace';
 import { useUsage } from '../state/usage';
 import type { PlanLimit } from '../lib/usage';
 import { runCommand } from '../state/commands';
+import { useChatSessions } from '../state/agentSessions';
 import { formatBinding, getBinding } from '../state/shortcuts';
 import { cn } from '../lib/cn';
 
@@ -37,13 +38,25 @@ export function StatusBar() {
   const showSidebarView = useFiles((s) => s.showSidebarView);
   const paletteKbd = formatBinding(getBinding('open-command-palette'));
   const broadcastInput = useWorkspace((s) => s.broadcastInput);
-  const waitingCount = useWorkspace((s) => Object.keys(s.agentWaiting).length);
-  const waitingTitle = useWorkspace((s) =>
+  // Chat agents count only while blocked on a permission; a finished chat
+  // turn is the user's to pick up when they like.
+  const chatWaiting = useChatSessions((s) =>
+    Object.values(s.snaps)
+      .filter((c) => c.pending)
+      .map((c) => c.agent)
+      .join(', '),
+  );
+  const chatWaitingCount = useChatSessions(
+    (s) => Object.values(s.snaps).filter((c) => c.pending).length,
+  );
+  const waitingCount = useWorkspace((s) => Object.keys(s.agentWaiting).length) + chatWaitingCount;
+  const tabsWaiting = useWorkspace((s) =>
     Object.keys(s.agentWaiting)
       .map((id) => s.tabs.find((t) => t.id === id)?.title)
       .filter(Boolean)
       .join(', '),
   );
+  const waitingTitle = [tabsWaiting, chatWaiting].filter(Boolean).join(', ');
   const usageAgents = useSettings((s) => s.usageAgents);
   const usageSelectedId = useUsage((s) => s.selectedId);
   const usageResults = useUsage((s) => s.results);

@@ -23,7 +23,8 @@ export type SidebarView =
   | 'debug'
   | 'docker'
   | 'ssh'
-  | 'agents';
+  | 'agents'
+  | 'sessions';
 
 /** Which agent the Agents panel is showing: Claude Code, Wingman, or an ACP
  *  agent by its CLI id. The ones ARC can drive headlessly get a chat surface; everything else launches in a terminal from
