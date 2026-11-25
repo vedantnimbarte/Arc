@@ -400,6 +400,8 @@ fn main() {
             commands::acp::acp_set_config,
             commands::orchestrator::orchestrator_url,
             commands::orchestrator::orchestrator_reply,
+            commands::session::session_schedules_load,
+            commands::session::session_schedules_save,
             commands::diagnostics::diagnostics_collect,
             commands::diagnostics::diagnostics_summary,
             commands::diagnostics::diagnostics_clear,

@@ -26,6 +26,8 @@ import { useAgentRun } from '../state/agentRun';
 import { askConfirm } from '../state/confirm';
 import { useFiles } from '../state/files';
 import { useOrchestrator } from '../state/orchestrator';
+import { useSchedules } from '../state/schedules';
+import { ScheduledSection } from './ScheduledSection';
 import { useWingman } from '../state/wingman';
 import { useWorkspace } from '../state/workspace';
 import { PanelTitle } from './PanelTitle';
@@ -101,6 +103,7 @@ export function SessionsPanel() {
         </button>
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto px-1.5 pb-3">
+        <ScheduledSection />
         {empty ? (
           <p className="px-3 py-6 text-center font-display text-2xs leading-relaxed text-fg-subtle">
             No agents yet. Start one from the Agents view or the agent launcher; it shows up here
@@ -207,6 +210,13 @@ function SessionItem({ row }: { row: SessionRow }) {
     return st.helpers[src.surface.tabId]?.parent ?? null;
   });
   const parentAgent = useChatSessions((st) => (parent ? st.snaps[parent]?.agent : undefined));
+  // A run a schedule started names the schedule.
+  const scheduled = useSchedules((st) => {
+    const src = row.source;
+    if (src.kind !== 'chat' || src.surface.kind !== 'window') return null;
+    const id = st.runs[src.surface.tabId];
+    return id ? (st.schedules.find((x) => x.id === id)?.name ?? 'a schedule') : null;
+  });
 
   const send = () => {
     const t = text.trim();
@@ -235,6 +245,11 @@ function SessionItem({ row }: { row: SessionRow }) {
             <span className="shrink-0 tabular-nums">${row.costUsd.toFixed(2)}</span>
           )}
         </span>
+        {scheduled && (
+          <span className="truncate font-display text-2xs text-fg-subtle">
+            ↳ scheduled run of {scheduled}
+          </span>
+        )}
         {parent && (
           <span className="truncate font-display text-2xs text-fg-subtle">
             ↳ helper started by {parentAgent ?? 'another agent'}

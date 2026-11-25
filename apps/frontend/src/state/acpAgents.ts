@@ -13,12 +13,14 @@ import {
   AI_CLIS,
   type AcpProvider,
   type AiCliId,
+  type ClaudePermissionMode,
 } from '../lib/tauri';
 import { registerChat } from './agentSessions';
 import {
   claudeWindow,
   sessionSlice,
   takeConversation,
+  useClaudeCode,
   type ClaudeSession,
   type SessionTransport,
 } from './claudeCode';
@@ -204,4 +206,63 @@ export async function chooseConfig(
     // The conversation's agent is gone, or refused: show what it really has.
     if (store.getState().sessionId === sessionId) store.setState({ config: before });
   }
+}
+
+/** An agent's display name: `claude` or an ACP agent's CLI id. */
+export function agentLabel(agent: string): string {
+  return agent === 'claude' ? 'Claude Code' : (AI_CLIS[agent as AiCliId] ?? agent);
+}
+
+/** Every chat agent installed right now, as `[id, label]`: Claude Code and the
+ *  ACP agents. Probes for them first if nothing has yet. */
+export async function availableAgents(): Promise<[string, string][]> {
+  const acp = useAcpAgents.getState();
+  if (acp.status === 'checking') await acp.detect();
+  if (useClaudeCode.getState().status === 'checking') await useClaudeCode.getState().detect();
+  return [
+    ...(useClaudeCode.getState().status === 'ready'
+      ? [['claude', 'Claude Code'] as [string, string]]
+      : []),
+    ...useAcpAgents.getState().providers.map((p) => [p.id, p.label] as [string, string]),
+  ];
+}
+
+/**
+ * Open an agent window behind whatever the user is looking at and start it on
+ * `prompt` — a helper another agent started, or a scheduled run. `onOpen` runs
+ * with the new tab id before the first turn starts, for bookkeeping that has
+ * to exist by then. Resolves with the tab id once the turn has started.
+ */
+export async function launchAgentWindow(opts: {
+  agent: string;
+  cwd: string;
+  title: string;
+  prompt: string;
+  permissionMode?: ClaudePermissionMode;
+  onOpen?: (tabId: string) => void;
+}): Promise<string> {
+  const ws = useWorkspace.getState();
+  const before = ws.activeTabId;
+  const provider = opts.agent === 'claude' ? undefined : opts.agent;
+  const tabId = ws.openClaudeCode(opts.cwd, {
+    provider,
+    title: `${agentLabel(opts.agent)}: ${opts.title}`,
+  });
+  if (before) ws.setActive(before);
+  opts.onOpen?.(tabId);
+
+  const s = useSettings.getState();
+  const store = claudeWindow(
+    tabId,
+    {
+      provider,
+      cwd: opts.cwd,
+      model: s.claudeModel,
+      permissionMode: opts.permissionMode ?? s.claudePermissionMode,
+      sidebarHidden: true,
+    },
+    provider ? acpTransport(provider) : undefined,
+  );
+  await store.getState().send(opts.prompt);
+  return tabId;
 }
