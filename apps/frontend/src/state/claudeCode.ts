@@ -212,6 +212,8 @@ export interface SessionTransport {
     permissionMode: string;
     /** Arc's MCP server for this conversation, when it may start agents. */
     mcpUrl: string | null;
+    /** Where the turn's events go — already being listened to. */
+    topic: string;
   }) => Promise<string>;
   respond: (opts: {
     topic: string;
@@ -430,7 +432,19 @@ export function sessionSlice(
 
       try {
         const mcpUrl = caller ? await mcpUrlFor(caller).catch(() => null) : null;
-        const topic = await transport.start({
+        // Listen before starting: a fast agent's first events (the session
+        // id, its settings, a permission request) can arrive before the start
+        // call returns, and an event nobody listens for is gone.
+        const topic = `arc://turn/${crypto.randomUUID()}`;
+        unlisten?.();
+        const record = transport.recorder?.({ cwd, model });
+        unlisten = await onClaudeTurn(topic, (ev) => {
+          applyEvent(set, ev);
+          record?.(ev);
+        });
+        set({ activeTopic: topic });
+        await transport.start({
+          topic,
           mcpUrl,
           cwd,
           // `/handoff …` and friends: the transcript keeps what was typed, the
@@ -439,14 +453,6 @@ export function sessionSlice(
           resume: sessionId,
           model,
           permissionMode,
-        });
-        set({ activeTopic: topic });
-
-        unlisten?.();
-        const record = transport.recorder?.({ cwd, model });
-        unlisten = await onClaudeTurn(topic, (ev) => {
-          applyEvent(set, ev);
-          record?.(ev);
         });
       } catch (e) {
         fail(e);

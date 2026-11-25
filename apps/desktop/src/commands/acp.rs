@@ -176,6 +176,7 @@ pub async fn acp_turn_start(
     resume: Option<String>,
     config: Option<std::collections::HashMap<String, String>>,
     mcp_url: Option<String>,
+    topic: Option<String>,
 ) -> Result<String, String> {
     if cwd.trim().is_empty() {
         return Err("no workspace folder is open".into());
@@ -183,7 +184,11 @@ pub async fn acp_turn_start(
     if content.is_empty() {
         return Err("empty message".into());
     }
-    let topic = format!("acp://turn/{}", state.next.fetch_add(1, Ordering::Relaxed));
+    let topic = crate::commands::claude_code::turn_topic(
+        topic,
+        "acp://turn/",
+        state.next.fetch_add(1, Ordering::Relaxed),
+    );
 
     if let Some(key) = resume.filter(|k| !k.is_empty()) {
         let conv = state.convs.get(&key).ok_or(

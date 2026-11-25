@@ -119,7 +119,13 @@ describe('ACP agent chat', () => {
   it('lists the conversation in the Sessions view', async () => {
     await browser.execute(() => window.__arcTest.useFiles.getState().showSidebarView('sessions'));
     await waitForPanel(/Fake ACP agent/, 'the conversation');
-    assert.match(await panelText(), /hi from wdio/);
+    // The title is read from the store: in a narrow sidebar the truncated
+    // text may not count as visible to WebDriver.
+    const snap = await browser.execute(
+      () => window.__arcTest.useChatSessions.getState().snaps['panel:fake-acp'],
+    );
+    assert.equal(snap?.title, 'hi from wdio');
+    assert.equal(snap?.status, 'done');
     await assertNoCrash();
   });
 });
