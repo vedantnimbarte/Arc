@@ -8,6 +8,7 @@ import {
   claudeTurnStart,
   isTauri,
   onClaudeTurn,
+  type AcpConfigOption,
   type ClaudePermissionMode,
   type ClaudeStreamEvent,
 } from '../lib/tauri';
@@ -110,6 +111,10 @@ export interface ClaudeSession {
    *  Only ever one: the CLI asks for a tool, waits, then asks for the next. A
    *  queue would imply a concurrency the protocol doesn't have. */
   pending: ClaudePermission | null;
+
+  /** The agent's settings for this conversation (model, mode, …), as ACP
+   *  agents report them. Null until the agent says; always null for Claude. */
+  config: AcpConfigOption[] | null;
 
   /** Answer the pending permission prompt and unblock the turn. */
   respond: (allow: boolean, message?: string) => Promise<void>;
@@ -256,6 +261,7 @@ const EMPTY_SESSION = {
   denials: [] as string[],
   editedFiles: [] as ClaudeEditedFile[],
   pending: null,
+  config: null,
 };
 
 /** The conversation half of a store, shared by the panel, every window and
@@ -325,6 +331,7 @@ export function sessionSlice(
         chat: acc.chat,
         editedFiles: acc.editedFiles,
         usage: acc.usage,
+        config: acc.config,
       });
     },
 
@@ -486,6 +493,7 @@ export function takeConversation(store: StoreApi<ClaudeSession>): Partial<Claude
     usage: s.usage,
     costUsd: s.costUsd,
     editedFiles: s.editedFiles,
+    config: s.config,
   };
   store.setState({ ...EMPTY_SESSION });
   return taken;
@@ -709,6 +717,12 @@ function applyEvent(
 
     case 'done':
       set(() => ({ streaming: false, activeTopic: null, pending: null }));
+      return;
+
+    // An ACP agent's settings, sent when the session starts and whenever they
+    // change (a new model can add or drop options).
+    case 'config':
+      if (Array.isArray(p.options)) set(() => ({ config: p.options as AcpConfigOption[] }));
       return;
 
     default:

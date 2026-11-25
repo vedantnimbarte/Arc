@@ -3,6 +3,7 @@ import { Bot, Sparkles, Terminal, type LucideIcon } from 'lucide-react';
 import { useFiles, type AgentPanelTab } from '../state/files';
 import { acpSession, expandToWindow, useAcpAgents } from '../state/acpAgents';
 import { ClaudePanel, SessionChat } from './claude/ClaudePanel';
+import { AgentConfigPickers } from './claude/AgentConfigPickers';
 import { WingmanPanel } from './wingman/WingmanPanel';
 import { cn } from '../lib/cn';
 import { PanelTitle } from './PanelTitle';
@@ -90,6 +91,13 @@ export function AgentsPanel() {
                 provider: provider.id,
                 title: provider.label,
               })
+            }
+            pickers={
+              <AgentConfigPickers
+                store={acpSession(provider.id)}
+                provider={provider.id}
+                className="w-auto max-w-[9rem]"
+              />
             }
           />
         ) : tab === 'wingman' ? (

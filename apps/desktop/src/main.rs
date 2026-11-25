@@ -396,6 +396,7 @@ fn main() {
             commands::acp::acp_conversation_close,
             commands::acp::acp_sessions_list,
             commands::acp::acp_session_load,
+            commands::acp::acp_set_config,
             commands::diagnostics::diagnostics_collect,
             commands::diagnostics::diagnostics_summary,
             commands::diagnostics::diagnostics_clear,

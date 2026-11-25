@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import {
   ArrowUp,
   Check,
@@ -96,12 +96,15 @@ export function SessionChat({
   agent,
   mode,
   onExpand,
+  pickers,
 }: {
   store: ClaudeSessionHook;
   agent: string;
   mode?: string;
   /** Move this conversation into a window in the main area. */
   onExpand?: () => void;
+  /** The agent's own settings (model, mode, …), shown above the composer. */
+  pickers?: ReactNode;
 }) {
   const chat = store((s) => s.chat);
   const streaming = store((s) => s.streaming);
@@ -219,6 +222,7 @@ export function SessionChat({
       <EditedFiles store={store} />
 
       <div className="shrink-0 border-t border-border-hairline px-2 py-2">
+        {pickers && <div className="mb-1.5 flex flex-wrap gap-1">{pickers}</div>}
         <div className="flex items-end gap-1 rounded-md border border-edge-1 bg-surface-1 px-1.5 py-1 focus-within:border-accent/40">
           <textarea
             value={text}

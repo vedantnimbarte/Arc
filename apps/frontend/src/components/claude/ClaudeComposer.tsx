@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import type { StoreApi, UseBoundStore } from 'zustand';
 import {
   ArrowUp,
@@ -79,7 +79,16 @@ async function readAttachment(file: File): Promise<ClaudeAttachment | string> {
  * approval card. The two share one surface on purpose: the question appears
  * where your hands already are, and you can't start a new prompt past it.
  */
-export function ClaudeComposer({ store, agent }: { store: WindowStore; agent?: string }) {
+export function ClaudeComposer({
+  store,
+  agent,
+  pickers,
+}: {
+  store: WindowStore;
+  agent?: string;
+  /** An ACP agent's own settings, shown where Claude's pickers sit. */
+  pickers?: ReactNode;
+}) {
   // An ACP agent (named by `agent`) keeps its own model and permission
   // settings, so Claude's pickers don't apply to it.
   const name = agent ?? 'Claude';
@@ -391,6 +400,7 @@ export function ClaudeComposer({ store, agent }: { store: WindowStore; agent?: s
         >
           <Paperclip size={14} strokeWidth={1.9} />
         </button>
+        {agent && pickers}
         {!agent && (
           <>
             <Select

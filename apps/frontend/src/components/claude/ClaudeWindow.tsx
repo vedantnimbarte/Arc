@@ -25,7 +25,12 @@ import { useWorkspace } from '../../state/workspace';
 import { ChatMarkdown } from '../ChatMarkdown';
 import { AttachmentNames, ChatRow, EditedFiles, basename } from './ClaudePanel';
 import { ClaudeComposer } from './ClaudeComposer';
+import { AgentConfigPickers } from './AgentConfigPickers';
 import { ClaudeHistoryRail, sessionLabel } from './ClaudeHistoryRail';
+
+/** Window stores whose saved conversation has been reopened (or didn't need
+ *  to be). */
+const restored = new WeakSet<object>();
 
 interface WindowBlob extends ClaudeWindowPrefs {
   sessionId: string | null;
@@ -125,9 +130,15 @@ export function ClaudeWindow({ tabId }: { tabId: string }) {
     });
   }, [store, tabId, provider]);
 
-  // Reopen the conversation this tab was showing.
+  // Reopen the conversation this tab was showing. The store already holds its
+  // id (seeded from the tab), so "nothing loaded yet" is an empty transcript —
+  // a window that took over a live conversation arrives with one. Once per
+  // store: StrictMode runs effects twice, and two ACP loads would start two
+  // agents on one session.
   useEffect(() => {
-    if (initial.sessionId && initial.cwd && !store.getState().sessionId) {
+    if (restored.has(store)) return;
+    restored.add(store);
+    if (initial.sessionId && initial.cwd && store.getState().chat.length === 0) {
       setOpening(true);
       void store
         .getState()
@@ -341,7 +352,13 @@ export function ClaudeWindow({ tabId }: { tabId: string }) {
           <div className="mb-2 overflow-hidden rounded-md empty:hidden">
             <EditedFiles store={store} />
           </div>
-          {!remote && <ClaudeComposer store={store} agent={agent} />}
+          {!remote && (
+            <ClaudeComposer
+              store={store}
+              agent={agent}
+              pickers={provider && <AgentConfigPickers store={store} provider={provider} />}
+            />
+          )}
         </div>
       </div>
     </div>

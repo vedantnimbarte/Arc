@@ -32,7 +32,7 @@ use serde_json::{json, Value};
 use std::collections::{HashMap, HashSet};
 use std::process::Stdio;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, oneshot};
 
 /// One event handed to the frontend, in ARC's own vocabulary.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -55,16 +55,24 @@ impl Event {
 /// (cdn.agentclientprotocol.com/registry). Adding an agent is one row here
 /// plus a row in `discover_ai_clis` if its binary isn't probed yet.
 ///
-/// Codex, Pi and Amp are absent on purpose: they speak ACP only through a
-/// separate adapter package, not the binary `discover_ai_clis` finds.
-const PROVIDERS: &[(&str, &[&str])] = &[
-    ("opencode-cli", &["acp"]),
-    ("gemini-cli", &["--acp"]),
-    ("qwen-code-cli", &["--acp"]),
-    ("kimi-code-cli", &["acp"]),
-    ("copilot-cli", &["--acp"]),
-    ("cursor-agent-cli", &["acp"]),
-    ("droid-cli", &["exec", "--output-format", "acp-daemon"]),
+/// An agent that speaks ACP only through a separate adapter names it in the
+/// middle column: Codex via `codex-acp` (npm `@agentclientprotocol/codex-acp`).
+/// It's offered only when both the agent and its adapter are on PATH — the
+/// adapter drives the agent's own login. Pi and Amp have adapters too, but
+/// aren't wired up yet.
+const PROVIDERS: &[(&str, Option<&str>, &[&str])] = &[
+    ("opencode-cli", None, &["acp"]),
+    ("gemini-cli", None, &["--acp"]),
+    ("qwen-code-cli", None, &["--acp"]),
+    ("kimi-code-cli", None, &["acp"]),
+    ("copilot-cli", None, &["--acp"]),
+    ("cursor-agent-cli", None, &["acp"]),
+    (
+        "droid-cli",
+        None,
+        &["exec", "--output-format", "acp-daemon"],
+    ),
+    ("codex-cli", Some("codex-acp"), &[]),
 ];
 
 /// An installed agent ARC can drive over ACP.
@@ -83,15 +91,37 @@ pub fn providers() -> Vec<Provider> {
     let found = arc_pty::discover_ai_clis();
     PROVIDERS
         .iter()
-        .filter_map(|(id, args)| {
-            found.iter().find(|c| c.id == *id).map(|c| Provider {
+        .filter_map(|(id, adapter, args)| {
+            let c = found.iter().find(|c| c.id == *id)?;
+            let path = match adapter {
+                Some(stem) => on_path(stem)?,
+                None => c.path.clone(),
+            };
+            Some(Provider {
                 id: c.id.clone(),
                 label: c.label.clone(),
-                path: c.path.clone(),
+                path,
                 args: args.iter().map(|a| a.to_string()).collect(),
             })
         })
         .collect()
+}
+
+/// Resolve a command name on PATH the way the shell would, including the
+/// `.cmd` shims npm installs on Windows.
+fn on_path(stem: &str) -> Option<String> {
+    let exts: &[&str] = if cfg!(windows) {
+        &[".cmd", ".exe", ".bat", ""]
+    } else {
+        &[""]
+    };
+    let path = std::env::var_os("PATH")?;
+    std::env::split_paths(&path).find_map(|dir| {
+        exts.iter()
+            .map(|e| dir.join(format!("{stem}{e}")))
+            .find(|p| p.is_file())
+            .map(|p| p.to_string_lossy().into_owned())
+    })
 }
 
 /// What a conversation is told to do next.
@@ -104,6 +134,13 @@ pub enum Command {
     /// `stopReason: "cancelled"`, which ends the turn normally.
     Cancel,
     Decide(Decision),
+    /// Change one of the agent's config options (`session/set_config_option`).
+    /// Answers with the agent's full, updated option list.
+    SetConfig {
+        id: String,
+        value: String,
+        reply: oneshot::Sender<std::result::Result<Value, String>>,
+    },
 }
 
 /// The user's answer to one `permission_request` event.
@@ -123,6 +160,9 @@ pub struct SessionOptions {
     /// Reopen this earlier session (`session/load`) instead of starting one.
     /// The agent replays its history as ordinary events, then `loaded` follows.
     pub load: Option<String>,
+    /// Config choices (`id`, `value`) to apply to a new session before its
+    /// first prompt — the user's remembered model, mode, …
+    pub config: Vec<(String, String)>,
 }
 
 /// File-changing tool kinds, whose `locations` are the files they wrote.
@@ -172,6 +212,11 @@ impl Translator {
             "agent_message_chunk" => chunk("text_delta", u),
             "agent_thought_chunk" => chunk("thinking_delta", u),
             "tool_call" | "tool_call_update" => self.tool(u),
+            // The agent's settings (model, mode, …) changed on its side.
+            "config_option_update" => vec![Event::new(
+                "config",
+                json!({ "options": u["configOptions"] }),
+            )],
             "usage_update" => {
                 let usd = u["cost"]["currency"]
                     .as_str()
@@ -443,6 +488,14 @@ fn command(binary: &str, args: &[String], cwd: &str) -> tokio::process::Command 
     cmd
 }
 
+fn prompt_line(id: u64, session: &str, content: &[Value], images: bool) -> String {
+    request(
+        id,
+        "session/prompt",
+        json!({ "sessionId": session, "prompt": to_acp_content(content, images) }),
+    )
+}
+
 fn init_params() -> Value {
     json!({
         "protocolVersion": 1,
@@ -577,6 +630,16 @@ where
     // Open permission requests: our key → (agent's raw id, its options).
     let mut perms: HashMap<String, (Value, Value)> = HashMap::new();
     let mut tr = Translator::new();
+    // Remembered config to apply once the session exists; the queued prompt
+    // waits until the agent has answered every one of these.
+    let mut startup_config = opts.config.clone();
+    let mut config_waiting: HashSet<u64> = HashSet::new();
+    // User-initiated config changes awaiting the agent's answer.
+    let mut config_replies: HashMap<u64, oneshot::Sender<std::result::Result<Value, String>>> =
+        HashMap::new();
+    // Last option list the agent reported, re-sent when a change fails so
+    // the UI snaps back.
+    let mut last_config = Value::Null;
 
     loop {
         tokio::select! {
@@ -593,13 +656,9 @@ where
                     in_turn = true;
                     match &session {
                         Some(sid) => {
-                            let id = next_id;
+                            prompt_id = Some(next_id);
+                            send(prompt_line(next_id, sid, &content, images));
                             next_id += 1;
-                            prompt_id = Some(id);
-                            send(request(id, "session/prompt", json!({
-                                "sessionId": sid,
-                                "prompt": to_acp_content(&content, images),
-                            })));
                         }
                         None => queued = Some(content),
                     }
@@ -629,6 +688,16 @@ where
                     if let Some((raw, options)) = perms.remove(&d.request_id) {
                         send(response(&raw, permission_outcome(&options, d.allow)));
                     }
+                }
+                Some(Command::SetConfig { id, value, reply }) => {
+                    let Some(sid) = &session else {
+                        let _ = reply.send(Err("the agent hasn't started a session yet".into()));
+                        continue;
+                    };
+                    let rid = next_id;
+                    next_id += 1;
+                    send(request(rid, "session/set_config_option", json!({ "sessionId": sid, "configId": id, "value": value })));
+                    config_replies.insert(rid, reply);
                 }
             },
 
@@ -666,6 +735,9 @@ where
                     }
                     (Some("session/update"), None) => {
                         for ev in tr.update(&msg["params"]["update"]) {
+                            if ev.kind == "config" {
+                                last_config = ev.payload["options"].clone();
+                            }
                             on_event(ev);
                         }
                     }
@@ -698,19 +770,51 @@ where
                                 break;
                             };
                             on_event(Event::new("init", json!({ "session_id": sid })));
+                            let options = &msg["result"]["configOptions"];
+                            if options.is_array() {
+                                last_config = options.clone();
+                                on_event(Event::new("config", json!({ "options": options })));
+                            }
                             if opts.load.is_some() {
                                 on_event(Event::new("loaded", json!({})));
                             }
-                            if let Some(content) = queued.take() {
-                                let id = next_id;
+                            for (cid, value) in startup_config.drain(..) {
+                                let rid = next_id;
                                 next_id += 1;
-                                prompt_id = Some(id);
-                                send(request(id, "session/prompt", json!({
-                                    "sessionId": sid,
-                                    "prompt": to_acp_content(&content, images),
-                                })));
+                                send(request(rid, "session/set_config_option", json!({ "sessionId": sid, "configId": cid, "value": value })));
+                                config_waiting.insert(rid);
+                            }
+                            if config_waiting.is_empty() {
+                                if let Some(content) = queued.take() {
+                                    prompt_id = Some(next_id);
+                                    send(prompt_line(next_id, &sid, &content, images));
+                                    next_id += 1;
+                                }
                             }
                             session = Some(sid);
+                        } else if let Some(rid) = id.filter(|r| config_waiting.contains(r) || config_replies.contains_key(r)) {
+                            let result = match err {
+                                Some(e) => Err(rpc_error(e)),
+                                None => Ok(msg["result"]["configOptions"].clone()),
+                            };
+                            match &result {
+                                Ok(options) if options.is_array() => last_config = options.clone(),
+                                // A remembered choice the agent no longer
+                                // offers is dropped, not fatal.
+                                Err(e) => tracing::debug!("acp: config change refused: {e}"),
+                                _ => {}
+                            }
+                            on_event(Event::new("config", json!({ "options": last_config })));
+                            if let Some(reply) = config_replies.remove(&rid) {
+                                let _ = reply.send(result);
+                            }
+                            if config_waiting.remove(&rid) && config_waiting.is_empty() {
+                                if let (Some(sid), Some(content)) = (&session, queued.take()) {
+                                    prompt_id = Some(next_id);
+                                    send(prompt_line(next_id, sid, &content, images));
+                                    next_id += 1;
+                                }
+                            }
                         } else if id.is_some() && id == prompt_id {
                             in_turn = false;
                             prompt_id = None;
@@ -970,6 +1074,8 @@ mod tests {
                 args: p.args.clone(),
                 cwd: dir.to_string_lossy().into(),
                 load: None,
+                // Applied before the first prompt is sent.
+                config: vec![("mode".into(), "plan".into())],
             },
             rx,
             move |e| {
@@ -980,20 +1086,47 @@ mod tests {
             json!({ "type": "text", "text": "Reply with just the word hi." }),
         ]))
         .unwrap();
-        let mut kinds = Vec::new();
+        let mut events = Vec::new();
         while let Some(e) = tokio::time::timeout(std::time::Duration::from_secs(120), ev_rx.recv())
             .await
             .unwrap()
         {
-            kinds.push(e.kind.clone());
-            if e.kind == "done" || e.kind == "error" {
+            let end = e.kind == "done" || e.kind == "error";
+            if end {
                 assert_eq!(e.kind, "done", "turn failed: {:?}", e.payload);
+            }
+            events.push(e);
+            if end {
                 break;
             }
         }
-        assert_eq!(kinds.first().map(String::as_str), Some("init"));
-        assert!(kinds.iter().any(|k| k == "text_delta"));
-        assert!(kinds.iter().any(|k| k == "result"));
+        let kinds: Vec<&str> = events.iter().map(|e| e.kind.as_str()).collect();
+        assert_eq!(kinds.first(), Some(&"init"));
+        assert!(kinds.contains(&"text_delta"));
+        assert!(kinds.contains(&"result"));
+        let mode = |options: &Value| {
+            options
+                .as_array()
+                .and_then(|o| o.iter().find(|o| o["id"] == "mode"))
+                .map(|o| o["currentValue"].clone())
+        };
+        let last_config = events
+            .iter()
+            .rev()
+            .find(|e| e.kind == "config")
+            .expect("config sent");
+        assert_eq!(mode(&last_config.payload["options"]), Some(json!("plan")));
+
+        // A change mid-conversation answers with the updated list.
+        let (reply, answer) = oneshot::channel();
+        tx.send(Command::SetConfig {
+            id: "mode".into(),
+            value: "build".into(),
+            reply,
+        })
+        .unwrap();
+        let options = answer.await.unwrap().expect("config change accepted");
+        assert_eq!(mode(&options), Some(json!("build")));
         drop(tx);
         task.await.unwrap().unwrap();
 
@@ -1012,6 +1145,7 @@ mod tests {
                 args: p.args,
                 cwd,
                 load: Some(id),
+                config: vec![],
             },
             rx,
             move |e| {
@@ -1035,6 +1169,17 @@ mod tests {
         assert!(replay.iter().any(|e| e.kind == "text_delta"));
         drop(tx);
         task.await.unwrap().unwrap();
+    }
+
+    #[test]
+    fn agent_side_config_changes_surface() {
+        let mut tr = Translator::new();
+        let out = up(
+            &mut tr,
+            r#"{"sessionUpdate":"config_option_update","configOptions":[{"id":"mode","currentValue":"plan"}]}"#,
+        );
+        assert_eq!(out[0].kind, "config");
+        assert_eq!(out[0].payload["options"][0]["currentValue"], "plan");
     }
 
     #[test]

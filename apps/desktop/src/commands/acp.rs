@@ -9,12 +9,13 @@
 //!
 //! Frontend contract (see apps/frontend/src/lib/tauri.ts):
 //!   invoke("acp_providers")                               -> Provider[]
-//!   invoke("acp_turn_start", { provider, cwd, content, resume }) -> topic
+//!   invoke("acp_turn_start", { provider, cwd, content, resume, config }) -> topic
 //!   invoke("acp_turn_cancel", { topic })                  -> ()
 //!   invoke("acp_permission_respond", { topic, requestId, allow }) -> ()
 //!   invoke("acp_conversation_close", { conversation })    -> ()
 //!   invoke("acp_sessions_list", { provider, cwd })        -> session[] | null
 //!   invoke("acp_session_load", { provider, cwd, id })     -> { kind, payload }[]
+//!   invoke("acp_set_config", { conversation, id, value }) -> configOptions
 //!
 //! `resume` is the `session_id` from `init`; it continues the same live
 //! process, or fails when that process is gone. `acp_session_load` reopens an
@@ -172,6 +173,7 @@ pub async fn acp_turn_start(
     cwd: String,
     content: Vec<Value>,
     resume: Option<String>,
+    config: Option<std::collections::HashMap<String, String>>,
 ) -> Result<String, String> {
     if cwd.trim().is_empty() {
         return Err("no workspace folder is open".into());
@@ -199,9 +201,32 @@ pub async fn acp_turn_start(
         args: p.args,
         cwd,
         load: None,
+        config: config.unwrap_or_default().into_iter().collect(),
     };
     spawn_conversation(app, &state, key, opts, topic.clone(), Some(content), None);
     Ok(topic)
+}
+
+/// Change one of a live conversation's config options (model, mode, …).
+/// Resolves with the agent's full, updated option list.
+#[tauri::command]
+pub async fn acp_set_config(
+    state: State<'_, AcpState>,
+    conversation: String,
+    id: String,
+    value: String,
+) -> Result<Value, String> {
+    let (reply, answer) = oneshot::channel();
+    state
+        .convs
+        .get(&conversation)
+        .ok_or("this conversation's agent has exited")?
+        .cmds
+        .send(Command::SetConfig { id, value, reply })
+        .map_err(|_| "the agent has exited")?;
+    answer
+        .await
+        .map_err(|_| "the agent has exited".to_string())?
 }
 
 /// The agent's earlier sessions in `cwd`, or `null` when it can't list them.
@@ -236,6 +261,7 @@ pub async fn acp_session_load(
         args: p.args,
         cwd,
         load: Some(id.clone()),
+        config: vec![],
     };
     spawn_conversation(app, &state, id.clone(), opts, String::new(), None, Some(tx));
     match tokio::time::timeout(std::time::Duration::from_secs(60), rx).await {
