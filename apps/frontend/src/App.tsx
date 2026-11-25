@@ -84,6 +84,7 @@ import { AgentsPanel } from './components/AgentsPanel';
 // project-config store fresh. Doesn't render anything itself.
 import './state/projectConfig';
 import { initOrchestrator } from './state/orchestrator';
+import { initSchedules } from './state/schedules';
 import { fsPickFolder, ptyListAiClis, settingsWindowOpen, type AiCliId } from './lib/tauri';
 import { CYCLE_MARKDOWN_PREVIEW_EVENT } from './lib/markdownLinks';
 import { PasteWarning } from './components/PasteWarning';
@@ -103,6 +104,8 @@ import { RUN_TESTS_AND_FIX_PROMPT, selectionPrompt } from './lib/agentPrompt';
 
 // Agents starting agents: answer Arc's MCP server from here.
 initOrchestrator();
+// Scheduled agent prompts: load them and start the clock.
+void initSchedules();
 
 // Palettes and dialogs mount only while open, so their code loads on first use.
 const CommandPalette = lazy(() =>

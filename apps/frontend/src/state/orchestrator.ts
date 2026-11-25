@@ -1,28 +1,19 @@
 import { create } from 'zustand';
 import {
-  AI_CLIS,
   gitRoot,
   isTauri,
   onOrchestratorCall,
   orchestratorReply,
   orchestratorUrl,
-  type AiCliId,
   type ClaudePermissionMode,
   type OrchestratorCall,
 } from '../lib/tauri';
 import { createRaceWorktrees } from '../lib/agentRace';
-import { acpTransport, useAcpAgents } from './acpAgents';
+import { agentLabel, availableAgents, launchAgentWindow } from './acpAgents';
 import { chatStore, useChatSessions } from './agentSessions';
-import {
-  claudeWindow,
-  setMcpUrlProvider,
-  useClaudeCode,
-  type ClaudeSession,
-  type ClaudeWindowSession,
-} from './claudeCode';
+import { setMcpUrlProvider, type ClaudeSession, type ClaudeWindowSession } from './claudeCode';
 import { askConfirm } from './confirm';
 import { useSettings } from './settings';
-import { useWorkspace } from './workspace';
 
 /**
  * Agents starting agents, through Arc's MCP server (see
@@ -122,23 +113,6 @@ function str(v: unknown): string {
   return typeof v === 'string' ? v.trim() : '';
 }
 
-function labelFor(agent: string): string {
-  return agent === 'claude' ? 'Claude Code' : (AI_CLIS[agent as AiCliId] ?? agent);
-}
-
-/** Agents a helper can be, as `[id, label]`. */
-async function available(): Promise<[string, string][]> {
-  const acp = useAcpAgents.getState();
-  if (acp.status === 'checking') await acp.detect();
-  if (useClaudeCode.getState().status === 'checking') await useClaudeCode.getState().detect();
-  return [
-    ...(useClaudeCode.getState().status === 'ready'
-      ? [['claude', 'Claude Code'] as [string, string]]
-      : []),
-    ...useAcpAgents.getState().providers.map((p) => [p.id, p.label] as [string, string]),
-  ];
-}
-
 function ownHelper(caller: string, id: string): Helper {
   const h = useOrchestrator.getState().helpers[id];
   if (!h || h.parent !== caller) throw new Error(`No helper "${id}" started by this conversation.`);
@@ -153,7 +127,7 @@ function statusLine(h: Helper): string {
 }
 
 async function listAgents(caller: string): Promise<string> {
-  const agents = await available();
+  const agents = await availableAgents();
   const mine = Object.values(useOrchestrator.getState().helpers).filter((h) => h.parent === caller);
   return [
     'Agents you can start (start_agent `agent`):',
@@ -168,7 +142,7 @@ async function startAgent(caller: string, args: Record<string, unknown>): Promis
   const agent = str(args.agent) === 'claude-cli' ? 'claude' : str(args.agent);
   const prompt = str(args.prompt);
   if (!prompt) throw new Error('start_agent needs a prompt.');
-  const agents = await available();
+  const agents = await availableAgents();
   if (!agents.some(([id]) => id === agent)) {
     throw new Error(`Unknown agent "${agent}". Available: ${agents.map(([id]) => id).join(', ')}.`);
   }
@@ -186,7 +160,7 @@ async function startAgent(caller: string, args: Record<string, unknown>): Promis
   const parent = useChatSessions.getState().snaps[caller];
   const cwd = parent?.cwd;
   if (!cwd) throw new Error("This conversation has no folder, so a helper can't start.");
-  const label = labelFor(agent);
+  const label = agentLabel(agent);
   const title = str(args.title) || prompt.split('\n')[0]!.slice(0, 40);
 
   // Once per conversation: the first helper asks, later ones go ahead.
@@ -207,35 +181,20 @@ async function startAgent(caller: string, args: Record<string, unknown>): Promis
   const worktree = wantTree ? (await createRaceWorktrees(cwd, title, 1, label))[0]!.path : null;
   const where = worktree ?? cwd;
 
-  // Opened behind whatever the user is looking at.
-  const ws = useWorkspace.getState();
-  const before = ws.activeTabId;
-  const provider = agent === 'claude' ? undefined : agent;
-  const tabId = ws.openClaudeCode(where, { provider, title: `${label}: ${title}` });
-  if (before) ws.setActive(before);
-
-  useOrchestrator.setState((s) => ({
-    helpers: {
-      ...s.helpers,
-      [tabId]: { id: tabId, parent: caller, agent, label, depth, worktree },
-    },
-  }));
-
-  const settings = useSettings.getState();
   const parentMode = (chatStore(caller)?.getState() as Partial<ClaudeWindowSession> | undefined)
     ?.permissionMode;
-  const store = claudeWindow(
-    tabId,
-    {
-      provider,
-      cwd: where,
-      model: settings.claudeModel,
-      permissionMode: childMode(settings.claudePermissionMode, parentMode),
-      sidebarHidden: true,
-    },
-    provider ? acpTransport(provider) : undefined,
-  );
-  await store.getState().send(prompt);
+  const tabId = await launchAgentWindow({
+    agent,
+    cwd: where,
+    title,
+    prompt,
+    permissionMode: childMode(useSettings.getState().claudePermissionMode, parentMode),
+    // Registered before its first turn, so its own MCP endpoint knows its depth.
+    onOpen: (id) =>
+      useOrchestrator.setState((s) => ({
+        helpers: { ...s.helpers, [id]: { id, parent: caller, agent, label, depth, worktree } },
+      })),
+  });
   return JSON.stringify({
     id: tabId,
     agent,

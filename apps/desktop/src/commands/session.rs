@@ -164,6 +164,28 @@ pub async fn session_usage_log_save(
         .map_err(str_err)
 }
 
+/// Load the scheduled agent prompts JSON (see
+/// `apps/frontend/src/state/schedules.ts`), or `null` if none were saved.
+#[tauri::command]
+pub async fn session_schedules_load(
+    store: State<'_, SessionStore>,
+) -> Result<Option<String>, String> {
+    settings::load(store.pool(), "schedules")
+        .await
+        .map_err(str_err)
+}
+
+/// Persist the scheduled agent prompts JSON.
+#[tauri::command]
+pub async fn session_schedules_save(
+    store: State<'_, SessionStore>,
+    value: String,
+) -> Result<(), String> {
+    settings::save(store.pool(), "schedules", &value)
+        .await
+        .map_err(str_err)
+}
+
 /// Finalize a command row once the shell reports it has finished (OSC 133 D).
 #[tauri::command]
 pub async fn session_command_finish(

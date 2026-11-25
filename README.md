@@ -146,6 +146,10 @@ it.
   Helpers open as Arc windows behind your current tab, in their own git worktree by default. You
   approve the first helper in each conversation; helpers nest at most two deep, four run at
   once, and a Claude helper is never given a looser permission mode than its Claude parent.
+- **Scheduled prompts** — Run a prompt on a timer (every N minutes, daily, or weekdays at a time)
+  with any chat agent, in a folder you pick and optionally its own git worktree per run. Runs
+  open as agent windows behind your current tab and are listed in Sessions. Schedules run while
+  ARC is open; one that came due while it was closed runs once when it opens.
 - **AI CLI Launcher** — Optionally launch external coding CLIs in a terminal tab when they're
   installed on your PATH: Claude Code, OpenAI Codex, OpenCode, Kimi Code, Gemini CLI, Qwen Code,
   Cursor Agent, GitHub Copilot, Amp, Aider, Crush, Factory Droid, and Wingman. Whatever's present

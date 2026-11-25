@@ -1159,6 +1159,15 @@ export async function sessionUsageLogSave(value: string): Promise<void> {
   await invoke('session_usage_log_save', { value });
 }
 
+/** Scheduled agent prompts, as the raw JSON `state/schedules.ts` wrote. */
+export async function sessionSchedulesLoad(): Promise<string | null> {
+  return invoke<string | null>('session_schedules_load');
+}
+
+export async function sessionSchedulesSave(value: string): Promise<void> {
+  await invoke('session_schedules_save', { value });
+}
+
 /** The running app's version, straight from tauri.conf.json. `null` in the
  *  browser-only build, where there is no bundle to ask. */
 export async function getAppVersion(): Promise<string | null> {
