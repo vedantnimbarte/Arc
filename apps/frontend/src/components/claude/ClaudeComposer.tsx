@@ -18,6 +18,7 @@ import { useSettings } from '../../state/settings';
 import { Select, type SelectOption } from '../Select';
 import { MODE_OPTIONS, RISKY_MODES } from './ClaudeSettings';
 import { relativeTo } from './ClaudePanel';
+import { SlashHints, completeSlash } from './SlashHints';
 
 type WindowStore = UseBoundStore<StoreApi<ClaudeWindowSession>>;
 
@@ -278,6 +279,7 @@ export function ClaudeComposer({
         dragging ? 'ring-accent/60' : risky ? 'ring-status-warn/40' : 'ring-edge-2',
       )}
     >
+      {!mention && <SlashHints text={text} onPick={setText} className="left-3 right-3" />}
       {mention && rows.length > 0 && (
         <ul
           role="listbox"
@@ -362,6 +364,12 @@ export function ClaudeComposer({
               return;
             }
           }
+          const completed = e.key === 'Tab' ? completeSlash(text) : null;
+          if (completed) {
+            e.preventDefault();
+            setText(completed);
+            return;
+          }
           if (e.key === 'Enter' && !e.shiftKey) {
             e.preventDefault();
             submit();
@@ -369,7 +377,7 @@ export function ClaudeComposer({
         }}
         rows={3}
         spellCheck={false}
-        placeholder={streaming ? `${name} is working… you can draft the next message` : `Ask ${name}… (@ to mention a file)`}
+        placeholder={streaming ? `${name} is working… you can draft the next message` : `Ask ${name}… (@ to mention a file, / for commands)`}
         aria-label={`Message ${agent ?? 'Claude Code'}`}
         className="block max-h-[40vh] min-h-[4.5rem] w-full resize-none bg-transparent px-4 pb-1 pt-3 font-display text-base text-fg-base placeholder:text-fg-subtle focus:outline-none"
       />

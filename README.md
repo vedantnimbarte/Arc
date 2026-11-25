@@ -146,6 +146,9 @@ it.
   Helpers open as Arc windows behind your current tab, in their own git worktree by default. You
   approve the first helper in each conversation; helpers nest at most two deep, four run at
   once, and a Claude helper is never given a looser permission mode than its Claude parent.
+  In any chat composer, `/handoff <task>` plans here and hands the implementation to another
+  agent, `/advisor <question>` asks another agent for a second opinion without it editing files,
+  and `/committee <question>` asks two different agents and compares their answers.
 - **Scheduled prompts** — Run a prompt on a timer (every N minutes, daily, or weekdays at a time)
   with any chat agent, in a folder you pick and optionally its own git worktree per run. Runs
   open as agent windows behind your current tab and are listed in Sessions. Schedules run while
