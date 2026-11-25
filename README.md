@@ -132,6 +132,11 @@ it.
   Cursor Agent and Factory Droid each get a tab in the Agents panel when installed, with streamed
   replies, tool rows, approve/deny prompts and the edited-file review. ARC starts the agent in ACP
   mode and keeps it running for the length of the conversation; sign-in stays with the CLI.
+  OpenAI Codex joins them when its ACP adapter is installed too
+  (`npm i -g @agentclientprotocol/codex-acp`). Whatever settings an agent offers (model, mode,
+  reasoning effort) appear as pickers by the composer; your choice sticks for that agent's next
+  conversations. Expand a chat into a centered window, where agents that keep history list and
+  reopen their earlier sessions.
 - **AI CLI Launcher** — Optionally launch external coding CLIs in a terminal tab when they're
   installed on your PATH: Claude Code, OpenAI Codex, OpenCode, Kimi Code, Gemini CLI, Qwen Code,
   Cursor Agent, GitHub Copilot, Amp, Aider, Crush, Factory Droid, and Wingman. Whatever's present

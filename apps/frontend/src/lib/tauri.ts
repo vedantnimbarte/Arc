@@ -3180,13 +3180,48 @@ export async function acpTurnStart(opts: {
   cwd: string;
   content: unknown[];
   resume?: string | null;
+  /** Config choices (option id → value) to apply before a new session's
+   *  first prompt. Ignored when resuming. */
+  config?: Record<string, string>;
 }): Promise<string> {
   return invoke<string>('acp_turn_start', {
     provider: opts.provider,
     cwd: opts.cwd,
     content: opts.content,
     resume: opts.resume ?? null,
+    config: opts.config ?? null,
   });
+}
+
+/** One of an agent's settings (model, mode, effort, …), as ACP describes it.
+ *  Only `select` options are rendered; a `group` entry nests more choices. */
+export interface AcpConfigOption {
+  id: string;
+  name: string;
+  category?: string | null;
+  description?: string | null;
+  type: string;
+  currentValue: string;
+  options: AcpConfigChoice[];
+}
+
+export interface AcpConfigChoice {
+  value?: string;
+  name: string;
+  description?: string | null;
+  /** Present on a group of choices instead of `value`. */
+  group?: string;
+  options?: AcpConfigChoice[];
+}
+
+/** Change a live conversation's option; resolves with the agent's full,
+ *  updated option list (changing the model can add or drop others). */
+export async function acpSetConfig(
+  conversation: string,
+  id: string,
+  value: string,
+): Promise<AcpConfigOption[]> {
+  return invoke<AcpConfigOption[]>('acp_set_config', { conversation, id, value });
 }
 
 export async function acpPermissionRespond(opts: {

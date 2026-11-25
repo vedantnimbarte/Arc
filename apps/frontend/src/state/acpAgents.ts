@@ -1,6 +1,9 @@
 import { create, type StoreApi, type UseBoundStore } from 'zustand';
+import { persist } from 'zustand/middleware';
 import {
   acpConversationClose,
+  acpSetConfig,
+  type AcpConfigOption,
   acpPermissionRespond,
   acpProviders,
   acpSessionLoad,
@@ -51,11 +54,46 @@ export const useAcpAgents = create<AcpState>((set) => ({
   },
 }));
 
+/**
+ * What the user picked for each agent's options (model, mode, …), applied to
+ * every new conversation with that agent, plus the options it last offered so
+ * the pickers can show before a conversation exists. Persisted: choosing a
+ * model once should stick.
+ */
+interface AcpPrefs {
+  choices: Record<string, Record<string, string>>;
+  known: Record<string, AcpConfigOption[]>;
+  choose: (provider: string, id: string, value: string) => void;
+  remember: (provider: string, options: AcpConfigOption[]) => void;
+}
+
+export const useAcpPrefs = create<AcpPrefs>()(
+  persist(
+    (set) => ({
+      choices: {},
+      known: {},
+      choose: (provider, id, value) =>
+        set((s) => ({
+          choices: { ...s.choices, [provider]: { ...s.choices[provider], [id]: value } },
+        })),
+      remember: (provider, options) => set((s) => ({ known: { ...s.known, [provider]: options } })),
+    }),
+    { name: 'arc-acp-prefs', partialize: (s) => ({ choices: s.choices, known: s.known }) },
+  ),
+);
+
 /** How a session reaches one ACP agent. */
 export function acpTransport(provider: string): SessionTransport {
   return {
     ready: () => useAcpAgents.getState().providers.some((p) => p.id === provider),
-    start: (o) => acpTurnStart({ provider, cwd: o.cwd, content: o.content, resume: o.resume }),
+    start: (o) =>
+      acpTurnStart({
+        provider,
+        cwd: o.cwd,
+        content: o.content,
+        resume: o.resume,
+        config: useAcpPrefs.getState().choices[provider],
+      }),
     respond: ({ topic, requestId, allow }) => acpPermissionRespond({ topic, requestId, allow }),
     cancel: acpTurnCancel,
     close: (id) => void acpConversationClose(id).catch(() => {}),
@@ -116,4 +154,42 @@ export function expandToWindow(
     },
     agent.provider ? acpTransport(agent.provider) : undefined,
   ).setState(taken);
+}
+
+/** The choices one option offers, with groups flattened. */
+export function flatChoices(
+  o: AcpConfigOption,
+): { value: string; name: string; description?: string | null }[] {
+  return o.options.flatMap((c) => {
+    if (c.options) return flatChoices({ ...o, options: c.options });
+    return c.value === undefined
+      ? []
+      : [{ value: c.value, name: c.name, description: c.description }];
+  });
+}
+
+/**
+ * Pick a value for one of an agent's options. Remembered for new
+ * conversations; applied to the live one, if any, and the store takes the
+ * agent's answer (changing the model can add or drop options). The store
+ * shows the new value at once and snaps back if the agent refuses it.
+ */
+export async function chooseConfig(
+  store: StoreApi<ClaudeSession>,
+  provider: string,
+  id: string,
+  value: string,
+): Promise<void> {
+  useAcpPrefs.getState().choose(provider, id, value);
+  const { config, sessionId } = store.getState();
+  if (!config || !sessionId) return;
+  const before = config;
+  store.setState({ config: config.map((o) => (o.id === id ? { ...o, currentValue: value } : o)) });
+  try {
+    const next = await acpSetConfig(sessionId, id, value);
+    if (Array.isArray(next)) store.setState({ config: next });
+  } catch {
+    // The conversation's agent is gone, or refused: show what it really has.
+    if (store.getState().sessionId === sessionId) store.setState({ config: before });
+  }
 }
