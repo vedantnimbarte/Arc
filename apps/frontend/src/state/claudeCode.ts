@@ -1,6 +1,7 @@
 import { create, type StoreApi, type UseBoundStore } from 'zustand';
 import type { UnlistenFn } from '@tauri-apps/api/event';
 import { registerChat, unregisterChat } from './agentSessions';
+import { expandSlash } from '../lib/slashCommands';
 import {
   AI_CLIS,
   type AiCliId,
@@ -432,7 +433,9 @@ export function sessionSlice(
         const topic = await transport.start({
           mcpUrl,
           cwd,
-          content: buildContent(prompt, attachments),
+          // `/handoff …` and friends: the transcript keeps what was typed, the
+          // agent gets the instructions it stands for.
+          content: buildContent(expandSlash(prompt), attachments),
           resume: sessionId,
           model,
           permissionMode,

@@ -26,6 +26,7 @@ import {
 } from '../../state/claudeCode';
 import { useFiles } from '../../state/files';
 import { expandToWindow } from '../../state/acpAgents';
+import { SlashHints, completeSlash } from './SlashHints';
 import { gitDiffTrees, gitSnapshotTree, isTauri } from '../../lib/tauri';
 import { parseNumstat } from '../../lib/agentRuns';
 import { explainChangesPrompt } from '../../lib/agentPrompt';
@@ -223,12 +224,17 @@ export function SessionChat({
 
       <div className="shrink-0 border-t border-border-hairline px-2 py-2">
         {pickers && <div className="mb-1.5 flex flex-wrap gap-1">{pickers}</div>}
-        <div className="flex items-end gap-1 rounded-md border border-edge-1 bg-surface-1 px-1.5 py-1 focus-within:border-accent/40">
+        <div className="relative flex items-end gap-1 rounded-md border border-edge-1 bg-surface-1 px-1.5 py-1 focus-within:border-accent/40">
+          <SlashHints text={text} onPick={setText} />
           <textarea
             value={text}
             onChange={(e) => setText(e.target.value)}
             onKeyDown={(e) => {
-              if (e.key === 'Enter' && !e.shiftKey) {
+              const completed = e.key === 'Tab' ? completeSlash(text) : null;
+              if (completed) {
+                e.preventDefault();
+                setText(completed);
+              } else if (e.key === 'Enter' && !e.shiftKey) {
                 e.preventDefault();
                 submit();
               }
@@ -241,7 +247,7 @@ export function SessionChat({
                 ? 'Waiting on your approval above…'
                 : streaming
                   ? `${agent} is working…`
-                  : `Ask ${agent}…`
+                  : `Ask ${agent}… (/ for commands)`
             }
             aria-label={`Message ${agent}`}
             className="min-w-0 flex-1 resize-none bg-transparent px-1 py-0.5 font-display text-xs text-fg-base placeholder:text-fg-subtle focus:outline-none disabled:opacity-60"

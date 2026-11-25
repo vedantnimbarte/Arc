@@ -84,6 +84,21 @@ describe('claude code windows', () => {
   });
 });
 
+describe('slash commands on send', () => {
+  beforeEach(() => {
+    __resetClaudeForTests();
+    started.length = 0;
+  });
+
+  it('shows what was typed and sends the expansion', async () => {
+    const w = claudeWindow('tab-1', prefs);
+    await w.getState().send('/advisor should this be a queue?');
+    expect(w.getState().chat[0]).toEqual({ kind: 'user', text: '/advisor should this be a queue?' });
+    const sent = (started[0] as { content: { text: string }[] }).content[0]!.text;
+    expect(sent).toContain('Get a second opinion from another agent on: should this be a queue?');
+  });
+});
+
 describe('agent windows over another transport', () => {
   beforeEach(() => __resetClaudeForTests());
 
