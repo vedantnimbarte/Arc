@@ -123,6 +123,7 @@ pub async fn claude_turn_start(
     permission_mode: Option<String>,
     max_budget_usd: Option<f64>,
     mcp_url: Option<String>,
+    topic: Option<String>,
 ) -> Result<String, String> {
     if cwd.trim().is_empty() {
         return Err("claude: no workspace folder is open".into());
@@ -132,7 +133,7 @@ pub async fn claude_turn_start(
     }
 
     let id = state.next_stream.fetch_add(1, Ordering::Relaxed);
-    let topic = format!("claude://turn/{id}");
+    let topic = turn_topic(topic, "claude://turn/", id);
 
     let (cancel_tx, cancel_rx) = oneshot::channel();
     let (decision_tx, decision_rx) = mpsc::unbounded_channel();
@@ -179,6 +180,17 @@ pub async fn claude_turn_start(
     });
 
     Ok(topic)
+}
+
+/// The topic a turn's events go to. The frontend names it and listens before
+/// starting the turn — a fast agent's first events (`init`, its config, a
+/// permission request) would otherwise be emitted before anyone listens and
+/// lost. One it didn't name gets a fresh one here.
+pub(crate) fn turn_topic(asked: Option<String>, prefix: &str, n: u64) -> String {
+    asked
+        .filter(|t| !t.is_empty() && t.len() <= 128)
+        .filter(|t| t.chars().all(|c| c.is_ascii_alphanumeric() || "-/:_".contains(c)))
+        .unwrap_or_else(|| format!("{prefix}{n}"))
 }
 
 /// Answer a `permission_request`. `message` is shown to Claude on a denial so
@@ -256,4 +268,18 @@ pub async fn claude_session_delete(cwd: String, id: String) -> Result<(), String
         .await
         .map_err(|e| e.to_string())?
         .map_err(|e| format!("{e:#}"))
+}
+
+#[cfg(test)]
+mod topic_tests {
+    use super::turn_topic;
+
+    #[test]
+    fn uses_the_frontends_topic_when_it_is_a_valid_event_name() {
+        let named = "arc://turn/3f2a-91c0";
+        assert_eq!(turn_topic(Some(named.into()), "claude://turn/", 7), named);
+        // Anything Tauri wouldn't accept as an event name gets a fresh one.
+        assert_eq!(turn_topic(Some("bad topic!".into()), "claude://turn/", 7), "claude://turn/7");
+        assert_eq!(turn_topic(None, "acp://turn/", 2), "acp://turn/2");
+    }
 }
