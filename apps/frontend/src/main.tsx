@@ -8,6 +8,8 @@ import { installErrorLog } from './lib/errorLog';
 import { getTerminal } from './lib/terminalRegistry';
 import { useFiles } from './state/files';
 import { useWorkspace } from './state/workspace';
+import { acpSession, useAcpAgents } from './state/acpAgents';
+import { useChatSessions } from './state/agentSessions';
 import './index.css';
 
 installErrorLog();
@@ -21,6 +23,9 @@ if (import.meta.env.VITE_ARC_E2E === '1') {
     useFiles,
     getTerminal,
     sessionLoad,
+    useAcpAgents,
+    acpSession,
+    useChatSessions,
   };
 }
 

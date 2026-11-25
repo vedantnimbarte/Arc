@@ -89,7 +89,7 @@ pub struct Provider {
 /// agree on what "installed" means.
 pub fn providers() -> Vec<Provider> {
     let found = arc_pty::discover_ai_clis();
-    PROVIDERS
+    let mut out: Vec<Provider> = PROVIDERS
         .iter()
         .filter_map(|(id, adapter, args)| {
             let c = found.iter().find(|c| c.id == *id)?;
@@ -104,7 +104,18 @@ pub fn providers() -> Vec<Provider> {
                 args: args.iter().map(|a| a.to_string()).collect(),
             })
         })
-        .collect()
+        .collect();
+    // Test hook: `ARC_TEST_ACP_AGENT=<script>` offers a Node ACP agent script
+    // (the e2e suite's tests/fake-acp-agent.mjs) as one more agent.
+    if let (Ok(script), Some(node)) = (std::env::var("ARC_TEST_ACP_AGENT"), on_path("node")) {
+        out.push(Provider {
+            id: "fake-acp".into(),
+            label: "Fake ACP agent".into(),
+            path: node,
+            args: vec![script],
+        });
+    }
+    out
 }
 
 /// Resolve a command name on PATH the way the shell would, including the
