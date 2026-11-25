@@ -79,7 +79,10 @@ async function readAttachment(file: File): Promise<ClaudeAttachment | string> {
  * approval card. The two share one surface on purpose: the question appears
  * where your hands already are, and you can't start a new prompt past it.
  */
-export function ClaudeComposer({ store }: { store: WindowStore }) {
+export function ClaudeComposer({ store, agent }: { store: WindowStore; agent?: string }) {
+  // An ACP agent (named by `agent`) keeps its own model and permission
+  // settings, so Claude's pickers don't apply to it.
+  const name = agent ?? 'Claude';
   const cwd = store((s) => s.cwd);
   const model = store((s) => s.model);
   const mode = store((s) => s.permissionMode);
@@ -99,7 +102,7 @@ export function ClaudeComposer({ store }: { store: WindowStore }) {
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
-  const risky = RISKY_MODES.includes(mode);
+  const risky = !agent && RISKY_MODES.includes(mode);
   const canSend = !streaming && (text.trim().length > 0 || atts.length > 0);
 
   // File typeahead for `@`, debounced like the file search palette.
@@ -203,7 +206,7 @@ export function ClaudeComposer({ store }: { store: WindowStore }) {
           <ShieldQuestion size={16} strokeWidth={1.9} className="mt-0.5 shrink-0 text-status-warn" />
           <div className="min-w-0 flex-1">
             <p className="font-display text-base text-fg-base">
-              Claude wants to use <span className="font-semibold">{pending.title || pending.tool}</span>
+              {name} wants to use <span className="font-semibold">{pending.title || pending.tool}</span>
             </p>
             {pending.description && (
               <p className="mt-0.5 font-display text-sm text-fg-muted">{pending.description}</p>
@@ -357,8 +360,8 @@ export function ClaudeComposer({ store }: { store: WindowStore }) {
         }}
         rows={3}
         spellCheck={false}
-        placeholder={streaming ? 'Claude is working… you can draft the next message' : 'Ask Claude… (@ to mention a file)'}
-        aria-label="Message Claude Code"
+        placeholder={streaming ? `${name} is working… you can draft the next message` : `Ask ${name}… (@ to mention a file)`}
+        aria-label={`Message ${agent ?? 'Claude Code'}`}
         className="block max-h-[40vh] min-h-[4.5rem] w-full resize-none bg-transparent px-4 pb-1 pt-3 font-display text-base text-fg-base placeholder:text-fg-subtle focus:outline-none"
       />
 
@@ -388,22 +391,26 @@ export function ClaudeComposer({ store }: { store: WindowStore }) {
         >
           <Paperclip size={14} strokeWidth={1.9} />
         </button>
-        <Select
-          size="compact"
-          ariaLabel="Model"
-          value={model}
-          options={modelOptions}
-          onChange={(v) => void pickModel(v)}
-          className="w-auto max-w-[12rem]"
-        />
-        <Select
-          size="compact"
-          ariaLabel="Permission mode"
-          value={mode}
-          options={WINDOW_MODE_OPTIONS}
-          onChange={(v) => store.setState({ permissionMode: v })}
-          className="w-auto"
-        />
+        {!agent && (
+          <>
+            <Select
+              size="compact"
+              ariaLabel="Model"
+              value={model}
+              options={modelOptions}
+              onChange={(v) => void pickModel(v)}
+              className="w-auto max-w-[12rem]"
+            />
+            <Select
+              size="compact"
+              ariaLabel="Permission mode"
+              value={mode}
+              options={WINDOW_MODE_OPTIONS}
+              onChange={(v) => store.setState({ permissionMode: v })}
+              className="w-auto"
+            />
+          </>
+        )}
         <div className="flex-1" />
         {streaming ? (
           <button
@@ -420,7 +427,7 @@ export function ClaudeComposer({ store }: { store: WindowStore }) {
             type="button"
             onClick={submit}
             disabled={!canSend}
-            aria-label="Send to Claude Code"
+            aria-label={`Send to ${agent ?? 'Claude Code'}`}
             title="Send (Enter)"
             className={cn(
               'flex h-8 w-8 items-center justify-center rounded-lg transition-all active:scale-95',

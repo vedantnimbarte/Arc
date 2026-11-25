@@ -6,6 +6,7 @@ import {
   ChevronRight,
   CircleAlert,
   FileDiff,
+  Maximize2,
   Plus,
   ShieldAlert,
   ShieldQuestion,
@@ -24,6 +25,7 @@ import {
   type ClaudeSessionHook,
 } from '../../state/claudeCode';
 import { useFiles } from '../../state/files';
+import { expandToWindow } from '../../state/acpAgents';
 import { gitDiffTrees, gitSnapshotTree, isTauri } from '../../lib/tauri';
 import { parseNumstat } from '../../lib/agentRuns';
 import { explainChangesPrompt } from '../../lib/agentPrompt';
@@ -71,7 +73,14 @@ export function ClaudePanel() {
     );
   }
 
-  return <SessionChat store={useClaudeCode} agent="Claude Code" mode={mode} />;
+  return (
+    <SessionChat
+      store={useClaudeCode}
+      agent="Claude Code"
+      mode={mode}
+      onExpand={() => expandToWindow(useClaudeCode, { title: 'Claude Code' })}
+    />
+  );
 }
 
 /**
@@ -86,10 +95,13 @@ export function SessionChat({
   store,
   agent,
   mode,
+  onExpand,
 }: {
   store: ClaudeSessionHook;
   agent: string;
   mode?: string;
+  /** Move this conversation into a window in the main area. */
+  onExpand?: () => void;
 }) {
   const chat = store((s) => s.chat);
   const streaming = store((s) => s.streaming);
@@ -156,6 +168,19 @@ export function SessionChat({
         >
           <Plus size={12} strokeWidth={2.2} />
         </button>
+        {onExpand && (
+          <button
+            type="button"
+            onClick={onExpand}
+            // Mid-turn, the stream is bound to this panel's store.
+            disabled={streaming}
+            title="Open in a window"
+            aria-label="Open in a window"
+            className="shrink-0 rounded p-1 text-fg-subtle transition-colors hover:bg-surface-2 hover:text-fg-base disabled:opacity-40"
+          >
+            <Maximize2 size={12} strokeWidth={2.2} />
+          </button>
+        )}
       </div>
 
       <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto px-2 py-2">

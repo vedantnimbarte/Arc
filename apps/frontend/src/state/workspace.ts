@@ -417,7 +417,12 @@ interface WorkspaceState {
   /** Open a new API Client tab. */
   openApiClient: () => string;
   /** Open a Claude Code window on `cwd` (default: the file tree's root). */
-  openClaudeCode: (cwd?: string | null) => string;
+  /** Open an agent window: Claude Code, or an ACP agent when `opts.provider`
+   *  is set. `opts.sessionId` reopens that conversation in it. */
+  openClaudeCode: (
+    cwd?: string | null,
+    opts?: { provider?: string; title?: string; sessionId?: string | null },
+  ) => string;
   /** Open (or focus) the GitHub tab. Only one is useful — it carries its own
    *  repo picker, so a second tab would just duplicate the same account. */
   openGitHub: () => string;
@@ -1640,19 +1645,20 @@ export const useWorkspace = create<WorkspaceState>()((set, get) => ({
     get().addTab(tab);
     return id;
   },
-  openClaudeCode: (cwd) => {
+  openClaudeCode: (cwd, opts) => {
     const id = `claude-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
     const settings = useSettings.getState();
     // The window's state rides in the same opaque blob API Client tabs use;
     // `ClaudeWindow` owns its shape.
     const apiClientState = JSON.stringify({
+      provider: opts?.provider,
       cwd: cwd ?? useFiles.getState().root,
-      sessionId: null,
+      sessionId: opts?.sessionId ?? null,
       model: settings.claudeModel,
       permissionMode: settings.claudePermissionMode,
       sidebarHidden: false,
     });
-    get().addTab({ id, title: 'Claude Code', kind: 'claude', apiClientState });
+    get().addTab({ id, title: opts?.title ?? 'Claude Code', kind: 'claude', apiClientState });
     return id;
   },
   openGitHub: () => {
@@ -1812,7 +1818,7 @@ export const useWorkspace = create<WorkspaceState>()((set, get) => ({
       }
       const newTab: Tab = {
         id: newTabId,
-        title: 'Claude Code',
+        title: source.title,
         workspaceId: source.workspaceId,
         kind: 'claude',
         apiClientState: JSON.stringify({ ...blob, sessionId: null }),

@@ -1,7 +1,7 @@
 import { useEffect } from 'react';
 import { Bot, Sparkles, Terminal, type LucideIcon } from 'lucide-react';
 import { useFiles, type AgentPanelTab } from '../state/files';
-import { acpSession, useAcpAgents } from '../state/acpAgents';
+import { acpSession, expandToWindow, useAcpAgents } from '../state/acpAgents';
 import { ClaudePanel, SessionChat } from './claude/ClaudePanel';
 import { WingmanPanel } from './wingman/WingmanPanel';
 import { cn } from '../lib/cn';
@@ -82,7 +82,16 @@ export function AgentsPanel() {
           position. The conversations live in their stores, not here. */}
       <div className="flex min-h-0 flex-1 flex-col" key={tab}>
         {provider ? (
-          <SessionChat store={acpSession(provider.id)} agent={provider.label} />
+          <SessionChat
+            store={acpSession(provider.id)}
+            agent={provider.label}
+            onExpand={() =>
+              expandToWindow(acpSession(provider.id), {
+                provider: provider.id,
+                title: provider.label,
+              })
+            }
+          />
         ) : tab === 'wingman' ? (
           <WingmanPanel />
         ) : (

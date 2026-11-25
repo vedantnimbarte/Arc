@@ -120,6 +120,9 @@ pub struct SessionOptions {
     pub args: Vec<String>,
     /// Absolute path; ACP requires it, and it scopes the agent's file access.
     pub cwd: String,
+    /// Reopen this earlier session (`session/load`) instead of starting one.
+    /// The agent replays its history as ordinary events, then `loaded` follows.
+    pub load: Option<String>,
 }
 
 /// File-changing tool kinds, whose `locations` are the files they wrote.
@@ -137,6 +140,9 @@ struct Tool {
 #[derive(Default)]
 pub struct Translator {
     tools: HashMap<String, Tool>,
+    /// `messageId` of the user message being replayed, while its chunks are
+    /// still arriving — the next chunk of the same message extends its row.
+    user: Option<Option<String>>,
     /// Latest running total from `usage_update`, in USD.
     cost: Option<f64>,
     /// How much of `cost` earlier turns already reported, since the panel
@@ -151,7 +157,18 @@ impl Translator {
 
     /// Convert one `session/update` payload (`params.update`).
     pub fn update(&mut self, u: &Value) -> Vec<Event> {
-        match u["sessionUpdate"].as_str().unwrap_or("") {
+        let kind = u["sessionUpdate"].as_str().unwrap_or("");
+        if kind != "user_message_chunk" {
+            self.user = None;
+        }
+        match kind {
+            // Only seen when a loaded session replays its history.
+            "user_message_chunk" => {
+                let id = u["messageId"].as_str().map(str::to_string);
+                let same = self.user.as_ref() == Some(&id);
+                self.user = Some(id);
+                chunk(if same { "user_delta" } else { "user" }, u)
+            }
             "agent_message_chunk" => chunk("text_delta", u),
             "agent_thought_chunk" => chunk("thinking_delta", u),
             "tool_call" | "tool_call_update" => self.tool(u),
@@ -409,6 +426,92 @@ fn rpc_error(e: &Value) -> String {
     }
 }
 
+/// The agent's process, piped for JSON-RPC. No console window on Windows.
+fn command(binary: &str, args: &[String], cwd: &str) -> tokio::process::Command {
+    let mut cmd = tokio::process::Command::new(binary);
+    cmd.args(args)
+        .current_dir(cwd)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .kill_on_drop(true);
+    #[cfg(windows)]
+    {
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        cmd.creation_flags(CREATE_NO_WINDOW);
+    }
+    cmd
+}
+
+fn init_params() -> Value {
+    json!({
+        "protocolVersion": 1,
+        // ARC offers no file or terminal access of its own (yet), so the
+        // agent uses its built-in tools.
+        "clientCapabilities": { "fs": { "readTextFile": false, "writeTextFile": false }, "terminal": false },
+        "clientInfo": { "name": "arc", "title": "ARC", "version": env!("CARGO_PKG_VERSION") },
+    })
+}
+
+/// The agent's earlier sessions in `cwd` (`session/list`), raw:
+/// `[{ sessionId, title?, updatedAt? }]`. `None` when the agent can't list.
+///
+/// ponytail: spawns the agent per call and reads only the first page; reuse a
+/// live conversation's process if listing gets slow.
+pub async fn list_sessions(binary: &str, args: &[String], cwd: &str) -> Result<Option<Vec<Value>>> {
+    let mut child = command(binary, args, cwd)
+        .stderr(Stdio::null())
+        .spawn()
+        .with_context(|| format!("acp: failed to spawn {binary}"))?;
+    let mut stdin = child.stdin.take().context("acp: no stdin")?;
+    let mut lines = BufReader::new(child.stdout.take().context("acp: no stdout")?).lines();
+
+    let work = async {
+        stdin
+            .write_all(format!("{}\n", request(0, "initialize", init_params())).as_bytes())
+            .await?;
+        let init = response_to(&mut lines, 0).await?;
+        if !init["result"]["agentCapabilities"]["sessionCapabilities"]["list"].is_object() {
+            return Ok(None);
+        }
+        stdin
+            .write_all(
+                format!("{}\n", request(1, "session/list", json!({ "cwd": cwd }))).as_bytes(),
+            )
+            .await?;
+        let r = response_to(&mut lines, 1).await?;
+        if let Some(e) = r.get("error").filter(|e| !e.is_null()) {
+            anyhow::bail!(rpc_error(e));
+        }
+        Ok(Some(
+            r["result"]["sessions"]
+                .as_array()
+                .cloned()
+                .unwrap_or_default(),
+        ))
+    };
+    let out = tokio::time::timeout(std::time::Duration::from_secs(30), work)
+        .await
+        .context("acp: the agent didn't answer")?;
+    let _ = child.kill().await;
+    out
+}
+
+/// Read until the response to request `id`, skipping everything else.
+async fn response_to(
+    lines: &mut tokio::io::Lines<BufReader<tokio::process::ChildStdout>>,
+    id: u64,
+) -> Result<Value> {
+    while let Some(l) = lines.next_line().await? {
+        if let Ok(v) = serde_json::from_str::<Value>(l.trim()) {
+            if v["id"] == id && v.get("method").is_none() {
+                return Ok(v);
+            }
+        }
+    }
+    anyhow::bail!("acp: the agent exited")
+}
+
 const ID_INIT: u64 = 0;
 const ID_NEW: u64 = 1;
 
@@ -425,19 +528,7 @@ pub async fn run_session<F>(
 where
     F: FnMut(Event) + Send + 'static,
 {
-    let mut cmd = tokio::process::Command::new(&opts.binary);
-    cmd.args(&opts.args)
-        .current_dir(&opts.cwd)
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .kill_on_drop(true);
-    #[cfg(windows)]
-    {
-        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-        cmd.creation_flags(CREATE_NO_WINDOW);
-    }
-    let mut child = cmd
+    let mut child = command(&opts.binary, &opts.args, &opts.cwd)
         .spawn()
         .with_context(|| format!("acp: failed to spawn {}", opts.binary))?;
 
@@ -474,17 +565,7 @@ where
     });
     let mut lines = BufReader::new(child.stdout.take().context("acp: no stdout")?).lines();
 
-    send(request(
-        ID_INIT,
-        "initialize",
-        json!({
-            "protocolVersion": 1,
-            // ARC offers no file or terminal access of its own (yet), so the
-            // agent uses its built-in tools.
-            "clientCapabilities": { "fs": { "readTextFile": false, "writeTextFile": false }, "terminal": false },
-            "clientInfo": { "name": "arc", "title": "ARC", "version": env!("CARGO_PKG_VERSION") },
-        }),
-    ));
+    send(request(ID_INIT, "initialize", init_params()));
 
     let mut next_id = ID_NEW + 1;
     let mut session: Option<String> = None;
@@ -598,16 +679,28 @@ where
                                 on_event(Event::new("error", json!({ "message": rpc_error(e) })));
                                 break;
                             }
-                            images = msg["result"]["agentCapabilities"]["promptCapabilities"]["image"] == true;
-                            send(request(ID_NEW, "session/new", json!({ "cwd": opts.cwd, "mcpServers": [] })));
+                            let caps = &msg["result"]["agentCapabilities"];
+                            images = caps["promptCapabilities"]["image"] == true;
+                            match &opts.load {
+                                Some(_) if caps["loadSession"] != true => {
+                                    on_event(Event::new("error", json!({ "message": "this agent can't reopen earlier sessions" })));
+                                    break;
+                                }
+                                Some(id) => send(request(ID_NEW, "session/load", json!({ "sessionId": id, "cwd": opts.cwd, "mcpServers": [] }))),
+                                None => send(request(ID_NEW, "session/new", json!({ "cwd": opts.cwd, "mcpServers": [] }))),
+                            }
                         } else if id == Some(ID_NEW) {
-                            let sid = msg["result"]["sessionId"].as_str().map(str::to_string);
+                            // `session/load` answers with no id; it's the one we asked for.
+                            let sid = opts.load.clone().or_else(|| msg["result"]["sessionId"].as_str().map(str::to_string));
                             let Some(sid) = sid.filter(|_| err.is_none()) else {
                                 let m = err.map(rpc_error).unwrap_or_else(|| "the agent did not start a session".into());
                                 on_event(Event::new("error", json!({ "message": m })));
                                 break;
                             };
                             on_event(Event::new("init", json!({ "session_id": sid })));
+                            if opts.load.is_some() {
+                                on_event(Event::new("loaded", json!({})));
+                            }
                             if let Some(content) = queued.take() {
                                 let id = next_id;
                                 next_id += 1;
@@ -873,9 +966,10 @@ mod tests {
         let (ev_tx, mut ev_rx) = mpsc::unbounded_channel::<Event>();
         let task = tokio::spawn(run_session(
             SessionOptions {
-                binary: p.path,
-                args: p.args,
+                binary: p.path.clone(),
+                args: p.args.clone(),
                 cwd: dir.to_string_lossy().into(),
+                load: None,
             },
             rx,
             move |e| {
@@ -902,5 +996,75 @@ mod tests {
         assert!(kinds.iter().any(|k| k == "result"));
         drop(tx);
         task.await.unwrap().unwrap();
+
+        // The session just run is listed, and reopening it replays the prompt.
+        let cwd = dir.to_string_lossy().to_string();
+        let listed = list_sessions(&p.path, &p.args, &cwd)
+            .await
+            .unwrap()
+            .expect("opencode lists");
+        let id = listed[0]["sessionId"].as_str().unwrap().to_string();
+        let (tx, rx) = mpsc::unbounded_channel();
+        let (ev_tx, mut ev_rx) = mpsc::unbounded_channel::<Event>();
+        let task = tokio::spawn(run_session(
+            SessionOptions {
+                binary: p.path,
+                args: p.args,
+                cwd,
+                load: Some(id),
+            },
+            rx,
+            move |e| {
+                let _ = ev_tx.send(e);
+            },
+        ));
+        let mut replay = Vec::new();
+        while let Some(e) = tokio::time::timeout(std::time::Duration::from_secs(60), ev_rx.recv())
+            .await
+            .unwrap()
+        {
+            assert_ne!(e.kind, "error", "load failed: {:?}", e.payload);
+            if e.kind == "loaded" {
+                break;
+            }
+            replay.push(e);
+        }
+        assert!(replay
+            .iter()
+            .any(|e| e.kind == "user" && e.payload["text"] == "Reply with just the word hi."));
+        assert!(replay.iter().any(|e| e.kind == "text_delta"));
+        drop(tx);
+        task.await.unwrap().unwrap();
+    }
+
+    #[test]
+    fn replayed_user_messages_split_by_message_id() {
+        let mut tr = Translator::new();
+        let a = up(
+            &mut tr,
+            r#"{"sessionUpdate":"user_message_chunk","messageId":"m1","content":{"type":"text","text":"fix "}}"#,
+        );
+        let b = up(
+            &mut tr,
+            r#"{"sessionUpdate":"user_message_chunk","messageId":"m1","content":{"type":"text","text":"it"}}"#,
+        );
+        let c = up(
+            &mut tr,
+            r#"{"sessionUpdate":"user_message_chunk","messageId":"m2","content":{"type":"text","text":"again"}}"#,
+        );
+        assert_eq!(
+            (a[0].kind.as_str(), b[0].kind.as_str(), c[0].kind.as_str()),
+            ("user", "user_delta", "user")
+        );
+        // Anything in between ends the message, even with the same id.
+        up(
+            &mut tr,
+            r#"{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"ok"}}"#,
+        );
+        let d = up(
+            &mut tr,
+            r#"{"sessionUpdate":"user_message_chunk","messageId":"m2","content":{"type":"text","text":"x"}}"#,
+        );
+        assert_eq!(d[0].kind, "user");
     }
 }

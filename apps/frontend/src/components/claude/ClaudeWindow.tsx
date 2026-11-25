@@ -2,12 +2,16 @@ import { useEffect, useRef, useState } from 'react';
 import { ChevronDown, FolderOpen, PanelLeftOpen, ShieldAlert, Sparkles } from 'lucide-react';
 import { cn } from '../../lib/cn';
 import {
+  AI_CLIS,
+  acpSessionsList,
   claudeSessionsList,
   fsPickFolder,
   isTauri,
+  type AiCliId,
   type ClaudePermissionMode,
   type ClaudeSessionMeta,
 } from '../../lib/tauri';
+import { acpTransport, useAcpAgents } from '../../state/acpAgents';
 import {
   claudeWindow,
   disposeClaudeWindow,
@@ -38,6 +42,7 @@ function parseBlob(json: string | undefined): WindowBlob {
     /* defaults below */
   }
   return {
+    provider: typeof o.provider === 'string' ? o.provider : undefined,
     cwd: typeof o.cwd === 'string' ? o.cwd : useFiles.getState().root,
     sessionId: typeof o.sessionId === 'string' ? o.sessionId : null,
     model: typeof o.model === 'string' ? o.model : s.claudeModel,
@@ -55,12 +60,29 @@ function parseBlob(json: string | undefined): WindowBlob {
  * permission mode — so several can run side by side.
  */
 export function ClaudeWindow({ tabId }: { tabId: string }) {
-  const status = useClaudeCode((s) => s.status);
-  const detect = useClaudeCode((s) => s.detect);
   const [initial] = useState(() =>
     parseBlob(useWorkspace.getState().tabs.find((t) => t.id === tabId)?.apiClientState),
   );
-  const [store] = useState(() => claudeWindow(tabId, initial));
+  // Set for an ACP agent's window (OpenCode, Gemini, …); unset for Claude Code.
+  const provider = initial.provider;
+  const agent = provider ? (AI_CLIS[provider as AiCliId] ?? provider) : undefined;
+  const [store] = useState(() =>
+    claudeWindow(tabId, initial, provider ? acpTransport(provider) : undefined),
+  );
+
+  const claudeStatus = useClaudeCode((s) => s.status);
+  const detectClaude = useClaudeCode((s) => s.detect);
+  const acpStatus = useAcpAgents((s) => s.status);
+  const acpInstalled = useAcpAgents((s) => s.providers.some((p) => p.id === provider));
+  const detectAcp = useAcpAgents((s) => s.detect);
+  const status = !provider
+    ? claudeStatus
+    : acpStatus === 'checking'
+      ? 'checking'
+      : acpInstalled
+        ? 'ready'
+        : 'unavailable';
+  const detect = provider ? detectAcp : detectClaude;
 
   const cwd = store((s) => s.cwd);
   const sessionId = store((s) => s.sessionId);
@@ -73,6 +95,9 @@ export function ClaudeWindow({ tabId }: { tabId: string }) {
   const mode = store((s) => s.permissionMode);
 
   const [sessions, setSessions] = useState<ClaudeSessionMeta[]>([]);
+  // Claude always has history; an ACP agent only if it supports `session/list`.
+  const [listable, setListable] = useState(!provider);
+  const [opening, setOpening] = useState(false);
   const [refresh, setRefresh] = useState(0);
   const scrollRef = useRef<HTMLDivElement>(null);
   const remote = !!cwd?.startsWith('ssh://');
@@ -87,6 +112,7 @@ export function ClaudeWindow({ tabId }: { tabId: string }) {
     let last = '';
     return store.subscribe((s) => {
       const next = JSON.stringify({
+        provider,
         cwd: s.cwd,
         sessionId: s.sessionId,
         model: s.model,
@@ -97,12 +123,16 @@ export function ClaudeWindow({ tabId }: { tabId: string }) {
       last = next;
       useWorkspace.getState().setApiClientState(tabId, next);
     });
-  }, [store, tabId]);
+  }, [store, tabId, provider]);
 
   // Reopen the conversation this tab was showing.
   useEffect(() => {
     if (initial.sessionId && initial.cwd && !store.getState().sessionId) {
-      void store.getState().loadSession(initial.cwd, initial.sessionId);
+      setOpening(true);
+      void store
+        .getState()
+        .loadSession(initial.cwd, initial.sessionId)
+        .finally(() => setOpening(false));
     }
   }, [initial, store]);
 
@@ -124,14 +154,28 @@ export function ClaudeWindow({ tabId }: { tabId: string }) {
       setSessions([]);
       return;
     }
+    // Listing an ACP agent's history spawns the agent, so only once per turn
+    // (at its end) rather than at both ends like Claude's file scan.
+    if (provider && (streaming || status !== 'ready')) return;
     let cancelled = false;
-    claudeSessionsList(cwd)
+    const list: Promise<ClaudeSessionMeta[]> = provider
+      ? acpSessionsList(provider, cwd).then((r) => {
+          if (!cancelled) setListable(r !== null);
+          return (r ?? []).map((s) => ({
+            id: s.sessionId,
+            title: s.title ?? null,
+            firstPrompt: null,
+            updatedAt: Date.parse(s.updatedAt ?? '') || 0,
+          }));
+        })
+      : claudeSessionsList(cwd);
+    list
       .then((r) => !cancelled && setSessions(r))
       .catch(() => !cancelled && setSessions([]));
     return () => {
       cancelled = true;
     };
-  }, [cwd, remote, streaming, refresh]);
+  }, [cwd, remote, streaming, refresh, provider, status]);
 
   // Follow the tail while a turn streams — only when already near the bottom,
   // so scrolling up to read an earlier result isn't yanked away.
@@ -152,7 +196,16 @@ export function ClaudeWindow({ tabId }: { tabId: string }) {
       <div className="flex h-full flex-col items-center justify-center gap-2 px-6 text-center">
         <Sparkles size={20} strokeWidth={1.6} className="text-fg-subtle" />
         {status === 'checking' ? (
-          <p className="font-display text-sm text-fg-subtle">Looking for the Claude Code CLI…</p>
+          <p className="font-display text-sm text-fg-subtle">
+            Looking for the {agent ?? 'Claude Code'} CLI…
+          </p>
+        ) : agent ? (
+          <>
+            <p className="font-display text-base text-fg-muted">{agent} isn&rsquo;t installed</p>
+            <p className="max-w-sm font-display text-sm leading-relaxed text-fg-subtle">
+              Install it and sign in, then reopen this tab. ARC uses your existing login.
+            </p>
+          </>
         ) : (
           <>
             <p className="font-display text-base text-fg-muted">Claude Code isn&rsquo;t installed</p>
@@ -175,7 +228,12 @@ export function ClaudeWindow({ tabId }: { tabId: string }) {
 
   const open = (id: string) => {
     if (id === sessionId || !cwd) return;
-    void store.getState().loadSession(cwd, id);
+    // An ACP agent has to start and replay the session, which takes seconds.
+    setOpening(true);
+    void store
+      .getState()
+      .loadSession(cwd, id)
+      .finally(() => setOpening(false));
   };
 
   const active = sessions.find((s) => s.id === sessionId);
@@ -184,22 +242,26 @@ export function ClaudeWindow({ tabId }: { tabId: string }) {
 
   return (
     <div className="relative flex h-full min-h-0">
-      {!hidden && (
+      {!hidden && listable && (
         <ClaudeHistoryRail
           cwd={cwd}
           sessions={sessions}
           activeId={sessionId}
-          busy={streaming}
+          busy={streaming || opening}
           onOpen={open}
           onNew={() => store.getState().newChat()}
-          onDeleted={(id) => {
-            if (id === store.getState().sessionId) store.getState().newChat();
-            setRefresh((n) => n + 1);
-          }}
+          onDeleted={
+            provider
+              ? undefined
+              : (id) => {
+                  if (id === store.getState().sessionId) store.getState().newChat();
+                  setRefresh((n) => n + 1);
+                }
+          }
           onHide={() => store.setState({ sidebarHidden: true })}
         />
       )}
-      {hidden && (
+      {hidden && listable && (
         <button
           type="button"
           onClick={() => store.setState({ sidebarHidden: false })}
@@ -215,14 +277,16 @@ export function ClaudeWindow({ tabId }: { tabId: string }) {
         <header
           className={cn(
             'flex h-10 shrink-0 items-center gap-2 border-b border-border-hairline pr-3',
-            hidden ? 'pl-11' : 'pl-3',
+            hidden && listable ? 'pl-11' : 'pl-3',
           )}
         >
           <button
             type="button"
             onClick={() => void pickFolder()}
             disabled={streaming}
-            title={cwd ? `Claude runs in ${cwd}. Click to change folder.` : 'Choose a folder'}
+            title={
+              cwd ? `${agent ?? 'Claude'} runs in ${cwd}. Click to change folder.` : 'Choose a folder'
+            }
             className="flex h-7 min-w-0 max-w-[40%] shrink-0 items-center gap-1.5 rounded-md px-2 font-display text-sm text-fg-base transition-colors hover:bg-surface-2 disabled:opacity-50"
           >
             <FolderOpen size={13} strokeWidth={1.9} className="shrink-0 text-fg-muted" />
@@ -244,8 +308,10 @@ export function ClaudeWindow({ tabId }: { tabId: string }) {
           <div className="mx-auto w-full max-w-[760px] px-6 py-6">
             {remote ? (
               <EmptyNote>
-                Claude Code runs on this machine. Pick a local folder to start.
+                {agent ?? 'Claude Code'} runs on this machine. Pick a local folder to start.
               </EmptyNote>
+            ) : opening && empty ? (
+              <EmptyNote>Opening the conversation…</EmptyNote>
             ) : empty ? (
               <EmptyState cwd={cwd} recent={sessions.slice(0, 3)} onOpen={open} />
             ) : (
@@ -275,7 +341,7 @@ export function ClaudeWindow({ tabId }: { tabId: string }) {
           <div className="mb-2 overflow-hidden rounded-md empty:hidden">
             <EditedFiles store={store} />
           </div>
-          {!remote && <ClaudeComposer store={store} />}
+          {!remote && <ClaudeComposer store={store} agent={agent} />}
         </div>
       </div>
     </div>

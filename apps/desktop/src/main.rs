@@ -394,6 +394,8 @@ fn main() {
             commands::acp::acp_turn_cancel,
             commands::acp::acp_permission_respond,
             commands::acp::acp_conversation_close,
+            commands::acp::acp_sessions_list,
+            commands::acp::acp_session_load,
             commands::diagnostics::diagnostics_collect,
             commands::diagnostics::diagnostics_summary,
             commands::diagnostics::diagnostics_clear,

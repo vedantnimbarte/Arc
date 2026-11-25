@@ -54,7 +54,8 @@ export function ClaudeHistoryRail({
   busy: boolean;
   onOpen: (id: string) => void;
   onNew: () => void;
-  onDeleted: (id: string) => void;
+  /** Omitted for ACP agents: the protocol has no delete, so rows have none. */
+  onDeleted?: (id: string) => void;
   onHide: () => void;
 }) {
   const [query, setQuery] = useState('');
@@ -81,7 +82,7 @@ export function ClaudeHistoryRail({
     if (!ok) return;
     try {
       await claudeSessionDelete(cwd, s.id);
-      onDeleted(s.id);
+      onDeleted?.(s.id);
     } catch (e) {
       toastError(`Couldn't delete the conversation: ${e instanceof Error ? e.message : String(e)}`);
     }
@@ -146,7 +147,8 @@ export function ClaudeHistoryRail({
                       aria-current={active ? 'true' : undefined}
                       title={s.firstPrompt ?? undefined}
                       className={cn(
-                        'flex h-8 w-full items-center rounded-md pl-2 pr-8 text-left font-display text-sm transition-colors disabled:opacity-50',
+                        'flex h-8 w-full items-center rounded-md pl-2 text-left font-display text-sm transition-colors disabled:opacity-50',
+                        onDeleted ? 'pr-8' : 'pr-2',
                         active
                           ? 'bg-surface-3 text-fg-base shadow-[inset_2px_0_0_rgb(var(--accent,200_202_208))]'
                           : 'text-fg-muted hover:bg-surface-2 hover:text-fg-base',
@@ -154,15 +156,17 @@ export function ClaudeHistoryRail({
                     >
                       <span className="truncate">{sessionLabel(s)}</span>
                     </button>
-                    <button
-                      type="button"
-                      onClick={() => void remove(s)}
-                      aria-label={`Delete ${sessionLabel(s)}`}
-                      title="Delete conversation"
-                      className="absolute right-1 top-1 hidden h-6 w-6 items-center justify-center rounded text-fg-subtle transition-colors hover:bg-status-err/15 hover:text-status-err focus-visible:flex group-hover/row:flex"
-                    >
-                      <Trash2 size={12} strokeWidth={1.9} />
-                    </button>
+                    {onDeleted && (
+                      <button
+                        type="button"
+                        onClick={() => void remove(s)}
+                        aria-label={`Delete ${sessionLabel(s)}`}
+                        title="Delete conversation"
+                        className="absolute right-1 top-1 hidden h-6 w-6 items-center justify-center rounded text-fg-subtle transition-colors hover:bg-status-err/15 hover:text-status-err focus-visible:flex group-hover/row:flex"
+                      >
+                        <Trash2 size={12} strokeWidth={1.9} />
+                      </button>
+                    )}
                   </li>
                 );
               })}

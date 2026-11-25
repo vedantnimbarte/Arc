@@ -133,8 +133,11 @@ interface ClaudeState extends ClaudeSession {
   detect: () => Promise<void>;
 }
 
-/** A Claude Code window's own settings, persisted with its tab. */
+/** An agent window's own settings, persisted with its tab. */
 export interface ClaudeWindowPrefs {
+  /** The ACP agent this window drives (its `AiCliId`); absent for Claude Code.
+   *  `model` and `permissionMode` are Claude's and unused for ACP agents. */
+  provider?: string;
   cwd: string | null;
   model: string;
   permissionMode: ClaudePermissionMode;
@@ -210,6 +213,8 @@ export interface SessionTransport {
   close?: (sessionId: string) => void;
   /** Per-turn event tap, e.g. to log usage. */
   recorder?: (ctx: { cwd: string; model: string }) => (ev: ClaudeStreamEvent) => void;
+  /** A recorded conversation replayed as events. Defaults to Claude's history. */
+  load?: (cwd: string, id: string) => Promise<ClaudeStreamEvent[]>;
 }
 
 const claudeTransport: SessionTransport = {
@@ -294,12 +299,18 @@ export function sessionSlice(
       const seq = ++loadSeq;
       let events: ClaudeStreamEvent[];
       try {
-        events = await claudeSessionLoad(cwd, id);
+        events = await (transport.load ?? claudeSessionLoad)(cwd, id);
       } catch (e) {
         if (seq === loadSeq) fail(e);
         return;
       }
-      if (seq !== loadSeq || get().streaming) return;
+      if (seq !== loadSeq || get().streaming) {
+        // An ACP load leaves a live agent behind; nobody will use this one.
+        if (id !== get().sessionId) transport.close?.(id);
+        return;
+      }
+      const prev = get().sessionId;
+      if (prev && prev !== id) transport.close?.(prev);
       // Fold into a local copy and commit once: a long transcript is
       // thousands of events, and one render beats thousands.
       let acc: ClaudeSession = { ...get(), ...EMPTY_SESSION };
@@ -450,16 +461,34 @@ const windows = new Map<string, UseBoundStore<StoreApi<ClaudeWindowSession>>>();
 export function claudeWindow(
   tabId: string,
   prefs: ClaudeWindowPrefs,
+  transport?: SessionTransport,
 ): UseBoundStore<StoreApi<ClaudeWindowSession>> {
   let store = windows.get(tabId);
   if (!store) {
     store = create<ClaudeWindowSession>()((set, get, api) => ({
-      ...sessionSlice(set, get, api, () => get()),
+      ...sessionSlice(set, get, api, () => get(), transport),
       ...prefs,
     }));
     windows.set(tabId, store);
   }
   return store;
+}
+
+/** Hand a store's conversation to another surface: returns it and leaves the
+ *  store empty, without closing it (an ACP agent keeps running for the new
+ *  owner). Only between turns — a streaming turn is still bound to this store. */
+export function takeConversation(store: StoreApi<ClaudeSession>): Partial<ClaudeSession> | null {
+  const s = store.getState();
+  if (s.streaming || !s.sessionId) return null;
+  const taken = {
+    sessionId: s.sessionId,
+    chat: s.chat,
+    usage: s.usage,
+    costUsd: s.costUsd,
+    editedFiles: s.editedFiles,
+  };
+  store.setState({ ...EMPTY_SESSION });
+  return taken;
 }
 
 /** Tear down a closed window: kill its turn and forget its store. */
@@ -536,6 +565,15 @@ function applyEvent(
     // A typed prompt, from a replayed transcript.
     case 'user':
       set((s) => ({ chat: [...s.chat, { kind: 'user', text: str(p.text) }] }));
+      return;
+
+    // More of the same replayed prompt (ACP streams history in chunks).
+    case 'user_delta':
+      set((s) => {
+        const last = s.chat[s.chat.length - 1];
+        if (last?.kind !== 'user') return { chat: [...s.chat, { kind: 'user', text: str(p.text) }] };
+        return { chat: [...s.chat.slice(0, -1), { ...last, text: last.text + str(p.text) }] };
+      });
       return;
 
     case 'text_delta':

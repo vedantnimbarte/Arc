@@ -83,3 +83,61 @@ describe('claude code windows', () => {
     expect(claudeWindow('tab-a', prefs)).toBe(a);
   });
 });
+
+describe('agent windows over another transport', () => {
+  beforeEach(() => __resetClaudeForTests());
+
+  const transport = () => {
+    const closed: string[] = [];
+    return {
+      closed,
+      t: {
+        ready: () => true,
+        start: async () => 'acp://turn/1',
+        respond: async () => {},
+        cancel: async () => {},
+        close: (id: string) => void closed.push(id),
+        load: async () => [
+          { kind: 'user', payload: { text: 'fix ' } },
+          { kind: 'user_delta', payload: { text: 'it' } },
+          { kind: 'text_delta', payload: { text: 'Done.' } },
+        ],
+      },
+    };
+  };
+
+  it('loads through the transport, joining replayed prompt chunks', async () => {
+    const { t } = transport();
+    const w = claudeWindow('tab-acp', prefs, t);
+    await w.getState().loadSession('/r', 'ses_1');
+    expect(w.getState().sessionId).toBe('ses_1');
+    expect(w.getState().chat).toEqual([
+      { kind: 'user', text: 'fix it' },
+      { kind: 'assistant', text: 'Done.' },
+    ]);
+  });
+
+  it('closes the conversation it leaves for another', async () => {
+    // Each ACP conversation is a running agent; switching must not leak one.
+    const { t, closed } = transport();
+    const w = claudeWindow('tab-acp', prefs, t);
+    await w.getState().loadSession('/r', 'ses_1');
+    await w.getState().loadSession('/r', 'ses_2');
+    expect(closed).toEqual(['ses_1']);
+  });
+
+  it('hands a conversation over without closing it', async () => {
+    const { takeConversation } = await import('../claudeCode');
+    const { t, closed } = transport();
+    const from = claudeWindow('tab-a', prefs, t);
+    await from.getState().loadSession('/r', 'ses_1');
+    const taken = takeConversation(from);
+    expect(taken).toMatchObject({ sessionId: 'ses_1', chat: [{ kind: 'user' }, { kind: 'assistant' }] });
+    expect(from.getState().sessionId).toBeNull();
+    expect(from.getState().chat).toEqual([]);
+    expect(closed).toEqual([]);
+
+    from.setState({ sessionId: 'ses_2', streaming: true });
+    expect(takeConversation(from)).toBeNull();
+  });
+});

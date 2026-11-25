@@ -4,8 +4,8 @@
 //! store: a turn starts with a topic, streams `{ kind, payload }` on it, and
 //! ends with `done` or `error`. The difference is underneath — an ACP agent is
 //! one long-lived process per conversation (see `arc-acp`), so this module
-//! keeps a table of live conversations and routes each one's events to the
-//! topic of its current turn.
+//! keeps a table of live conversations, keyed by the agent's session id, and
+//! routes each one's events to the topic of its current turn.
 //!
 //! Frontend contract (see apps/frontend/src/lib/tauri.ts):
 //!   invoke("acp_providers")                               -> Provider[]
@@ -13,16 +13,23 @@
 //!   invoke("acp_turn_cancel", { topic })                  -> ()
 //!   invoke("acp_permission_respond", { topic, requestId, allow }) -> ()
 //!   invoke("acp_conversation_close", { conversation })    -> ()
+//!   invoke("acp_sessions_list", { provider, cwd })        -> session[] | null
+//!   invoke("acp_session_load", { provider, cwd, id })     -> { kind, payload }[]
 //!
-//! The `session_id` in a conversation's `init` event is ARC's key for it, not
-//! the agent's: passing it back as `resume` continues the same live process.
+//! `resume` is the `session_id` from `init`; it continues the same live
+//! process, or fails when that process is gone. `acp_session_load` reopens an
+//! earlier session in a new process and returns its replayed history, after
+//! which `resume` with that id continues it.
 
-use arc_acp::{providers, run_session, Command, Decision, Provider, SessionOptions};
+use arc_acp::{
+    list_sessions, providers, run_session, Command, Decision, Event, Provider, SessionOptions,
+};
 use dashmap::DashMap;
+use serde_json::{json, Value};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use tauri::{AppHandle, Emitter, Manager, State};
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, oneshot};
 
 struct Conversation {
     cmds: mpsc::UnboundedSender<Command>,
@@ -53,6 +60,109 @@ pub async fn acp_providers() -> Result<Vec<Provider>, String> {
         .map_err(|e| e.to_string())
 }
 
+async fn find_provider(id: &str) -> Result<Provider, String> {
+    tokio::task::spawn_blocking(providers)
+        .await
+        .map_err(|e| e.to_string())?
+        .into_iter()
+        .find(|p| p.id == id)
+        .ok_or_else(|| format!("{id} is not installed"))
+}
+
+type Replay = oneshot::Sender<Result<Vec<Value>, String>>;
+
+/// Start an agent process for one conversation, registered under `key` until
+/// its `init` names the real session id. Its events go to the conversation's
+/// current topic — except while `replay` is set (a load), when they are
+/// collected and handed back on `loaded`.
+fn spawn_conversation(
+    app: AppHandle,
+    state: &AcpState,
+    key: String,
+    opts: SessionOptions,
+    topic: String,
+    first: Option<Vec<Value>>,
+    replay: Option<Replay>,
+) {
+    let (tx, rx) = mpsc::unbounded_channel();
+    if let Some(content) = first {
+        let _ = tx.send(Command::Prompt(content));
+    }
+    let current = Arc::new(Mutex::new(topic));
+    state.convs.insert(
+        key.clone(),
+        Conversation {
+            cmds: tx,
+            topic: current.clone(),
+        },
+    );
+    let key = Arc::new(Mutex::new(key));
+
+    tauri::async_runtime::spawn(async move {
+        let emit = {
+            let (app, current, key) = (app.clone(), current.clone(), key.clone());
+            let mut replay = replay;
+            let mut buf = Vec::new();
+            move |ev: Event| {
+                if ev.kind == "init" {
+                    rekey(
+                        &app,
+                        &key,
+                        ev.payload["session_id"].as_str().unwrap_or_default(),
+                    );
+                }
+                let msg = json!({ "kind": ev.kind, "payload": ev.payload });
+                if let Some(tx) = replay.take() {
+                    match ev.kind.as_str() {
+                        "loaded" => drop(tx.send(Ok(std::mem::take(&mut buf)))),
+                        "error" => {
+                            let m = ev.payload["message"].as_str().unwrap_or("the agent failed");
+                            drop(tx.send(Err(m.to_string())));
+                        }
+                        _ => {
+                            buf.push(msg);
+                            replay = Some(tx);
+                        }
+                    }
+                    return;
+                }
+                let topic = current.lock().unwrap().clone();
+                if !topic.is_empty() {
+                    let _ = app.emit(&topic, msg);
+                }
+            }
+        };
+        if let Err(e) = run_session(opts, rx, emit).await {
+            tracing::warn!("acp conversation failed to start: {e:#}");
+            let topic = current.lock().unwrap().clone();
+            if !topic.is_empty() {
+                let _ = app.emit(
+                    &topic,
+                    json!({ "kind": "error", "payload": { "message": format!("{e:#}") } }),
+                );
+            }
+        }
+        if let Some(state) = app.try_state::<AcpState>() {
+            state.convs.remove(&*key.lock().unwrap());
+        }
+    });
+}
+
+/// Move a conversation from its provisional key to the agent's session id, so
+/// `resume`, history and reopened tabs all use the id the agent knows.
+fn rekey(app: &AppHandle, key: &Mutex<String>, sid: &str) {
+    let mut k = key.lock().unwrap();
+    if sid.is_empty() || *k == sid {
+        return;
+    }
+    if let Some(state) = app.try_state::<AcpState>() {
+        if let Some((_, conv)) = state.convs.remove(&*k) {
+            state.convs.insert(sid.to_string(), conv);
+        }
+    }
+    *k = sid.to_string();
+}
+
 /// Start a turn. Without `resume`, spawns the agent for a new conversation.
 #[tauri::command]
 pub async fn acp_turn_start(
@@ -60,7 +170,7 @@ pub async fn acp_turn_start(
     state: State<'_, AcpState>,
     provider: String,
     cwd: String,
-    content: Vec<serde_json::Value>,
+    content: Vec<Value>,
     resume: Option<String>,
 ) -> Result<String, String> {
     if cwd.trim().is_empty() {
@@ -82,61 +192,60 @@ pub async fn acp_turn_start(
         return Ok(topic);
     }
 
-    let p = tokio::task::spawn_blocking(providers)
-        .await
-        .map_err(|e| e.to_string())?
-        .into_iter()
-        .find(|p| p.id == provider)
-        .ok_or_else(|| format!("{provider} is not installed"))?;
-
-    let key = format!("acp-{}", state.next.fetch_add(1, Ordering::Relaxed));
-    let (tx, rx) = mpsc::unbounded_channel();
-    let current = Arc::new(Mutex::new(topic.clone()));
-    tx.send(Command::Prompt(content)).ok();
-    state.convs.insert(
-        key.clone(),
-        Conversation {
-            cmds: tx,
-            topic: current.clone(),
-        },
-    );
-
+    let p = find_provider(&provider).await?;
+    let key = format!("pending-{}", state.next.fetch_add(1, Ordering::Relaxed));
     let opts = SessionOptions {
         binary: p.path,
         args: p.args,
         cwd,
+        load: None,
     };
-    tauri::async_runtime::spawn(async move {
-        let emit = {
-            let (app, current, key) = (app.clone(), current.clone(), key.clone());
-            move |mut ev: arc_acp::Event| {
-                // `init` and every `result` carry the agent's own session id;
-                // the panel resumes with whatever it last saw, so all of them
-                // must name ARC's key instead.
-                if ev.payload.get("session_id").is_some() {
-                    ev.payload["session_id"] = key.clone().into();
-                }
-                let topic = current.lock().unwrap().clone();
-                let _ = app.emit(
-                    &topic,
-                    serde_json::json!({ "kind": ev.kind, "payload": ev.payload }),
-                );
-            }
-        };
-        if let Err(e) = run_session(opts, rx, emit).await {
-            tracing::warn!("acp conversation failed to start: {e:#}");
-            let topic = current.lock().unwrap().clone();
-            let _ = app.emit(
-                &topic,
-                serde_json::json!({ "kind": "error", "payload": { "message": format!("{e:#}") } }),
-            );
-        }
-        if let Some(state) = app.try_state::<AcpState>() {
-            state.convs.remove(&key);
-        }
-    });
-
+    spawn_conversation(app, &state, key, opts, topic.clone(), Some(content), None);
     Ok(topic)
+}
+
+/// The agent's earlier sessions in `cwd`, or `null` when it can't list them.
+#[tauri::command]
+pub async fn acp_sessions_list(
+    provider: String,
+    cwd: String,
+) -> Result<Option<Vec<Value>>, String> {
+    let p = find_provider(&provider).await?;
+    list_sessions(&p.path, &p.args, &cwd)
+        .await
+        .map_err(|e| format!("{e:#}"))
+}
+
+/// Reopen an earlier session in a fresh agent process and return its replayed
+/// history. The conversation stays live under `id` for the next turn.
+#[tauri::command]
+pub async fn acp_session_load(
+    app: AppHandle,
+    state: State<'_, AcpState>,
+    provider: String,
+    cwd: String,
+    id: String,
+) -> Result<Vec<Value>, String> {
+    if state.convs.contains_key(&id) {
+        return Err("This conversation is already open in another window.".into());
+    }
+    let p = find_provider(&provider).await?;
+    let (tx, rx) = oneshot::channel();
+    let opts = SessionOptions {
+        binary: p.path,
+        args: p.args,
+        cwd,
+        load: Some(id.clone()),
+    };
+    spawn_conversation(app, &state, id.clone(), opts, String::new(), None, Some(tx));
+    match tokio::time::timeout(std::time::Duration::from_secs(60), rx).await {
+        Ok(Ok(r)) => r,
+        Ok(Err(_)) => Err("the agent exited while reopening the session".into()),
+        Err(_) => {
+            state.convs.remove(&id);
+            Err("the agent didn't reopen the session in time".into())
+        }
+    }
 }
 
 /// Answer a `permission_request`. Unknown topics are a no-op.
