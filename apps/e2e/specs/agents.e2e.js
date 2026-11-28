@@ -82,8 +82,19 @@ describe('ACP agent chat', () => {
   });
 
   it("shows the agent's own settings as pickers", async () => {
-    await waitForPanel(/Fake Small/, 'the model picker');
-    assert.match(await panelText(), /build/);
+    // Found by their labels: a picker's value sits in a truncated span, which
+    // WebKitWebDriver's getText leaves out.
+    const panel = await $('#sidebar-view-panel');
+    await panel.$('button[aria-label="Model"]').waitForDisplayed({ timeout: 30_000 });
+    assert.ok(await panel.$('button[aria-label="Mode"]').isDisplayed(), 'no mode picker');
+    const model = await browser.execute(
+      () =>
+        window.__arcTest
+          .acpSession('fake-acp')
+          .getState()
+          .config?.find((o) => o.id === 'model')?.currentValue,
+    );
+    assert.equal(model, 'fake-small');
   });
 
   it('pauses on a permission prompt until it is answered', async () => {

@@ -36,7 +36,17 @@ export const config = {
   maxInstances: 1,
   capabilities: [
     {
-      'tauri:options': { application },
+      'tauri:options': {
+        application,
+        // Windows: hand WebView2 a profile folder the test owns. On GitHub's
+        // hosted runners the default one isn't usable, the browser process
+        // dies before writing DevToolsActivePort, and msedgedriver never gets
+        // a session (tauri-apps/tauri#10670). Forwarded by tauri-driver as
+        // `ms:edgeOptions.webviewOptions`.
+        ...(process.platform === 'win32' && {
+          webviewOptions: { userDataFolder: join(process.env.ARC_DATA_DIR, 'webview') },
+        }),
+      },
       // tauri-driver speaks classic WebDriver only, no BiDi.
       'wdio:enforceWebDriverClassic': true,
     },

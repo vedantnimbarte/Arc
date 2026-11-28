@@ -127,7 +127,7 @@ it.
 - **⌘K Command Bar** — Describe a command in plain English and get it typed onto the
   shell prompt for review; nothing runs until you press Enter. Needs an Anthropic API key
   (**Settings → Terminal**), stored in your OS credential vault.
-- **ACP Agents** *(optional)* — Agents that speak the Agent Client Protocol get the same
+- **ACP Agents** *(optional, beta)* — Agents that speak the Agent Client Protocol get the same
   sidebar chat as Claude Code: Gemini CLI, OpenCode, Qwen Code, Kimi Code, GitHub Copilot,
   Cursor Agent and Factory Droid each get a tab in the Agents panel when installed, with streamed
   replies, tool rows, approve/deny prompts and the edited-file review. ARC starts the agent in ACP
@@ -136,12 +136,13 @@ it.
   (`npm i -g @agentclientprotocol/codex-acp`). Whatever settings an agent offers (model, mode,
   reasoning effort) appear as pickers by the composer; your choice sticks for that agent's next
   conversations. Expand a chat into a centered window, where agents that keep history list and
-  reopen their earlier sessions.
-- **Agent Sessions** — One sidebar list of every agent wherever it runs (chat panels and windows,
+  reopen their earlier sessions. Tested with OpenCode and a protocol test agent; the others use
+  the same protocol code but haven't been tried yet — issues welcome.
+- **Agent Sessions** *(beta)* — One sidebar list of every agent wherever it runs (chat panels and windows,
   terminal CLIs, worktree races, Wingman runs), grouped *Waiting on you / Working / Done*, with
   stop, review, and follow-up right from the row. Chat agents notify when they finish or need a
   permission, and count toward the status bar's "N waiting".
-- **Agents starting agents** — Chat agents get Arc's own MCP server (`arc`), so one agent can hand
+- **Agents starting agents** *(beta)* — Chat agents get Arc's own MCP server (`arc`), so one agent can hand
   work to another: start a helper with a prompt, wait for its reply, send follow-ups, stop it.
   Helpers open as Arc windows behind your current tab, in their own git worktree by default. You
   approve the first helper in each conversation; helpers nest at most two deep, four run at
@@ -149,7 +150,7 @@ it.
   In any chat composer, `/handoff <task>` plans here and hands the implementation to another
   agent, `/advisor <question>` asks another agent for a second opinion without it editing files,
   and `/committee <question>` asks two different agents and compares their answers.
-- **Scheduled prompts** — Run a prompt on a timer (every N minutes, daily, or weekdays at a time)
+- **Scheduled prompts** *(beta)* — Run a prompt on a timer (every N minutes, daily, or weekdays at a time)
   with any chat agent, in a folder you pick and optionally its own git worktree per run. Runs
   open as agent windows behind your current tab and are listed in Sessions. Schedules run while
   ARC is open; one that came due while it was closed runs once when it opens.
