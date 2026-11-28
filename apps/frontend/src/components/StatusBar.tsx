@@ -4,8 +4,8 @@ import {
   CircleDollarSign,
   Radio,
   Gauge,
-  Command as CommandIcon,
   FolderOpen,
+  GitBranch,
   type LucideIcon,
 } from 'lucide-react';
 import type { BranchPickerAnchor } from './BranchPicker';
@@ -16,7 +16,7 @@ import { useUsage } from '../state/usage';
 import type { PlanLimit } from '../lib/usage';
 import { runCommand } from '../state/commands';
 import { useChatSessions } from '../state/agentSessions';
-import { formatBinding, getBinding } from '../state/shortcuts';
+import { useGit } from '../state/git';
 import { cn } from '../lib/cn';
 
 const UsagePopover = lazy(() =>
@@ -25,7 +25,7 @@ const UsagePopover = lazy(() =>
 
 /**
  * Thin strip along the bottom of the window: which folder you're in, what
- * wants your attention, and a permanent pointer at ⌘K.
+ * branch you're on, and what wants your attention.
  *
  * ARC used to carry a much heavier status bar (breadcrumbs, shell picker,
  * branch switcher — see commit a9e77ed) and it was removed for good reason.
@@ -36,7 +36,8 @@ const UsagePopover = lazy(() =>
 export function StatusBar() {
   const root = useFiles((s) => s.root);
   const showSidebarView = useFiles((s) => s.showSidebarView);
-  const paletteKbd = formatBinding(getBinding('open-command-palette'));
+  const branch = useGit((s) => s.info?.branch ?? null);
+  const changed = useGit((s) => s.entries.length);
   const broadcastInput = useWorkspace((s) => s.broadcastInput);
   // Chat agents count only while blocked on a permission; a finished chat
   // turn is the user's to pick up when they like.
@@ -71,7 +72,7 @@ export function StatusBar() {
   );
 
   return (
-    <footer className="material-toolbar flex h-6 shrink-0 items-center gap-1 border-t border-border-hairline px-2 font-display text-2xs text-fg-muted">
+    <footer className="material-toolbar flex h-7 shrink-0 items-center gap-1 px-2.5 font-display text-xs text-fg-muted">
       {/* Folder — the answer to "what am I even looking at". With no root
           picked yet this is the call to action instead. */}
       <Item
@@ -81,6 +82,16 @@ export function StatusBar() {
         title={root ?? 'Choose the folder to work in'}
         accent={!root}
       />
+      {branch && (
+        <Item
+          icon={GitBranch}
+          onClick={() => showSidebarView('git')}
+          label={branch}
+          title="Show changes"
+        >
+          {changed > 0 && <span className="shrink-0 text-fg-subtle">{changed} changed</span>}
+        </Item>
+      )}
 
       <div className="flex-1" />
 
@@ -121,17 +132,6 @@ export function StatusBar() {
           danger={topLimit?.severity === 'critical'}
         />
       )}
-
-      {/* The one thing every new user needs to know. Deliberately spelled out
-          rather than left as a bare glyph. */}
-      <Item
-        icon={CommandIcon}
-        onClick={() => void runCommand('shortcut.open-command-palette')}
-        label="Commands"
-        title="Search every action in ARC"
-      >
-        <kbd className="font-mono text-fg-subtle">{paletteKbd}</kbd>
-      </Item>
 
       <Suspense fallback={null}>
         {usageAnchor && <UsagePopover anchor={usageAnchor} onClose={() => setUsageAnchor(null)} />}
@@ -175,13 +175,13 @@ function Item({
       onClick={onClick}
       title={title}
       className={cn(
-        'flex h-[18px] max-w-[240px] items-center gap-1.5 rounded px-1.5 transition-colors',
+        'flex h-[22px] max-w-[260px] items-center gap-1.5 rounded-md px-2 transition-colors',
         'hover:bg-surface-2 hover:text-fg-base',
         'focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent/40',
         danger ? 'text-status-err' : warn ? 'text-status-warn' : accent && 'text-accent-bright',
       )}
     >
-      <Icon size={11} strokeWidth={2} className="shrink-0" />
+      <Icon size={12} strokeWidth={2} className="shrink-0" />
       {/* min-w-0: a flex child's default min-width is its content's intrinsic
           width, which defeats `truncate` entirely — this is what let a long
           branch name shove the sibling badge into wrapping instead of

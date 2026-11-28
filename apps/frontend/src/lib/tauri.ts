@@ -1064,14 +1064,6 @@ export interface PersistedSettings {
   terminalProfiles?: unknown;
   /** Id of the profile new terminals use. `null`/missing → `defaultShell`. */
   defaultProfileId?: string | null;
-  /** Appearance preference: 'dark' | 'light' | 'system'. */
-  appearance?: 'dark' | 'light' | 'system';
-  /** Active theme id (e.g. 'catppuccin-mocha'). When set + registered,
-   *  overrides the dark/light pair from `appearance`. `null` (or missing)
-   *  means "follow appearance" — the legacy behavior. */
-  themeId?: string | null;
-  /** Mono font id from `FONT_OPTIONS`. */
-  fontId?: string;
   /** Terminal / editor font size in px. */
   fontSize?: number;
   /** Start ARC on OS login. Wired to `tauri-plugin-autostart`. */

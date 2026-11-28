@@ -588,7 +588,7 @@ function CommitMenu({
       style={{ left: pos.x, top: pos.y }}
       className={cn(
         'fixed z-[9999] min-w-[228px] rounded-xl p-1.5',
-        'border border-border-strong bg-bg-panel/95 backdrop-blur-thick backdrop-saturate-180',
+        'border border-border-strong bg-bg-panel backdrop-blur-thick backdrop-saturate-180',
         'shadow-sheet animate-fade-in',
       )}
       role="menu"

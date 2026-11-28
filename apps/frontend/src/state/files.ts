@@ -6,10 +6,10 @@ export const SIDEBAR_MIN = 180;
 export const SIDEBAR_MAX = 480;
 export const SIDEBAR_DEFAULT = 260;
 /** Width of the icon-only activity rail. */
-export const SIDEBAR_RAIL_WIDTH = 44;
+export const SIDEBAR_RAIL_WIDTH = 52;
 /** Width of the same rail with view names shown beside the icons. Wide enough
  *  for the longest label ("Source Control") at `text-2xs`. */
-export const SIDEBAR_RAIL_WIDTH_LABELED = 128;
+export const SIDEBAR_RAIL_WIDTH_LABELED = 152;
 
 /** Which panel is showing in the left sidebar. Driven by the sidebar's
  *  activity rail (Explorer / Source Control / SSH / Search / Outline). */

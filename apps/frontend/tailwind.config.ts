@@ -6,26 +6,11 @@ export default {
   theme: {
     extend: {
       fontFamily: {
-        // SF Pro on Apple, falls through to Inter elsewhere — mirrors the
-        // native macOS feel without shipping a binary blob.
-        display: [
-          // The user's Settings → Font Family pick, published as a CSS var by
-          // `applyFontFamily()`. Unset (tests, pre-boot) → the default below.
-          'var(--font-user)',
-          '-apple-system',
-          'BlinkMacSystemFont',
-          'SF Pro Display',
-          'SF Pro Text',
-          // Bundled variable build (see index.css); 'Inter' stays as a
-          // fallback for anyone who has the static family installed.
-          'Inter Variable',
-          'Inter',
-          'system-ui',
-          'sans-serif',
-        ],
+        // Interface text. Inter is bundled (see index.css), so every platform
+        // gets the same face; mono is for code, paths and terminals only.
+        display: ['Inter Variable', 'Inter', '-apple-system', 'BlinkMacSystemFont', 'system-ui', 'sans-serif'],
         // SF Mono → JetBrains Mono fallback for the terminal + code.
         mono: [
-          'var(--font-user)',
           'SF Mono',
           'ui-monospace',
           'JetBrains Mono Variable',

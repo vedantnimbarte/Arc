@@ -9,19 +9,7 @@ import {
   type ClaudePermissionMode,
   type PersistedSettings,
 } from '../lib/tauri';
-import {
-  applyFontFamily,
-  applyTheme,
-  DEFAULT_APPEARANCE,
-  DEFAULT_FONT_ID,
-  DEFAULT_FONT_SIZE,
-  MAX_FONT_SIZE,
-  MIN_FONT_SIZE,
-  onSystemAppearanceChange,
-  resolveActiveTheme,
-  type Appearance,
-} from '../themes';
-import { loadInstalledThemes } from '../lib/themeMarketplace';
+import { DEFAULT_FONT_SIZE, MAX_FONT_SIZE, MIN_FONT_SIZE } from '../themes';
 // Type-only: `workspace.ts` imports this store at runtime, so a value import
 // here would close the cycle. `import type` is erased, leaving one direction.
 import type { LayoutMode } from './workspace';
@@ -167,13 +155,6 @@ export interface Settings {
   /** Profile new terminals use when the caller doesn't name one. `null`
    *  falls back to `defaultShell`. */
   defaultProfileId: string | null;
-  /** User's appearance preference. `'system'` follows the OS color scheme. */
-  appearance: Appearance;
-  /** Specific theme id (e.g. 'catppuccin-mocha'). When set + registered, it
-   *  overrides the dark/light resolution from `appearance`. */
-  themeId: string | null;
-  /** Mono font id from `FONT_OPTIONS`. */
-  fontId: string;
   /** Terminal / editor font size in px. */
   fontSize: number;
   /** Auto-launch ARC at OS login. Mirrors the autostart plugin's state. */
@@ -266,11 +247,6 @@ export interface Settings {
    *  add/edit/delete all funnel through one setter. */
   setTerminalProfiles: (profiles: TerminalProfile[]) => void;
   setDefaultProfileId: (id: string | null) => void;
-  setAppearance: (a: Appearance) => void;
-  /** Pick a specific theme id, or pass `null` to fall back to the dark/light
-   *  pair from `appearance`. */
-  setThemeId: (id: string | null) => void;
-  setFontId: (id: string) => void;
   setFontSize: (size: number) => void;
   /** Toggle autostart at login. Also syncs the OS-level registration via
    *  `tauri-plugin-autostart` — failures are logged but don't block the
@@ -321,9 +297,6 @@ const DEFAULTS = {
   defaultShell: null as string | null,
   terminalProfiles: [] as TerminalProfile[],
   defaultProfileId: null as string | null,
-  appearance: DEFAULT_APPEARANCE,
-  themeId: null as string | null,
-  fontId: DEFAULT_FONT_ID,
   fontSize: DEFAULT_FONT_SIZE,
   launchAtLogin: false,
   restoreWindowState: true,
@@ -362,9 +335,6 @@ const clampTileGap = (n: number): number =>
 const clampFontSize = (n: number): number =>
   Math.max(MIN_FONT_SIZE, Math.min(MAX_FONT_SIZE, Math.round(n)));
 
-const isAppearance = (v: unknown): v is Appearance =>
-  v === 'dark' || v === 'light' || v === 'system';
-
 export const useSettings = create<Settings>()((set, get) => ({
   ...DEFAULTS,
   settingsHydrated: false,
@@ -381,23 +351,6 @@ export const useSettings = create<Settings>()((set, get) => ({
     })),
   setDefaultProfileId: (id) => set({ defaultProfileId: id }),
 
-  setAppearance: (a) => {
-    set({ appearance: a });
-    applyTheme(resolveActiveTheme(a, get().themeId));
-    if (isTauri) {
-      const snapshot = toPersistedSettings(get());
-      void sessionSettingsSave(snapshot)
-        .then(() => settingsBroadcastChanged().catch(() => {}))
-        .catch((err) => console.error('[settings] appearance save failed:', err));
-    }
-  },
-  setThemeId: (id) => {
-    set({ themeId: id });
-    applyTheme(resolveActiveTheme(get().appearance, id));
-    // Persist + broadcast via the debounced subscribe handler — no need to
-    // fire a save here ourselves.
-  },
-  setFontId: (id) => set({ fontId: id }),
   setFontSize: (size) => set({ fontSize: clampFontSize(size) }),
 
   setLaunchAtLogin: async (on) => {
@@ -494,17 +447,6 @@ async function loadSettings(): Promise<void> {
       suppressSave = false;
     });
 
-    // Register user-installed themes (Tier 1.7) before resolving, so a stored
-    // themeId pointing at one applies on first paint instead of falling back.
-    if (isTauri) {
-      try {
-        await loadInstalledThemes();
-      } catch (err) {
-        console.error('[settings] installed themes load failed:', err);
-      }
-    }
-
-    applyTheme(resolveActiveTheme(get().appearance, get().themeId));
     if (!isTauri) return;
 
     // Reconcile launchAtLogin with the OS: the user may have disabled
@@ -530,7 +472,6 @@ async function loadSettings(): Promise<void> {
       if (stored) {
         suppressSave = true;
         set((s) => applyStored(s, stored));
-        applyTheme(resolveActiveTheme(get().appearance, get().themeId));
         queueMicrotask(() => {
           suppressSave = false;
         });
@@ -548,7 +489,6 @@ async function loadSettings(): Promise<void> {
         const legacy = parsed.state ?? {};
         suppressSave = true;
         set((s) => applyStored(s, legacy));
-        applyTheme(resolveActiveTheme(get().appearance, get().themeId));
         queueMicrotask(() => {
           suppressSave = false;
         });
@@ -570,14 +510,6 @@ async function loadSettings(): Promise<void> {
 function applyStored(current: Settings, stored: Partial<PersistedSettings>): Partial<Settings> {
   return {
     defaultShell: stored.defaultShell ?? current.defaultShell,
-    appearance: isAppearance(stored.appearance) ? stored.appearance : current.appearance,
-    themeId:
-      stored.themeId === null
-        ? null
-        : typeof stored.themeId === 'string'
-          ? stored.themeId
-          : current.themeId,
-    fontId: stored.fontId ?? current.fontId,
     fontSize:
       typeof stored.fontSize === 'number' ? clampFontSize(stored.fontSize) : current.fontSize,
     launchAtLogin:
@@ -658,9 +590,6 @@ function applyStored(current: Settings, stored: Partial<PersistedSettings>): Par
 function toPersistedSettings(s: Settings): PersistedSettings {
   return {
     defaultShell: s.defaultShell,
-    appearance: s.appearance,
-    themeId: s.themeId,
-    fontId: s.fontId,
     fontSize: s.fontSize,
     launchAtLogin: s.launchAtLogin,
     restoreWindowState: s.restoreWindowState,
@@ -778,8 +707,6 @@ export function importSettingsJson(text: string): void {
     throw new Error('Not an ARC settings export.');
   }
   useSettings.setState((s) => applyStored(s, doc.settings as Partial<PersistedSettings>));
-  const next = useSettings.getState();
-  applyTheme(resolveActiveTheme(next.appearance, next.themeId));
 }
 
 // Suppress save during programmatic hydrate. Set true around set(), cleared
@@ -832,53 +759,14 @@ export async function rehydrateSettingsFromBroadcast(): Promise<void> {
   try {
     const stored = await sessionSettingsLoad();
     if (!stored) return;
-    const current = useSettings.getState();
-    const sameAppearance =
-      (isAppearance(stored.appearance) ? stored.appearance : current.appearance) ===
-      current.appearance;
-    const incomingThemeId =
-      stored.themeId === null
-        ? null
-        : typeof stored.themeId === 'string'
-          ? stored.themeId
-          : current.themeId;
-    const sameTheme = incomingThemeId === current.themeId;
-    // Apply every field, not just the theme — tile gap, default layout,
-    // notifications and agents all need to reach the open windows live.
+    // Apply every field — tile gap, default layout, notifications and agents
+    // all need to reach the open windows live.
     suppressSave = true;
     useSettings.setState((s) => applyStored(s, stored));
-    const next = useSettings.getState();
-    if (!sameAppearance || !sameTheme)
-      applyTheme(resolveActiveTheme(next.appearance, next.themeId));
     queueMicrotask(() => {
       suppressSave = false;
     });
   } catch (err) {
     console.error('[settings] rehydrate broadcast failed:', err);
   }
-}
-
-// Keep `--font-user` in sync with the stored family. One subscription covers
-// every path that can change it — the Settings picker, SQLite hydration, the
-// legacy-localStorage migration and the cross-window broadcast — so none of
-// them has to remember to re-apply it.
-if (typeof document !== 'undefined') {
-  applyFontFamily(useSettings.getState().fontId);
-  useSettings.subscribe((s, prev) => {
-    if (s.fontId !== prev.fontId) applyFontFamily(s.fontId);
-  });
-}
-
-// Re-paint when the OS color scheme changes — only matters when the user
-// picked `'system'`.
-if (typeof window !== 'undefined') {
-  onSystemAppearanceChange(() => {
-    const s = useSettings.getState();
-    // Only repaint when nothing else has nailed the theme down. A specific
-    // themeId means the user explicitly picked that look — OS color-scheme
-    // flips shouldn't override it.
-    if (s.appearance === 'system' && !s.themeId) {
-      applyTheme(resolveActiveTheme('system', null));
-    }
-  });
 }

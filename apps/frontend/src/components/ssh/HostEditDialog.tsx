@@ -68,7 +68,7 @@ export function HostEditDialog({ existing, onClose }: HostEditDialogProps) {
   };
 
   return (
-    <div className="absolute inset-0 z-10 flex flex-col bg-bg-panel/95 backdrop-blur-md animate-fade-in">
+    <div className="absolute inset-0 z-10 flex flex-col bg-bg-panel backdrop-blur-md animate-fade-in">
       <div className="border-b border-border-subtle px-4 py-2.5">
         <div className="font-display text-sm text-fg-base">
           {existing ? 'Edit host' : 'Add host'}

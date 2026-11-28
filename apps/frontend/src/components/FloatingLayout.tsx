@@ -247,7 +247,7 @@ function StackCard({
             aria-label={`Go to ${tab.title}`}
             className="absolute inset-0 flex items-center justify-center rounded-lg outline-none transition-colors duration-150 group-hover:bg-scrim-1 focus-visible:bg-scrim-1 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent/60"
           >
-            <span className="translate-y-1 rounded-full bg-bg-panel/95 px-3 py-1 font-display text-xs font-medium text-fg-base opacity-0 shadow-sheet ring-1 ring-edge-2 transition-all duration-150 ease-apple group-hover:translate-y-0 group-hover:opacity-100 group-focus-within:translate-y-0 group-focus-within:opacity-100 motion-reduce:transition-none">
+            <span className="translate-y-1 rounded-full bg-bg-panel px-3 py-1 font-display text-xs font-medium text-fg-base opacity-0 shadow-sheet ring-1 ring-edge-2 transition-all duration-150 ease-apple group-hover:translate-y-0 group-hover:opacity-100 group-focus-within:translate-y-0 group-focus-within:opacity-100 motion-reduce:transition-none">
               Go to
             </span>
           </button>

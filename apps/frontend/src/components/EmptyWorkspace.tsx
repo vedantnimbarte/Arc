@@ -1,4 +1,4 @@
-import { Suspense, lazy, useEffect, useRef, useState } from 'react';
+import { Suspense, lazy, useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import {
   TerminalSquare,
@@ -26,9 +26,9 @@ import { useFiles } from '../state/files';
 import { useClaudeCode } from '../state/claudeCode';
 import { fileIcon } from '../lib/fileIcons';
 import { fsPickFiles, fsPickFolder, isTauri, ptyListAiClis, type AiCliInfo } from '../lib/tauri';
-import { groupColorDef, rgba, type TabGroupColorId } from '../lib/tabGroups';
+import { groupColorDef, rgba } from '../lib/tabGroups';
+import { useVibe } from '../state/vibe';
 import { formatBinding, getBinding } from '../state/shortcuts';
-import { cn } from '../lib/cn';
 import { WorkspaceEditPanel, DEFAULT_WORKSPACE_COLOR } from './WorkspaceEditPanel';
 import { AGENT_PANEL_H, AGENT_PANEL_W } from './agentPanelSize';
 
@@ -45,25 +45,15 @@ function initials(name: string): string {
 }
 
 /**
- * Shown when the active workspace has no tabs. A launcher: primary tool cards
- * (terminal / editor / preview / API client), a row of detected AI CLIs, a few
- * utility links, and recent files to jump back into. Styled with the same
- * liquid-glass tiles as the workspace rail.
+ * Shown when the active workspace has no tabs. With no folder open it asks
+ * for one and nothing else. With a folder: an agent prompt, three starts
+ * (terminal, file, Agent mode), recent files, and the other tools in one row.
  */
 
 interface Props {
   /** Opens the ⌘K command palette — owned by App, threaded down. */
   onOpenCommandPalette?: () => void;
 }
-
-type CoreTool = {
-  title: string;
-  hint: string;
-  icon: LucideIcon;
-  color: TabGroupColorId;
-  kbd?: string;
-  run: () => void;
-};
 
 export function EmptyWorkspace({ onOpenCommandPalette }: Props) {
   const active = useWorkspace((s) => s.workspaces.find((w) => w.id === s.activeWorkspaceId));
@@ -72,10 +62,9 @@ export function EmptyWorkspace({ onOpenCommandPalette }: Props) {
   const openApiClient = useWorkspace((s) => s.openApiClient);
   const openDbClient = useWorkspace((s) => s.openDbClient);
   const openGitHub = useWorkspace((s) => s.openGitHub);
-  const openClaudeCode = useWorkspace((s) => s.openClaudeCode);
   const claudeReady = useClaudeCode((s) => s.status === 'ready');
   const openFile = useWorkspace((s) => s.openFile);
-  const launchAiCli = useWorkspace((s) => s.launchAiCli);
+  const root = useFiles((s) => s.root);
   const recentFiles = useFiles((s) => s.recentFiles).slice(0, 5);
 
   const [aiClis, setAiClis] = useState<AiCliInfo[]>([]);
@@ -138,183 +127,187 @@ export function EmptyWorkspace({ onOpenCommandPalette }: Props) {
     });
   };
 
-  const tools: CoreTool[] = [
-    {
-      title: 'Terminal',
-      hint: 'Open a shell',
-      icon: TerminalSquare,
-      color: 'slate',
-      kbd: formatBinding(getBinding('new-terminal')),
-      run: () => void newTerminal(),
-    },
-    { title: 'Editor', hint: 'Open a file', icon: FileCode2, color: 'blue', run: pickAndOpen },
-    { title: 'Preview', hint: 'Render a URL', icon: MonitorPlay, color: 'green', run: () => openPreview() },
-    { title: 'API Client', hint: 'Send a request', icon: Send, color: 'violet', run: () => openApiClient() },
-    { title: 'Database', hint: 'Run a query', icon: Database, color: 'amber', run: () => openDbClient() },
-    { title: 'GitHub', hint: 'Browse and clone', icon: Github, color: 'slate', run: () => openGitHub() },
-    // Only when the CLI is installed — a tile that opens a "not installed"
-    // screen is a dead end.
-    ...(claudeReady
-      ? [{ title: 'Claude Code', hint: 'Chat about this folder', icon: Sparkles, color: 'orange', run: () => openClaudeCode() } satisfies CoreTool]
-      : []),
-  ];
-
   const connectSsh = () => useFiles.getState().showSidebarView('ssh');
   const openFolder = () => {
     void fsPickFolder(useFiles.getState().root).then((dir) => {
       if (dir) useFiles.getState().setRoot(dir);
     });
   };
+  const openAgents = (e: React.MouseEvent<HTMLElement>) => {
+    const r = e.currentTarget.getBoundingClientRect();
+    // Anchor under the button, but keep the whole panel on screen — on a
+    // short window a naive `r.bottom` pushes the Launch button below the fold.
+    setAgentPos({
+      x: Math.max(12, Math.min(r.left, window.innerWidth - AGENT_PANEL_W - 12)),
+      y: Math.max(12, Math.min(r.bottom + 8, window.innerHeight - AGENT_PANEL_H - 12)),
+    });
+  };
+
+  // Tools that aren't one of the three starts. Also under New in the title bar.
+  const otherTools: { label: string; icon: LucideIcon; run: () => void }[] = [
+    { label: 'Preview', icon: MonitorPlay, run: () => openPreview() },
+    { label: 'API client', icon: Send, run: () => openApiClient() },
+    { label: 'Database', icon: Database, run: () => openDbClient() },
+    { label: 'GitHub', icon: Github, run: () => openGitHub() },
+    { label: 'Connect over SSH', icon: ServerIcon, run: connectSsh },
+  ];
 
   return (
-    <div className="flex h-full w-full items-center justify-center overflow-y-auto p-8">
-      <div className="w-full max-w-2xl animate-view-in">
-        <header className="mb-6 flex flex-col items-center text-center">
-          {active && (
-            <button
-              onClick={(e) => {
-                const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
-                setEditPos({ x: r.left + r.width / 2 - 124, y: r.bottom + 6 });
+    <div className="flex h-full w-full justify-center overflow-y-auto px-8 py-[12vh]">
+      <div className="w-full max-w-xl animate-view-in">
+        {active && (
+          <button
+            onClick={(e) => {
+              const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
+              setEditPos({ x: r.left, y: r.bottom + 6 });
+            }}
+            title="Edit workspace"
+            data-launcher-stay
+            className="group -ml-1.5 mb-5 flex items-center gap-2 rounded-lg py-1 pl-1.5 pr-2.5 transition-colors hover:bg-surface-1"
+          >
+            <span
+              className="flex h-6 w-6 items-center justify-center rounded-md font-display text-xs font-semibold text-fg-base"
+              style={{
+                backgroundColor: rgba(groupColorDef(active.color ?? DEFAULT_WORKSPACE_COLOR).hex, 0.18),
               }}
-              title="Edit workspace"
-              data-launcher-stay
-              className="group mb-2.5 flex items-center gap-2 rounded-lg border border-border-hairline bg-surface-1 py-1.5 pl-1.5 pr-2.5 transition-colors hover:border-border-subtle hover:bg-surface-1"
             >
-              <span
-                className="flex h-6 w-6 items-center justify-center rounded-md font-display text-xs font-semibold text-fg-base"
-                style={{
-                  backgroundColor: rgba(groupColorDef(active.color ?? DEFAULT_WORKSPACE_COLOR).hex, 0.18),
-                }}
-              >
-                {active.icon ? <span className="text-base">{active.icon}</span> : initials(active.name)}
-              </span>
-              <span className="font-display text-sm font-medium tracking-tight text-fg-base">
-                {active.name}
-              </span>
-              <Pencil
-                size={11}
-                strokeWidth={1.9}
-                className="text-fg-subtle transition-colors group-hover:text-fg-muted"
-              />
-            </button>
-          )}
-          <h1 className="font-display text-xl font-semibold tracking-tight text-fg-base">
-            What would you like to build?
-          </h1>
-          <p className="mt-1 text-xs text-fg-muted">Ask your agent, or pick a tool below</p>
-        </header>
+              {active.icon ? <span className="text-base">{active.icon}</span> : initials(active.name)}
+            </span>
+            <span className="font-display text-sm text-fg-muted">{active.name}</span>
+            <Pencil
+              size={11}
+              strokeWidth={1.9}
+              className="text-fg-subtle opacity-0 transition-opacity group-hover:opacity-100"
+            />
+          </button>
+        )}
 
-        <BuildComposer agentReady={claudeReady} />
-
-        <SectionLabel>Tools</SectionLabel>
-
-        {/* Core tools — one glass card per tab type. */}
-        <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-4">
-          {tools.map((t) => {
-            const hex = groupColorDef(t.color).hex;
-            return (
+        {!root ? (
+          // No folder yet: one job. Agents, the terminal and git all work
+          // inside a folder, so that's the first thing to choose.
+          <>
+            <h1 className="font-display text-2xl font-semibold tracking-tight text-fg-base">
+              Open a folder to start
+            </h1>
+            <p className="mt-2 max-w-md text-base leading-relaxed text-fg-muted">
+              Arc opens its files, a terminal and git status there. Once it's open you can ask an
+              agent to work on it.
+            </p>
+            <div className="mt-6 flex flex-wrap gap-2">
               <button
-                key={t.title}
-                onClick={t.run}
-                className="group relative flex h-[112px] flex-col items-start justify-between rounded-xl border border-border-hairline bg-surface-1 p-3.5 text-left transition-colors hover:border-border-subtle hover:bg-surface-1"
+                onClick={openFolder}
+                className="flex h-9 items-center gap-2 rounded-lg bg-accent px-4 font-display text-sm font-medium text-[#0d1a26] transition-colors hover:bg-accent-bright"
               >
-                <t.icon size={20} strokeWidth={1.8} style={{ color: hex }} />
-                {t.kbd && (
-                  <kbd className="absolute right-3 top-3 rounded bg-surface-2 px-1 font-mono text-2xs text-fg-subtle">
-                    {t.kbd}
-                  </kbd>
-                )}
-                <div>
-                  <div className="font-display text-base font-semibold tracking-tight text-fg-base">
-                    {t.title}
-                  </div>
-                  <div className="text-xs text-fg-muted">{t.hint}</div>
-                </div>
+                <FolderOpen size={15} strokeWidth={2} />
+                Open folder…
               </button>
-            );
-          })}
-        </div>
-
-        {/* AI agents — a chip per detected CLI for the one-click case, then the
-            full panel for choosing a count or editing the command. With none
-            detected the panel entry stands alone: an empty row should still
-            offer the way forward rather than just reporting the absence. */}
-        <section className="mt-6">
-          <SectionLabel icon={Sparkles}>AI Agents</SectionLabel>
-          <div className="flex flex-wrap gap-2">
-            {aiClis.map((cli) => (
               <button
-                key={cli.id}
-                onClick={() => void launchAiCli(cli)}
-                title={cli.path}
-                className="flex items-center gap-2 rounded-lg border border-border-hairline bg-surface-1 px-3 py-2 text-sm font-medium text-fg-base/90 transition-colors hover:border-border-subtle hover:bg-surface-1"
+                onClick={() => openGitHub()}
+                className="flex h-9 items-center gap-2 rounded-lg bg-bg-panel px-4 font-display text-sm font-medium text-fg-base transition-colors hover:bg-bg-hover"
               >
-                <Bot size={13} strokeWidth={1.9} className="text-accent-bright" />
-                <span className="truncate">{cli.label}</span>
+                <Github size={15} strokeWidth={1.9} />
+                Clone from GitHub
               </button>
-            ))}
-            <button
-              onClick={(e) => {
-                const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
-                // Anchor under the button, but keep the whole panel on screen —
-                // the launcher is often open on a short window, where a naive
-                // `r.bottom` would push the command field and Launch button
-                // below the fold with no way to scroll to them.
-                setAgentPos({
-                  x: Math.max(12, Math.min(r.left, window.innerWidth - AGENT_PANEL_W - 12)),
-                  y: Math.max(12, Math.min(r.bottom + 8, window.innerHeight - AGENT_PANEL_H - 12)),
-                });
-              }}
-              data-launcher-stay
-              className="flex items-center gap-2 rounded-lg border border-dashed border-border-subtle px-3 py-2 text-sm font-medium text-fg-muted transition-colors hover:border-border-subtle hover:bg-surface-1 hover:text-fg-base"
-            >
-              <Sparkles size={13} strokeWidth={1.9} className="text-fg-subtle" />
-              <span>{aiClis.length > 0 ? 'More agents…' : 'Browse agents…'}</span>
-            </button>
-          </div>
-        </section>
-
-        {/* Utilities + recent files. */}
-        <div className="mt-6 grid grid-cols-1 gap-6 sm:grid-cols-2">
-          <section>
-            <SectionLabel>Shortcuts</SectionLabel>
-            <div className="flex flex-col gap-0.5">
-              <UtilityRow icon={FolderOpen} label="Open folder…" onClick={openFolder} />
-              <UtilityRow icon={ServerIcon} label="Connect SSH" onClick={connectSsh} />
-              {onOpenCommandPalette && (
-                <UtilityRow
-                  icon={CommandIcon}
-                  label="Command palette"
-                  kbd={formatBinding(getBinding('open-command-palette'))}
-                  onClick={onOpenCommandPalette}
-                />
-              )}
+              <button
+                onClick={connectSsh}
+                className="flex h-9 items-center gap-2 rounded-lg px-3 font-display text-sm text-fg-muted transition-colors hover:bg-surface-2 hover:text-fg-base"
+              >
+                <ServerIcon size={15} strokeWidth={1.9} />
+                Open over SSH
+              </button>
             </div>
-          </section>
+            <p className="mt-10 max-w-md font-display text-sm leading-relaxed text-fg-subtle">
+              Arc has two modes, switched at the top right.{' '}
+              <span className="text-fg-muted">Agent</span>: describe a change and review what the
+              agent writes. <span className="text-fg-muted">Editor</span>: files, panes and a
+              terminal.
+            </p>
+          </>
+        ) : (
+          <>
+            <h1 className="font-display text-2xl font-semibold tracking-tight text-fg-base">
+              What do you want to do in {basename(root)}?
+            </h1>
+            <p className="mt-2 text-base text-fg-muted">
+              Describe a change for an agent, or start with a tool.
+            </p>
 
-          {recentFiles.length > 0 && (
-            <section>
-              <SectionLabel>Recent files</SectionLabel>
-              <div className="flex flex-col gap-0.5">
-                {recentFiles.map((path) => {
-                  const name = path.split(/[\\/]/).pop() || path;
-                  const { Icon, color } = fileIcon(name);
-                  return (
-                    <button
-                      key={path}
-                      onClick={() => openFile(path)}
-                      title={path}
-                      className="flex items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm text-fg-base/85 transition-colors hover:bg-surface-2 hover:text-fg-base"
-                    >
-                      <Icon size={13} strokeWidth={1.8} style={{ color }} className="shrink-0" />
-                      <span className="truncate">{name}</span>
-                    </button>
-                  );
-                })}
+            <BuildComposer agentReady={claudeReady} />
+
+            <div className="mt-4 grid grid-cols-1 gap-2 sm:grid-cols-3">
+              <Start
+                icon={TerminalSquare}
+                title="Terminal"
+                kbd={formatBinding(getBinding('new-terminal'))}
+                onClick={() => void newTerminal()}
+              />
+              <Start icon={FileCode2} title="Open a file" onClick={pickAndOpen} />
+              {/* Agent mode needs Claude Code; without it, offer the agent
+                  CLIs that can be launched instead. */}
+              <Start
+                icon={Sparkles}
+                title={claudeReady ? 'Agent mode' : 'Start an agent'}
+                onClick={(e) => (claudeReady ? useVibe.getState().enterVibe() : openAgents(e))}
+              />
+            </div>
+
+            {recentFiles.length > 0 && (
+              <section className="mt-8">
+                <h2 className="mb-1.5 font-display text-sm font-medium text-fg-muted">Recent files</h2>
+                <div className="-mx-2 flex flex-col">
+                  {recentFiles.map((path) => {
+                    const name = path.split(/[\\/]/).pop() || path;
+                    const { Icon, color } = fileIcon(name);
+                    return (
+                      <button
+                        key={path}
+                        onClick={() => openFile(path)}
+                        title={path}
+                        className="flex h-8 items-center gap-2.5 rounded-md px-2 text-left text-sm text-fg-base/90 transition-colors hover:bg-surface-2 hover:text-fg-base"
+                      >
+                        <Icon size={14} strokeWidth={1.8} style={{ color }} className="shrink-0" />
+                        <span className="truncate">{name}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </section>
+            )}
+
+            <section className="mt-8">
+              <h2 className="mb-1.5 font-display text-sm font-medium text-fg-muted">Other tools</h2>
+              <div className="-mx-2 flex flex-wrap gap-x-1 gap-y-0.5">
+                {otherTools.map(({ label, icon: Icon, run }) => (
+                  <button
+                    key={label}
+                    onClick={run}
+                    className="flex h-8 items-center gap-2 rounded-md px-2 text-sm text-fg-muted transition-colors hover:bg-surface-2 hover:text-fg-base"
+                  >
+                    <Icon size={14} strokeWidth={1.9} />
+                    {label}
+                  </button>
+                ))}
+                <button
+                  onClick={openAgents}
+                  data-launcher-stay
+                  className="flex h-8 items-center gap-2 rounded-md px-2 text-sm text-fg-muted transition-colors hover:bg-surface-2 hover:text-fg-base"
+                >
+                  <Bot size={14} strokeWidth={1.9} />
+                  {aiClis.length > 0 ? `Agent CLIs (${aiClis.length} found)` : 'Agent CLIs'}
+                </button>
+                {onOpenCommandPalette && (
+                  <button
+                    onClick={onOpenCommandPalette}
+                    className="flex h-8 items-center gap-2 rounded-md px-2 text-sm text-fg-muted transition-colors hover:bg-surface-2 hover:text-fg-base"
+                  >
+                    <CommandIcon size={14} strokeWidth={1.9} />
+                    All commands
+                  </button>
+                )}
               </div>
             </section>
-          )}
-        </div>
+          </>
+        )}
       </div>
 
       {agentPos &&
@@ -365,8 +358,8 @@ function BuildComposer({ agentReady }: { agentReady: boolean }) {
     setPrompt('');
   };
   return (
-    <section className="mb-6">
-      <div className="rounded-xl border border-border-subtle bg-surface-1 p-3 transition-colors focus-within:border-border-strong">
+    <section className="mt-6">
+      <div className="rounded-xl bg-bg-panel/60 p-3 ring-1 ring-inset ring-edge-1 transition-colors focus-within:ring-accent/40">
         <textarea
           value={prompt}
           onChange={(e) => setPrompt(e.target.value)}
@@ -377,28 +370,28 @@ function BuildComposer({ agentReady }: { agentReady: boolean }) {
             }
           }}
           rows={2}
-          placeholder="Send a prompt to your agent…"
+          placeholder="Describe what you want to build or change"
           aria-label="Prompt for your agent"
           className="w-full resize-none bg-transparent text-sm text-fg-base placeholder:text-fg-subtle focus:outline-none"
         />
         <div className="mt-2 flex items-center gap-2">
-          <span className="text-2xs text-fg-subtle">
+          <span className="text-xs text-fg-subtle">
             {agentReady
-              ? 'Goes to a running agent terminal, or Claude Code'
-              : 'No agent connected: install Claude Code or start an agent CLI. Until then prompts are copied to the clipboard.'}
+              ? 'Enter sends it to a running agent, or to Claude Code'
+              : 'No agent found. Install Claude Code or start an agent CLI; until then, Enter copies the prompt.'}
           </span>
           <div className="flex-1" />
           <button
             onClick={send}
             disabled={!prompt.trim()}
             aria-label="Send prompt"
-            className="flex h-7 w-7 items-center justify-center rounded-full bg-fg-base text-bg-base transition-opacity disabled:opacity-30"
+            className="flex h-8 w-8 items-center justify-center rounded-lg bg-accent text-[#0d1a26] transition-opacity disabled:opacity-30"
           >
             <ArrowUp size={14} strokeWidth={2.4} />
           </button>
         </div>
       </div>
-      <div className="mt-2 flex flex-wrap justify-center gap-1.5">
+      <div className="-ml-2 mt-2 flex flex-wrap gap-1">
         {QUICK_ACTIONS.map(({ label, icon: Icon, command }) => (
           <button
             key={command}
@@ -414,37 +407,32 @@ function BuildComposer({ agentReady }: { agentReady: boolean }) {
   );
 }
 
-function SectionLabel({ icon: Icon, children }: { icon?: LucideIcon; children: React.ReactNode }) {
-  return (
-    <div className="mb-2 flex items-center gap-1.5 font-display text-2xs font-semibold uppercase tracking-[0.14em] text-fg-subtle/80">
-      {Icon && <Icon size={11} strokeWidth={2.2} />}
-      {children}
-    </div>
-  );
-}
-
-function UtilityRow({
+function Start({
   icon: Icon,
-  label,
+  title,
   kbd,
   onClick,
 }: {
   icon: LucideIcon;
-  label: string;
+  title: string;
   kbd?: string;
-  onClick: () => void;
+  onClick: (e: React.MouseEvent<HTMLElement>) => void;
 }) {
   return (
     <button
       onClick={onClick}
-      className={cn(
-        'group flex items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm',
-        'text-fg-base/85 transition-colors hover:bg-surface-2 hover:text-fg-base',
-      )}
+      data-launcher-stay
+      className="flex h-11 items-center gap-2.5 rounded-lg bg-bg-panel/60 px-3 text-left font-display text-sm font-medium text-fg-base transition-colors hover:bg-bg-panel"
     >
-      <Icon size={13} strokeWidth={1.9} className="text-fg-subtle group-hover:text-fg-muted" />
-      <span className="flex-1">{label}</span>
-      {kbd && <kbd className="font-mono text-2xs text-fg-subtle">{kbd}</kbd>}
+      <Icon size={16} strokeWidth={1.8} className="shrink-0 text-fg-muted" />
+      <span className="flex-1 truncate">{title}</span>
+      {kbd && <kbd className="text-2xs font-normal text-fg-subtle">{kbd}</kbd>}
     </button>
   );
+}
+
+/** Last path segment, forward or back slashes. */
+function basename(p: string): string {
+  const parts = p.split(/[\\/]+/).filter(Boolean);
+  return parts[parts.length - 1] ?? p;
 }

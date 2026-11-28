@@ -23,13 +23,14 @@ function seed(tabs: Tab[]) {
   });
 }
 
-describe('vibe mode', () => {
+describe('agent mode', () => {
   beforeEach(() => {
     useVibe.setState({ vibe: false, restore: null, floatingAgentOpen: true });
     if (useFiles.getState().collapsed) useFiles.getState().toggleCollapsed();
+    useFiles.getState().setSidebarView('files');
   });
 
-  it('focuses the Claude tab, maximizes it, hides the sidebar, then restores on exit', () => {
+  it('focuses the Claude tab, maximizes it, shows Changes, then restores on exit', () => {
     seed([
       { id: 'term', title: 'shell', kind: 'terminal', workspaceId: WS },
       { id: 'cc', title: 'Claude Code', kind: 'claude', workspaceId: WS },
@@ -38,12 +39,14 @@ describe('vibe mode', () => {
     useVibe.getState().enterVibe();
     expect(useWorkspace.getState().activeTabId).toBe('cc');
     expect(useWorkspace.getState().maximizedPaneId).toBe(useWorkspace.getState().focusedPaneId);
-    expect(useFiles.getState().collapsed).toBe(true);
+    expect(useFiles.getState().collapsed).toBe(false);
+    expect(useFiles.getState().sidebarView).toBe('git');
     expect(useVibe.getState().floatingAgentOpen).toBe(false);
 
     useVibe.getState().exitVibe();
     expect(useWorkspace.getState().maximizedPaneId).toBeNull();
     expect(useFiles.getState().collapsed).toBe(false);
+    expect(useFiles.getState().sidebarView).toBe('files');
     expect(useVibe.getState().vibe).toBe(false);
     expect(useVibe.getState().floatingAgentOpen).toBe(true);
   });

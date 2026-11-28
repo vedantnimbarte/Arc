@@ -7,28 +7,22 @@ import {
   FolderOpen,
   Settings as SettingsIcon,
   Bot,
-  Columns3,
   LayoutGrid,
-  LayoutPanelLeft,
   Monitor,
   Send,
   Database,
   Github,
   Sparkles,
-  Keyboard,
   ChevronRight,
-  PanelRightOpen,
-  type LucideIcon,
+  Search,
 } from 'lucide-react';
 import { getCurrentWindow } from '@tauri-apps/api/window';
-import { LAYOUT_MODES, layoutModeOf, useWorkspace, type LayoutMode } from '../state/workspace';
-import { LAYOUT_MODE_INFO, LayoutModeGlyph } from './LayoutModeGlyph';
+import { useWorkspace } from '../state/workspace';
 import { useFiles } from '../state/files';
 import { useVibe } from '../state/vibe';
 import { useClaudeCode } from '../state/claudeCode';
 import { runCommand } from '../state/commands';
 import { Tooltip } from './Tooltip';
-import { AGENT_PANEL_H, AGENT_PANEL_W } from './agentPanelSize';
 import { NotificationCenter } from './NotificationCenter';
 import { WorkspaceSwitcher } from './WorkspaceSwitcher';
 import { formatBinding, getBinding } from '../state/shortcuts';
@@ -40,12 +34,6 @@ const AgentLauncher = lazy(() =>
 );
 
 const isTauri = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
-
-/** Last path segment of a cwd, forward or back slashes. */
-function basename(p: string): string {
-  const parts = p.split(/[\\/]+/).filter(Boolean);
-  return parts[parts.length - 1] ?? p;
-}
 
 export function TabBar() {
   const {
@@ -60,9 +48,6 @@ export function TabBar() {
     openClaudeCode,
   } = useWorkspace();
   const claudeReady = useClaudeCode((s) => s.status === 'ready');
-  const activeTab = useWorkspace((s) => s.tabs.find((t) => t.id === s.activeTabId) ?? null);
-  const layoutMode = useWorkspace((s) => layoutModeOf(s.workspaces, s.activeWorkspaceId));
-  const setLayoutMode = useWorkspace((s) => s.setLayoutMode);
   const root = useFiles((s) => s.root);
 
   const [menuOpen, setMenuOpen] = useState(false);
@@ -189,61 +174,44 @@ export function TabBar() {
         every tooltip here is painted over the moment it hangs past h-9. */}
       <div
         data-tauri-drag-region="deep"
-        className="material-toolbar relative z-20 flex h-9 shrink-0 items-center gap-2 pl-3"
+        className="material-toolbar relative z-20 flex h-11 shrink-0 items-center gap-1.5 pl-3"
       >
-        {/* Focused pane's title, centered. Absolutely positioned + click-through
-          so it never shifts the side clusters or eats the window-drag region. */}
-        {activeTab && (
-          <div className="pointer-events-none absolute inset-y-0 left-1/2 flex max-w-[44%] -translate-x-1/2 items-center gap-1.5 px-3">
-            <span className="truncate font-display text-sm font-medium tracking-tight text-fg-base/85">
-              {activeTab.title}
-            </span>
-            {activeTab.cwd && (
-              <span className="shrink truncate font-display text-xs text-fg-subtle">
-                · {basename(activeTab.cwd)}
-              </span>
-            )}
-          </div>
-        )}
-
         {/* Workspace dropdown — far left, the bar's anchor. */}
         <WorkspaceSwitcher />
 
-        {/* AI CLI launcher + keyboard shortcuts — relocated here from the old
-          bottom status bar, sitting between the workspace switcher and the +. */}
-        <AiCliMenuButton clis={aiClis} />
-        <Tooltip label="Keyboard shortcuts" kbd={formatBinding(getBinding('open-shortcuts'))}>
-          <button
-            onClick={() => void runCommand('shortcut.open-shortcuts')}
-            className="group flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-fg-muted transition-all duration-200 ease-apple hover:bg-surface-2 hover:text-fg-base active:bg-surface-3"
-            aria-label="Keyboard shortcuts"
-          >
-            <Keyboard size={14} strokeWidth={1.9} />
-          </button>
-        </Tooltip>
+        {/* Everything you can open lives behind New; the palette reaches the
+            rest, so the bar itself stays short. */}
+        <button
+          ref={plusRef}
+          onClick={() => setMenuOpen((o) => !o)}
+          className="flex h-7 shrink-0 items-center gap-1.5 rounded-md px-2.5 font-display text-sm text-fg-muted transition-colors duration-150 hover:bg-surface-2 hover:text-fg-base active:bg-surface-3"
+          aria-expanded={menuOpen}
+          aria-haspopup="menu"
+        >
+          <Plus size={14} strokeWidth={2} />
+          New
+        </button>
 
-        {/* The workspace renders every tab as a grid cell (no tab strip); the +
-          adds one. Labelled "tab" everywhere the user can see it — "cell" is
-          internal vocabulary. The flex-1 keeps it left-aligned and preserves
-          the window-drag region. */}
-        <div className="flex min-w-0 flex-1 items-center gap-1.5 pl-1">
-          <Tooltip label="New tab">
-            <button
-              ref={plusRef}
-              onClick={() => setMenuOpen((o) => !o)}
-              className="group ml-0.5 flex h-[28px] w-[28px] shrink-0 items-center justify-center rounded-[7px] text-fg-subtle transition-all duration-200 ease-apple hover:bg-surface-2 hover:text-fg-base active:bg-surface-3"
-              aria-label="New tab"
-              aria-expanded={menuOpen}
-              aria-haspopup="menu"
-            >
-              <Plus
-                size={13}
-                strokeWidth={2}
-                className="transition-transform duration-200 ease-apple group-active:scale-90"
-              />
-            </button>
-          </Tooltip>
+        {/* One place to start anything: files, commands and agents all go
+            through the command palette. Centred over the whole window. */}
+        <div className="pointer-events-none absolute inset-y-0 left-1/2 flex w-[min(440px,36vw)] -translate-x-1/2 items-center">
+          <button
+            onClick={() => void runCommand('shortcut.open-command-palette')}
+            className="pointer-events-auto flex h-7 w-full items-center gap-2 rounded-lg bg-bg-base px-2.5 text-left font-display text-sm text-fg-subtle ring-1 ring-inset ring-edge-1 transition-colors duration-150 hover:text-fg-muted hover:ring-edge-2"
+          >
+            <Search size={14} strokeWidth={1.9} className="shrink-0" />
+            <span className="min-w-0 flex-1 truncate">
+              Search files, run a command, or ask an agent
+            </span>
+            <kbd className="shrink-0 rounded border border-edge-2 px-1.5 font-display text-2xs text-fg-subtle">
+              {formatBinding(getBinding('open-command-palette'))}
+            </kbd>
+          </button>
         </div>
+
+        <div className="min-w-0 flex-1" />
+
+        <ModeSwitch />
 
         <NotificationCenter />
 
@@ -253,16 +221,9 @@ export function TabBar() {
             className="group flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-fg-muted transition-all duration-200 ease-apple hover:bg-surface-2 hover:text-fg-base active:bg-surface-3"
             aria-label="Open settings"
           >
-            <SettingsIcon size={14} strokeWidth={1.9} />
+            <SettingsIcon size={15} strokeWidth={1.9} />
           </button>
         </Tooltip>
-
-        <VibeToggle />
-
-        {/* Layout mode — tiles, tabs or floating. Per-workspace, so it reflects whichever
-          workspace is active. Sits in the right cluster, inboard of the
-          window controls. */}
-        <LayoutModePicker mode={layoutMode} onSelect={setLayoutMode} />
 
         <div className="ml-0.5 pr-2" />
 
@@ -419,297 +380,42 @@ export function TabBar() {
   );
 }
 
-const LAYOUT_ICONS: Record<LayoutMode, React.ReactNode> = {
-  tiling: <LayoutGrid size={14} strokeWidth={1.9} />,
-  standard: <Columns3 size={14} strokeWidth={1.9} />,
-  // Mirrored so the small stacked panels sit on the left, like the deck does.
-  floating: <LayoutPanelLeft size={14} strokeWidth={1.9} className="-scale-x-100" />,
-};
-
-const PICKER_W = 316;
-
-/**
- * Layout mode for the active workspace: one icon showing the current mode,
- * opening a popover of three picture cards. Portaled to body so the toolbar's
- * backdrop-filter doesn't trap it.
- */
-/** Vibe (agent fills the window) vs IDE (your normal layout), plus the
- *  floating agent card, which only makes sense outside Vibe. */
-function VibeToggle() {
-  const vibe = useVibe((s) => s.vibe);
-  const floatingOpen = useVibe((s) => s.floatingAgentOpen);
+/** Agent mode (the agent fills the window, its changes beside it) vs Editor
+ *  mode (files, panes and terminal). The floating agent card and the layout
+ *  picker live in the command palette. */
+function ModeSwitch() {
+  const agent = useVibe((s) => s.vibe);
   const segment = (active: boolean) =>
     cn(
-      'rounded px-2 py-0.5 font-display text-[11px] font-medium tracking-tight',
-      'transition-all duration-150 ease-apple',
-      active ? 'bg-surface-3 text-fg-base' : 'text-fg-muted hover:text-fg-base',
+      'rounded-md px-2.5 py-1 font-display text-xs font-medium',
+      'transition-colors duration-150 ease-apple',
+      active ? 'bg-bg-panel text-fg-base shadow-control' : 'text-fg-muted hover:text-fg-base',
     );
   return (
-    <div className="flex items-center gap-1">
-      {!vibe && (
-        <Tooltip label={floatingOpen ? 'Hide floating agent' : 'Show floating agent'} align="end">
-          <button
-            onClick={() => useVibe.getState().toggleFloatingAgent()}
-            aria-pressed={floatingOpen}
-            aria-label="Toggle floating agent"
-            className={cn(
-              'flex h-8 w-8 shrink-0 items-center justify-center rounded-md transition-all duration-200 ease-apple',
-              floatingOpen
-                ? 'bg-surface-3 text-fg-base'
-                : 'text-fg-muted hover:bg-surface-2 hover:text-fg-base',
-            )}
-          >
-            <PanelRightOpen size={14} strokeWidth={1.9} />
-          </button>
-        </Tooltip>
-      )}
-      <div
-        role="group"
-        aria-label="Workspace mode"
-        className="flex items-center gap-0.5 rounded-md bg-surface-1 p-0.5 ring-1 ring-inset ring-border-subtle"
-      >
+    <div
+      role="group"
+      aria-label="Mode"
+      className="mr-1 flex items-center gap-0.5 rounded-lg bg-bg-base p-0.5"
+    >
+      <Tooltip label="Agent: describe a change, an agent writes it, you review it" align="end">
         <button
           onClick={() => useVibe.getState().enterVibe()}
-          aria-pressed={vibe}
-          className={segment(vibe)}
+          aria-pressed={agent}
+          className={segment(agent)}
         >
-          Vibe
-        </button>
-        <button
-          onClick={() => useVibe.getState().exitVibe()}
-          aria-pressed={!vibe}
-          className={segment(!vibe)}
-        >
-          IDE
-        </button>
-      </div>
-    </div>
-  );
-}
-
-function LayoutModePicker({
-  mode,
-  onSelect,
-}: {
-  mode: LayoutMode;
-  onSelect: (mode: LayoutMode) => void;
-}) {
-  const [pos, setPos] = useState<{ top: number; left: number } | null>(null);
-  const btnRef = useRef<HTMLButtonElement>(null);
-  const menuRef = useRef<HTMLDivElement>(null);
-  const open = pos !== null;
-  const kbd = formatBinding(getBinding('toggle-layout-mode'));
-
-  const close = (refocus: boolean) => {
-    setPos(null);
-    if (refocus) btnRef.current?.focus();
-  };
-
-  // Land focus on the current mode so arrows start from where you are.
-  useLayoutEffect(() => {
-    if (open) menuRef.current?.querySelector<HTMLElement>('[aria-checked="true"]')?.focus();
-  }, [open]);
-
-  useEffect(() => {
-    if (!open) return;
-    const onDown = (e: MouseEvent) => {
-      const t = e.target as Node | null;
-      if (t && (menuRef.current?.contains(t) || btnRef.current?.contains(t))) return;
-      close(false);
-    };
-    const onResize = () => close(false);
-    window.addEventListener('mousedown', onDown);
-    window.addEventListener('resize', onResize);
-    return () => {
-      window.removeEventListener('mousedown', onDown);
-      window.removeEventListener('resize', onResize);
-    };
-  }, [open]);
-
-  const onMenuKey = (e: React.KeyboardEvent) => {
-    if (e.key === 'Escape' || e.key === 'Tab') {
-      e.preventDefault();
-      close(true);
-      return;
-    }
-    const step = { ArrowRight: 1, ArrowDown: 1, ArrowLeft: -1, ArrowUp: -1 }[e.key];
-    if (!step) return;
-    e.preventDefault();
-    const items = Array.from(
-      menuRef.current?.querySelectorAll<HTMLElement>('[role="menuitemradio"]') ?? [],
-    );
-    const i = items.indexOf(document.activeElement as HTMLElement);
-    items[(i + step + items.length) % items.length]?.focus();
-  };
-
-  return (
-    <>
-      <Tooltip align="end" label={`Layout: ${LAYOUT_MODE_INFO[mode].label}`} kbd={kbd}>
-        <button
-          ref={btnRef}
-          onClick={() => {
-            if (open) return close(false);
-            const r = btnRef.current!.getBoundingClientRect();
-            setPos({ top: r.bottom + 6, left: Math.max(8, r.right - PICKER_W) });
-          }}
-          aria-label={`Layout: ${LAYOUT_MODE_INFO[mode].label}`}
-          aria-haspopup="menu"
-          aria-expanded={open}
-          className={cn(
-            'flex h-8 w-8 shrink-0 items-center justify-center rounded-md transition-colors duration-200 ease-apple',
-            open
-              ? 'bg-surface-3 text-fg-base'
-              : 'text-fg-muted hover:bg-surface-2 hover:text-fg-base',
-          )}
-        >
-          {LAYOUT_ICONS[mode]}
+          Agent
         </button>
       </Tooltip>
-
-      {open &&
-        createPortal(
-          <div
-            ref={menuRef}
-            role="menu"
-            aria-label="Layout"
-            onKeyDown={onMenuKey}
-            style={{ position: 'fixed', top: pos.top, left: pos.left, width: PICKER_W }}
-            className="material-sheet z-50 grid origin-top-right animate-popover-in grid-cols-3 gap-1.5 rounded-lg p-1.5 shadow-sheet ring-1 ring-edge-2 motion-reduce:animate-none"
-          >
-            {LAYOUT_MODES.map((m) => {
-              const active = m === mode;
-              return (
-                <button
-                  key={m}
-                  role="menuitemradio"
-                  aria-checked={active}
-                  title={LAYOUT_MODE_INFO[m].hint}
-                  onClick={() => {
-                    onSelect(m);
-                    close(true);
-                  }}
-                  className={cn(
-                    'flex flex-col items-center gap-1.5 rounded-md px-1 pb-2 pt-2.5 outline-none transition-colors duration-150',
-                    'focus-visible:ring-2 focus-visible:ring-accent/60',
-                    active
-                      ? 'bg-accent/15 text-accent ring-1 ring-inset ring-accent/30'
-                      : 'text-fg-muted hover:bg-surface-2 hover:text-fg-base',
-                  )}
-                >
-                  <LayoutModeGlyph mode={m} className="h-[38px] w-[62px]" />
-                  <span className="font-display text-xs font-medium tracking-tight">
-                    {LAYOUT_MODE_INFO[m].label}
-                  </span>
-                </button>
-              );
-            })}
-          </div>,
-          document.body,
-        )}
-    </>
-  );
-}
-
-/**
- * Toolbar AI CLI launcher — an icon that opens a downward dropdown of the
- * detected coding CLIs (Claude Code / Codex / OpenCode / …). Relocated from
- * the old bottom status bar. Portaled to body so the toolbar's backdrop-filter
- * doesn't trap the menu.
- */
-function AiCliMenuButton({ clis }: { clis: AiCliInfo[] }) {
-  const [open, setOpen] = useState(false);
-  const [pos, setPos] = useState<{ top: number; left: number } | null>(null);
-  const btnRef = useRef<HTMLButtonElement>(null);
-  const menuRef = useRef<HTMLDivElement>(null);
-
-  useLayoutEffect(() => {
-    if (!open) {
-      setPos(null);
-      return;
-    }
-    const update = () => {
-      const r = btnRef.current?.getBoundingClientRect();
-      if (!r) return;
-      // The panel is far taller than the old menu, so a short window would push
-      // its command field and Launch button off the bottom with nothing to
-      // scroll. Clamp both axes; `max-h` on the sheet is the backstop.
-      setPos({
-        top: Math.max(8, Math.min(r.bottom + 4, window.innerHeight - AGENT_PANEL_H - 8)),
-        left: Math.max(8, Math.min(r.left, window.innerWidth - AGENT_PANEL_W - 8)),
-      });
-    };
-    update();
-    window.addEventListener('resize', update);
-    window.addEventListener('scroll', update, true);
-    return () => {
-      window.removeEventListener('resize', update);
-      window.removeEventListener('scroll', update, true);
-    };
-  }, [open]);
-
-  useEffect(() => {
-    if (!open) return;
-    const onDown = (e: MouseEvent) => {
-      const t = e.target as Node | null;
-      if (!t) return;
-      if (menuRef.current?.contains(t) || btnRef.current?.contains(t)) return;
-      setOpen(false);
-    };
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setOpen(false);
-    };
-    window.addEventListener('mousedown', onDown);
-    window.addEventListener('keydown', onKey);
-    return () => {
-      window.removeEventListener('mousedown', onDown);
-      window.removeEventListener('keydown', onKey);
-    };
-  }, [open]);
-
-  return (
-    <>
-      <button
-        ref={btnRef}
-        onClick={() => setOpen((o) => !o)}
-        aria-label="Launch AI CLI"
-        aria-expanded={open}
-        aria-haspopup="menu"
-        title={
-          clis.length > 0
-            ? `Launch AI CLI (${clis.length} installed)`
-            : 'Launch AI CLI (none detected on PATH)'
-        }
-        className={cn(
-          'group flex h-8 w-8 shrink-0 items-center justify-center rounded-md transition-all duration-200 ease-apple',
-          open
-            ? 'bg-surface-3 text-fg-base'
-            : clis.length === 0
-              ? 'text-fg-subtle/60 hover:bg-surface-2 hover:text-fg-muted active:bg-surface-3'
-              : 'text-fg-muted hover:bg-surface-2 hover:text-fg-base active:bg-surface-3',
-        )}
-      >
-        <Bot size={14} strokeWidth={1.9} />
-      </button>
-
-      {/* The same panel the new-tab menu's Agents row opens: this button used
-          to list the detected CLIs and launch one with no options, which could
-          not say what else ARC supports or start more than one. */}
-      {open &&
-        pos &&
-        typeof document !== 'undefined' &&
-        createPortal(
-          <div
-            ref={menuRef}
-            style={{ position: 'fixed', top: pos.top, left: pos.left }}
-            className="material-sheet z-50 max-h-[calc(100vh-16px)] animate-popover-in overflow-y-auto rounded-lg shadow-sheet ring-1 ring-edge-2"
-          >
-            <Suspense fallback={null}>
-              <AgentLauncher detected={clis} onDone={() => setOpen(false)} />
-            </Suspense>
-          </div>,
-          document.body,
-        )}
-    </>
+      <Tooltip label="Editor: files, editor, terminal and git" align="end">
+        <button
+          onClick={() => useVibe.getState().exitVibe()}
+          aria-pressed={!agent}
+          className={segment(!agent)}
+        >
+          Editor
+        </button>
+      </Tooltip>
+    </div>
   );
 }
 

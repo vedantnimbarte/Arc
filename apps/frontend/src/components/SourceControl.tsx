@@ -2486,7 +2486,7 @@ function ChangeContextMenu({
       style={{ left: pos.x, top: pos.y }}
       className={cn(
         'fixed z-[9999] min-w-[212px] rounded-xl p-1.5',
-        'border border-border-strong bg-bg-panel/95 backdrop-blur-thick backdrop-saturate-180',
+        'border border-border-strong bg-bg-panel backdrop-blur-thick backdrop-saturate-180',
         'shadow-sheet animate-fade-in',
       )}
       role="menu"
@@ -2625,7 +2625,7 @@ function DiffViewer({
       <div
         className={cn(
           'flex h-full max-h-[82vh] w-full max-w-[1000px] flex-col overflow-hidden rounded-window',
-          'border border-border-strong bg-bg-panel/95 backdrop-blur-thick',
+          'border border-border-strong bg-bg-panel backdrop-blur-thick',
           'shadow-sheet animate-sheet-in',
         )}
       >
@@ -2866,7 +2866,7 @@ function DiscardDialog({
       <div
         className={cn(
           'w-[420px] max-w-full overflow-hidden rounded-window',
-          'border border-border-strong bg-bg-panel/95 backdrop-blur-thick',
+          'border border-border-strong bg-bg-panel backdrop-blur-thick',
           'shadow-sheet animate-sheet-in',
         )}
       >

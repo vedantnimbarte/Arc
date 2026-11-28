@@ -629,10 +629,10 @@ export default function App() {
     const extras: CommandAction[] = [
       {
         id: 'view.toggle-vibe',
-        title: 'Toggle Vibe Mode',
-        description: 'Agent fills the window; run again to return to the IDE layout',
+        title: 'Switch Agent / Editor Mode',
+        description: 'Agent mode: the agent fills the window with its changes beside it. Editor mode: your files, panes and terminal.',
         group: 'View',
-        keywords: ['vibe', 'ide', 'agent', 'focus', 'claude', 'fullscreen', 'zen'],
+        keywords: ['agent', 'editor', 'mode', 'vibe', 'ide', 'focus', 'claude', 'review'],
         icon: Sparkles,
         run: () => useVibe.getState().toggleVibe(),
       },
@@ -917,8 +917,6 @@ export default function App() {
 
   return (
     <div className="shell-root relative flex h-full w-full flex-col overflow-hidden text-fg-base">
-      <div className="desktop-wash" aria-hidden />
-
       {/* The title bar spans the full width — over the sidebar *and* the
           panes — so the window controls sit flush against the right edge. */}
       <div className="relative z-10 flex h-full w-full min-h-0 min-w-0 flex-col">
@@ -929,7 +927,7 @@ export default function App() {
         <div className="flex min-h-0 min-w-0 flex-1">
           <aside
             ref={railAsideRef}
-            className="shell-rail material-sidebar shrink-0 border-r border-border-hairline transition-[width] duration-200 ease-apple"
+            className="shell-rail shrink-0 transition-[width] duration-200 ease-apple"
             style={{ width: railLabels ? SIDEBAR_RAIL_WIDTH_LABELED : SIDEBAR_RAIL_WIDTH }}
           >
             <SidebarRail />
@@ -941,7 +939,7 @@ export default function App() {
             aria-hidden={sidebarCollapsed}
           >
             <div
-              className="shell-sidebar-panel material-sidebar h-full border-r border-border-hairline"
+              className="shell-sidebar-panel h-full"
               style={{ width: sidebarWidth }}
             >
               <div className="shell-sidebar-card h-full">
@@ -958,9 +956,11 @@ export default function App() {
             />
           )}
 
-          <div className="relative flex min-h-0 min-w-0 flex-1 px-3 pb-2 pt-1">
-            <div className="flex min-h-0 w-full overflow-hidden rounded-window shadow-panel ring-1 ring-border-subtle">
-              <main className="relative min-w-0 flex-1 overflow-hidden p-1.5">
+          {/* Panes sit straight on the ground, separated by the tile gap —
+              tone does the framing, so there's no border around the stage. */}
+          <div className="relative flex min-h-0 min-w-0 flex-1 pb-2 pl-1 pr-2 pt-1">
+            <div className="flex min-h-0 w-full overflow-hidden">
+              <main className="relative min-w-0 flex-1 overflow-hidden">
                 {/* Split-pane tree — each leaf hosts a tab and can be split
                       right/down into a new pane, with draggable dividers. */}
                 <PaneTreeView

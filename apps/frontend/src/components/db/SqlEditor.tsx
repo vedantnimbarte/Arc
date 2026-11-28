@@ -7,7 +7,7 @@ import { MySQL, PostgreSQL, SQLite, sql, type SQLNamespace } from '@codemirror/l
 import type { DbBackend } from '../../lib/tauri';
 import { catppuccinHighlight } from '../../lib/codeLanguages';
 import { MOCHA } from '../../lib/fileIcons';
-import { getFont } from '../../themes';
+import { CODE_FONT_STACK } from '../../themes';
 import { useSettings } from '../../state/settings';
 
 export interface SqlEditorHandle {
@@ -110,7 +110,6 @@ export const SqlEditor = forwardRef<SqlEditorHandle, Props>(function SqlEditor(
   const onChangeRef = useRef(onChange);
   onRunRef.current = onRun;
   onChangeRef.current = onChange;
-  const fontId = useSettings((s) => s.fontId);
   const fontSize = useSettings((s) => s.fontSize);
 
   const selectionOrAll = (state: EditorState) => {
@@ -149,7 +148,7 @@ export const SqlEditor = forwardRef<SqlEditorHandle, Props>(function SqlEditor(
           EditorView.lineWrapping,
           syntaxHighlighting(catppuccinHighlight),
           theme,
-          fontC.current.of(fontTheme(getFont(fontId).stack, fontSize)),
+          fontC.current.of(fontTheme(CODE_FONT_STACK, fontSize)),
           langC.current.of(language(backend, completion)),
           editableC.current.of([EditorView.editable.of(!disabled), EditorState.readOnly.of(disabled)]),
           placeholderC.current.of(placeholderExt(placeholder)),
@@ -189,8 +188,8 @@ export const SqlEditor = forwardRef<SqlEditorHandle, Props>(function SqlEditor(
   }, [disabled, placeholder]);
 
   useEffect(() => {
-    view.current?.dispatch({ effects: fontC.current.reconfigure(fontTheme(getFont(fontId).stack, fontSize)) });
-  }, [fontId, fontSize]);
+    view.current?.dispatch({ effects: fontC.current.reconfigure(fontTheme(CODE_FONT_STACK, fontSize)) });
+  }, [fontSize]);
 
   return <div ref={host} className="h-full min-h-0" />;
 });

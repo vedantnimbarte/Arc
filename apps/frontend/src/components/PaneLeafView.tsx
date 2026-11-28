@@ -130,12 +130,12 @@ export function PaneLeafView({ paneId, hostsRef, stageRef, header }: Props) {
   return (
     <div
       ref={rootRef}
-      className="flex h-full min-h-0 w-full animate-pane-in flex-col overflow-hidden rounded-lg glass-pane ring-1 ring-border-subtle"
+      className="group/pane flex h-full min-h-0 w-full animate-pane-in flex-col overflow-hidden rounded-[10px] glass-pane"
     >
       {header}
       <div
         ref={contentRef}
-        className="dot-grid relative min-h-0 flex-1 overflow-hidden"
+        className="relative min-h-0 flex-1 overflow-hidden"
         onDragEnter={(e) => {
           if (!hasTabDrag(e)) return;
           enterCount.current += 1;

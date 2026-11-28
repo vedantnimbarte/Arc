@@ -12,7 +12,7 @@ interface SshErrorCardProps {
  *  this stays mounted until the user retries or closes the tab. */
 export function SshErrorCard({ hostName, message, onRetry, onClose }: SshErrorCardProps) {
   return (
-    <div className="absolute inset-0 z-10 flex items-center justify-center bg-bg-base/95 backdrop-blur-sm animate-fade-in">
+    <div className="absolute inset-0 z-10 flex items-center justify-center bg-bg-base backdrop-blur-sm animate-fade-in">
       <div className="flex max-w-[420px] flex-col items-center gap-3 rounded-window border border-status-err/30 bg-bg-panel/80 px-6 py-5 shadow-sheet">
         <AlertTriangle className="h-6 w-6 text-status-err" strokeWidth={1.4} />
         <div className="font-display text-lg text-fg-base">{hostName}</div>

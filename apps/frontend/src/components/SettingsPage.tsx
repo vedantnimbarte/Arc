@@ -13,8 +13,6 @@ import {
   Plus,
   X,
   Info,
-  Sun,
-  Moon,
   Monitor,
   Search,
   RotateCcw,
@@ -69,7 +67,6 @@ import { copyText } from '../lib/clipboard';
 import { toast, toastError } from '../state/toast';
 import { isValidPattern, type HighlightRule } from '../lib/highlightRules';
 import { ANTHROPIC_KEY_SECRET } from '../lib/ai';
-import { FontPicker } from './FontPicker';
 import { useFiles, type SidebarView } from '../state/files';
 import { LAYOUT_MODES, type LayoutMode } from '../state/workspace';
 import { LAYOUT_MODE_INFO, LayoutModeGlyph } from './LayoutModeGlyph';
@@ -87,18 +84,7 @@ import {
   type ShellInfo,
 } from '../lib/tauri';
 import { cn } from '../lib/cn';
-import {
-  listThemes,
-  MAX_FONT_SIZE,
-  MIN_FONT_SIZE,
-  type Appearance,
-  type ThemeDef,
-} from '../themes';
-import {
-  installThemeFromFile,
-  installThemeFromUrl,
-  loadInstalledThemes,
-} from '../lib/themeMarketplace';
+import { MAX_FONT_SIZE, MIN_FONT_SIZE } from '../themes';
 import {
   ACTION_META,
   ACTION_ORDER,
@@ -168,9 +154,6 @@ const NAV: { label?: string; items: { id: Pane; icon: typeof Cpu; label: string 
 export function SettingsPage() {
   const {
     defaultShell,
-    appearance,
-    themeId,
-    fontId,
     fontSize,
     launchAtLogin,
     restoreWindowState,
@@ -181,13 +164,10 @@ export function SettingsPage() {
     notifyThresholdSecs,
     notifySound,
     setDefaultShell,
-    setAppearance,
     defaultLayoutMode,
     setDefaultLayoutMode,
     tileGap,
     setTileGap,
-    setThemeId,
-    setFontId,
     setFontSize,
     setLaunchAtLogin,
     setRestoreWindowState,
@@ -291,16 +271,7 @@ export function SettingsPage() {
               rather than stretching the line length past readable. */}
           <div className="mx-auto w-full max-w-[660px] px-10 py-9">
             {pane === 'appearance' && (
-              <AppearancePane
-                appearance={appearance}
-                themeId={themeId}
-                onThemeChange={setThemeId}
-                fontId={fontId}
-                fontSize={fontSize}
-                onAppearanceChange={setAppearance}
-                onFontChange={setFontId}
-                onFontSizeChange={setFontSize}
-              />
+              <AppearancePane fontSize={fontSize} onFontSizeChange={setFontSize} />
             )}
             {pane === 'shortcuts' && <ShortcutsPane />}
             {pane === 'terminal' && (
@@ -353,253 +324,51 @@ export function SettingsPage() {
 
 // ─── Appearance ────────────────────────────────────────────
 
-/**
- * Everything about how ARC looks, in one pane. Colour mode, theme and type
- * used to be split across two rail rows, which made picking a look a two-stop
- * trip for settings that are read together.
- */
+/** Arc has one look; the only visual setting left is how big code reads. */
 function AppearancePane({
-  appearance,
-  themeId,
-  onThemeChange,
-  fontId,
   fontSize,
-  onAppearanceChange,
-  onFontChange,
   onFontSizeChange,
 }: {
-  appearance: Appearance;
-  themeId: string | null;
-  onThemeChange: (id: string | null) => void;
-  fontId: string;
   fontSize: number;
-  onAppearanceChange: (a: Appearance) => void;
-  onFontChange: (id: string) => void;
   onFontSizeChange: (size: number) => void;
 }) {
   return (
     <>
       <PaneHeader
         title="Appearance"
-        blurb="Colour, theme and type. Changes apply to every ARC window as you make them."
+        blurb="Text size for the terminal and editors. Changes apply to every ARC window as you make them."
       />
-
-      <Group title="Colour mode" hint="System follows your OS setting and switches with it.">
-        <div className="grid grid-cols-3 gap-3">
-          <AppearanceCard
-            label="Light"
-            icon={Sun}
-            active={appearance === 'light'}
-            onPick={() => onAppearanceChange('light')}
-            preview="light"
-          />
-          <AppearanceCard
-            label="Dark"
-            icon={Moon}
-            active={appearance === 'dark'}
-            onPick={() => onAppearanceChange('dark')}
-            preview="dark"
-          />
-          <AppearanceCard
-            label="System"
-            icon={Monitor}
-            active={appearance === 'system'}
-            onPick={() => onAppearanceChange('system')}
-            preview="system"
-          />
-        </div>
-      </Group>
-
-      <ThemeGroup themeId={themeId} onThemeChange={onThemeChange} />
-
-      <Group
-        title="Type"
-        hint="One family across the terminal, the editor and the interface. Size applies everywhere too."
-      >
-        <div className="space-y-3">
-          <FontPicker value={fontId} onChange={onFontChange} />
-          <Rows>
-            <Row
-              label="Font size"
-              control={
-                <div className="inline-flex items-stretch overflow-hidden rounded-md border border-edge-2">
-                  <button
-                    onClick={() => onFontSizeChange(fontSize - 1)}
-                    disabled={fontSize <= MIN_FONT_SIZE}
-                    className="flex h-8 w-8 items-center justify-center text-fg-muted transition-colors hover:bg-surface-2 hover:text-fg-base disabled:opacity-30 disabled:hover:bg-transparent"
-                    aria-label="Decrease font size"
-                  >
-                    <Minus size={12} />
-                  </button>
-                  <div className="flex h-8 w-14 items-center justify-center border-x border-edge-2 font-mono text-sm text-fg-base">
-                    {fontSize}px
-                  </div>
-                  <button
-                    onClick={() => onFontSizeChange(fontSize + 1)}
-                    disabled={fontSize >= MAX_FONT_SIZE}
-                    className="flex h-8 w-8 items-center justify-center text-fg-muted transition-colors hover:bg-surface-2 hover:text-fg-base disabled:opacity-30 disabled:hover:bg-transparent"
-                    aria-label="Increase font size"
-                  >
-                    <Plus size={12} />
-                  </button>
+      <Group title="Code text">
+        <Rows>
+          <Row
+            label="Font size"
+            control={
+              <div className="inline-flex items-stretch overflow-hidden rounded-md border border-edge-2">
+                <button
+                  onClick={() => onFontSizeChange(fontSize - 1)}
+                  disabled={fontSize <= MIN_FONT_SIZE}
+                  className="flex h-8 w-8 items-center justify-center text-fg-muted transition-colors hover:bg-surface-2 hover:text-fg-base disabled:opacity-30 disabled:hover:bg-transparent"
+                  aria-label="Decrease font size"
+                >
+                  <Minus size={12} />
+                </button>
+                <div className="flex h-8 w-14 items-center justify-center border-x border-edge-2 text-sm tabular-nums text-fg-base">
+                  {fontSize}px
                 </div>
-              }
-            />
-          </Rows>
-        </div>
+                <button
+                  onClick={() => onFontSizeChange(fontSize + 1)}
+                  disabled={fontSize >= MAX_FONT_SIZE}
+                  className="flex h-8 w-8 items-center justify-center text-fg-muted transition-colors hover:bg-surface-2 hover:text-fg-base disabled:opacity-30 disabled:hover:bg-transparent"
+                  aria-label="Increase font size"
+                >
+                  <Plus size={12} />
+                </button>
+              </div>
+            }
+          />
+        </Rows>
       </Group>
     </>
-  );
-}
-
-// ─── Themes ───────────────────────────────────────────────
-
-/**
- * Theme picker plus the two install paths, folded into the Appearance pane.
- * Installing is the rare half, so it sits behind a disclosure - the common
- * case (pick one of the themes I already have) stays one glance.
- */
-function ThemeGroup({
-  themeId,
-  onThemeChange,
-}: {
-  themeId: string | null;
-  onThemeChange: (id: string | null) => void;
-}) {
-  const [themes, setThemes] = useState<ThemeDef[]>(() => listThemes());
-  const [url, setUrl] = useState('');
-  const [installing, setInstalling] = useState(false);
-  const [msg, setMsg] = useState<{ kind: 'ok' | 'err'; text: string } | null>(null);
-  const [addOpen, setAddOpen] = useState(false);
-
-  const reload = () => setThemes(listThemes());
-
-  // The Settings window is a separate JS context, so register the user's
-  // installed themes here too (the main window does this on boot).
-  useEffect(() => {
-    void loadInstalledThemes()
-      .then(reload)
-      .catch(() => {});
-  }, []);
-
-  // Both install paths land here so success and failure read the same way
-  // whichever button you pressed. A null result means the file picker was
-  // cancelled - nothing happened, so nothing is reported.
-  const applyResult = (res: Awaited<ReturnType<typeof installThemeFromUrl>> | null) => {
-    setInstalling(false);
-    if (!res) return;
-    if (res.ok) {
-      reload();
-      onThemeChange(res.theme.id);
-      setUrl('');
-      setMsg({ kind: 'ok', text: `Installed “${res.theme.name}”.` });
-    } else {
-      setMsg({ kind: 'err', text: res.error });
-    }
-  };
-
-  const onInstall = async () => {
-    const trimmed = url.trim();
-    if (!trimmed || installing) return;
-    setInstalling(true);
-    setMsg(null);
-    applyResult(await installThemeFromUrl(trimmed));
-  };
-
-  const onImportFile = async () => {
-    if (installing) return;
-    setInstalling(true);
-    setMsg(null);
-    applyResult(await installThemeFromFile());
-  };
-
-  return (
-    <Group
-      title="Theme"
-      hint="A specific palette, or the default dark/light pair that follows the colour mode above."
-      action={
-        <button
-          onClick={() => setAddOpen((v) => !v)}
-          aria-expanded={addOpen}
-          className="rounded-md px-2 py-1 font-display text-xs text-fg-muted transition-colors hover:bg-surface-2 hover:text-fg-base"
-        >
-          {addOpen ? 'Done' : 'Add a theme'}
-        </button>
-      }
-    >
-      <div className="grid grid-cols-2 gap-2.5">
-        <ThemeCard
-          label="Default"
-          description="Follow the colour mode"
-          active={themeId === null}
-          onPick={() => onThemeChange(null)}
-          swatches={['var(--bg-base)', 'var(--bg-panel)', 'var(--accent)']}
-        />
-        {themes.map((t) => (
-          <ThemeCard
-            key={t.id}
-            label={t.name}
-            description={t.author ? `by ${t.author}` : t.mode}
-            active={themeId === t.id}
-            onPick={() => onThemeChange(t.id)}
-            swatches={[
-              `rgb(${t.tokens.bgBase})`,
-              `rgb(${t.tokens.bgPanel})`,
-              `rgb(${t.tokens.accent})`,
-            ]}
-          />
-        ))}
-      </div>
-
-      {addOpen && (
-        <Panel className="mt-3 animate-view-in space-y-3">
-          <p className="font-display text-xs leading-relaxed text-fg-muted">
-            Paste a link to a theme JSON, or load one from disk. VS Code colour themes work too -
-            the workbench palette is converted to ARC’s, with the text ramp re-solved for contrast.
-            Installed themes are saved to{' '}
-            <code className="font-mono text-fg-subtle">~/.arc/themes</code>.
-          </p>
-          <div className="flex items-center gap-2">
-            <input
-              value={url}
-              onChange={(e) => setUrl(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') void onInstall();
-              }}
-              placeholder="https://…/my-theme.json"
-              spellCheck={false}
-              autoComplete="off"
-              className="min-w-0 flex-1 rounded-md border border-edge-2 bg-bg-base/50 px-3 py-2 font-mono text-xs text-fg-base placeholder:text-fg-subtle focus:border-accent/45 focus:outline-none"
-            />
-            <button
-              onClick={() => void onInstall()}
-              disabled={installing || !url.trim()}
-              className="shrink-0 rounded-md bg-accent-soft px-3 py-2 font-display text-xs font-medium text-fg-base ring-1 ring-accent/40 transition-colors hover:bg-accent/20 disabled:opacity-50"
-            >
-              {installing ? 'Installing…' : 'Install'}
-            </button>
-            <button
-              onClick={() => void onImportFile()}
-              disabled={installing}
-              className="shrink-0 rounded-md border border-edge-2 px-3 py-2 font-display text-xs font-medium text-fg-base transition-colors hover:bg-surface-2 disabled:opacity-50"
-            >
-              Choose file…
-            </button>
-          </div>
-          {/* One result line for both install paths - whichever you used last. */}
-          {msg && (
-            <p
-              className={cn(
-                'font-display text-xs leading-relaxed',
-                msg.kind === 'ok' ? 'text-status-ok' : 'text-status-err',
-              )}
-            >
-              {msg.text}
-            </p>
-          )}
-        </Panel>
-      )}
-    </Group>
   );
 }
 
@@ -851,139 +620,6 @@ function LayoutModeCard({
         {active && <Check size={11} className="shrink-0 text-accent" />}
       </div>
     </button>
-  );
-}
-
-function AppearanceCard({
-  label,
-  icon: Icon,
-  active,
-  onPick,
-  preview,
-}: {
-  label: string;
-  icon: typeof Sun;
-  active: boolean;
-  onPick: () => void;
-  preview: 'light' | 'dark' | 'system';
-}) {
-  return (
-    <button
-      onClick={onPick}
-      className={cn(
-        'group flex flex-col items-stretch overflow-hidden rounded-lg border text-left transition-all duration-150 ease-apple',
-        active
-          ? 'border-accent/60 shadow-glow-sm ring-1 ring-accent/40'
-          : 'border-border-subtle hover:border-border-strong',
-      )}
-    >
-      <div className="relative h-20 overflow-hidden">
-        {preview === 'light' && <LightSwatch />}
-        {preview === 'dark' && <DarkSwatch />}
-        {preview === 'system' && (
-          <div className="flex h-full">
-            <div className="flex-1">
-              <LightSwatch />
-            </div>
-            <div className="flex-1">
-              <DarkSwatch />
-            </div>
-          </div>
-        )}
-      </div>
-      <div className="flex items-center justify-between border-t border-border-subtle bg-bg-base/40 px-3 py-2">
-        <div className="flex items-center gap-1.5">
-          <Icon
-            size={11}
-            strokeWidth={2.1}
-            className={active ? 'text-accent-bright' : 'text-fg-muted'}
-          />
-          <span className="font-display text-sm font-medium tracking-tight text-fg-base">
-            {label}
-          </span>
-        </div>
-        {active && <Check size={11} className="text-accent" />}
-      </div>
-    </button>
-  );
-}
-
-function ThemeCard({
-  label,
-  description,
-  active,
-  onPick,
-  swatches,
-}: {
-  label: string;
-  description: string;
-  active: boolean;
-  onPick: () => void;
-  swatches: [string, string, string];
-}) {
-  return (
-    <button
-      onClick={onPick}
-      className={cn(
-        'group flex items-center gap-3 rounded-lg border px-3 py-2.5 text-left transition-all duration-150 ease-apple',
-        active
-          ? 'border-accent/60 shadow-glow-sm ring-1 ring-accent/40'
-          : 'border-border-subtle hover:border-border-strong',
-      )}
-    >
-      <div className="flex shrink-0 gap-0.5">
-        {swatches.map((color, i) => (
-          <span
-            key={i}
-            className="h-7 w-3 rounded-sm ring-1 ring-black/10"
-            style={{ background: color }}
-          />
-        ))}
-      </div>
-      <div className="min-w-0 flex-1">
-        <div className="truncate font-display text-sm font-medium tracking-tight text-fg-base">
-          {label}
-        </div>
-        <div className="truncate font-display text-2xs text-fg-muted">{description}</div>
-      </div>
-      {active && <Check size={11} className="shrink-0 text-accent" />}
-    </button>
-  );
-}
-
-function LightSwatch() {
-  return (
-    <div
-      className="flex h-full flex-col gap-1 p-2.5"
-      style={{ background: '#f7f7f8', color: '#1c1c1e' }}
-    >
-      <div className="flex gap-1">
-        <span className="h-1.5 w-1.5 rounded-full" style={{ background: '#ff5f57' }} />
-        <span className="h-1.5 w-1.5 rounded-full" style={{ background: '#febc2e' }} />
-        <span className="h-1.5 w-1.5 rounded-full" style={{ background: '#28c840' }} />
-      </div>
-      <div className="font-mono text-2xs leading-tight" style={{ color: '#3873d6' }}>
-        ~ $ <span style={{ color: '#1c1c1e' }}>arc</span>
-      </div>
-    </div>
-  );
-}
-
-function DarkSwatch() {
-  return (
-    <div
-      className="flex h-full flex-col gap-1 p-2.5"
-      style={{ background: '#161618', color: '#eef0f3' }}
-    >
-      <div className="flex gap-1">
-        <span className="h-1.5 w-1.5 rounded-full" style={{ background: '#ff5252' }} />
-        <span className="h-1.5 w-1.5 rounded-full" style={{ background: '#f0a958' }} />
-        <span className="h-1.5 w-1.5 rounded-full" style={{ background: '#3ad28a' }} />
-      </div>
-      <div className="font-mono text-2xs leading-tight" style={{ color: '#c8cad0' }}>
-        ~ $ <span style={{ color: '#eef0f3' }}>arc</span>
-      </div>
-    </div>
   );
 }
 

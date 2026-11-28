@@ -51,6 +51,20 @@ export const SIDEBAR_VIEW_BY_ID: Record<SidebarView, SidebarViewDef> = Object.fr
   SIDEBAR_VIEWS.map((v) => [v.id, v]),
 ) as Record<SidebarView, SidebarViewDef>;
 
+/** The rail starts with the views every project uses (Explorer, Source
+ *  Control, Search, Agents). These start hidden; each joins the rail on its
+ *  own while the project needs it (see `useRelevantViews` in Sidebar), and
+ *  any can be pinned from the rail's More menu or Settings. */
+export const DEFAULT_HIDDEN: SidebarView[] = [
+  'outline',
+  'problems',
+  'tests',
+  'debug',
+  'docker',
+  'ssh',
+  'sessions',
+];
+
 /** Explorer is the home view and can't be hidden — there must always be a
  *  fallback the rail/body can show. */
 export const PINNED_VIEW: SidebarView = 'files';

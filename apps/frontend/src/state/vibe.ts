@@ -1,11 +1,13 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
-import { useFiles } from './files';
+import { useFiles, type SidebarView } from './files';
 import { useWorkspace } from './workspace';
 
 /**
- * "Vibe" is the agent-first layout: the Claude window fills the work area
- * and the sidebar steps aside. "IDE" puts back exactly what Vibe changed —
+ * Agent mode (stored as `vibe`) is the agent-first layout: the Claude window
+ * fills the work area and the sidebar switches to Changes, so what the agent
+ * edits sits beside the conversation, ready to review. Editor mode puts back
+ * exactly what Agent mode changed —
  * nothing more — so a user who maximized a pane or collapsed the sidebar
  * themselves doesn't get it undone on the way out.
  */
@@ -17,6 +19,7 @@ interface VibeState {
   restore: {
     maximizedPaneId: string | null;
     sidebarCollapsed: boolean;
+    sidebarView: SidebarView;
     floatingAgentOpen: boolean;
   } | null;
   enterVibe: () => void;
@@ -39,6 +42,7 @@ export const useVibe = create<VibeState>()(
         const restore = {
           maximizedPaneId: workspace.maximizedPaneId,
           sidebarCollapsed: files.collapsed,
+          sidebarView: files.sidebarView,
           floatingAgentOpen: get().floatingAgentOpen,
         };
 
@@ -54,7 +58,7 @@ export const useVibe = create<VibeState>()(
         if (maximizedPaneId !== focusedPaneId) {
           useWorkspace.getState().toggleMaximizePane(focusedPaneId);
         }
-        if (!files.collapsed) files.toggleCollapsed();
+        files.showSidebarView('git');
         set({ vibe: true, restore, floatingAgentOpen: false });
       },
       exitVibe: () => {
@@ -66,6 +70,7 @@ export const useVibe = create<VibeState>()(
             useWorkspace.setState({ maximizedPaneId: restore.maximizedPaneId });
           }
           const files = useFiles.getState();
+          if (files.sidebarView !== restore.sidebarView) files.setSidebarView(restore.sidebarView);
           if (files.collapsed !== restore.sidebarCollapsed) files.toggleCollapsed();
         }
         set({
@@ -80,8 +85,8 @@ export const useVibe = create<VibeState>()(
     }),
     {
       name: 'arc-vibe',
-      // Vibe itself is per-session: relaunching into a maximized agent with a
-      // hidden sidebar would read as a broken layout.
+      // The mode itself is per-session: relaunching into a maximized agent
+      // would read as a broken layout.
       partialize: (s) => ({ floatingAgentOpen: s.floatingAgentOpen }),
     },
   ),

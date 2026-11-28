@@ -12,7 +12,7 @@ import {
 import { useSettings } from '../../state/settings';
 import { useSsh } from '../../state/ssh';
 import { useWorkspace } from '../../state/workspace';
-import { getFont, resolveActiveTheme } from '../../themes';
+import { CODE_FONT_STACK, XTERM_THEME } from '../../themes';
 import { SshConnectingOverlay } from './SshConnectingOverlay';
 import { SshErrorCard } from './SshErrorCard';
 import { LogDrawerToggle, SshSessionLogDrawer } from './SshSessionLogDrawer';
@@ -66,11 +66,9 @@ export function SshTab({ sessionKey, hostId }: SshTabProps) {
     let currentSessionId: string | null = null;
 
     const initialSettings = useSettings.getState();
-    const initialFont = getFont(initialSettings.fontId);
-    const initialTheme = resolveActiveTheme(initialSettings.appearance, initialSettings.themeId);
 
     const term = new XTerm({
-      fontFamily: initialFont.stack,
+      fontFamily: CODE_FONT_STACK,
       fontSize: initialSettings.fontSize,
       fontWeight: '400',
       fontWeightBold: '600',
@@ -82,7 +80,7 @@ export function SshTab({ sessionKey, hostId }: SshTabProps) {
       scrollback: 10_000,
       allowTransparency: true,
       smoothScrollDuration: 80,
-      theme: { ...initialTheme.xterm, background: '#00000000' }, // transparent: wallpaper shows through the frosted pane
+      theme: { ...XTERM_THEME, background: '#00000000' }, // transparent: the pane colour shows through
     });
 
     const fit = new FitAddon();
@@ -145,16 +143,9 @@ export function SshTab({ sessionKey, hostId }: SshTabProps) {
 
     // Live-update font + theme when the user changes them in Settings.
     const unsubAppearance = useSettings.subscribe((s, prev) => {
-      if (
-        s.fontId !== prev.fontId ||
-        s.fontSize !== prev.fontSize ||
-        s.appearance !== prev.appearance ||
-        s.themeId !== prev.themeId
-      ) {
+      if (s.fontSize !== prev.fontSize) {
         try {
-          term.options.fontFamily = getFont(s.fontId).stack;
           term.options.fontSize = s.fontSize;
-          term.options.theme = { ...resolveActiveTheme(s.appearance, s.themeId).xterm, background: '#00000000' };
           safeFit();
         } catch {
           /* term may be disposed */
