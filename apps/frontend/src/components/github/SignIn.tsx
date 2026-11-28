@@ -10,6 +10,7 @@ import {
 } from '../../lib/tauri';
 import type { UnlistenFn } from '@tauri-apps/api/event';
 import { cn } from '../../lib/cn';
+import { ErrorNote } from '../ui';
 
 interface Props {
   /** Called once a token is stored and confirmed working. */
@@ -33,6 +34,8 @@ type Phase =
 export function SignIn({ onSignedIn }: Props) {
   const [phase, setPhase] = useState<Phase>({ step: 'idle' });
   const [error, setError] = useState<string | null>(null);
+  /** Raw text from a pasted token that failed; shown behind Details. */
+  const [tokenError, setTokenError] = useState<string | null>(null);
   const [deviceAvailable, setDeviceAvailable] = useState<boolean | null>(null);
   const [copied, setCopied] = useState(false);
   const [showToken, setShowToken] = useState(false);
@@ -55,6 +58,7 @@ export function SignIn({ onSignedIn }: Props) {
 
   const startDeviceLogin = async () => {
     setError(null);
+    setTokenError(null);
     setPhase({ step: 'starting' });
     try {
       const topic = await gitHostDeviceLogin();
@@ -137,16 +141,20 @@ export function SignIn({ onSignedIn }: Props) {
           )
         )}
 
-        {error && (
-          <div className="mt-5 flex items-start gap-2 rounded-xl bg-status-err/[0.08] px-3 py-2 font-display text-xs text-status-err/90 ring-1 ring-inset ring-status-err/20">
-            <span className="mt-[5px] h-1.5 w-1.5 shrink-0 rounded-full bg-status-err" />
-            <span>{error}</span>
-          </div>
-        )}
+        {error && <ErrorNote error={error} className="mt-5" />}
 
-        <div className="mt-8 border-t border-edge-1 pt-5">
+        <div className="mt-8 pt-5">
           {showToken ? (
-            <TokenForm onSaved={onSignedIn} onError={setError} />
+            <>
+              <TokenForm
+                onSaved={onSignedIn}
+                onError={(raw) => {
+                  setError(null);
+                  setTokenError(raw);
+                }}
+              />
+              {tokenError && <TokenErrorNote raw={tokenError} />}
+            </>
           ) : (
             <button
               onClick={() => setShowToken(true)}
@@ -215,6 +223,18 @@ function DeviceCode({
   );
 }
 
+/** Its own sentence rather than `friendlyError`'s: GitHub answers a bad token
+ *  with a 401, which that maps to "you were signed out" — wrong on this screen. */
+function TokenErrorNote({ raw }: { raw: string }) {
+  return (
+    <ErrorNote
+      className="mt-3"
+      error={raw}
+      message="That token didn't work. Check it has the repo, workflow, read:org and notifications scopes."
+    />
+  );
+}
+
 function TokenForm({
   onSaved,
   onError,
@@ -237,7 +257,7 @@ function TokenForm({
       await gitHostViewer();
       onSaved();
     } catch (e) {
-      onError(`That token didn't work: ${String(e)}`);
+      onError(String(e));
       setBusy(false);
     }
   };

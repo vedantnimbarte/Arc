@@ -122,7 +122,7 @@ export function InboxView() {
   const unread = items.filter((n) => n.unread).length;
 
   return (
-    <div className="flex h-full min-w-0 flex-col">
+    <div className="flex h-full min-w-0 flex-col gap-0.5 bg-bg-chrome">
       <Toolbar>
         <StateFilter
           value={showAll ? 'all' : 'unread'}
@@ -137,7 +137,7 @@ export function InboxView() {
         <RefreshButton loading={loading} onClick={() => void load()} />
       </Toolbar>
 
-      <div className="min-h-0 flex-1 overflow-y-auto px-4 py-3">
+      <div className="min-h-0 flex-1 overflow-y-auto bg-bg-base px-4 py-3">
         {error && <ErrorTray message={error} />}
         {items.length === 0 && loading && <Loading />}
         {items.length === 0 && !loading && !error ? (
@@ -148,7 +148,7 @@ export function InboxView() {
           <div className="mx-auto max-w-4xl space-y-4">
             {groups.map((g) => (
               <section key={g.repo}>
-                <h3 className="mb-1 flex items-center gap-2 px-1 font-mono text-2xs">
+                <h3 className="mb-1 flex items-center gap-2 px-1 font-display text-2xs">
                   <span
                     className="h-2 w-2 shrink-0 rounded-full"
                     style={{ backgroundColor: laneColor(g.repo) }}

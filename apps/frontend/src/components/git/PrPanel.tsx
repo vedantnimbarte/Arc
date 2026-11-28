@@ -190,7 +190,7 @@ function Header({
         )}
         <PanelHeading inline={inline} onCollapse={onClose}>
           <GitPullRequest size={12} strokeWidth={2.1} className="shrink-0 text-fg-muted" />
-          {view.kind === 'create' ? 'New Pull Request' : 'Pull Requests'}
+          {view.kind === 'create' ? 'New pull request' : 'Pull requests'}
           {slug && (
             <span className="truncate font-mono text-2xs font-normal text-fg-subtle">
               · {slug.owner}/{slug.name}
@@ -513,7 +513,7 @@ function DetailView({ root, number }: { root: string; number: number }) {
 
       <div className="flex min-h-0 flex-1">
         <div className="flex w-[300px] shrink-0 flex-col border-r border-border-hairline">
-          <SectionLabel>commits ({pr.commits.length})</SectionLabel>
+          <SectionLabel>Commits ({pr.commits.length})</SectionLabel>
           <div className="flex-1 overflow-y-auto">
             {pr.commits.map((c) => (
               <div
@@ -535,7 +535,7 @@ function DetailView({ root, number }: { root: string; number: number }) {
         </div>
 
         <div className="flex min-w-0 flex-1 flex-col">
-          <SectionLabel>files ({pr.files.length})</SectionLabel>
+          <SectionLabel>Files ({pr.files.length})</SectionLabel>
           <div className="flex-1 overflow-y-auto">
             {pr.files.map((f) => (
               <FileRow key={f.path} file={f} />
@@ -595,7 +595,7 @@ function FileRow({ file }: { file: { path: string; status: string; additions: nu
 
 function SectionLabel({ children }: { children: React.ReactNode }) {
   return (
-    <div className="border-b border-border-hairline bg-bg-base/30 px-3 py-1.5 font-display text-2xs uppercase tracking-wider text-fg-subtle">
+    <div className="border-b border-border-hairline bg-bg-base px-3 py-1.5 font-display text-2xs text-fg-subtle">
       {children}
     </div>
   );
@@ -671,8 +671,8 @@ function CreateView({
       </div>
 
       <label className="flex flex-col gap-1">
-        <span className="font-display text-2xs uppercase tracking-wider text-fg-subtle">
-          title
+        <span className="font-display text-2xs text-fg-subtle">
+          Title
         </span>
         <input
           value={title}
@@ -684,8 +684,8 @@ function CreateView({
       </label>
 
       <label className="flex flex-1 flex-col gap-1">
-        <span className="font-display text-2xs uppercase tracking-wider text-fg-subtle">
-          description
+        <span className="font-display text-2xs text-fg-subtle">
+          Description
         </span>
         <textarea
           value={body}
@@ -746,7 +746,7 @@ function BranchPicker({
 }) {
   return (
     <label className="flex flex-col gap-1">
-      <span className="font-display text-2xs uppercase tracking-wider text-fg-subtle">
+      <span className="font-display text-2xs text-fg-subtle">
         {label}
       </span>
       <Select

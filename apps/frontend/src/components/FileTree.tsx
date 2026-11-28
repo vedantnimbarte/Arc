@@ -489,7 +489,7 @@ export function FileTree() {
           <EmptyState
             icon={FolderOpen}
             title="File tree unavailable"
-            body="The browser preview has no filesystem access. Run ARC as a desktop app to browse files."
+            body="The browser preview has no filesystem access. Run Arc as a desktop app to browse files."
             hint="pnpm tauri:dev"
           />
         ) : !root ? (

@@ -1,8 +1,9 @@
 import { useState } from 'react';
-import { GitBranch, GitMerge, RotateCcw, Scissors } from 'lucide-react';
+import { GitMerge, MoreHorizontal } from 'lucide-react';
 import { cn } from '../../lib/cn';
 import type { GitLogEntry, GitResetMode } from '../../lib/tauri';
 import { colorForAuthor } from './AuthorsSidebar';
+import { MenuItem, Popover } from './Popover';
 
 interface Props {
   commits: GitLogEntry[];
@@ -67,7 +68,6 @@ function CommitRow({
 }) {
   const isMerge = commit.parents.length > 1;
   const dotColor = colorForAuthor(commit.author, commit.email);
-  const [resetMenuOpen, setResetMenuOpen] = useState(false);
   const hasActions = onCherryPick || onCherryPickTo || onRevert || onReset;
 
   return (
@@ -84,7 +84,7 @@ function CommitRow({
           style={{ background: dotColor }}
         />
         <span
-          className="relative h-2 w-2 rounded-full ring-1 ring-black/50"
+          className="relative h-2 w-2 rounded-full ring-1 ring-bg-base"
           style={{ background: dotColor }}
         />
       </span>
@@ -96,72 +96,31 @@ function CommitRow({
       </span>
       <DiffStat additions={commit.additions} deletions={commit.deletions} />
       {isMerge && (
-        <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-surface-1 px-2 py-[1px] font-display text-2xs uppercase tracking-widest2 text-fg-subtle ring-1 ring-inset ring-edge-1">
+        <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-surface-1 px-2 py-[1px] font-display text-2xs text-fg-subtle ring-1 ring-inset ring-edge-1">
           <GitMerge size={9} strokeWidth={2.2} />
-          merge
+          Merge
         </span>
       )}
 
-      {/* Commit action buttons — visible on hover */}
+      {/* One menu per row, so the actions read as words, not glyphs. */}
       {hasActions && (
-        <span className="relative flex shrink-0 items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100">
-          {onCherryPick && (
-            <ActionBtn
-              title="Cherry-pick this commit onto HEAD"
-              onClick={() => onCherryPick(commit.oid)}
-            >
-              <Scissors size={11} strokeWidth={2} />
-            </ActionBtn>
+        <Popover
+          label="Commit actions"
+          trigger={<MoreHorizontal size={13} strokeWidth={2} />}
+          triggerClassName="flex h-5 w-5 shrink-0 items-center justify-center rounded text-fg-muted opacity-0 transition hover:bg-surface-3 hover:text-fg-base group-hover:opacity-100 focus-visible:opacity-100 aria-expanded:opacity-100"
+          width={240}
+        >
+          {(close) => (
+            <CommitMenu
+              commit={commit}
+              close={close}
+              onCherryPick={onCherryPick}
+              onCherryPickTo={onCherryPickTo}
+              onRevert={onRevert}
+              onReset={onReset}
+            />
           )}
-          {onCherryPickTo && (
-            <ActionBtn
-              title="Cherry-pick to a different branch…"
-              onClick={() => onCherryPickTo(commit)}
-            >
-              <GitBranch size={11} strokeWidth={2} />
-            </ActionBtn>
-          )}
-          {onRevert && (
-            <ActionBtn
-              title="Revert: create an undo commit"
-              onClick={() => onRevert(commit.oid)}
-            >
-              <RotateCcw size={11} strokeWidth={2} />
-            </ActionBtn>
-          )}
-          {onReset && (
-            <div className="relative">
-              <ActionBtn
-                title="Reset HEAD to this commit"
-                onClick={() => setResetMenuOpen((o) => !o)}
-              >
-                <span className="font-mono text-2xs font-bold">↩</span>
-              </ActionBtn>
-              {resetMenuOpen && (
-                <div
-                  className="absolute right-0 top-full z-50 mt-1 w-32 rounded-lg border border-border-hairline bg-bg-surface shadow-xl ring-1 ring-edge-1"
-                  onMouseLeave={() => setResetMenuOpen(false)}
-                >
-                  {(['soft', 'mixed', 'hard'] as GitResetMode[]).map((m) => (
-                    <button
-                      key={m}
-                      onClick={() => { onReset(commit.oid, m); setResetMenuOpen(false); }}
-                      className={cn(
-                        'flex w-full items-center gap-2 px-3 py-1.5 font-sans text-xs transition hover:bg-surface-2',
-                        m === 'hard' ? 'text-red-400 hover:text-red-300' : 'text-fg-base',
-                      )}
-                    >
-                      <span className="w-10 font-mono text-2xs text-fg-subtle">{m}</span>
-                      <span className="text-fg-muted text-2xs">
-                        {m === 'soft' ? 'keep staged' : m === 'mixed' ? 'keep files' : 'discard all'}
-                      </span>
-                    </button>
-                  ))}
-                </div>
-              )}
-            </div>
-          )}
-        </span>
+        </Popover>
       )}
 
       <span
@@ -178,16 +137,61 @@ function CommitRow({
   );
 }
 
-function ActionBtn({ title, onClick, children }: { title: string; onClick: () => void; children: React.ReactNode }) {
+function CommitMenu({
+  commit,
+  close,
+  onCherryPick,
+  onCherryPickTo,
+  onRevert,
+  onReset,
+}: {
+  commit: GitLogEntry;
+  close: () => void;
+  onCherryPick?: (oid: string) => void;
+  onCherryPickTo?: (commit: GitLogEntry) => void;
+  onRevert?: (oid: string) => void;
+  onReset?: (oid: string, mode: GitResetMode) => void;
+}) {
+  // "Move branch back" is a three-way choice, so it swaps the menu for its
+  // options rather than squeezing into a yes/no dialog.
+  const [resetStep, setResetStep] = useState(false);
+  const run = (fn: () => void) => {
+    close();
+    fn();
+  };
+
+  if (resetStep && onReset) {
+    return (
+      <>
+        <div className="px-2.5 pb-1 pt-1.5 font-display text-2xs text-fg-subtle">
+          Move branch back to <span className="font-mono">{commit.short}</span>
+        </div>
+        <MenuItem hint="Later commits become staged changes" onClick={() => run(() => onReset(commit.oid, 'soft'))}>
+          Keep my changes staged
+        </MenuItem>
+        <MenuItem hint="Later commits become unstaged edits" onClick={() => run(() => onReset(commit.oid, 'mixed'))}>
+          Keep my changes unstaged
+        </MenuItem>
+        <MenuItem danger hint="Later commits and uncommitted edits are lost" onClick={() => run(() => onReset(commit.oid, 'hard'))}>
+          Throw away my changes
+        </MenuItem>
+      </>
+    );
+  }
+
   return (
-    <button
-      type="button"
-      title={title}
-      onClick={(e) => { e.stopPropagation(); onClick(); }}
-      className="flex h-5 w-5 items-center justify-center rounded text-fg-muted transition hover:bg-surface-3 hover:text-fg-base"
-    >
-      {children}
-    </button>
+    <>
+      {onCherryPick && (
+        <MenuItem onClick={() => run(() => onCherryPick(commit.oid))}>Copy onto current branch</MenuItem>
+      )}
+      {onCherryPickTo && (
+        <MenuItem onClick={() => run(() => onCherryPickTo(commit))}>Copy onto another branch…</MenuItem>
+      )}
+      {onRevert && (
+        <MenuItem onClick={() => run(() => onRevert(commit.oid))}>Undo this commit (adds a new commit)</MenuItem>
+      )}
+      {onReset && <MenuItem onClick={() => setResetStep(true)}>Move branch back to here…</MenuItem>}
+    </>
   );
 }
 
@@ -196,12 +200,12 @@ function DiffStat({ additions, deletions }: { additions: number; deletions: numb
   return (
     <span className="flex shrink-0 items-center gap-1 font-mono text-2xs tabular-nums">
       {additions > 0 && (
-        <span className="rounded px-1 py-[1px] text-[#3ad28a] ring-1 ring-inset ring-[#3ad28a]/20 bg-[#3ad28a]/[0.07]">
+        <span className="rounded px-1 py-[1px] text-status-ok ring-1 ring-inset ring-status-ok/20 bg-status-ok/[0.07]">
           +{additions}
         </span>
       )}
       {deletions > 0 && (
-        <span className="rounded px-1 py-[1px] text-[#ff5252] ring-1 ring-inset ring-[#ff5252]/20 bg-[#ff5252]/[0.07]">
+        <span className="rounded px-1 py-[1px] text-status-err ring-1 ring-inset ring-status-err/20 bg-status-err/[0.07]">
           -{deletions}
         </span>
       )}

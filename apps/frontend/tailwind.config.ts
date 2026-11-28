@@ -9,6 +9,9 @@ export default {
         // Interface text. Inter is bundled (see index.css), so every platform
         // gets the same face; mono is for code, paths and terminals only.
         display: ['Inter Variable', 'Inter', '-apple-system', 'BlinkMacSystemFont', 'system-ui', 'sans-serif'],
+        // Same face under Tailwind's default name, so `font-sans` doesn't fall
+        // back to the OS font (Segoe UI on Windows).
+        sans: ['Inter Variable', 'Inter', '-apple-system', 'BlinkMacSystemFont', 'system-ui', 'sans-serif'],
         // SF Mono → JetBrains Mono fallback for the terminal + code.
         mono: [
           'SF Mono',

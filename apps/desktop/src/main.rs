@@ -182,6 +182,7 @@ fn main() {
             commands::git::git_stash_push,
             commands::git::git_stash_pop,
             commands::git::git_stash_drop,
+            commands::git::git_init,
             commands::git::git_checkpoint_create,
             commands::git::git_checkpoint_restore,
             commands::git::git_checkpoint_forget,

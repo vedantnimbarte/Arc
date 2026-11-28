@@ -172,7 +172,7 @@ export function ReposView() {
   const scopeKey = scope.kind === 'org' ? `org:${scope.name}` : scope.kind;
 
   return (
-    <div className="flex h-full flex-col">
+    <div className="flex h-full flex-col gap-0.5 bg-bg-chrome">
       <Toolbar>
         <div className="min-w-0 overflow-x-auto">
           <StateFilter
@@ -238,47 +238,49 @@ export function ReposView() {
         </div>
       </Toolbar>
 
-      {(clone || error) && (
-        <div className="space-y-2 px-4 pt-3">
-          {clone && <CloneBanner clone={clone} onDismiss={() => setClone(null)} />}
-          {error && <ErrorTray message={error} />}
-        </div>
-      )}
-
-      <div className="min-h-0 flex-1 overflow-y-auto p-4">
-        {shown.length === 0 ? (
-          loading ? (
-            <Loading />
-          ) : (
-            !error && (
-              <EmptyNote>
-                {searched
-                  ? `Nothing on GitHub matches "${filter.trim()}".`
-                  : needle
-                    ? `No repository here matches "${filter.trim()}". Press Enter to search all of GitHub.`
-                    : 'No repositories in this scope.'}
-              </EmptyNote>
-            )
-          )
-        ) : (
-          <div className="grid gap-3 [grid-template-columns:repeat(auto-fill,minmax(290px,1fr))]">
-            {shown.map((r) => (
-              <RepoCard
-                key={r.full_name}
-                repo={r}
-                active={activeRepo === r.full_name}
-                localPath={clones[r.full_name.toLowerCase()]}
-                cloning={clone?.state === 'running' && clone.repo === r.full_name}
-                onPick={() => {
-                  setRepo(r.full_name);
-                  setSection('issues');
-                }}
-                onClone={() => void startClone(r)}
-                onOpen={(path) => void openClone(r, path)}
-              />
-            ))}
+      <div className="flex min-h-0 flex-1 flex-col bg-bg-base">
+        {(clone || error) && (
+          <div className="space-y-2 px-4 pt-3">
+            {clone && <CloneBanner clone={clone} onDismiss={() => setClone(null)} />}
+            {error && <ErrorTray message={error} />}
           </div>
         )}
+
+        <div className="min-h-0 flex-1 overflow-y-auto p-4">
+          {shown.length === 0 ? (
+            loading ? (
+              <Loading />
+            ) : (
+              !error && (
+                <EmptyNote>
+                  {searched
+                    ? `Nothing on GitHub matches "${filter.trim()}".`
+                    : needle
+                      ? `No repository here matches "${filter.trim()}". Press Enter to search all of GitHub.`
+                      : 'No repositories in this scope.'}
+                </EmptyNote>
+              )
+            )
+          ) : (
+            <div className="grid gap-3 [grid-template-columns:repeat(auto-fill,minmax(290px,1fr))]">
+              {shown.map((r) => (
+                <RepoCard
+                  key={r.full_name}
+                  repo={r}
+                  active={activeRepo === r.full_name}
+                  localPath={clones[r.full_name.toLowerCase()]}
+                  cloning={clone?.state === 'running' && clone.repo === r.full_name}
+                  onPick={() => {
+                    setRepo(r.full_name);
+                    setSection('issues');
+                  }}
+                  onClone={() => void startClone(r)}
+                  onOpen={(path) => void openClone(r, path)}
+                />
+              ))}
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );
@@ -344,7 +346,7 @@ function RepoCard({
           <div className="min-w-0 flex-1">
             {/* The owner only says something when it isn't you. */}
             {repo.owner !== viewerLogin && (
-              <p className="truncate font-mono text-2xs text-fg-subtle">{repo.owner}</p>
+              <p className="truncate font-display text-2xs text-fg-subtle">{repo.owner}</p>
             )}
             <h3 className="truncate pt-0.5 font-display text-sm font-semibold tracking-tight text-fg-base">
               {repo.name}
@@ -392,7 +394,7 @@ function RepoCard({
             </span>
           )}
           {repo.language && (
-            <span className="inline-flex shrink-0 items-center gap-1 font-mono text-2xs text-fg-muted">
+            <span className="inline-flex shrink-0 items-center gap-1 font-display text-2xs text-fg-muted">
               <span className="h-2 w-2 rounded-full" style={{ backgroundColor: color }} />
               {repo.language}
             </span>

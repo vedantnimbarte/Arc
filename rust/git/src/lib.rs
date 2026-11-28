@@ -2028,6 +2028,11 @@ pub async fn stash_pop<P: AsRef<Path>>(path: P, index: Option<usize>) -> Result<
     Ok(())
 }
 
+/// `git init` in `path`: start tracking a folder that isn't a repo yet.
+pub async fn init<P: AsRef<Path>>(path: P) -> Result<()> {
+    run_git(path.as_ref(), &["init"]).await.map(|_| ())
+}
+
 pub async fn stash_drop<P: AsRef<Path>>(path: P, index: usize) -> Result<()> {
     let path = path.as_ref();
     let output = git_cmd()

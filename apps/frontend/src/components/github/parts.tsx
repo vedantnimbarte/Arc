@@ -2,6 +2,7 @@ import { useState, type ReactNode } from 'react';
 import { ExternalLink, GitBranch, RefreshCw, type LucideIcon } from 'lucide-react';
 import { shellOpenExternal, type GitHostComment } from '../../lib/tauri';
 import { cn } from '../../lib/cn';
+import { ErrorNote } from '../ui';
 import { laneColor, relative } from './format';
 import type { Glyph } from './stateGlyph';
 
@@ -22,13 +23,12 @@ export function SplitPane({
   detail: ReactNode;
 }) {
   return (
-    <div className="flex h-full min-w-0 flex-col">
+    // Panes are told apart by a 2px gutter in the chrome tone, not by lines.
+    <div className="flex h-full min-w-0 flex-col gap-0.5 bg-bg-chrome">
       <Toolbar>{toolbar}</Toolbar>
-      <div className="flex min-h-0 flex-1">
-        <div className="w-[400px] shrink-0 overflow-y-auto border-r border-edge-1 bg-surface-1/40 px-1.5 py-2">
-          {list}
-        </div>
-        <div className="min-w-0 flex-1 overflow-y-auto">{detail}</div>
+      <div className="flex min-h-0 flex-1 gap-0.5">
+        <div className="w-[400px] shrink-0 overflow-y-auto bg-bg-base px-1.5 py-2">{list}</div>
+        <div className="min-w-0 flex-1 overflow-y-auto bg-bg-base">{detail}</div>
       </div>
     </div>
   );
@@ -36,7 +36,7 @@ export function SplitPane({
 
 export function Toolbar({ children }: { children: ReactNode }) {
   return (
-    <div className="flex h-11 shrink-0 items-center gap-2 border-b border-edge-1 px-3">{children}</div>
+    <div className="flex h-11 shrink-0 items-center gap-2 bg-bg-base px-3">{children}</div>
   );
 }
 
@@ -67,7 +67,7 @@ export function StateFilter({
         >
           {o.label}
           {o.count != null && (
-            <span className="font-mono tabular-nums text-fg-subtle">{o.count}</span>
+            <span className="tabular-nums text-fg-subtle">{o.count}</span>
           )}
         </button>
       ))}
@@ -92,18 +92,15 @@ export function RefreshButton({ loading, onClick }: { loading: boolean; onClick:
 export function Count({ n, one, many }: { n: number; one: string; many: string }) {
   return (
     <span className="font-display text-2xs text-fg-subtle">
-      <span className="font-mono tabular-nums text-fg-muted">{n}</span> {n === 1 ? one : many}
+      <span className="tabular-nums text-fg-muted">{n}</span> {n === 1 ? one : many}
     </span>
   );
 }
 
+/** The stored error as one plain sentence, with GitHub's own text behind
+ *  Details. Views keep `setError(String(e))`; the wording happens here. */
 export function ErrorTray({ message }: { message: string }) {
-  return (
-    <div className="mb-2 flex items-start gap-2 rounded-lg bg-status-err/[0.08] px-3 py-2 font-display text-xs text-status-err/90 ring-1 ring-inset ring-status-err/20">
-      <span className="mt-[5px] h-1.5 w-1.5 shrink-0 rounded-full bg-status-err" />
-      <span className="min-w-0 break-words">{message}</span>
-    </div>
-  );
+  return <ErrorNote error={message} className="mb-2" />;
 }
 
 export function EmptyNote({ children }: { children: ReactNode }) {
@@ -134,7 +131,7 @@ export function ago(iso: string): string {
  *  and the icon do that job. */
 export function Fact({ icon: Icon, children }: { icon?: LucideIcon; children: ReactNode }) {
   return (
-    <span className="inline-flex min-w-0 shrink-0 items-center gap-1 font-mono text-2xs tabular-nums text-fg-subtle">
+    <span className="inline-flex min-w-0 shrink-0 items-center gap-1 font-display text-2xs tabular-nums text-fg-subtle">
       {Icon && <Icon size={10} strokeWidth={2.2} className="shrink-0" />}
       <span className="truncate">{children}</span>
     </span>
@@ -143,7 +140,7 @@ export function Fact({ icon: Icon, children }: { icon?: LucideIcon; children: Re
 
 export function Avatar({ src, login }: { src?: string; login: string }) {
   return (
-    <span className="inline-flex min-w-0 shrink-0 items-center gap-1 font-mono text-2xs text-fg-muted">
+    <span className="inline-flex min-w-0 shrink-0 items-center gap-1 font-display text-2xs text-fg-muted">
       {src ? (
         <img src={src} alt="" className="h-3.5 w-3.5 shrink-0 rounded-full ring-1 ring-edge-2" />
       ) : (
@@ -248,7 +245,7 @@ export function DetailHeader({
   actions?: ReactNode;
 }) {
   return (
-    <div className="shrink-0 border-b border-edge-1 px-5 pb-3.5 pt-4">
+    <div className="shrink-0 px-5 pb-3.5 pt-4">
       <div className="flex items-center gap-2">
         <StateBadge glyph={glyph} />
         <span className="font-mono text-xs tabular-nums text-fg-subtle">{number}</span>
@@ -324,7 +321,7 @@ export function CommentThread({
         </ol>
       </div>
 
-      <div className="shrink-0 border-t border-edge-1 p-3">
+      <div className="shrink-0 bg-bg-chrome p-3">
         {error && <ErrorTray message={error} />}
         <textarea
           value={draft}
@@ -375,7 +372,7 @@ function Entry({
         )}
       </span>
       <div className="min-w-0 flex-1 rounded-lg bg-surface-1 ring-1 ring-inset ring-edge-1">
-        <p className="flex items-center gap-2 border-b border-edge-1 px-3 py-1.5 font-mono text-2xs text-fg-muted">
+        <p className="flex items-center gap-2 border-b border-edge-1 px-3 py-1.5 font-display text-2xs text-fg-muted">
           <span className="font-medium text-fg-base/85">{author}</span>
           {opening ? (
             <span className="text-fg-subtle">opened this</span>

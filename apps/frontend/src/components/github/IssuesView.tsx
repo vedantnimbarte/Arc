@@ -146,8 +146,10 @@ export function IssuesView() {
           {issues.length === 0 && !loading && !error ? (
             <EmptyNote>
               {state === 'open'
-                ? 'No open issues in this repository.'
-                : `No ${state} issues here.`}
+                ? 'No open issues. Use New issue to report one.'
+                : state === 'closed'
+                  ? 'No closed issues.'
+                  : 'No issues yet. Use New issue to report one.'}
             </EmptyNote>
           ) : (
             <div className={laneEnds}>
@@ -361,7 +363,7 @@ function NewIssueForm({
   return (
     <div className="flex h-full flex-col p-5">
       <h2 className="font-display text-lg font-semibold tracking-tight text-fg-base">New issue</h2>
-      <p className="mt-0.5 font-mono text-2xs text-fg-subtle">
+      <p className="mt-0.5 font-display text-2xs text-fg-subtle">
         {owner}/{name}
       </p>
 

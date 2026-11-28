@@ -446,7 +446,7 @@ export function ResultGrid({ result, editing, readOnlyReason, browsing, links, c
                           'group/cell',
                           value !== null && NUMERIC.test(value) && 'text-right tabular-nums',
                           deleted ? 'text-fg-subtle line-through' : 'text-fg-base/90',
-                          dirty && 'bg-[#4f8cff]/[0.16] text-fg-base',
+                          dirty && 'bg-accent/15 text-fg-base',
                           isEditing && 'p-0',
                         )}
                       >

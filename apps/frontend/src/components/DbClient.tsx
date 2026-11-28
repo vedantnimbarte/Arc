@@ -6,17 +6,15 @@ import {
   Bookmark,
   Check,
   ChevronRight,
-  CircleAlert,
   Columns3,
   Copy,
+  Database,
   Download,
+  Ellipsis,
   FileCode2,
   FileUp,
-  Gauge,
+  FolderOpen,
   GitCompareArrows,
-  Hand,
-  HardDriveDownload,
-  HardDriveUpload,
   History,
   ListTree,
   Loader2,
@@ -30,7 +28,6 @@ import {
   TableProperties,
   Undo2,
   X,
-  Zap,
 } from 'lucide-react';
 import {
   dbApply,
@@ -75,6 +72,9 @@ import {
 } from '../lib/tauri';
 import { useWorkspace } from '../state/workspace';
 import { askConfirm } from '../state/confirm';
+import { MOD_ENTER } from '../state/shortcuts';
+import { Button, EmptyState, ErrorNote, Input } from './ui';
+import { maskPassword, sqliteUrl } from './db/connectionUrl';
 import { toast, toastError } from '../state/toast';
 import { cn } from '../lib/cn';
 import { toCsv, toJson } from '../lib/dbExport';
@@ -108,6 +108,7 @@ import {
   Placeholder,
   StatusBar,
   ToolButton,
+  ToolMenu,
   ToolSep,
   ToolTab,
   Toolbar,
@@ -275,7 +276,6 @@ export function DbClient({ tabId }: Props) {
   const [form, setForm] = useState<{ editing: DbConnection | null } | null>(null);
   /** The statement behind `result`, re-run by the full export. */
   const [resultSql, setResultSql] = useState('');
-  const [analyze, setAnalyze] = useState(false);
   const [exporting, setExporting] = useState<{ id: string; rows: number } | null>(null);
   const [panel, setPanel] = useState<QueryPanelTab | null>(null);
   const [history, setHistory] = useState<DbQueryHistoryEntry[]>([]);
@@ -557,7 +557,7 @@ export function DbClient({ tabId }: Props) {
   /** EXPLAIN the editor's statement and show the plan tree. ANALYZE executes
    *  the statement, so the destructive-statement check applies to it. */
   const explain = useCallback(
-    async (text: string) => {
+    async (text: string, analyze = false) => {
       if (!activeId || !active || !connected || running) return;
       const trimmed = text.trim();
       if (!trimmed) return;
@@ -579,7 +579,7 @@ export function DbClient({ tabId }: Props) {
         if (panel === 'history') void reloadHistory();
       }
     },
-    [activeId, active, analyze, confirmSafe, connected, running, panel, reloadHistory],
+    [activeId, active, confirmSafe, connected, running, panel, reloadHistory],
   );
 
   /** Re-run the result's statement in Rust and stream every row to a file. */
@@ -1085,20 +1085,26 @@ export function DbClient({ tabId }: Props) {
   const nEdits = editCount(edits);
 
   const env = envOf(safety);
+  // Result and Schema stay in the strip; the rarer views get a tab only while
+  // they're open, and are opened from the More menu beside it.
   const resultTabs: Array<{ id: Pane; label: string; icon: typeof Rows3; show: boolean }> = [
     { id: 'grid', label: 'Result', icon: Rows3, show: true },
     { id: 'schema', label: schema ? `Schema: ${schema.table}` : 'Schema', icon: Columns3, show: !!schema },
     { id: 'plan', label: 'Plan', icon: ListTree, show: !!plan },
-    { id: 'diagram', label: 'Diagram', icon: Network, show: connected && tables.length > 0 },
-    { id: 'diff', label: 'Compare', icon: GitCompareArrows, show: connected && tables.length > 0 },
-    { id: 'design', label: design?.table ? `Alter ${design.table}` : 'New table', icon: TableProperties, show: !!design },
+    { id: 'diagram', label: 'Diagram', icon: Network, show: pane === 'diagram' },
+    { id: 'diff', label: 'Compare', icon: GitCompareArrows, show: pane === 'diff' },
+    { id: 'design', label: design?.table ? `Alter ${design.table}` : 'New table', icon: TableProperties, show: !!design && pane === 'design' },
   ];
+  const hasTables = connected && tables.length > 0;
   const showExport = !exporting && result && result.columns.length > 0 && pane === 'grid';
+  const currentSql = () => editor.current?.selectionOrAll() ?? sql;
+  const newConnection = () => setForm({ editing: null });
 
   return (
-    <div className="flex h-full overflow-hidden text-sm">
-      {/* ── Explorer: the connection, then its tables ── */}
-      <div className="flex w-60 shrink-0 flex-col border-r border-edge-1 bg-bg-panel/40">
+    <div className="flex h-full overflow-hidden bg-bg-base text-sm">
+      {/* ── Explorer: the connection, then its tables. Hidden until there's one to show. ── */}
+      {connections.length > 0 && (
+      <div className="flex w-60 shrink-0 flex-col bg-bg-chrome">
         <ConnectionSwitcher
           connections={connections}
           active={active}
@@ -1151,21 +1157,15 @@ export function DbClient({ tabId }: Props) {
               )}
             </Placeholder>
           )}
-          {!active && connections.length === 0 && !form && (
-            <Placeholder>
-              No saved connections yet.
-              <button type="button" onClick={() => setForm({ editing: null })} className={primaryBtn}>
-                <Plus size={12} /> New connection
-              </button>
-            </Placeholder>
-          )}
         </div>
       </div>
+      )}
 
       {/* ── Workspace ── */}
       <div className="flex min-w-0 flex-1 flex-col">
         {/* Main toolbar. The stripe along its top is the environment colour. */}
-        <Toolbar env={connected ? env : null}>
+        {connected && (
+        <Toolbar env={env}>
           {view === 'query' && (
             <>
               {running ? (
@@ -1181,68 +1181,18 @@ export function DbClient({ tabId }: Props) {
                 <ToolButton
                   icon={Play}
                   tone="run"
-                  label="Run the selection, or everything (⌘/Ctrl + Enter)"
-                  onClick={() => void run(editor.current?.selectionOrAll() ?? sql)}
-                  disabled={!connected || !sql.trim()}
+                  label={`Run the selection, or everything (${MOD_ENTER})`}
+                  onClick={() => void run(currentSql())}
+                  disabled={!sql.trim()}
                 >
                   Run
                 </ToolButton>
               )}
               <ToolButton
-                icon={ListTree}
-                label="Show the query plan"
-                onClick={() => void explain(editor.current?.selectionOrAll() ?? sql)}
-                disabled={!connected || running || !sql.trim()}
-              >
-                Explain
-              </ToolButton>
-              {active?.backend === 'postgres' && (
-                <ToolButton
-                  icon={Gauge}
-                  label={
-                    analyze
-                      ? 'Analyze is on: Explain executes the statement (writes included) to measure real rows and timings'
-                      : 'Explain with ANALYZE — executes the statement to measure real rows and timings'
-                  }
-                  active={analyze}
-                  onClick={() => setAnalyze((a) => !a)}
-                >
-                  {analyze ? <span className="text-status-warn">Analyze</span> : 'Analyze'}
-                </ToolButton>
-              )}
-              <ToolSep />
-              <ToolButton
-                icon={autoCommit ? Zap : Hand}
-                label={
-                  inTx
-                    ? 'Commit or roll back the open transaction first'
-                    : autoCommit
-                      ? 'Auto-commit: each statement commits on its own. Click for manual transactions'
-                      : 'Manual: statements run inside a transaction you commit or roll back. Click for auto-commit'
-                }
-                onClick={() => setAutoCommit((a) => !a)}
-                disabled={inTx || !connected}
-              >
-                Tx: {autoCommit ? 'Auto' : 'Manual'}
-              </ToolButton>
-              {inTx && (
-                <>
-                  <span className="ml-1 shrink-0 font-display text-2xs font-medium text-status-warn">Transaction open</span>
-                  <ToolButton icon={Check} label="Commit the open transaction" onClick={() => void finishTx(true)}>
-                    Commit
-                  </ToolButton>
-                  <ToolButton icon={Undo2} label="Roll back the open transaction" onClick={() => void finishTx(false)}>
-                    Rollback
-                  </ToolButton>
-                </>
-              )}
-              <ToolSep />
-              <ToolButton
                 icon={Sparkles}
                 label="Describe a query and let Claude write it"
                 active={askOpen}
                 onClick={() => setAskOpen((o) => !o)}
-                disabled={!connected}
               >
                 Ask Claude
               </ToolButton>
@@ -1270,44 +1220,98 @@ export function DbClient({ tabId }: Props) {
               )}
             </>
           )}
-          {active && (
-            <ToolButton
-              icon={History}
-              label="History and saved queries"
-              active={!!panel}
-              onClick={() => setPanel((p) => (p ? null : 'history'))}
-            />
+          <ToolButton
+            icon={History}
+            label="History and saved queries"
+            active={!!panel}
+            onClick={() => setPanel((p) => (p ? null : 'history'))}
+          />
+          {inTx && (
+            <>
+              <ToolSep />
+              <span className="ml-1 shrink-0 font-display text-2xs font-medium text-status-warn">Transaction open</span>
+              <ToolButton icon={Check} label="Commit the open transaction" onClick={() => void finishTx(true)}>
+                Commit
+              </ToolButton>
+              <ToolButton icon={Undo2} label="Roll back the open transaction" onClick={() => void finishTx(false)}>
+                Rollback
+              </ToolButton>
+            </>
           )}
 
           <span className="flex-1" />
 
-          {connected && env && (
+          {backingUp && (
+            <span className="mr-1 flex shrink-0 items-center gap-1.5 font-display text-2xs text-fg-muted">
+              <Loader2 size={11} className="animate-spin" />
+              {backingUp === 'dump' ? 'Backing up…' : 'Restoring…'}
+            </span>
+          )}
+          {env && (
             <span title={safety === 'production' ? 'Production: every write asks for confirmation' : 'Read-only: writes are refused here and by the server'}>
               <EnvBadge env={env} />
             </span>
           )}
-          {connected && (
-            <>
-              <ToolSep />
-              <ToolButton
-                icon={backingUp === 'dump' ? Loader2 : HardDriveDownload}
-                spin={backingUp === 'dump'}
-                label={active?.backend === 'sqlite' ? 'Back up: save a copy of the database file' : 'Back up: dump the database to a SQL file'}
-                onClick={() => void backup()}
-                disabled={backingUp !== null}
-              />
-              {!readOnly && (
-                <ToolButton
-                  icon={backingUp === 'restore' ? Loader2 : HardDriveUpload}
-                  spin={backingUp === 'restore'}
-                  label="Restore: run a SQL script or dump file against this database"
-                  onClick={() => void restore()}
-                  disabled={backingUp !== null}
-                />
-              )}
-            </>
-          )}
+          <ToolMenu
+            icon={Ellipsis}
+            label="More"
+            items={[
+              ...(view === 'query'
+                ? [
+                    {
+                      label: 'Explain query plan',
+                      hint: 'Show how the database would run the statement, without running it',
+                      onClick: () => void explain(currentSql()),
+                      disabled: running || !sql.trim(),
+                    },
+                    ...(active?.backend === 'postgres'
+                      ? [
+                          {
+                            label: 'Analyze query',
+                            hint: 'Runs the statement (writes included) to measure real rows and timings',
+                            onClick: () => void explain(currentSql(), true),
+                            disabled: running || !sql.trim(),
+                          },
+                        ]
+                      : []),
+                    'separator' as const,
+                  ]
+                : []),
+              {
+                label: 'Transactions: commit automatically',
+                hint: inTx ? 'Commit or roll back the open transaction first' : 'Each statement commits on its own',
+                checked: autoCommit,
+                onClick: () => setAutoCommit(true),
+                disabled: inTx,
+              },
+              {
+                label: 'Transactions: commit manually',
+                hint: inTx ? 'Commit or roll back the open transaction first' : 'Statements run inside a transaction you commit or roll back',
+                checked: !autoCommit,
+                onClick: () => setAutoCommit(false),
+                disabled: inTx,
+              },
+              'separator',
+              {
+                label: 'Back up…',
+                hint: active?.backend === 'sqlite' ? 'Save a copy of the database file' : 'Dump the database to a SQL file',
+                onClick: () => void backup(),
+                disabled: backingUp !== null,
+              },
+              ...(readOnly
+                ? []
+                : [
+                    {
+                      label: 'Restore…',
+                      hint: 'Run a SQL script or dump file against this database',
+                      onClick: () => void restore(),
+                      disabled: backingUp !== null,
+                    },
+                  ]),
+            ]}
+          />
         </Toolbar>
+        )}
 
         {form && (
           <ConnectionForm
@@ -1324,22 +1328,35 @@ export function DbClient({ tabId }: Props) {
         )}
 
         {error && (
-          <div className="flex shrink-0 items-start gap-2 border-b border-status-err/25 bg-status-err/[0.08] px-3 py-1.5 font-display text-xs text-status-err">
-            <CircleAlert size={13} className="mt-px shrink-0" />
-            <span className="min-w-0 flex-1 whitespace-pre-wrap break-words font-mono">{error}</span>
+          <div className="flex shrink-0 items-start gap-2 px-3 py-2">
+            <ErrorNote error={error} onDismiss={() => setError(null)} className="min-w-0 flex-1" />
             {failedSql && aiContext && (
-              <button
-                type="button"
+              <Button
+                size="sm"
+                variant="ghost"
+                icon={Sparkles}
                 onClick={() => setAiExplain((x) => ({ n: (x?.n ?? 0) + 1, sql: failedSql, problem: { error } }))}
-                className={cn(textBtn, 'text-status-err hover:text-status-err')}
               >
-                <Sparkles size={11} /> Explain with Claude
-              </button>
+                Explain with Claude
+              </Button>
             )}
-            <button type="button" onClick={() => setError(null)} aria-label="Dismiss error" className="shrink-0 rounded p-0.5 hover:bg-status-err/15">
-              <X size={12} />
-            </button>
           </div>
+        )}
+
+        {!connected && !form && (
+          <EmptyState
+            icon={Database}
+            title="Connect a database to get started"
+            body={
+              connections.length === 0
+                ? 'Paste a connection URL for Postgres, MySQL or SQLite.'
+                : 'Pick a saved connection on the left, or add a new one.'
+            }
+          >
+            <Button variant="primary" icon={Plus} onClick={newConnection}>
+              New connection
+            </Button>
+          </EmptyState>
         )}
 
         {aiExplain && aiContext && view === 'query' && (
@@ -1358,7 +1375,7 @@ export function DbClient({ tabId }: Props) {
 
         {/* Console tabs, and the switch between consoles and analytics. */}
         {connected && (
-          <div className="flex h-8 shrink-0 items-end gap-0.5 border-b border-edge-1 bg-surface-1/60 pl-1 pr-2">
+          <div className="flex h-8 shrink-0 items-end gap-0.5 bg-bg-chrome pl-1 pr-2">
             {view === 'query' ? (
               <div className="flex min-w-0 flex-1 items-end gap-0.5 overflow-x-auto">
                 {queryTabs.map((t) => {
@@ -1368,10 +1385,10 @@ export function DbClient({ tabId }: Props) {
                     <div
                       key={t.id}
                       className={cn(
-                        'group relative flex h-7 shrink-0 items-center gap-1.5 rounded-t-md pl-2.5 pr-1.5 font-mono text-xs',
-                        isActive ? 'bg-bg-base text-fg-base' : 'text-fg-muted hover:bg-surface-2 hover:text-fg-base',
+                        'group relative flex h-7 shrink-0 items-center gap-1.5 rounded-t-md pl-2.5 pr-1.5 font-display text-xs',
+                        isActive ? 'bg-bg-base text-fg-base' : 'text-fg-muted hover:bg-bg-hover hover:text-fg-base',
+                        isActive && env && cn(env.stripeTop, env.tint),
                       )}
-                      style={isActive && env ? { boxShadow: `inset 0 2px 0 ${env.color}`, backgroundColor: `${env.color}12` } : undefined}
                     >
                       <FileCode2 size={12} className={cn('shrink-0', isActive ? 'text-accent-bright' : 'text-fg-subtle')} />
                       <button
@@ -1426,7 +1443,7 @@ export function DbClient({ tabId }: Props) {
                     view === v ? 'bg-surface-3 text-fg-base' : 'text-fg-muted hover:text-fg-base',
                   )}
                 >
-                  {v === 'query' ? 'Console' : 'Analytics'}
+                  {v === 'query' ? 'Query' : 'Analytics'}
                 </button>
               ))}
             </div>
@@ -1443,9 +1460,9 @@ export function DbClient({ tabId }: Props) {
               onOpenSql={(text) => sendToEditor(text, 'Query from the analytics view is in the editor')}
             />
           </div>
-        ) : (
+        ) : connected ? (
           <>
-            {askOpen && aiContext && connected && (
+            {askOpen && aiContext && (
               <AskClaudeBar
                 ctx={aiContext}
                 onUse={(text) => {
@@ -1457,7 +1474,7 @@ export function DbClient({ tabId }: Props) {
             )}
 
             {/* SQL console */}
-            <div className="shrink-0 border-b border-edge-1 bg-bg-base">
+            <div className="shrink-0 bg-bg-base">
               <div className="h-40 min-h-[64px] resize-y overflow-hidden">
                 <SqlEditor
                   ref={editor}
@@ -1466,8 +1483,8 @@ export function DbClient({ tabId }: Props) {
                   onRun={(text) => void run(text)}
                   backend={active?.backend ?? null}
                   completion={completion}
-                  disabled={!connected}
-                  placeholder={connected ? 'SELECT …    (⌘/Ctrl + Enter runs the selection or everything)' : 'Connect first'}
+                  disabled={false}
+                  placeholder={`SELECT …    (${MOD_ENTER} runs the selection, or everything)`}
                 />
               </div>
             </div>
@@ -1511,50 +1528,50 @@ export function DbClient({ tabId }: Props) {
                       Cancel
                     </button>
                   </span>
-                ) : showExport ? (
+                ) : (
                   <>
-                    <span className="mr-0.5 font-display text-2xs text-fg-subtle">Export</span>
-                    {(['csv', 'json'] as const).map((format) => (
-                      <button
-                        key={format}
-                        type="button"
-                        onClick={() => void exportResult(format)}
-                        title={`Export the rows shown as ${format.toUpperCase()}`}
-                        className={cn(textBtn, 'h-6 px-1.5 font-mono text-2xs')}
+                    {showExport && (
+                      <ToolMenu
+                        icon={Download}
+                        label="Export"
+                        items={[
+                          { label: 'Visible rows as CSV', onClick: () => void exportResult('csv') },
+                          { label: 'Visible rows as JSON', onClick: () => void exportResult('json') },
+                          'separator',
+                          {
+                            label: 'All rows as CSV',
+                            hint: 'Runs the query again and saves every row, past the grid’s limit',
+                            onClick: () => void exportFull('csv'),
+                          },
+                          {
+                            label: 'All rows as JSON',
+                            hint: 'Runs the query again and saves every row, past the grid’s limit',
+                            onClick: () => void exportFull('json'),
+                          },
+                        ]}
                       >
-                        <Download size={11} />
-                        {format.toUpperCase()}
-                      </button>
-                    ))}
-                    <span aria-hidden className="mx-0.5 h-3.5 w-px bg-edge-2" />
-                    {(['csv', 'json'] as const).map((format) => (
-                      <button
-                        key={format}
-                        type="button"
-                        onClick={() => void exportFull(format)}
-                        title={`Export the full result as ${format.toUpperCase()}: re-runs the query and streams every row to the file, past the grid's cap`}
-                        className={cn(textBtn, 'h-6 px-1.5 font-mono text-2xs')}
-                      >
-                        <Download size={11} />
-                        All {format.toUpperCase()}
-                      </button>
-                    ))}
+                        Export
+                      </ToolMenu>
+                    )}
+                    {hasTables && (
+                      <ToolMenu
+                        icon={Ellipsis}
+                        label="More views"
+                        items={[
+                          { label: 'Schema diagram', onClick: () => setPane('diagram') },
+                          { label: 'Compare schemas', onClick: () => setPane('diff') },
+                          ...(readOnly ? [] : [{ label: 'New table', onClick: () => openDesigner(null) }]),
+                        ]}
+                      />
+                    )}
                   </>
-                ) : undefined
+                )
               }
             >
               {resultTabs
                 .filter((t) => t.show)
                 .map((t) => (
-                  <ToolTab
-                    key={t.id}
-                    icon={t.icon}
-                    active={pane === t.id}
-                    onClick={() => {
-                      if (t.id === 'design') return setPane('design');
-                      setPane(t.id);
-                    }}
-                  >
+                  <ToolTab key={t.id} icon={t.icon} active={pane === t.id} onClick={() => setPane(t.id)}>
                     {t.label}
                   </ToolTab>
                 ))}
@@ -1647,7 +1664,7 @@ export function DbClient({ tabId }: Props) {
               ) : result && result.columns.length > 0 ? (
                 <div className="flex h-full flex-col">
                   {trail.length > 0 && (
-                    <div className="flex h-7 shrink-0 items-center gap-2 border-b border-edge-1 px-2 font-mono text-2xs text-fg-subtle">
+                    <div className="flex h-7 shrink-0 items-center gap-2 px-2 font-display text-2xs text-fg-subtle">
                       <button type="button" onClick={() => void goBack()} disabled={running} className={textBtn}>
                         <ArrowLeft size={11} /> Back
                       </button>
@@ -1697,43 +1714,39 @@ export function DbClient({ tabId }: Props) {
                       </span>
                     </>
                   ) : result ? (
-                    'Statement ran. It returned no rows.'
-                  ) : connected ? (
-                    'Run a query, or open a table from the explorer.'
+                    'Done. No rows returned.'
                   ) : (
-                    'Not connected.'
+                    'Pick a table on the left, or write a query and press Run.'
                   )}
                 </Placeholder>
               )}
             </div>
           </>
-        )}
+        ) : null}
 
         {/* Status bar */}
+        {active && (
         <StatusBar>
-          {active ? (
-            <span className="flex min-w-0 items-center gap-1.5">
-              <EnvDot env={env} on={connected} />
-              <span className="truncate text-fg-muted">{active.name}</span>
-              <span className="truncate font-mono">{connecting ? 'connecting…' : connected ? active.backend : 'disconnected'}</span>
-            </span>
-          ) : (
-            <span>No connection</span>
-          )}
+          <span className="flex min-w-0 items-center gap-1.5">
+            <EnvDot env={env} on={connected} />
+            <span className="truncate text-fg-muted">{active.name}</span>
+            <span className="truncate">{connecting ? 'Connecting…' : connected ? active.backend : 'Disconnected'}</span>
+          </span>
           {connected && (
             <span className="shrink-0">{inTx ? <span className="text-status-warn">Transaction open</span> : autoCommit ? 'Auto-commit' : 'Manual commit'}</span>
           )}
           <span className="flex-1" />
           {result && view === 'query' && (
-            <span className="shrink-0 font-mono tabular-nums">
+            <span className="shrink-0 tabular-nums">
               {result.columns.length > 0
                 ? `${result.rows.length.toLocaleString()} row${result.rows.length === 1 ? '' : 's'}`
                 : `${result.rows_affected.toLocaleString()} row${result.rows_affected === 1 ? '' : 's'} affected`}
               {result.truncated && <span className="text-status-warn"> (truncated)</span>}
             </span>
           )}
-          {result && view === 'query' && <span className="shrink-0 font-mono tabular-nums">{result.duration_ms} ms</span>}
+          {result && view === 'query' && <span className="shrink-0 tabular-nums">{result.duration_ms} ms</span>}
         </StatusBar>
+        )}
       </div>
 
       {panel && activeId && (
@@ -2008,11 +2021,8 @@ function ConnectionForm({
   const [safety, setSafety] = useState<DbSafety>(editing?.safety ?? 'normal');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const nameRef = useRef<HTMLInputElement>(null);
-
-  useEffect(() => {
-    nameRef.current?.focus();
-  }, []);
+  /** The URL shows its password only while you're editing it. */
+  const [urlFocused, setUrlFocused] = useState(false);
 
   const backend = backendFromUrl(url);
   const placeholder =
@@ -2069,10 +2079,7 @@ function ConnectionForm({
   const env = envOf(safety);
 
   return (
-    <div
-      className="shrink-0 border-b border-edge-1 bg-bg-panel/60"
-      style={env ? { boxShadow: `inset 3px 0 0 ${env.color}` } : undefined}
-    >
+    <div className={cn('shrink-0 bg-bg-panel', env?.stripeLeft)}>
       <ToolWindowHeader>
         <span className="flex items-center gap-1.5 px-1">
           <Plug size={12} className="shrink-0 text-fg-subtle" />
@@ -2085,28 +2092,35 @@ function ConnectionForm({
 
       <div className="space-y-3 px-3 py-3">
         <div className="flex items-end gap-2">
-          <Field label="Name" className="w-44 shrink-0">
-            <input
-              ref={nameRef}
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              placeholder="Optional"
-              spellCheck={false}
-              className={cn(inputCls, 'font-display')}
-            />
-          </Field>
-          <Field label="URL" className="flex-1">
-            <input
-              value={url}
+          <Field label="Connection URL" className="flex-1">
+            <Input
+              mono
+              autoFocus
+              value={urlFocused ? url : maskPassword(url)}
               onChange={(e) => setUrl(e.target.value)}
+              onFocus={() => setUrlFocused(true)}
+              onBlur={() => setUrlFocused(false)}
               onKeyDown={keys}
               placeholder={placeholder}
-              spellCheck={false}
-              autoComplete="off"
-              className={inputCls}
             />
           </Field>
+          {backend === 'sqlite' && (
+            <Button
+              icon={FolderOpen}
+              onClick={() => void fsPickFiles().then(([f]) => f && setUrl(sqliteUrl(f)), (e) => toastError(String(e)))}
+            >
+              Choose file…
+            </Button>
+          )}
         </div>
+        <Field label="Name (optional)" className="w-64">
+          <Input
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            onKeyDown={keys}
+            placeholder="Defaults to the URL"
+          />
+        </Field>
 
         <div className="flex items-end gap-2">
           <Field label="Password" className="flex-1">
@@ -2233,8 +2247,7 @@ function ConnectionForm({
                 >
                   <span
                     aria-hidden
-                    className={cn('h-2 w-2 rounded-full', !e && 'bg-fg-subtle')}
-                    style={e ? { backgroundColor: e.color } : undefined}
+                    className={cn('h-2 w-2 rounded-full', e ? e.dot : 'bg-fg-subtle')}
                   />
                   {s.label}
                 </button>
@@ -2246,17 +2259,17 @@ function ConnectionForm({
           </span>
         </div>
 
-        {error && <p className="font-mono text-xs text-status-err">{error}</p>}
+        {error && <ErrorNote error={error} onDismiss={() => setError(null)} />}
 
         <div className="flex items-center gap-2">
-          <button type="button" onClick={() => void save()} disabled={saving || !url.trim()} className={primaryBtn}>
+          <Button variant="primary" size="sm" onClick={() => void save()} disabled={saving || !url.trim()}>
             {saving ? 'Saving…' : 'Save'}
-          </button>
-          <button type="button" onClick={onCancel} className={textBtn}>
+          </Button>
+          <Button variant="ghost" size="sm" onClick={onCancel}>
             Cancel
-          </button>
+          </Button>
           <p className="ml-auto font-display text-2xs leading-relaxed text-fg-subtle">
-            Passwords and passphrases are stored in your OS credential vault, never in ARC&apos;s
+            Passwords and passphrases are stored in your OS credential vault, never in Arc&apos;s
             database — the saved URL keeps only <span className="font-mono">user@host</span>.
           </p>
         </div>

@@ -60,7 +60,7 @@ const theme = EditorView.theme({
   // these theme classes, and a 100% height there doubles the page height.
   '&.cm-editor': { height: '100%' },
   '.cm-scroller': { fontFamily: 'inherit', overflow: 'auto' },
-  '.cm-content': { caretColor: '#d4d6dc', padding: '8px 0' },
+  '.cm-content': { caretColor: 'rgb(var(--fg-base))', padding: '8px 0' },
   '.cm-gutters': {
     backgroundColor: 'transparent',
     color: MOCHA.overlay0,
@@ -68,7 +68,7 @@ const theme = EditorView.theme({
     borderRight: '1px solid var(--edge-1, rgba(255, 255, 255, 0.05))',
   },
   '.cm-activeLine, .cm-activeLineGutter': { backgroundColor: 'rgba(255,255,255,0.025)' },
-  '.cm-cursor, .cm-dropCursor': { borderLeftColor: '#d4d6dc', borderLeftWidth: '2px' },
+  '.cm-cursor, .cm-dropCursor': { borderLeftColor: 'rgb(var(--fg-base))', borderLeftWidth: '2px' },
   '&.cm-focused > .cm-scroller > .cm-selectionLayer .cm-selectionBackground, .cm-selectionBackground, ::selection':
     { backgroundColor: 'rgba(200, 210, 225, 0.30)' },
   '&.cm-focused': { outline: 'none' },

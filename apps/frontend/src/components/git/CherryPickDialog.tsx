@@ -128,8 +128,8 @@ export function CherryPickDialog() {
         </div>
 
         <div className="border-b border-border-hairline px-4 py-2">
-          <div className="font-display text-2xs uppercase tracking-wider text-fg-subtle">
-            commit
+          <div className="font-display text-2xs text-fg-subtle">
+            Commit
           </div>
           <div className="mt-1 flex items-center gap-2">
             <span className="rounded bg-surface-2 px-1.5 py-0.5 font-mono text-2xs text-fg-base">

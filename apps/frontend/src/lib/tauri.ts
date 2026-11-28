@@ -1673,6 +1673,11 @@ export async function gitStashDrop(path: string, index: number): Promise<void> {
   return gitInvoke<void>('git_stash_drop', { path, index });
 }
 
+/** `git init` in a folder that isn't tracked yet. */
+export async function gitInit(path: string): Promise<void> {
+  return gitInvoke<void>('git_init', { path });
+}
+
 // ── Branch management ─────────────────────────────────────────────────────────
 
 export async function gitBranchCreate(

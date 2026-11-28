@@ -70,11 +70,11 @@ export function FilterBar({
   };
 
   return (
-    <div className="relative flex shrink-0 flex-col gap-2.5 border-b border-border-subtle px-4 py-3 bg-gradient-to-b from-white/[0.015] to-transparent">
+    <div className="relative flex shrink-0 flex-col gap-2.5 border-b border-border-subtle px-4 py-3">
       {/* Row 1 — author chips + view toggle */}
       <div className="flex flex-wrap items-center gap-1.5">
         {selectedAuthors.length === 0 ? (
-          <span className="inline-flex items-center gap-1.5 font-display text-2xs uppercase tracking-widest2 text-fg-subtle/80">
+          <span className="inline-flex items-center gap-1.5 font-display text-2xs text-fg-subtle">
             <span className="h-1 w-1 rounded-full bg-fg-subtle/50" />
             All authors
           </span>
@@ -82,7 +82,7 @@ export function FilterBar({
           selectedAuthors.map((a) => (
             <span
               key={authorKey(a)}
-              className="group inline-flex items-center gap-1.5 rounded-full bg-gradient-to-b from-white/[0.07] to-white/[0.03] py-[3px] pl-2.5 pr-1 font-display text-xs text-fg-base ring-1 ring-inset ring-edge-1 shadow-control animate-fade-in"
+              className="group inline-flex items-center gap-1.5 rounded-full bg-surface-2 py-[3px] pl-2.5 pr-1 font-display text-xs text-fg-base ring-1 ring-inset ring-edge-1 shadow-control animate-fade-in"
               title={`${a.name} <${a.email}>`}
             >
               <span className="max-w-[160px] truncate">{a.name || a.email}</span>
@@ -124,7 +124,7 @@ export function FilterBar({
               className={cn(
                 'rounded-full px-2.5 py-[2px] font-display text-2xs transition-all duration-200',
                 range.preset === p.id
-                  ? 'bg-gradient-to-b from-white/[0.14] to-white/[0.06] text-fg-base shadow-control'
+                  ? 'bg-surface-3 text-fg-base shadow-control'
                   : 'text-fg-muted hover:text-fg-base',
               )}
             >
@@ -179,7 +179,7 @@ function ToggleSegment({
       className={cn(
         'flex items-center gap-1.5 rounded-full px-2.5 py-[3px] font-display text-xs transition-all duration-200',
         active
-          ? 'bg-gradient-to-b from-white/[0.14] to-white/[0.06] text-fg-base shadow-control'
+          ? 'bg-surface-3 text-fg-base shadow-control'
           : 'text-fg-muted hover:text-fg-base',
       )}
     >

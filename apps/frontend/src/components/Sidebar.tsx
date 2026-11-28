@@ -455,7 +455,7 @@ function railQuickActions(view: SidebarView): RailMenuItem[] {
           },
         },
         {
-          label: collapsed ? 'Expand Sidebar' : 'Collapse Sidebar',
+          label: collapsed ? 'Expand sidebar' : 'Collapse sidebar',
           onClick: () => useFiles.getState().toggleCollapsed(),
         },
       ];
@@ -463,7 +463,7 @@ function railQuickActions(view: SidebarView): RailMenuItem[] {
     case 'git':
       return [
         {
-          label: 'Pull Requests',
+          label: 'Pull requests',
           onClick: () => {
             useFiles.getState().showSidebarView('git');
             useGitUi.getState().openPrList();
@@ -484,14 +484,14 @@ function railQuickActions(view: SidebarView): RailMenuItem[] {
           },
         },
         {
-          label: 'Reflog',
+          label: 'Undo history (reflog)',
           onClick: () => {
             useFiles.getState().showSidebarView('git');
             useGitUi.getState().setReflogPanelOpen(true);
           },
         },
         {
-          label: 'Bisect',
+          label: 'Find the commit that broke it',
           onClick: () => {
             useFiles.getState().showSidebarView('git');
             useGitUi.getState().setBisectPanelOpen(true);
@@ -501,14 +501,14 @@ function railQuickActions(view: SidebarView): RailMenuItem[] {
     case 'ssh':
       return [
         {
-          label: 'Manage Hosts',
+          label: 'Manage hosts',
           onClick: () => {
             useFiles.getState().showSidebarView('ssh');
             useSsh.getState().setPanelTab('hosts');
           },
         },
         {
-          label: 'Manage Keys',
+          label: 'Manage keys',
           onClick: () => {
             useFiles.getState().showSidebarView('ssh');
             useSsh.getState().setPanelTab('keys');
@@ -527,11 +527,11 @@ function railMenuItems(view: SidebarView): RailMenuItem[] {
   const items: RailMenuItem[] = [...quick];
   if (quick.length) items.push({ separator: true });
   items.push({
-    label: 'Move Up',
+    label: 'Move up',
     onClick: () => useSidebarLayout.getState().move(view, -1),
   });
   items.push({
-    label: 'Move Down',
+    label: 'Move down',
     onClick: () => useSidebarLayout.getState().move(view, 1),
   });
   if (view !== PINNED_VIEW) {
@@ -545,7 +545,7 @@ function railMenuItems(view: SidebarView): RailMenuItem[] {
     onClick: () => useFiles.getState().toggleRailLabels(),
   });
   items.push({
-    label: 'Customize Sidebar…',
+    label: 'Customize sidebar…',
     onClick: () => {
       if (isTauri) void settingsWindowOpen().catch(() => {});
     },
