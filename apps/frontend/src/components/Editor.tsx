@@ -44,7 +44,7 @@ import { useFiles } from '../state/files';
 import { useSettings } from '../state/settings';
 import { useWorkspace } from '../state/workspace';
 import { useReveal } from '../state/reveal';
-import { getFont } from '../themes';
+import { CODE_FONT_STACK } from '../themes';
 import { cn } from '../lib/cn';
 import { catppuccinHighlight, loadLanguage } from '../lib/codeLanguages';
 
@@ -78,7 +78,6 @@ export function Editor({ filePath, tabId }: Props) {
   /** Holds the user-chosen font family + size. Reconfigured live from
    *  Settings so changing the font reflows the editor without a remount. */
   const fontCompartment = useRef(new Compartment());
-  const fontId = useSettings((s) => s.fontId);
   const fontSize = useSettings((s) => s.fontSize);
   /** Holds the LSP feature layer (diagnostics/hover/completion), reconfigured
    *  once a language server attaches. */
@@ -320,7 +319,7 @@ export function Editor({ filePath, tabId }: Props) {
               // it live.
               fontCompartment.current.of(
                 fontTheme(
-                  getFont(useSettings.getState().fontId).stack,
+                  CODE_FONT_STACK,
                   useSettings.getState().fontSize,
                 ),
               ),
@@ -476,10 +475,10 @@ export function Editor({ filePath, tabId }: Props) {
     if (!view) return;
     view.dispatch({
       effects: fontCompartment.current.reconfigure(
-        fontTheme(getFont(fontId).stack, fontSize),
+        fontTheme(CODE_FONT_STACK, fontSize),
       ),
     });
-  }, [fontId, fontSize]);
+  }, [fontSize]);
 
   // Apply a pending "jump to line" once the view is ready. Runs both on a
   // fresh mount (status flips to `ready` with a line already queued) and when

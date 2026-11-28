@@ -518,6 +518,10 @@ const IS_MAC =
   typeof navigator !== 'undefined' &&
   /mac|iphone|ipad|ipod/i.test(navigator.platform || navigator.userAgent || '');
 
+/** How "run" is written for Enter-with-modifier hints: ⌘↵ on a Mac,
+ *  Ctrl+Enter elsewhere. Handlers accept both; only the label differs. */
+export const MOD_ENTER = IS_MAC ? '⌘↵' : 'Ctrl+Enter';
+
 /** Pretty-print a binding for display. `null` renders as "Disabled". */
 export function formatBinding(binding: KeyBinding | null): string {
   if (!binding) return 'Disabled';

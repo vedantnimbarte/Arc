@@ -41,7 +41,7 @@ export function SshConnectingOverlay({
     <div
       className={cn(
         'absolute inset-0 z-10 flex flex-col items-center justify-center gap-6',
-        'bg-bg-base/95 backdrop-blur-sm animate-fade-in',
+        'bg-bg-base backdrop-blur-sm animate-fade-in',
       )}
     >
       {/* Progress dots row */}

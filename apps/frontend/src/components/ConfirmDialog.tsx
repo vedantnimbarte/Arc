@@ -89,7 +89,7 @@ export function ConfirmDialog() {
 
         {input && (
           <label className="flex flex-col gap-1 px-4 pb-4">
-            <span className="font-display text-2xs uppercase tracking-wider text-fg-subtle">
+            <span className="font-display text-xs text-fg-muted">
               {input.label}
             </span>
             {input.multiline ? (

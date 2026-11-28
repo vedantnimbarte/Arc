@@ -489,7 +489,7 @@ export function FileTree() {
           <EmptyState
             icon={FolderOpen}
             title="File tree unavailable"
-            body="The browser preview has no filesystem access. Run ARC as a desktop app to browse files."
+            body="The browser preview has no filesystem access. Run Arc as a desktop app to browse files."
             hint="pnpm tauri:dev"
           />
         ) : !root ? (
@@ -1121,7 +1121,7 @@ function TreeNode({
           e.dataTransfer.effectAllowed = 'copy';
         }}
         className={cn(
-          'group relative flex h-[26px] w-full items-center gap-1.5 rounded-md pr-2 font-display text-sm tracking-tight transition-colors duration-100',
+          'group relative flex h-7 w-full items-center gap-1.5 rounded-md pr-2 font-display text-sm transition-colors duration-100',
           'hover:bg-surface-1',
           // Ignored rows stay clickable — just recede, the way VS Code greys
           // out `node_modules` and build output.

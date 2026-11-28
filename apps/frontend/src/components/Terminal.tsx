@@ -37,7 +37,7 @@ import { useWorkspace } from '../state/workspace';
 import { useAi } from '../state/ai';
 import { notifyEvent } from '../lib/notifyEvent';
 import { AiCommandBar } from './AiCommandBar';
-import { getFont, resolveActiveTheme } from '../themes';
+import { CODE_FONT_STACK, XTERM_THEME } from '../themes';
 import { every } from '../lib/ticker';
 import { compileRules, matchLine } from '../lib/highlightRules';
 import { AGENT_RESUME_ARGS, isTerminalReply } from '../lib/agentResume';
@@ -136,11 +136,9 @@ export function Terminal({ sessionKey }: Props) {
     let stopAgentIdleTimer: (() => void) | null = null;
 
     const initialSettings = useSettings.getState();
-    const initialFont = getFont(initialSettings.fontId);
-    const initialTheme = resolveActiveTheme(initialSettings.appearance, initialSettings.themeId);
 
     const term = new XTerm({
-      fontFamily: initialFont.stack,
+      fontFamily: CODE_FONT_STACK,
       fontSize: initialSettings.fontSize,
       fontWeight: '400',
       fontWeightBold: '600',
@@ -152,7 +150,7 @@ export function Terminal({ sessionKey }: Props) {
       scrollback: 10_000,
       allowTransparency: true,
       smoothScrollDuration: 80,
-      theme: { ...initialTheme.xterm, background: '#00000000' }, // transparent: wallpaper shows through the frosted pane
+      theme: { ...XTERM_THEME, background: '#00000000' }, // transparent: the pane colour shows through
     });
     termRef.current = term;
 
@@ -399,16 +397,9 @@ export function Terminal({ sessionKey }: Props) {
 
     // Live-update font + theme when the user changes them in Settings.
     const unsubAppearance = useSettings.subscribe((s, prev) => {
-      if (
-        s.fontId !== prev.fontId ||
-        s.fontSize !== prev.fontSize ||
-        s.appearance !== prev.appearance ||
-        s.themeId !== prev.themeId
-      ) {
+      if (s.fontSize !== prev.fontSize) {
         try {
-          term.options.fontFamily = getFont(s.fontId).stack;
           term.options.fontSize = s.fontSize;
-          term.options.theme = { ...resolveActiveTheme(s.appearance, s.themeId).xterm, background: '#00000000' };
           safeFit();
         } catch {
           /* term may be disposed */

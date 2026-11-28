@@ -1,5 +1,6 @@
-import type { ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import {
+  Check,
   Columns3,
   Eye,
   FolderTree,
@@ -21,16 +22,43 @@ import { cn } from '../../lib/cn';
  * the wrong window, so it's the only saturated chrome here.
  */
 
+/** The environment colour as class names (whole strings, so Tailwind sees them). */
 export interface Env {
-  color: string;
   label: string;
+  /** Text and icon colour. */
+  text: string;
+  /** Solid fill, for dots. */
+  dot: string;
+  /** A light wash of the colour, for an active tab or a badge. */
+  tint: string;
+  /** A 2px stripe along the top edge. */
+  stripeTop: string;
+  /** A 3px stripe down the left edge. */
+  stripeLeft: string;
 }
+
+const ENVS: Record<'production' | 'readonly', Env> = {
+  production: {
+    label: 'Production',
+    text: 'text-status-err',
+    dot: 'bg-status-err',
+    tint: 'bg-status-err/10',
+    stripeTop: 'shadow-[inset_0_2px_0_theme(colors.status.err)]',
+    stripeLeft: 'shadow-[inset_3px_0_0_theme(colors.status.err)]',
+  },
+  readonly: {
+    label: 'Read-only',
+    text: 'text-status-warn',
+    dot: 'bg-status-warn',
+    tint: 'bg-status-warn/10',
+    stripeTop: 'shadow-[inset_0_2px_0_theme(colors.status.warn)]',
+    stripeLeft: 'shadow-[inset_3px_0_0_theme(colors.status.warn)]',
+  },
+};
 
 /** The connection's environment colour, derived from its safety level. */
 export function envOf(safety: DbSafety | undefined): Env | null {
-  if (safety === 'production') return { color: '#ff5252', label: 'Production' };
-  if (safety === 'readonly') return { color: '#f0a958', label: 'Read-only' };
-  return null;
+  return safety === 'production' || safety === 'readonly' ? ENVS[safety] : null;
 }
 
 // ─── Toolbar ──────────────────────────────────────────────────────────────────
@@ -95,8 +123,7 @@ export function ToolSep() {
 export function Toolbar({ children, env, className }: { children: ReactNode; env?: Env | null; className?: string }) {
   return (
     <div
-      className={cn('relative flex h-9 shrink-0 items-center gap-0.5 border-b border-edge-1 px-2', className)}
-      style={env ? { boxShadow: `inset 0 2px 0 ${env.color}` } : undefined}
+      className={cn('relative flex h-9 shrink-0 items-center gap-0.5 bg-bg-chrome px-2', env?.stripeTop, className)}
     >
       {children}
     </div>
@@ -181,26 +208,26 @@ export function ToolTitle({ icon: Icon, title, subtitle }: { icon: LucideIcon; t
 export type ObjKind = 'schema' | 'table' | 'view' | 'column' | 'pk' | 'fk' | 'index';
 
 const OBJ: Record<ObjKind, { icon: LucideIcon; color: string }> = {
-  schema: { icon: FolderTree, color: '#9aa3b2' },
-  table: { icon: Table2, color: '#5ea4ff' },
-  view: { icon: Eye, color: '#62c99a' },
-  column: { icon: Columns3, color: '#9aa3b2' },
-  pk: { icon: KeyRound, color: '#e8b339' },
-  fk: { icon: KeyRound, color: '#a493ff' },
-  index: { icon: ListTree, color: '#3ec6c0' },
+  schema: { icon: FolderTree, color: 'text-fg-muted' },
+  table: { icon: Table2, color: 'text-accent' },
+  view: { icon: Eye, color: 'text-status-ok' },
+  column: { icon: Columns3, color: 'text-fg-muted' },
+  pk: { icon: KeyRound, color: 'text-status-warn' },
+  fk: { icon: KeyRound, color: 'text-status-merged' },
+  index: { icon: ListTree, color: 'text-status-info' },
 };
 
 /** The icon a database IDE would draw for this kind of object. */
 export function ObjIcon({ kind, size = 12 }: { kind: ObjKind; size?: number }) {
   const { icon: Icon, color } = OBJ[kind];
-  return <Icon size={size} strokeWidth={2} className="shrink-0" style={{ color }} aria-hidden />;
+  return <Icon size={size} strokeWidth={2} className={cn('shrink-0', color)} aria-hidden />;
 }
 
 // ─── Status bar ───────────────────────────────────────────────────────────────
 
 export function StatusBar({ children }: { children: ReactNode }) {
   return (
-    <div className="flex h-6 shrink-0 items-center gap-3 overflow-hidden border-t border-edge-1 bg-surface-1 px-3 font-display text-2xs text-fg-subtle">
+    <div className="flex h-6 shrink-0 items-center gap-3 overflow-hidden bg-bg-chrome px-3 font-display text-2xs text-fg-subtle">
       {children}
     </div>
   );
@@ -211,8 +238,10 @@ export function EnvDot({ env, on = true }: { env: Env | null; on?: boolean }) {
   return (
     <span
       aria-hidden
-      className={cn('h-2 w-2 shrink-0 rounded-full', !env && (on ? 'bg-status-ok' : 'bg-fg-subtle'))}
-      style={env ? { backgroundColor: env.color, opacity: on ? 1 : 0.5 } : undefined}
+      className={cn(
+        'h-2 w-2 shrink-0 rounded-full',
+        env ? cn(env.dot, !on && 'opacity-50') : on ? 'bg-status-ok' : 'bg-fg-subtle',
+      )}
     />
   );
 }
@@ -220,10 +249,7 @@ export function EnvDot({ env, on = true }: { env: Env | null; on?: boolean }) {
 /** A small rounded badge in the environment colour. */
 export function EnvBadge({ env }: { env: Env }) {
   return (
-    <span
-      className="shrink-0 rounded px-1 font-display text-[10px] font-semibold leading-4"
-      style={{ color: env.color, backgroundColor: `${env.color}22`, boxShadow: `inset 0 0 0 1px ${env.color}44` }}
-    >
+    <span className={cn('shrink-0 rounded px-1 font-display text-[10px] font-semibold leading-4', env.text, env.tint)}>
       {env.label}
     </span>
   );
@@ -235,6 +261,108 @@ export function Placeholder({ children }: { children: ReactNode }) {
     <div className="flex h-full min-h-[8rem] flex-col items-center justify-center gap-2 px-6 text-center font-display text-xs text-fg-subtle">
       {children}
     </div>
+  );
+}
+
+// ─── Menus ────────────────────────────────────────────────────────────────────
+
+export type MenuEntry =
+  | {
+      label: string;
+      onClick: () => void;
+      disabled?: boolean;
+      /** Set for a choice; true draws the check. */
+      checked?: boolean;
+      /** Tooltip, when the label alone doesn't say what happens. */
+      hint?: string;
+    }
+  | 'separator';
+
+/**
+ * A toolbar button that opens a short list of actions. The list is fixed to
+ * the viewport off the button, so a scrolling tab strip can't clip it.
+ */
+export function ToolMenu({
+  icon,
+  label,
+  children,
+  items,
+}: {
+  icon: LucideIcon;
+  /** Tooltip and accessible name. */
+  label: string;
+  /** Optional visible text after the icon. */
+  children?: ReactNode;
+  items: MenuEntry[];
+}) {
+  const [pos, setPos] = useState<{ top: number; right: number } | null>(null);
+  const anchor = useRef<HTMLSpanElement>(null);
+  const list = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!pos) return;
+    const away = (e: MouseEvent) => {
+      const t = e.target as Node;
+      if (!list.current?.contains(t) && !anchor.current?.contains(t)) setPos(null);
+    };
+    const esc = (e: KeyboardEvent) => e.key === 'Escape' && setPos(null);
+    const close = () => setPos(null);
+    document.addEventListener('mousedown', away);
+    document.addEventListener('keydown', esc);
+    window.addEventListener('resize', close);
+    return () => {
+      document.removeEventListener('mousedown', away);
+      document.removeEventListener('keydown', esc);
+      window.removeEventListener('resize', close);
+    };
+  }, [pos]);
+
+  const toggle = () => {
+    if (pos) return setPos(null);
+    const r = anchor.current?.getBoundingClientRect();
+    if (r) setPos({ top: r.bottom + 4, right: Math.max(8, window.innerWidth - r.right) });
+  };
+
+  return (
+    <>
+      <span ref={anchor} className="flex shrink-0" aria-haspopup="menu" aria-expanded={!!pos}>
+        <ToolButton icon={icon} label={label} active={!!pos} onClick={toggle}>
+          {children}
+        </ToolButton>
+      </span>
+      {pos && (
+        <div
+          ref={list}
+          role="menu"
+          aria-label={label}
+          className="fixed z-50 min-w-[12rem] rounded-lg bg-bg-panel p-1 shadow-sheet ring-1 ring-edge-2"
+          style={pos}
+        >
+          {items.map((item, i) =>
+            item === 'separator' ? (
+              <div key={i} role="separator" className="my-1 h-px bg-edge-1" />
+            ) : (
+              <button
+                key={item.label}
+                type="button"
+                role={item.checked === undefined ? 'menuitem' : 'menuitemradio'}
+                aria-checked={item.checked}
+                disabled={item.disabled}
+                title={item.hint}
+                onClick={() => {
+                  setPos(null);
+                  item.onClick();
+                }}
+                className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left font-display text-xs text-fg-base transition-colors hover:bg-bg-hover focus-visible:bg-bg-hover focus-visible:outline-none disabled:pointer-events-none disabled:opacity-40"
+              >
+                <Check size={12} className={cn('shrink-0 text-accent-bright', !item.checked && 'invisible')} />
+                {item.label}
+              </button>
+            ),
+          )}
+        </div>
+      )}
+    </>
   );
 }
 

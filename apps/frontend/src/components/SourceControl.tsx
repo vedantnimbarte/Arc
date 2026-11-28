@@ -19,7 +19,6 @@ import {
   ChevronDown,
   ChevronRight,
   Copy,
-  CloudDownload,
   FileText,
   FolderTree,
   GitBranch,
@@ -29,6 +28,7 @@ import {
   History,
   ListOrdered,
   Minus,
+  MoreHorizontal,
   Pencil,
   Plus,
   RefreshCw,
@@ -38,8 +38,6 @@ import {
   Bot,
   Boxes,
   Cloud,
-  PenLine,
-  ShieldCheck,
   Tag,
   Target,
 } from 'lucide-react';
@@ -55,6 +53,7 @@ import {
   gitDiff,
   gitDiscard,
   gitFetch,
+  gitInit,
   gitLastMessage,
   gitMerge,
   gitPull,
@@ -100,6 +99,9 @@ import { copyText } from '../lib/clipboard';
 import { toast, toastError } from '../state/toast';
 import { notifyEvent } from '../lib/notifyEvent';
 import { PanelTitle } from './PanelTitle';
+import { Button, ErrorNote } from './ui';
+import { MenuItem, Popover } from './git/Popover';
+import { MOD_ENTER } from '../state/shortcuts';
 
 // ~800 lines of worktree + rebase UI, only pulled in when one is opened.
 const WorktreePanel = lazy(() =>
@@ -162,10 +164,10 @@ function sectionFor(entry: GitChangeEntry): Section {
 }
 
 const SECTION_LABEL: Record<Section, string> = {
-  staged: 'Staged Changes',
+  staged: 'Staged changes',
   changes: 'Changes',
   untracked: 'Untracked',
-  conflict: 'Merge Conflicts',
+  conflict: 'Merge conflicts',
 };
 
 const SECTION_ORDER: Section[] = ['conflict', 'staged', 'changes', 'untracked'];
@@ -295,7 +297,9 @@ export function SourceControl() {
 
   // Remote ops
   const [remoteOp, setRemoteOp] = useState<'fetch' | 'pull' | 'push' | null>(null);
-  const [remoteMsg, setRemoteMsg] = useState<string | null>(null);
+  /** Last remote op's outcome: a plain sentence, with git's own output
+   *  behind "Details". */
+  const [remoteMsg, setRemoteMsg] = useState<{ text: string; detail?: string } | null>(null);
 
   // Stash
   const [stashes, setStashes] = useState<GitStashEntry[]>([]);
@@ -340,6 +344,9 @@ export function SourceControl() {
   const [newRemoteUrl, setNewRemoteUrl] = useState('');
   const [submodules, setSubmodules] = useState<GitSubmoduleEntry[]>([]);
   const [submodulesOpen, setSubmodulesOpen] = useState(false);
+  // The rarer tools sit behind one disclosure so the panel opens on what
+  // most people need: changes, commit, sync, stash.
+  const [moreToolsOpen, setMoreToolsOpen] = useState(false);
 
   // Set when a push comes back rejected, so the banner can offer the
   // force-with-lease retry rather than hiding it behind a modifier key.
@@ -425,7 +432,7 @@ function notifyGitFailure(title: string, err: unknown): void {
     setOpError(null);
     try {
       const res = await gitFetch(root);
-      setRemoteMsg(res.message || 'Fetch complete.');
+      setRemoteMsg({ text: 'Fetched from the remote.', detail: res.message });
       await refreshStore(root);
     } catch (e) {
       setOpError(String(e));
@@ -442,7 +449,7 @@ function notifyGitFailure(title: string, err: unknown): void {
     setOpError(null);
     try {
       const res = await gitPull(root, false);
-      setRemoteMsg(res.message || 'Pull complete.');
+      setRemoteMsg({ text: 'Pulled the latest commits.', detail: res.message });
       await refreshStore(root);
     } catch (e) {
       setOpError(String(e));
@@ -462,7 +469,7 @@ function notifyGitFailure(title: string, err: unknown): void {
       try {
         const hasUpstream = !!info?.upstream;
         const res = await gitPushRemote(root, undefined, undefined, force, !hasUpstream);
-        setRemoteMsg(res.message || 'Push complete.');
+        setRemoteMsg({ text: 'Pushed your commits.', detail: res.message });
         await refreshStore(root);
       } catch (e) {
         const msg = String(e);
@@ -482,13 +489,37 @@ function notifyGitFailure(title: string, err: unknown): void {
   const handleForcePush = useCallback(async () => {
     if (!root) return;
     const ok = await askConfirm({
-      title: 'Force push with lease?',
-      body: 'Overwrites the remote branch with your local history. The lease still refuses if someone else pushed since your last fetch.',
-      confirmLabel: 'Force push',
+      title: 'Overwrite the remote branch?',
+      body: "Commits on the remote that you don't have will be lost for everyone.",
+      confirmLabel: 'Overwrite remote',
       destructive: true,
     });
     if (ok) await handlePush(true);
   }, [root, handlePush]);
+
+  /** Pull, then push only if the pull went through. Backs the header's Sync
+   *  and the rejected-push banner. With no upstream there is nothing to pull
+   *  yet, so it goes straight to the first push (which sets one). */
+  const handleSync = useCallback(async () => {
+    if (!root || remoteOp) return;
+    if (info?.upstream) {
+      setRemoteOp('pull');
+      setRemoteMsg(null);
+      setOpError(null);
+      setPushRejected(false);
+      try {
+        await gitPull(root, false);
+        await refreshStore(root);
+      } catch (e) {
+        setOpError(String(e));
+        notifyGitFailure('Pull failed', e);
+        return;
+      } finally {
+        setRemoteOp(null);
+      }
+    }
+    await handlePush();
+  }, [root, remoteOp, info?.upstream, refreshStore, handlePush]);
 
   // ── Stash ────────────────────────────────────────────────────────────────────
 
@@ -540,6 +571,13 @@ function notifyGitFailure(title: string, err: unknown): void {
 
   const handleStashDrop = useCallback(async (index: number) => {
     if (!root || stashBusy) return;
+    const ok = await askConfirm({
+      title: 'Delete this stash?',
+      body: "Its changes can't be recovered.",
+      confirmLabel: 'Delete stash',
+      destructive: true,
+    });
+    if (!ok) return;
     setStashBusy(true);
     setOpError(null);
     try {
@@ -596,6 +634,15 @@ function notifyGitFailure(title: string, err: unknown): void {
   const handleRebaseStep = useCallback(
     async (step: 'continue' | 'abort') => {
       if (!root || rebaseBusy) return;
+      if (
+        step === 'abort' &&
+        !(await askConfirm({
+          title: 'Stop the rebase?',
+          body: 'Your branch goes back to how it was before it started.',
+          confirmLabel: 'Stop rebase',
+        }))
+      )
+        return;
       setRebaseBusy(true);
       setOpError(null);
       try {
@@ -604,7 +651,7 @@ function notifyGitFailure(title: string, err: unknown): void {
           toast('Rebase continued');
         } else {
           await gitRebaseAbort(root);
-          toast('Rebase aborted');
+          toast('Rebase stopped');
         }
         await refreshStore(root);
       } catch (e) {
@@ -679,7 +726,7 @@ function notifyGitFailure(title: string, err: unknown): void {
       setOpError(null);
       try {
         const res = await gitTagPush(root, name);
-        setRemoteMsg(res.message);
+        setRemoteMsg({ text: `Pushed tag ${name}.`, detail: res.message });
       } catch (e) {
         setOpError(String(e));
       } finally {
@@ -842,7 +889,7 @@ function notifyGitFailure(title: string, err: unknown): void {
         const forced = await askConfirm({
           title: `"${name}" is not fully merged.`,
           body: 'Deleting it now drops the commits that are only on this branch.',
-          confirmLabel: 'force delete',
+          confirmLabel: 'Delete anyway',
           destructive: true,
         });
         if (forced) await handleBranchDelete(name, true);
@@ -890,6 +937,22 @@ function notifyGitFailure(title: string, err: unknown): void {
       setBusy(false);
     }
   }, [root, refreshStore]);
+
+  /** `git init` the open folder, then let the store pick the new repo up. */
+  const handleInit = useCallback(async () => {
+    if (!root || busy) return;
+    setBusy(true);
+    setOpError(null);
+    try {
+      await gitInit(root);
+      await useGit.getState().refresh(root);
+      toast('Now tracking changes in this folder');
+    } catch (e) {
+      setOpError(String(e));
+    } finally {
+      setBusy(false);
+    }
+  }, [root, busy]);
 
   // Everything below — sections, counts, stage-all, the commit box — runs off
   // `visible`, so the review filter narrows the whole panel rather than just
@@ -1071,6 +1134,18 @@ function notifyGitFailure(title: string, err: unknown): void {
   const canCommit =
     isTauri && !!root && !busy && stagedCount > 0 && message.trim().length > 0;
 
+  // Ahead only: push. Behind only: pull. Both or neither: pull then push.
+  const ahead = info?.ahead ?? 0;
+  const behind = info?.behind ?? 0;
+  const sync =
+    ahead > 0 && behind === 0
+      ? { label: `Push ${ahead}`, title: `Push ${ahead} commit${ahead === 1 ? '' : 's'}`, icon: ArrowUpFromLine, run: () => handlePush() }
+      : behind > 0 && ahead === 0
+        ? { label: `Pull ${behind}`, title: `Pull ${behind} commit${behind === 1 ? '' : 's'}`, icon: ArrowDownToLine, run: handlePull }
+        : { label: 'Sync', title: 'Pull, then push', icon: RefreshCw, run: handleSync };
+  const anyToolOpen = prInline || worktreesInline || rebaseInline || reflogInline || bisectInline;
+  const showMoreTools = moreToolsOpen || anyToolOpen;
+
   return (
     <div className="flex h-full min-w-0 flex-col">
       {/* Panel label — every other sidebar panel names itself this way
@@ -1081,11 +1156,6 @@ function notifyGitFailure(title: string, err: unknown): void {
       </div>
       {/* Header — branch glyph, name + sync indicators, change count, refresh */}
       <div className="relative flex h-11 shrink-0 items-center gap-1.5 border-b border-border-hairline px-2.5">
-        {/* Subtle top-edge highlight, matches macOS toolbar lift. */}
-        <span
-          aria-hidden
-          className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-white/[0.06] to-transparent"
-        />
         <button
           onClick={() => { if (isTauri && root) setBranchPanelOpen((o) => !o); }}
           className="flex h-5 w-5 shrink-0 items-center justify-center rounded-md bg-accent-soft ring-1 ring-inset ring-accent/15 transition hover:ring-accent/40"
@@ -1104,71 +1174,76 @@ function notifyGitFailure(title: string, err: unknown): void {
         >
           {info?.branch ?? (info?.head_short ? `detached @ ${info.head_short}` : '—')}
         </button>
-        {/* Ahead/behind chevrons — only render the side that's non-zero. */}
-        {info && (info.ahead > 0 || info.behind > 0) && (
-          <div className="flex items-center gap-1 rounded-md bg-surface-1 px-1.5 py-[2px] font-mono text-2xs tabular-nums text-fg-muted ring-1 ring-inset ring-edge-1">
-            {info.behind > 0 && (
-              <span className="flex items-center gap-[1px]" title={`${info.behind} behind`}>
-                <ArrowDownToLine size={9} strokeWidth={2.4} />
-                {info.behind}
-              </span>
-            )}
-            {info.ahead > 0 && (
-              <span className="flex items-center gap-[1px]" title={`${info.ahead} ahead`}>
-                <ArrowUpFromLine size={9} strokeWidth={2.4} />
-                {info.ahead}
-              </span>
-            )}
+        {/* Ahead/behind: the sync button names a one-sided count itself, so
+            this only shows when both sides moved. */}
+        {info && info.ahead > 0 && info.behind > 0 && (
+          <div className="flex items-center gap-1 rounded-md bg-surface-1 px-1.5 py-[2px] font-display text-2xs tabular-nums text-fg-muted">
+            <span className="flex items-center gap-[1px]" title={`${info.behind} to pull`}>
+              <ArrowDownToLine size={9} strokeWidth={2.4} />
+              {info.behind}
+            </span>
+            <span className="flex items-center gap-[1px]" title={`${info.ahead} to push`}>
+              <ArrowUpFromLine size={9} strokeWidth={2.4} />
+              {info.ahead}
+            </span>
           </div>
         )}
         {total > 0 && (
           <span
-            className="flex h-[17px] min-w-[18px] items-center justify-center rounded-full bg-surface-1 px-[5px] font-mono text-2xs font-semibold tabular-nums text-fg-base/85 ring-1 ring-inset ring-edge-1"
+            className="flex h-[17px] min-w-[18px] items-center justify-center rounded-full bg-surface-1 px-[5px] font-display text-2xs font-semibold tabular-nums text-fg-base"
             title={`${total} change${total === 1 ? '' : 's'}`}
           >
             {total > 99 ? '99+' : total}
           </span>
         )}
-        {/* Fetch / Pull / Push */}
+        {/* One sync button named for what it will do, with the individual
+            steps one click away. */}
         {isTauri && root && (
-          <>
-            <button
-              onClick={() => void handleFetch()}
+          <div className="flex shrink-0 items-center gap-px">
+            <Button
+              size="sm"
+              icon={sync.icon}
+              onClick={() => void sync.run()}
               disabled={!!remoteOp || busy}
-              title="Fetch"
-              className={cn(
-                'flex h-6 w-6 items-center justify-center rounded-md text-fg-muted transition-all duration-150 ease-apple',
-                'hover:bg-surface-2 hover:text-fg-base hover:shadow-[inset_0_0_0_1px_rgba(255,255,255,0.05)]',
-                'active:scale-[0.92] disabled:opacity-40',
-              )}
+              title={sync.title}
+              className="h-6 rounded-r-none px-2"
             >
-              <CloudDownload size={11} strokeWidth={2.1} className={remoteOp === 'fetch' ? 'animate-pulse' : ''} />
-            </button>
-            <button
-              onClick={() => void handlePull()}
-              disabled={!!remoteOp || busy}
-              title="Pull"
-              className={cn(
-                'flex h-6 w-6 items-center justify-center rounded-md text-fg-muted transition-all duration-150 ease-apple',
-                'hover:bg-surface-2 hover:text-fg-base hover:shadow-[inset_0_0_0_1px_rgba(255,255,255,0.05)]',
-                'active:scale-[0.92] disabled:opacity-40',
-              )}
+              {remoteOp === 'fetch'
+                ? 'Fetching…'
+                : remoteOp === 'pull'
+                  ? 'Pulling…'
+                  : remoteOp === 'push'
+                    ? 'Pushing…'
+                    : sync.label}
+            </Button>
+            <Popover
+              label="More sync options"
+              trigger={<ChevronDown size={11} strokeWidth={2.2} />}
+              triggerClassName="flex h-6 w-5 items-center justify-center rounded-r-md bg-bg-panel text-fg-muted transition-colors hover:bg-bg-hover hover:text-fg-base"
+              width={220}
             >
-              <ArrowDownToLine size={11} strokeWidth={2.1} className={remoteOp === 'pull' ? 'animate-pulse' : ''} />
-            </button>
-            <button
-              onClick={() => void handlePush()}
-              disabled={!!remoteOp || busy}
-              title="Push"
-              className={cn(
-                'flex h-6 w-6 items-center justify-center rounded-md text-fg-muted transition-all duration-150 ease-apple',
-                'hover:bg-surface-2 hover:text-fg-base hover:shadow-[inset_0_0_0_1px_rgba(255,255,255,0.05)]',
-                'active:scale-[0.92] disabled:opacity-40',
+              {(close) => (
+                <>
+                  <MenuItem
+                    disabled={!!remoteOp}
+                    hint="Check for new commits without changing files"
+                    onClick={() => { close(); void handleFetch(); }}
+                  >
+                    Fetch
+                  </MenuItem>
+                  <MenuItem disabled={!!remoteOp} onClick={() => { close(); void handlePull(); }}>
+                    Pull
+                  </MenuItem>
+                  <MenuItem disabled={!!remoteOp} onClick={() => { close(); void handlePush(); }}>
+                    Push
+                  </MenuItem>
+                  <MenuItem disabled={loading} onClick={() => { close(); void refresh(); }}>
+                    Refresh
+                  </MenuItem>
+                </>
               )}
-            >
-              <ArrowUpFromLine size={11} strokeWidth={2.1} className={remoteOp === 'push' ? 'animate-pulse' : ''} />
-            </button>
-          </>
+            </Popover>
+          </div>
         )}
         {isTauri && root && (
           <button
@@ -1177,31 +1252,13 @@ function notifyGitFailure(title: string, err: unknown): void {
             aria-label="Open Git history"
             className={cn(
               'flex h-6 w-6 items-center justify-center rounded-md text-fg-muted transition-all duration-150 ease-apple',
-              'hover:bg-surface-2 hover:text-fg-base hover:shadow-[inset_0_0_0_1px_rgba(255,255,255,0.05)]',
+              'hover:bg-surface-2 hover:text-fg-base',
               'active:scale-[0.92]',
             )}
           >
             <History size={11} strokeWidth={2.1} />
           </button>
         )}
-        <button
-          onClick={() => void refresh()}
-          disabled={!isTauri || !root || loading}
-          className={cn(
-            'flex h-6 w-6 items-center justify-center rounded-md text-fg-muted transition-all duration-150 ease-apple',
-            'hover:bg-surface-2 hover:text-fg-base hover:shadow-[inset_0_0_0_1px_rgba(255,255,255,0.05)]',
-            'active:scale-[0.92]',
-            'disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:shadow-none',
-          )}
-          aria-label="Refresh"
-          title="Refresh"
-        >
-          <RefreshCw
-            size={12}
-            strokeWidth={2.1}
-            className={loading ? 'animate-spin-slow' : ''}
-          />
-        </button>
       </div>
 
       {/* Changes / History — the working tree you're about to commit, or the
@@ -1245,9 +1302,9 @@ function notifyGitFailure(title: string, err: unknown): void {
                 onClick={() => void handleRebaseStep('abort')}
                 disabled={rebaseBusy}
                 title="git rebase --abort"
-                className="shrink-0 rounded-md px-2 py-0.5 font-display text-2xs text-fg-muted hover:bg-surface-2 hover:text-red-300 disabled:opacity-40"
+                className="shrink-0 rounded-md px-2 py-0.5 font-display text-2xs text-fg-muted hover:bg-surface-2 hover:text-status-err disabled:opacity-40"
               >
-                Abort
+                Stop rebase
               </button>
             </>
           )}
@@ -1307,28 +1364,50 @@ function notifyGitFailure(title: string, err: unknown): void {
 
       {/* Remote op result banner */}
       {remoteMsg && (
-        <div className="flex shrink-0 items-start gap-2 border-b border-border-hairline bg-surface-1 px-3 py-1.5 font-mono text-2xs text-fg-muted">
-          <span className="flex-1 break-all">{remoteMsg}</span>
-          <button onClick={() => setRemoteMsg(null)} className="shrink-0 text-fg-subtle hover:text-fg-base"><X size={11} /></button>
+        <div className="flex shrink-0 items-start gap-2 bg-surface-1 px-3 py-1.5 font-display text-2xs text-fg-muted">
+          <div className="min-w-0 flex-1">
+            <span className="text-fg-base">{remoteMsg.text}</span>
+            {remoteMsg.detail && (
+              <details className="mt-0.5">
+                <summary className="cursor-pointer text-fg-subtle hover:text-fg-base">Details</summary>
+                <pre className="selectable mt-1 max-h-32 overflow-auto whitespace-pre-wrap break-words font-mono text-2xs text-fg-muted">
+                  {remoteMsg.detail}
+                </pre>
+              </details>
+            )}
+          </div>
+          <button onClick={() => setRemoteMsg(null)} aria-label="Dismiss" className="shrink-0 text-fg-subtle hover:text-fg-base"><X size={11} /></button>
         </div>
       )}
 
-      {/* The remote refused the push — after a rebase or amend that's
-          expected, and force-with-lease is the way through. */}
+      {/* The remote refused the push. Usually a teammate pushed first, so
+          pulling is the way through; overwriting (force-with-lease) is for
+          after a rebase or amend, and asks first. */}
       {pushRejected && (
-        <div className="flex shrink-0 items-center gap-2 border-b border-border-hairline bg-status-warn/[0.08] px-2.5 py-1.5">
+        <div className="flex shrink-0 flex-wrap items-center gap-2 bg-status-warn/10 px-2.5 py-1.5">
           <Upload size={11} strokeWidth={2.2} className="shrink-0 text-status-warn" />
-          <span className="min-w-0 flex-1 font-display text-2xs text-fg-muted">
-            Push rejected — your history has moved.
+          <span className="min-w-0 flex-1 font-display text-2xs text-fg-base">
+            The remote has commits you don't have yet.
           </span>
-          <button
+          <Button
+            size="sm"
+            variant="primary"
+            onClick={() => void handleSync()}
+            disabled={!!remoteOp}
+            className="h-6 px-2 text-2xs"
+          >
+            Pull, then push
+          </Button>
+          <Button
+            size="sm"
+            variant="ghost"
             onClick={() => void handleForcePush()}
             disabled={!!remoteOp}
             title="git push --force-with-lease"
-            className="shrink-0 rounded-md px-2 py-0.5 font-display text-2xs text-fg-muted ring-1 ring-inset ring-edge-1 hover:bg-surface-2 hover:text-red-300 disabled:opacity-40"
+            className="h-6 px-2 text-2xs"
           >
-            Force with lease
-          </button>
+            Overwrite remote…
+          </Button>
           <button
             onClick={() => setPushRejected(false)}
             className="shrink-0 text-fg-subtle hover:text-fg-base"
@@ -1355,14 +1434,14 @@ function notifyGitFailure(title: string, err: unknown): void {
               onClick={() => void handleBranchCreate(true)}
               disabled={!newBranchName.trim() || busy}
               title="Create & switch"
-              className="flex h-6 items-center gap-1 rounded-md bg-accent/10 px-2 font-sans text-2xs text-accent hover:bg-accent/20 disabled:opacity-40"
+              className="flex h-6 items-center gap-1 rounded-md bg-accent/10 px-2 font-display text-2xs text-accent hover:bg-accent/20 disabled:opacity-40"
             >
               <Plus size={10} strokeWidth={2.5} /> Create
             </button>
           </div>
           {/* Branch list */}
           {branchesLoading ? (
-            <p className="px-1 font-sans text-2xs text-fg-subtle">Loading…</p>
+            <p className="px-1 font-display text-2xs text-fg-subtle">Loading…</p>
           ) : (
             <ul className="max-h-40 overflow-y-auto space-y-px">
               {branches.filter((b) => !b.remote).map((b) => (
@@ -1389,7 +1468,7 @@ function notifyGitFailure(title: string, err: unknown): void {
                       )}
                       <button onClick={() => { setRenamingBranch(b.name); setRenameValue(b.name); }} title="Rename" className="text-fg-muted hover:text-fg-base"><Pencil size={10} strokeWidth={2} /></button>
                       {!b.current && (
-                        <button onClick={() => void handleBranchDelete(b.name)} title="Delete" className="text-fg-muted hover:text-red-400"><Trash2 size={10} strokeWidth={2} /></button>
+                        <button onClick={() => void handleBranchDelete(b.name)} title="Delete" className="text-fg-muted hover:text-status-err"><Trash2 size={10} strokeWidth={2} /></button>
                       )}
                     </span>
                   )}
@@ -1402,13 +1481,12 @@ function notifyGitFailure(title: string, err: unknown): void {
 
       {/* Commit composer — card with focus bloom + gradient commit bar */}
       {isTauri && root && tab === 'changes' && (
-        <div className="shrink-0 border-b border-border-hairline bg-surface-1/30 px-2.5 py-2.5">
+        <div className="shrink-0 px-2.5 py-2.5">
           <div
             className={cn(
-              'group/composer relative rounded-lg border border-edge-1 bg-bg-base/55',
-              'shadow-[inset_0_1px_0_0_rgba(255,255,255,0.035)]',
+              'group/composer relative rounded-lg border border-edge-1 bg-bg-base',
               'transition-all duration-200 ease-apple',
-              'focus-within:border-accent/45 focus-within:bg-bg-base/75 focus-within:shadow-focus',
+              'focus-within:border-accent/45 focus-within:shadow-focus',
             )}
           >
             <textarea
@@ -1433,13 +1511,13 @@ function notifyGitFailure(title: string, err: unknown): void {
               aria-hidden
               className={cn(
                 'pointer-events-none absolute bottom-1.5 right-2 flex items-center gap-1',
-                'font-mono text-2xs tabular-nums tracking-tight text-fg-subtle/80',
+                'font-display text-2xs tabular-nums tracking-tight text-fg-subtle',
                 'transition-opacity duration-200',
                 message.length > 0 ? 'opacity-100' : 'opacity-0',
               )}
             >
-              <kbd className="rounded bg-surface-1 px-1 py-[1px] ring-1 ring-inset ring-edge-1">
-                ⌘⏎
+              <kbd className="rounded bg-surface-1 px-1 py-[1px] font-display ring-1 ring-inset ring-edge-1">
+                {MOD_ENTER}
               </kbd>
             </div>
           </div>
@@ -1453,23 +1531,11 @@ function notifyGitFailure(title: string, err: unknown): void {
                 'font-display text-xs font-medium tracking-tight',
                 'transition-all duration-200 ease-apple',
                 (amendMode ? message.trim() && !busy : canCommit)
-                  ? cn(
-                      'bg-gradient-to-b from-white/[0.10] to-white/[0.04] text-accent-bright',
-                      'ring-1 ring-inset ring-accent/25',
-                      'shadow-[inset_0_1px_0_0_rgba(255,255,255,0.08),0_1px_2px_0_rgba(0,0,0,0.35)]',
-                      'hover:from-white/[0.14] hover:to-white/[0.06] hover:ring-accent/40 hover:shadow-glow-sm',
-                      'active:scale-[0.985]',
-                    )
-                  : 'bg-surface-1 text-fg-subtle ring-1 ring-inset ring-edge-1',
+                  ? 'bg-accent text-bg-base hover:bg-accent-bright active:scale-[0.985]'
+                  : 'bg-surface-1 text-fg-subtle',
               )}
-              title={amendMode ? 'Amend last commit (⌘⏎)' : (stagedCount === 0 ? 'Stage a file first' : 'Commit (⌘⏎)')}
+              title={amendMode ? `Amend last commit (${MOD_ENTER})` : (stagedCount === 0 ? 'Stage a file first' : `Commit (${MOD_ENTER})`)}
             >
-              {(amendMode ? message.trim() && !busy : canCommit) && (
-                <span
-                  aria-hidden
-                  className="pointer-events-none absolute inset-x-3 top-0 h-px bg-gradient-to-r from-transparent via-white/[0.18] to-transparent"
-                />
-              )}
               <Check size={12} strokeWidth={2.4} />
               <span className="relative">
                 {amendMode ? 'Amend commit' : (canCommit ? `Commit ${stagedCount} ${stagedCount === 1 ? 'file' : 'files'}` : 'Commit')}
@@ -1480,26 +1546,44 @@ function notifyGitFailure(title: string, err: unknown): void {
               onClick={() => void handleToggleAmend()}
               title="Amend last commit"
               className={cn(
-                'flex h-[28px] items-center gap-1 rounded-lg px-2 font-sans text-2xs transition-all',
+                'flex h-[28px] items-center gap-1 rounded-lg px-2 font-display text-2xs transition-all',
                 amendMode
-                  ? 'bg-accent/15 text-accent ring-1 ring-inset ring-accent/30'
-                  : 'bg-surface-1 text-fg-subtle ring-1 ring-inset ring-edge-1 hover:text-fg-base hover:bg-surface-2',
+                  ? 'bg-accent/15 text-accent'
+                  : 'bg-surface-1 text-fg-subtle hover:text-fg-base hover:bg-surface-2',
               )}
             >
               <Pencil size={9} strokeWidth={2.2} /> Amend
             </button>
-            <CommitSwitch
-              on={signCommits}
-              onClick={() => useGitUi.getState().setSignCommits(!signCommits)}
-              label="Sign commits (-S)"
-              icon={<ShieldCheck size={11} strokeWidth={2.2} />}
-            />
-            <CommitSwitch
-              on={signoffCommits}
-              onClick={() => useGitUi.getState().setSignoffCommits(!signoffCommits)}
-              label="Add Signed-off-by (-s)"
-              icon={<PenLine size={11} strokeWidth={2.2} />}
-            />
+            {/* Signing switches live one click in: rarely changed, and
+                remembered across sessions. The trigger lights while one is on. */}
+            <Popover
+              label="Commit options"
+              trigger={<MoreHorizontal size={12} strokeWidth={2.2} />}
+              triggerClassName={cn(
+                'flex h-[28px] w-[28px] items-center justify-center rounded-lg transition-all',
+                signCommits || signoffCommits
+                  ? 'bg-accent/15 text-accent'
+                  : 'bg-surface-1 text-fg-subtle hover:bg-surface-2 hover:text-fg-base',
+              )}
+              width={240}
+            >
+              {() => (
+                <>
+                  <CommitOption
+                    on={signCommits}
+                    onClick={() => useGitUi.getState().setSignCommits(!signCommits)}
+                    label="Sign commits (-S)"
+                    hint="Uses your configured signing key"
+                  />
+                  <CommitOption
+                    on={signoffCommits}
+                    onClick={() => useGitUi.getState().setSignoffCommits(!signoffCommits)}
+                    label="Add Signed-off-by (-s)"
+                    hint="Appends a sign-off line with your name"
+                  />
+                </>
+              )}
+            </Popover>
           </div>
         </div>
       )}
@@ -1517,15 +1601,14 @@ function notifyGitFailure(title: string, err: unknown): void {
           </div>
         )}
         {error && (
-          <div className="mx-1 mb-2 flex items-start gap-2 rounded-lg border border-status-err/25 bg-status-err/[0.07] px-2.5 py-2 font-display text-2xs leading-relaxed text-status-err shadow-[inset_0_1px_0_0_rgba(255,82,82,0.05)]">
-            <AlertCircle size={12} strokeWidth={2} className="mt-px shrink-0" />
-            <span className="min-w-0 break-words text-status-err/90" title={error}>
-              {error}
-            </span>
-          </div>
+          <ErrorNote
+            error={error}
+            onDismiss={opError ? () => setOpError(null) : undefined}
+            className="mx-1 mb-2 text-xs"
+          />
         )}
         {isTauri && !error && total === 0 && !loading && (
-          <EmptyState isRepo={!!repoRoot} />
+          <EmptyState isRepo={!!repoRoot} onInit={root ? handleInit : undefined} busy={busy} />
         )}
         {SECTION_ORDER.map((section) => {
           const rows = grouped[section];
@@ -1598,19 +1681,81 @@ function notifyGitFailure(title: string, err: unknown): void {
         </Suspense>
       )}
 
-      {/* Git tools — Changes / PRs / worktrees / rebase / reflog / bisect, each
-          a collapsible section in the bottom stack beside stash and tags. */}
+      {/* Bottom stack: Changes and Stash always; the rest behind one
+          disclosure. A tool opened from elsewhere (the command palette)
+          shows the disclosure open so it isn't hidden. */}
       {isTauri && root && tab === 'changes' && (
+        <GitToolRow
+          icon={<FileText size={11} strokeWidth={2} />}
+          label="Changes"
+          count={total}
+          onClick={() => useGitUi.getState().closeGitPanels()}
+        />
+      )}
+
+      {/* Stash section */}
+      {isTauri && root && tab === 'changes' && (
+        <div className="shrink-0 border-t border-border-hairline">
+          <button
+            onClick={() => setStashOpen((o) => !o)}
+            className="flex w-full items-center gap-1.5 px-2.5 py-1.5 text-left hover:bg-surface-1"
+          >
+            {stashOpen ? <ChevronDown size={10} strokeWidth={2} className="text-fg-subtle" /> : <ChevronRight size={10} strokeWidth={2} className="text-fg-subtle" />}
+            <Archive size={11} strokeWidth={2} className="text-fg-muted" />
+            <span className="flex-1 font-display text-xs text-fg-muted">Saved for later (stash)</span>
+            {stashes.length > 0 && (
+              <span className="rounded-full bg-surface-2 px-1.5 font-display text-2xs tabular-nums text-fg-subtle">{stashes.length}</span>
+            )}
+            <button
+              onClick={(e) => { e.stopPropagation(); void handleStashPush(); }}
+              disabled={stashBusy}
+              title="Set all changes aside for later"
+              className="flex h-5 items-center gap-0.5 rounded px-1.5 font-display text-2xs text-fg-muted hover:bg-surface-2 hover:text-fg-base disabled:opacity-40"
+            >
+              <Plus size={9} strokeWidth={2.5} /> Stash
+            </button>
+          </button>
+          {stashOpen && (
+            <div className="px-2 pb-1.5">
+              {stashes.length === 0 ? (
+                <p className="px-1 font-display text-2xs text-fg-subtle/60">Nothing saved for later</p>
+              ) : (
+                <ul className="max-h-40 space-y-px overflow-y-auto">
+                  {stashes.map((s) => (
+                    <li key={s.index} className="group flex items-center gap-1.5 rounded px-1 py-[3px] hover:bg-surface-1">
+                      <span className="w-5 shrink-0 font-mono text-2xs text-fg-subtle/60">{s.index}</span>
+                      <span className="flex-1 truncate font-display text-xs text-fg-base/80">{s.message}</span>
+                      <span className="hidden items-center gap-1 group-hover:flex">
+                        <button onClick={() => void handleStashPop(s.index)} title="Bring back and remove from the list" disabled={stashBusy} className="text-fg-muted hover:text-accent disabled:opacity-40"><ArrowDownToLine size={11} strokeWidth={2} /></button>
+                        <button onClick={() => void handleStashDrop(s.index)} title="Delete stash" disabled={stashBusy} className="text-fg-muted hover:text-status-err disabled:opacity-40"><Trash2 size={11} strokeWidth={2} /></button>
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+
+      {isTauri && root && tab === 'changes' && (
+        <GitToolRow
+          icon={<MoreHorizontal size={11} strokeWidth={2} />}
+          label="More git tools"
+          open={showMoreTools}
+          onClick={() => {
+            if (showMoreTools) {
+              setMoreToolsOpen(false);
+              if (anyToolOpen) useGitUi.getState().closeGitPanels();
+            } else setMoreToolsOpen(true);
+          }}
+        />
+      )}
+      {isTauri && root && tab === 'changes' && showMoreTools && (
         <Suspense fallback={null}>
-          <GitToolRow
-            icon={<FileText size={11} strokeWidth={2} />}
-            label="Changes"
-            count={total}
-            onClick={() => useGitUi.getState().closeGitPanels()}
-          />
           <GitToolSection
             icon={<GitPullRequest size={11} strokeWidth={2} />}
-            label="Pull Requests"
+            label="Pull requests"
             open={prInline}
             onOpen={() => useGitUi.getState().openPrList()}
           >
@@ -1634,7 +1779,7 @@ function notifyGitFailure(title: string, err: unknown): void {
           </GitToolSection>
           <GitToolSection
             icon={<History size={11} strokeWidth={2} />}
-            label="Reflog"
+            label="Undo history (reflog)"
             open={reflogInline}
             onOpen={() => useGitUi.getState().setReflogPanelOpen(true)}
           >
@@ -1642,7 +1787,7 @@ function notifyGitFailure(title: string, err: unknown): void {
           </GitToolSection>
           <GitToolSection
             icon={<Target size={11} strokeWidth={2} />}
-            label="Bisect"
+            label="Find the commit that broke it"
             open={bisectInline}
             onOpen={() => useGitUi.getState().setBisectPanelOpen(true)}
           >
@@ -1651,53 +1796,8 @@ function notifyGitFailure(title: string, err: unknown): void {
         </Suspense>
       )}
 
-      {/* Stash section */}
-      {isTauri && root && tab === 'changes' && (
-        <div className="shrink-0 border-t border-border-hairline">
-          <button
-            onClick={() => setStashOpen((o) => !o)}
-            className="flex w-full items-center gap-1.5 px-2.5 py-1.5 text-left hover:bg-surface-1"
-          >
-            {stashOpen ? <ChevronDown size={10} strokeWidth={2} className="text-fg-subtle" /> : <ChevronRight size={10} strokeWidth={2} className="text-fg-subtle" />}
-            <Archive size={11} strokeWidth={2} className="text-fg-muted" />
-            <span className="flex-1 font-sans text-xs text-fg-muted">Stash</span>
-            {stashes.length > 0 && (
-              <span className="rounded-full bg-surface-2 px-1.5 font-mono text-2xs text-fg-subtle">{stashes.length}</span>
-            )}
-            <button
-              onClick={(e) => { e.stopPropagation(); void handleStashPush(); }}
-              disabled={stashBusy}
-              title="Stash all changes"
-              className="flex h-5 items-center gap-0.5 rounded px-1.5 font-sans text-2xs text-fg-muted hover:bg-surface-2 hover:text-fg-base disabled:opacity-40"
-            >
-              <Plus size={9} strokeWidth={2.5} /> Stash
-            </button>
-          </button>
-          {stashOpen && (
-            <div className="px-2 pb-1.5">
-              {stashes.length === 0 ? (
-                <p className="px-1 font-sans text-2xs text-fg-subtle/60">No stashes</p>
-              ) : (
-                <ul className="max-h-40 space-y-px overflow-y-auto">
-                  {stashes.map((s) => (
-                    <li key={s.index} className="group flex items-center gap-1.5 rounded px-1 py-[3px] hover:bg-surface-1">
-                      <span className="w-5 shrink-0 font-mono text-2xs text-fg-subtle/60">{s.index}</span>
-                      <span className="flex-1 truncate font-sans text-xs text-fg-base/80">{s.message}</span>
-                      <span className="hidden items-center gap-1 group-hover:flex">
-                        <button onClick={() => void handleStashPop(s.index)} title="Apply & drop" disabled={stashBusy} className="text-fg-muted hover:text-accent disabled:opacity-40"><ArrowDownToLine size={11} strokeWidth={2} /></button>
-                        <button onClick={() => void handleStashDrop(s.index)} title="Drop" disabled={stashBusy} className="text-fg-muted hover:text-red-400 disabled:opacity-40"><Trash2 size={11} strokeWidth={2} /></button>
-                      </span>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </div>
-          )}
-        </div>
-      )}
-
       {/* Tags */}
-      {isTauri && root && tab === 'changes' && (
+      {isTauri && root && tab === 'changes' && showMoreTools && (
         <div className="shrink-0 border-t border-border-hairline">
           <button
             onClick={() => setTagsOpen((o) => !o)}
@@ -1705,9 +1805,9 @@ function notifyGitFailure(title: string, err: unknown): void {
           >
             {tagsOpen ? <ChevronDown size={10} strokeWidth={2} className="text-fg-subtle" /> : <ChevronRight size={10} strokeWidth={2} className="text-fg-subtle" />}
             <Tag size={11} strokeWidth={2} className="text-fg-muted" />
-            <span className="flex-1 font-sans text-xs text-fg-muted">Tags</span>
+            <span className="flex-1 font-display text-xs text-fg-muted">Tags</span>
             {tags.length > 0 && (
-              <span className="rounded-full bg-surface-2 px-1.5 font-mono text-2xs text-fg-subtle">{tags.length}</span>
+              <span className="rounded-full bg-surface-2 px-1.5 font-display text-2xs tabular-nums text-fg-subtle">{tags.length}</span>
             )}
           </button>
           {tagsOpen && (
@@ -1725,13 +1825,13 @@ function notifyGitFailure(title: string, err: unknown): void {
                   onClick={() => void handleTagCreate()}
                   disabled={!newTagName.trim() || tagBusy}
                   title="Create tag at HEAD"
-                  className="flex h-6 items-center gap-1 rounded-md bg-accent/10 px-2 font-sans text-2xs text-accent hover:bg-accent/20 disabled:opacity-40"
+                  className="flex h-6 items-center gap-1 rounded-md bg-accent/10 px-2 font-display text-2xs text-accent hover:bg-accent/20 disabled:opacity-40"
                 >
                   <Plus size={10} strokeWidth={2.5} /> Tag
                 </button>
               </div>
               {tags.length === 0 ? (
-                <p className="px-1 font-sans text-2xs text-fg-subtle/60">No tags</p>
+                <p className="px-1 font-display text-2xs text-fg-subtle/60">No tags</p>
               ) : (
                 <ul className="max-h-40 space-y-px overflow-y-auto">
                   {tags.map((t) => (
@@ -1742,7 +1842,7 @@ function notifyGitFailure(title: string, err: unknown): void {
                       <span className="shrink-0 font-mono text-2xs text-fg-subtle/70">{t.head_short}</span>
                       <span className="hidden items-center gap-1 group-hover:flex">
                         <button onClick={() => void handleTagPush(t.name)} title="Push to origin" disabled={tagBusy} className="text-fg-muted hover:text-accent disabled:opacity-40"><Upload size={10} strokeWidth={2} /></button>
-                        <button onClick={() => void handleTagDelete(t.name)} title="Delete" disabled={tagBusy} className="text-fg-muted hover:text-red-400 disabled:opacity-40"><Trash2 size={10} strokeWidth={2} /></button>
+                        <button onClick={() => void handleTagDelete(t.name)} title="Delete" disabled={tagBusy} className="text-fg-muted hover:text-status-err disabled:opacity-40"><Trash2 size={10} strokeWidth={2} /></button>
                       </span>
                     </li>
                   ))}
@@ -1754,7 +1854,7 @@ function notifyGitFailure(title: string, err: unknown): void {
       )}
 
       {/* Remotes */}
-      {isTauri && root && tab === 'changes' && (
+      {isTauri && root && tab === 'changes' && showMoreTools && (
         <div className="shrink-0 border-t border-border-hairline">
           <button
             onClick={() => setRemotesOpen((o) => !o)}
@@ -1762,9 +1862,9 @@ function notifyGitFailure(title: string, err: unknown): void {
           >
             {remotesOpen ? <ChevronDown size={10} strokeWidth={2} className="text-fg-subtle" /> : <ChevronRight size={10} strokeWidth={2} className="text-fg-subtle" />}
             <Cloud size={11} strokeWidth={2} className="text-fg-muted" />
-            <span className="flex-1 font-sans text-xs text-fg-muted">Remotes</span>
+            <span className="flex-1 font-display text-xs text-fg-muted">Remotes</span>
             {remotes.length > 0 && (
-              <span className="rounded-full bg-surface-2 px-1.5 font-mono text-2xs text-fg-subtle">{remotes.length}</span>
+              <span className="rounded-full bg-surface-2 px-1.5 font-display text-2xs tabular-nums text-fg-subtle">{remotes.length}</span>
             )}
           </button>
           {remotesOpen && (
@@ -1796,7 +1896,7 @@ function notifyGitFailure(title: string, err: unknown): void {
                 </button>
               </div>
               {remotes.length === 0 ? (
-                <p className="px-1 font-sans text-2xs text-fg-subtle/60">No remotes</p>
+                <p className="px-1 font-display text-2xs text-fg-subtle/60">No remotes</p>
               ) : (
                 <ul className="max-h-40 space-y-px overflow-y-auto">
                   {remotes.map((r) => (
@@ -1807,7 +1907,7 @@ function notifyGitFailure(title: string, err: unknown): void {
                       </span>
                       <span className="hidden items-center gap-1 group-hover:flex">
                         <button onClick={() => void handleRemoteSetUrl(r.name, r.fetch_url)} title="Change URL" disabled={remoteBusy} className="text-fg-muted hover:text-fg-base disabled:opacity-40"><Pencil size={10} strokeWidth={2} /></button>
-                        <button onClick={() => void handleRemoteRemove(r.name)} title="Remove" disabled={remoteBusy} className="text-fg-muted hover:text-red-400 disabled:opacity-40"><Trash2 size={10} strokeWidth={2} /></button>
+                        <button onClick={() => void handleRemoteRemove(r.name)} title="Remove" disabled={remoteBusy} className="text-fg-muted hover:text-status-err disabled:opacity-40"><Trash2 size={10} strokeWidth={2} /></button>
                       </span>
                     </li>
                   ))}
@@ -1827,8 +1927,8 @@ function notifyGitFailure(title: string, err: unknown): void {
           >
             {submodulesOpen ? <ChevronDown size={10} strokeWidth={2} className="text-fg-subtle" /> : <ChevronRight size={10} strokeWidth={2} className="text-fg-subtle" />}
             <Boxes size={11} strokeWidth={2} className="text-fg-muted" />
-            <span className="flex-1 font-sans text-xs text-fg-muted">Submodules</span>
-            <span className="rounded-full bg-surface-2 px-1.5 font-mono text-2xs text-fg-subtle">{submodules.length}</span>
+            <span className="flex-1 font-display text-xs text-fg-muted">Submodules</span>
+            <span className="rounded-full bg-surface-2 px-1.5 font-display text-2xs tabular-nums text-fg-subtle">{submodules.length}</span>
           </button>
           {submodulesOpen && (
             <ul className="max-h-40 space-y-px overflow-y-auto px-2 pb-1.5">
@@ -1841,8 +1941,8 @@ function notifyGitFailure(title: string, err: unknown): void {
                   {m.state !== 'ok' && (
                     <span
                       className={cn(
-                        'shrink-0 rounded px-1 font-sans text-2xs',
-                        m.state === 'conflict' ? 'text-red-400' : 'text-status-warn',
+                        'shrink-0 rounded px-1 font-display text-2xs',
+                        m.state === 'conflict' ? 'text-status-err' : 'text-status-warn',
                       )}
                       title={
                         m.state === 'uninitialized'
@@ -1926,7 +2026,7 @@ function GitToolRow({
   icon: React.ReactNode;
   label: string;
   count?: number;
-  /** Omitted for the rows that don't expand (Changes, Pull Requests). */
+  /** Omitted for the rows that don't expand (Changes). */
   open?: boolean;
   onClick: () => void;
 }) {
@@ -1945,9 +2045,9 @@ function GitToolRow({
           <ChevronRight size={10} strokeWidth={2} className="text-fg-subtle" />
         )}
         <span className="shrink-0 text-fg-muted">{icon}</span>
-        <span className="flex-1 font-sans text-xs text-fg-muted">{label}</span>
+        <span className="flex-1 font-display text-xs text-fg-muted">{label}</span>
         {count !== undefined && count > 0 && (
-          <span className="rounded-full bg-surface-2 px-1.5 font-mono text-2xs text-fg-subtle">{count}</span>
+          <span className="rounded-full bg-surface-2 px-1.5 font-display text-2xs tabular-nums text-fg-subtle">{count}</span>
         )}
       </button>
     </div>
@@ -1973,32 +2073,33 @@ function GitToolSection({
   return <GitToolRow icon={icon} label={label} open={false} onClick={onOpen} />;
 }
 
-/** Sticky on/off pill for a commit flag (`-S`, `-s`). */
-function CommitSwitch({
+/** On/off row for a commit flag (`-S`, `-s`) in the commit-options menu. */
+function CommitOption({
   on,
   onClick,
   label,
-  icon,
+  hint,
 }: {
   on: boolean;
   onClick: () => void;
   label: string;
-  icon: React.ReactNode;
+  hint: string;
 }) {
   return (
     <button
+      type="button"
+      role="menuitemcheckbox"
+      aria-checked={on}
       onClick={onClick}
-      title={label}
-      aria-label={label}
-      aria-pressed={on}
-      className={cn(
-        'flex h-[28px] w-[28px] items-center justify-center rounded-lg transition-all',
-        on
-          ? 'bg-accent/15 text-accent ring-1 ring-inset ring-accent/30'
-          : 'bg-surface-1 text-fg-subtle ring-1 ring-inset ring-edge-1 hover:bg-surface-2 hover:text-fg-base',
-      )}
+      className="flex w-full items-start gap-2 rounded-md px-2.5 py-1.5 text-left font-display text-xs text-fg-base transition-colors hover:bg-bg-hover"
     >
-      {icon}
+      <span className="mt-px flex h-3.5 w-3.5 shrink-0 items-center justify-center text-accent">
+        {on && <Check size={12} strokeWidth={2.4} />}
+      </span>
+      <span className="min-w-0">
+        <span className="block">{label}</span>
+        <span className="mt-0.5 block text-2xs text-fg-subtle">{hint}</span>
+      </span>
     </button>
   );
 }
@@ -2038,7 +2139,7 @@ function SectionBlock({
           />
           <span
             className={cn(
-              'truncate font-display text-2xs font-medium uppercase tracking-widest2',
+              'truncate font-display text-xs font-medium',
               accent.label,
             )}
           >
@@ -2047,7 +2148,7 @@ function SectionBlock({
           <span
             className={cn(
               'inline-flex h-[14px] min-w-[15px] items-center justify-center rounded-full px-[4px]',
-              'font-mono text-2xs font-semibold leading-none tabular-nums tracking-tight',
+              'font-display text-2xs font-semibold leading-none tabular-nums',
               'bg-surface-1 text-fg-muted ring-1 ring-inset ring-edge-1',
             )}
           >
@@ -2110,7 +2211,7 @@ function SectionAction({
       title={label}
       className={cn(
         'flex h-[18px] w-[18px] items-center justify-center rounded-md text-fg-subtle transition-all duration-150 ease-apple',
-        'hover:bg-surface-2 hover:text-fg-base hover:shadow-[inset_0_0_0_1px_rgba(255,255,255,0.05)]',
+        'hover:bg-surface-2 hover:text-fg-base',
         'active:scale-[0.9]',
         'disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:shadow-none',
       )}
@@ -2121,7 +2222,16 @@ function SectionAction({
 }
 
 /** Small illustrative empty-state mark + line of copy. */
-function EmptyState({ isRepo }: { isRepo: boolean }) {
+function EmptyState({
+  isRepo,
+  onInit,
+  busy,
+}: {
+  isRepo: boolean;
+  /** Offered when the folder isn't a repo: runs `git init` there. */
+  onInit?: () => void;
+  busy?: boolean;
+}) {
   return (
     <div className="flex flex-col items-center gap-3 px-2 py-8 text-center">
       {/* A trio of stacked rings — pure CSS, no asset. Reads as "all clean". */}
@@ -2147,14 +2257,19 @@ function EmptyState({ isRepo }: { isRepo: boolean }) {
       </div>
       <div className="space-y-0.5">
         <p className="font-display text-xs font-medium tracking-tight text-fg-base/85">
-          {isRepo ? 'Working tree clean' : 'Not a git repository'}
+          {isRepo ? 'Working tree clean' : "This folder isn't tracked yet"}
         </p>
         <p className="font-display text-2xs leading-relaxed text-fg-subtle">
           {isRepo
             ? 'Every change committed. Make an edit to see it here.'
-            : 'Open a folder under git to enable source control.'}
+            : 'Start tracking changes with git to see edits, commit and sync.'}
         </p>
       </div>
+      {!isRepo && onInit && (
+        <Button size="sm" variant="primary" onClick={onInit} disabled={busy}>
+          Start tracking changes
+        </Button>
+      )}
     </div>
   );
 }
@@ -2266,7 +2381,7 @@ function ChangeRow({
         {isConflict && onCheckoutOurs && (
           <RowAction
             icon={<span className="font-mono text-2xs font-bold">O</span>}
-            label="Accept Ours"
+            label="Keep my version (ours)"
             disabled={busy}
             onClick={onCheckoutOurs}
           />
@@ -2274,7 +2389,7 @@ function ChangeRow({
         {isConflict && onCheckoutTheirs && (
           <RowAction
             icon={<span className="font-mono text-2xs font-bold">T</span>}
-            label="Accept Theirs"
+            label="Take their version (theirs)"
             disabled={busy}
             onClick={onCheckoutTheirs}
           />
@@ -2319,7 +2434,7 @@ function RowAction({
       className={cn(
         'flex h-[20px] w-[20px] items-center justify-center rounded-md text-fg-muted',
         'transition-all duration-150 ease-apple',
-        'hover:bg-surface-3 hover:text-accent-bright hover:shadow-[inset_0_0_0_1px_rgba(255,255,255,0.06)]',
+        'hover:bg-surface-3 hover:text-accent-bright',
         'active:scale-[0.9]',
         'disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-fg-muted disabled:hover:shadow-none',
       )}
@@ -2363,7 +2478,7 @@ function PanelTab({
       {count !== undefined && count > 0 && (
         <span
           className={cn(
-            'shrink-0 rounded-full px-1.5 font-mono text-2xs',
+            'shrink-0 rounded-full px-1.5 font-display text-2xs tabular-nums',
             active ? 'bg-accent/20 text-accent' : 'bg-surface-2 text-fg-subtle',
           )}
         >
@@ -2476,7 +2591,7 @@ function ChangeContextMenu({
   const sep = (
     <div
       aria-hidden
-      className="my-1 h-px bg-gradient-to-r from-transparent via-white/[0.07] to-transparent"
+      className="my-1 h-px bg-edge-1"
     />
   );
 
@@ -2486,14 +2601,14 @@ function ChangeContextMenu({
       style={{ left: pos.x, top: pos.y }}
       className={cn(
         'fixed z-[9999] min-w-[212px] rounded-xl p-1.5',
-        'border border-border-strong bg-bg-panel/95 backdrop-blur-thick backdrop-saturate-180',
+        'border border-border-strong bg-bg-panel',
         'shadow-sheet animate-fade-in',
       )}
       role="menu"
       aria-label={`Source control actions for ${entry.path}`}
     >
       {/* Tiny header strip showing what we're acting on. */}
-      <div className="mx-1 mb-1 mt-0.5 flex items-center gap-1.5 truncate font-display text-2xs uppercase tracking-widest2 text-fg-subtle/80">
+      <div className="mx-1 mb-1 mt-0.5 flex items-center gap-1.5 truncate font-display text-2xs text-fg-subtle">
         <span
           aria-hidden
           className={cn(
@@ -2503,19 +2618,19 @@ function ChangeContextMenu({
         />
         <span className="truncate">{SECTION_LABEL[section]}</span>
       </div>
-      {item(<FileText size={12} strokeWidth={2} />, 'Open File', onOpenFile)}
+      {item(<FileText size={12} strokeWidth={2} />, 'Open file', onOpenFile)}
       {canDiff &&
-        item(<GitCompare size={12} strokeWidth={2} />, 'Open Changes', onOpenDiff)}
+        item(<GitCompare size={12} strokeWidth={2} />, 'Open changes', onOpenDiff)}
       {sep}
       {canStage &&
-        item(<Plus size={12} strokeWidth={2.2} />, 'Stage Changes', onStage)}
+        item(<Plus size={12} strokeWidth={2.2} />, 'Stage changes', onStage)}
       {canUnstage &&
-        item(<Minus size={12} strokeWidth={2.2} />, 'Unstage Changes', onUnstage)}
+        item(<Minus size={12} strokeWidth={2.2} />, 'Unstage changes', onUnstage)}
       {canDiscard &&
-        item(<Trash2 size={12} strokeWidth={2} />, 'Discard Changes', onDiscard, true)}
+        item(<Trash2 size={12} strokeWidth={2} />, 'Discard changes', onDiscard, true)}
       {sep}
-      {item(<Copy size={12} strokeWidth={2} />, 'Copy Path', onCopyPath)}
-      {item(<Copy size={12} strokeWidth={2} />, 'Copy Relative Path', onCopyRelativePath)}
+      {item(<Copy size={12} strokeWidth={2} />, 'Copy path', onCopyPath)}
+      {item(<Copy size={12} strokeWidth={2} />, 'Copy relative path', onCopyRelativePath)}
     </div>,
     document.body,
   );
@@ -2625,20 +2740,16 @@ function DiffViewer({
       <div
         className={cn(
           'flex h-full max-h-[82vh] w-full max-w-[1000px] flex-col overflow-hidden rounded-window',
-          'border border-border-strong bg-bg-panel/95 backdrop-blur-thick',
+          'border border-border-strong bg-bg-panel',
           'shadow-sheet animate-sheet-in',
         )}
       >
         {/* Header: scope pill, breadcrumb path, close. */}
         <div className="relative flex shrink-0 items-center gap-2 border-b border-border-hairline px-4 py-3">
           <span
-            aria-hidden
-            className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-white/[0.08] to-transparent"
-          />
-          <span
             className={cn(
               'flex shrink-0 items-center gap-1.5 rounded-full px-2 py-[3px] ring-1 ring-inset',
-              'font-display text-2xs font-medium uppercase tracking-widest2',
+              'font-display text-2xs font-medium',
               scopeTone.bg,
               scopeTone.text,
               scopeTone.ring,
@@ -2686,7 +2797,7 @@ function DiffViewer({
             className={cn(
               'flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-fg-muted',
               'transition-all duration-150 ease-apple',
-              'hover:bg-surface-2 hover:text-fg-base hover:shadow-[inset_0_0_0_1px_rgba(255,255,255,0.06)]',
+              'hover:bg-surface-2 hover:text-fg-base',
               'active:scale-[0.92]',
             )}
             aria-label="Close diff"
@@ -2704,12 +2815,7 @@ function DiffViewer({
               <span className="font-display tracking-tight">Loading diff…</span>
             </div>
           )}
-          {error && (
-            <div className="m-4 flex items-start gap-2 rounded-lg border border-status-err/25 bg-status-err/[0.07] px-3 py-2.5 font-display text-xs tracking-tight text-status-err shadow-[inset_0_1px_0_0_rgba(255,82,82,0.05)]">
-              <AlertCircle size={12} strokeWidth={2} className="mt-px shrink-0" />
-              <span className="whitespace-pre-wrap break-words">{error}</span>
-            </div>
-          )}
+          {error && <ErrorNote error={error} className="m-4" />}
           {empty && (
             <div className="flex flex-col items-center gap-2.5 px-4 py-12 text-center">
               <div className="flex h-9 w-9 items-center justify-center rounded-full bg-accent-soft ring-1 ring-inset ring-accent/15">
@@ -2737,7 +2843,7 @@ function DiffViewer({
                 ? 'Comparing index against HEAD.'
                 : 'Comparing working tree against index.'}
           </span>
-          <span className="flex items-center gap-1 font-mono tabular-nums">
+          <span className="flex items-center gap-1">
             <kbd className="rounded bg-surface-1 px-1 py-[1px] ring-1 ring-inset ring-edge-1">
               Esc
             </kbd>
@@ -2866,16 +2972,11 @@ function DiscardDialog({
       <div
         className={cn(
           'w-[420px] max-w-full overflow-hidden rounded-window',
-          'border border-border-strong bg-bg-panel/95 backdrop-blur-thick',
+          'border border-border-strong bg-bg-panel',
           'shadow-sheet animate-sheet-in',
         )}
       >
         <div className="relative px-5 pt-5 pb-4">
-          {/* Top highlight rule */}
-          <span
-            aria-hidden
-            className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-white/[0.08] to-transparent"
-          />
           <div className="flex items-start gap-3.5">
             {/* Soft red puck — concentric tinted rings, single AlertCircle at center. */}
             <div className="relative h-10 w-10 shrink-0">
@@ -2938,19 +3039,12 @@ function DiscardDialog({
             onClick={onConfirm}
             className={cn(
               'group/destruct relative overflow-hidden rounded-md px-3.5 py-1.5',
-              'font-display text-xs font-semibold tracking-tight text-white',
-              'bg-gradient-to-b from-status-err/95 to-status-err/75',
-              'ring-1 ring-inset ring-status-err/40',
-              'shadow-[inset_0_1px_0_0_rgba(255,255,255,0.16),0_1px_2px_0_rgba(0,0,0,0.4)]',
+              'font-display text-xs font-semibold tracking-tight text-bg-base',
+              'bg-status-err hover:bg-status-err/90',
               'transition-all duration-150 ease-apple',
-              'hover:shadow-[inset_0_1px_0_0_rgba(255,255,255,0.22),0_0_18px_-2px_rgba(255,82,82,0.45)]',
               'active:scale-[0.985]',
             )}
           >
-            <span
-              aria-hidden
-              className="pointer-events-none absolute inset-x-3 top-0 h-px bg-gradient-to-r from-transparent via-white/[0.30] to-transparent"
-            />
             <span className="relative inline-flex items-center gap-1.5">
               <Trash2 size={11} strokeWidth={2.2} />
               Discard

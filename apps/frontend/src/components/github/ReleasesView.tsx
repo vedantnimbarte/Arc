@@ -69,7 +69,7 @@ export function ReleasesView() {
           {error && <ErrorTray message={error} />}
           {releases.length === 0 && loading && <Loading />}
           {releases.length === 0 && !loading && !error ? (
-            <EmptyNote>No releases published from this repository.</EmptyNote>
+            <EmptyNote>No releases yet. Releases appear here when you publish one on GitHub.</EmptyNote>
           ) : (
             <div className={laneEnds}>
               {releases.map((r) => {

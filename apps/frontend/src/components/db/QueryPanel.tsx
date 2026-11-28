@@ -36,7 +36,7 @@ export function QueryPanel(props: Props) {
   );
 
   return (
-    <div className="flex w-72 shrink-0 flex-col border-l border-edge-1 bg-bg-panel/40">
+    <div className="flex w-72 shrink-0 flex-col bg-bg-chrome">
       <ToolWindowHeader
         actions={
           <>

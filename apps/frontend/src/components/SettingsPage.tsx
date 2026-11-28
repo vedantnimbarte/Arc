@@ -13,8 +13,6 @@ import {
   Plus,
   X,
   Info,
-  Sun,
-  Moon,
   Monitor,
   Search,
   RotateCcw,
@@ -36,8 +34,9 @@ import {
   Download,
   Upload,
   FolderOpen,
-  CircleDollarSign,
   Bell,
+  ChevronRight,
+  Wand2,
 } from 'lucide-react';
 import {
   DEFAULT_AI_MODEL,
@@ -67,9 +66,11 @@ import {
 } from '../lib/tauri';
 import { copyText } from '../lib/clipboard';
 import { toast, toastError } from '../state/toast';
+import { askConfirm } from '../state/confirm';
+import { friendlyError } from '../lib/friendlyError';
+import { Button, ErrorNote, Input } from './ui';
 import { isValidPattern, type HighlightRule } from '../lib/highlightRules';
 import { ANTHROPIC_KEY_SECRET } from '../lib/ai';
-import { FontPicker } from './FontPicker';
 import { useFiles, type SidebarView } from '../state/files';
 import { LAYOUT_MODES, type LayoutMode } from '../state/workspace';
 import { LAYOUT_MODE_INFO, LayoutModeGlyph } from './LayoutModeGlyph';
@@ -87,18 +88,7 @@ import {
   type ShellInfo,
 } from '../lib/tauri';
 import { cn } from '../lib/cn';
-import {
-  listThemes,
-  MAX_FONT_SIZE,
-  MIN_FONT_SIZE,
-  type Appearance,
-  type ThemeDef,
-} from '../themes';
-import {
-  installThemeFromFile,
-  installThemeFromUrl,
-  loadInstalledThemes,
-} from '../lib/themeMarketplace';
+import { MAX_FONT_SIZE, MIN_FONT_SIZE } from '../themes';
 import {
   ACTION_META,
   ACTION_ORDER,
@@ -108,6 +98,7 @@ import {
   bindingFromEvent,
   findConflict,
   formatBinding,
+  getBinding,
   useShortcuts,
   type ActionCategory,
   type ActionId,
@@ -123,7 +114,7 @@ type Pane =
   | 'shortcuts'
   | 'wingman'
   | 'claude'
-  | 'usage'
+  | 'ai'
   | 'startup'
   | 'secrets'
   | 'about';
@@ -152,7 +143,7 @@ const NAV: { label?: string; items: { id: Pane; icon: typeof Cpu; label: string 
     items: [
       { id: 'wingman', icon: Bot, label: 'Wingman' },
       { id: 'claude', icon: Sparkles, label: 'Claude Code' },
-      { id: 'usage', icon: CircleDollarSign, label: 'Usage' },
+      { id: 'ai', icon: Wand2, label: 'Command bar AI' },
     ],
   },
   {
@@ -165,12 +156,62 @@ const NAV: { label?: string; items: { id: Pane; icon: typeof Cpu; label: string 
   },
 ];
 
+const PANE_LABEL = Object.fromEntries(
+  NAV.flatMap((g) => g.items.map((i) => [i.id, i.label])),
+) as Record<Pane, string>;
+
+/** Disclosures a search result can open. */
+type Reveal = 'terminal-more' | 'claude-usage';
+
+/**
+ * Every group and row title, by hand. A static list goes stale when a setting
+ * is added, but walking the rendered panes would mean mounting all of them.
+ * `group` is the Group title to scroll to.
+ */
+const SEARCH_INDEX: { pane: Pane; label: string; group?: string; reveal?: Reveal; keywords?: string }[] = [
+  { pane: 'appearance', label: 'Font size', group: 'Code text', keywords: 'text zoom bigger smaller' },
+  { pane: 'appearance', label: 'Pane spacing', group: 'Pane spacing', keywords: 'gap tiles split' },
+  { pane: 'editor', label: 'Vim mode', group: 'Editing', keywords: 'keybindings modal multi-cursor' },
+  { pane: 'editor', label: 'Language servers', group: 'Language servers', keywords: 'lsp diagnostics completion hover' },
+  { pane: 'editor', label: 'Format on save', group: 'Language servers', keywords: 'formatter prettier' },
+  { pane: 'editor', label: 'Code navigation', group: 'Navigation', keywords: 'go to definition references rename' },
+  { pane: 'terminal', label: 'Shell', group: 'Shell', keywords: 'default shell bash zsh powershell fish' },
+  { pane: 'terminal', label: 'Relaunch agents on startup', group: 'Agent tabs', keywords: 'agent tabs resume' },
+  { pane: 'terminal', label: 'Notifications', group: 'Notifications', keywords: 'notify long command sound osc 133' },
+  { pane: 'terminal', label: 'Terminal profiles', group: 'Profiles', reveal: 'terminal-more', keywords: 'arguments working directory' },
+  { pane: 'terminal', label: 'Highlight rules', group: 'Highlight rules', reveal: 'terminal-more', keywords: 'regex colour color pattern bell' },
+  { pane: 'terminal', label: 'Background terminals', group: 'Background terminals', reveal: 'terminal-more', keywords: 'persistent keep running sessions end' },
+  { pane: 'sidebar', label: 'Activity rail', group: 'Activity rail', keywords: 'views order hide' },
+  { pane: 'sidebar', label: 'Show hidden files', group: 'File tree', keywords: 'dotfiles explorer' },
+  { pane: 'sidebar', label: 'File search', group: 'File search', keywords: 'ignore folders node_modules' },
+  { pane: 'shortcuts', label: 'Keyboard shortcuts', keywords: 'keybindings keys rebind reset' },
+  { pane: 'wingman', label: 'Wingman connection', group: 'Connection', keywords: 'daemon address token' },
+  { pane: 'claude', label: 'Permission mode', group: 'Permissions and spending', keywords: 'plan ask auto edits bypass' },
+  { pane: 'claude', label: 'Claude model', group: 'Permissions and spending', keywords: 'opus sonnet haiku' },
+  { pane: 'claude', label: 'Spend cap per turn', group: 'Permissions and spending', keywords: 'budget cost usd' },
+  { pane: 'claude', label: 'Usage commands', group: 'Usage commands', reveal: 'claude-usage', keywords: 'tokens credits cost ccusage status bar' },
+  { pane: 'ai', label: 'Anthropic API key', group: 'Command suggestions', keywords: 'ai key ctrl+k' },
+  { pane: 'ai', label: 'Command bar model', group: 'Command suggestions', keywords: 'ai model claude' },
+  { pane: 'startup', label: 'Open Arc at login', group: 'Launching', keywords: 'launch startup boot' },
+  { pane: 'startup', label: 'Restore window position and size', group: 'Launching', keywords: 'window' },
+  { pane: 'startup', label: 'Default workspace layout', group: 'Default workspace layout', keywords: 'layout mode tiles tabs' },
+  { pane: 'secrets', label: 'Secrets', keywords: 'keychain vault credential token env' },
+  { pane: 'about', label: 'Updates', group: 'Updates', keywords: 'version check install' },
+  { pane: 'about', label: 'Diagnostics', group: 'Diagnostics', keywords: 'crash log bug report' },
+  { pane: 'about', label: 'Settings backup', group: 'Settings backup', keywords: 'export import' },
+];
+
+export function searchSettings(query: string) {
+  const q = query.trim().toLowerCase();
+  if (!q) return [];
+  return SEARCH_INDEX.filter((e) =>
+    `${e.label} ${e.group ?? ''} ${PANE_LABEL[e.pane]} ${e.keywords ?? ''}`.toLowerCase().includes(q),
+  );
+}
+
 export function SettingsPage() {
   const {
     defaultShell,
-    appearance,
-    themeId,
-    fontId,
     fontSize,
     launchAtLogin,
     restoreWindowState,
@@ -181,13 +222,10 @@ export function SettingsPage() {
     notifyThresholdSecs,
     notifySound,
     setDefaultShell,
-    setAppearance,
     defaultLayoutMode,
     setDefaultLayoutMode,
     tileGap,
     setTileGap,
-    setThemeId,
-    setFontId,
     setFontSize,
     setLaunchAtLogin,
     setRestoreWindowState,
@@ -200,6 +238,21 @@ export function SettingsPage() {
   } = useSettings();
 
   const [pane, setPane] = useState<Pane>('appearance');
+  const [query, setQuery] = useState('');
+  // A search jump remounts the pane (so a disclosure can start open) and
+  // scrolls its group into view.
+  const [jump, setJump] = useState<{ n: number; group?: string; reveal?: Reveal }>({ n: 0 });
+  const results = useMemo(() => searchSettings(query), [query]);
+  const openResult = (r: (typeof SEARCH_INDEX)[number]) => {
+    setPane(r.pane);
+    setJump((j) => ({ n: j.n + 1, group: r.group, reveal: r.reveal }));
+  };
+  useEffect(() => {
+    if (!jump.group) return;
+    document
+      .querySelector(`[data-group="${CSS.escape(jump.group)}"]`)
+      ?.scrollIntoView({ block: 'start', behavior: 'smooth' });
+  }, [jump]);
   const [shells, setShells] = useState<ShellInfo[] | null>(null);
 
   useEffect(() => {
@@ -247,7 +300,7 @@ export function SettingsPage() {
         </span>
         <button
           onClick={close}
-          className="group absolute right-2 top-1/2 flex h-6 w-6 -translate-y-1/2 items-center justify-center rounded-md text-fg-subtle transition-all duration-200 ease-out hover:bg-red-500/[0.18] hover:text-red-300 active:scale-95"
+          className="group absolute right-2 top-1/2 flex h-6 w-6 -translate-y-1/2 items-center justify-center rounded-md text-fg-subtle transition-all duration-200 ease-out hover:bg-status-err/15 hover:text-status-err active:scale-95"
           aria-label="Close settings"
           title="Close (esc)"
         >
@@ -256,12 +309,55 @@ export function SettingsPage() {
       </div>
 
       <div className="flex min-h-0 flex-1">
-        <aside className="material-sidebar flex w-[228px] shrink-0 flex-col border-r border-border-hairline">
+        <aside className="material-sidebar flex w-[228px] shrink-0 flex-col">
+          <div className="px-3 pt-4">
+            <div className="flex items-center gap-2 rounded-md bg-bg-base px-2.5 focus-within:ring-1 focus-within:ring-accent/50">
+              <Search size={13} strokeWidth={2.1} className="shrink-0 text-fg-subtle" />
+              <input
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Escape' && query) {
+                    // Clear first; only an empty field lets Escape close the window.
+                    e.stopPropagation();
+                    setQuery('');
+                  } else if (e.key === 'Enter' && results[0]) {
+                    openResult(results[0]);
+                  }
+                }}
+                placeholder="Search settings"
+                aria-label="Search settings"
+                spellCheck={false}
+                autoComplete="off"
+                className="h-8 min-w-0 flex-1 bg-transparent font-display text-sm text-fg-base placeholder:text-fg-subtle focus:outline-none"
+              />
+            </div>
+          </div>
           <nav className="flex flex-1 flex-col gap-5 overflow-y-auto px-3 py-4">
-            {NAV.map((group, i) => (
+            {query.trim() ? (
+              results.length === 0 ? (
+                <p className="px-2.5 font-display text-xs text-fg-subtle">No settings match.</p>
+              ) : (
+                <div className="flex flex-col gap-px">
+                  {results.map((r) => (
+                    <button
+                      key={`${r.pane}:${r.label}`}
+                      onClick={() => openResult(r)}
+                      className={cn(
+                        'flex flex-col rounded-md px-2.5 py-[7px] text-left font-display hover:bg-surface-2',
+                        pane === r.pane && 'bg-accent-soft',
+                      )}
+                    >
+                      <span className="text-sm tracking-tight text-fg-base">{r.label}</span>
+                      <span className="text-2xs text-fg-subtle">{PANE_LABEL[r.pane]}</span>
+                    </button>
+                  ))}
+                </div>
+              )
+            ) : NAV.map((group, i) => (
               <div key={group.label ?? i}>
                 {group.label && (
-                  <div className="mb-1 px-2.5 font-display text-2xs font-semibold uppercase tracking-widest2 text-fg-subtle">
+                  <div className="mb-1 px-2.5 font-display text-xs font-medium text-fg-subtle">
                     {group.label}
                   </div>
                 )}
@@ -280,7 +376,7 @@ export function SettingsPage() {
             ))}
           </nav>
 
-          <div className="border-t border-edge-1 px-4 py-3 font-display text-2xs text-fg-subtle">
+          <div className="px-4 py-3 font-display text-2xs text-fg-subtle">
             Changes save as you make them.
           </div>
         </aside>
@@ -289,17 +385,13 @@ export function SettingsPage() {
           {/* One measure for every pane. At the default window width this
               sits just inside the padding; widen the window and it centres
               rather than stretching the line length past readable. */}
-          <div className="mx-auto w-full max-w-[660px] px-10 py-9">
+          <div key={jump.n} className="mx-auto w-full max-w-[660px] px-10 py-9">
             {pane === 'appearance' && (
               <AppearancePane
-                appearance={appearance}
-                themeId={themeId}
-                onThemeChange={setThemeId}
-                fontId={fontId}
                 fontSize={fontSize}
-                onAppearanceChange={setAppearance}
-                onFontChange={setFontId}
                 onFontSizeChange={setFontSize}
+                tileGap={tileGap}
+                onTileGapChange={setTileGap}
               />
             )}
             {pane === 'shortcuts' && <ShortcutsPane />}
@@ -314,6 +406,7 @@ export function SettingsPage() {
                 onNotifyLongCommandsChange={setNotifyLongCommands}
                 onNotifyThresholdChange={setNotifyThresholdSecs}
                 onNotifySoundChange={setNotifySound}
+                showMore={jump.reveal === 'terminal-more'}
               />
             )}
             {pane === 'editor' && (
@@ -333,16 +426,14 @@ export function SettingsPage() {
                 restoreWindowState={restoreWindowState}
                 defaultLayoutMode={defaultLayoutMode}
                 onDefaultLayoutModeChange={setDefaultLayoutMode}
-                tileGap={tileGap}
-                onTileGapChange={setTileGap}
                 onLaunchAtLoginChange={setLaunchAtLogin}
                 onRestoreWindowStateChange={setRestoreWindowState}
               />
             )}
             {pane === 'secrets' && <SecretsPane />}
             {pane === 'wingman' && <WingmanPane />}
-            {pane === 'claude' && <ClaudePane />}
-            {pane === 'usage' && <UsagePane />}
+            {pane === 'claude' && <ClaudePane showUsage={jump.reveal === 'claude-usage'} />}
+            {pane === 'ai' && <AiPane />}
             {pane === 'about' && <AboutPane />}
           </div>
         </div>
@@ -353,267 +444,76 @@ export function SettingsPage() {
 
 // ─── Appearance ────────────────────────────────────────────
 
-/**
- * Everything about how ARC looks, in one pane. Colour mode, theme and type
- * used to be split across two rail rows, which made picking a look a two-stop
- * trip for settings that are read together.
- */
+/** Arc has one look; the only visual setting left is how big code reads. */
 function AppearancePane({
-  appearance,
-  themeId,
-  onThemeChange,
-  fontId,
   fontSize,
-  onAppearanceChange,
-  onFontChange,
   onFontSizeChange,
+  tileGap,
+  onTileGapChange,
 }: {
-  appearance: Appearance;
-  themeId: string | null;
-  onThemeChange: (id: string | null) => void;
-  fontId: string;
   fontSize: number;
-  onAppearanceChange: (a: Appearance) => void;
-  onFontChange: (id: string) => void;
   onFontSizeChange: (size: number) => void;
+  tileGap: number;
+  onTileGapChange: (px: number) => void;
 }) {
   return (
     <>
       <PaneHeader
         title="Appearance"
-        blurb="Colour, theme and type. Changes apply to every ARC window as you make them."
+        blurb="Text size for the terminal and editors. Changes apply to every Arc window as you make them."
       />
-
-      <Group title="Colour mode" hint="System follows your OS setting and switches with it.">
-        <div className="grid grid-cols-3 gap-3">
-          <AppearanceCard
-            label="Light"
-            icon={Sun}
-            active={appearance === 'light'}
-            onPick={() => onAppearanceChange('light')}
-            preview="light"
+      <Group title="Code text">
+        <Rows>
+          <Row
+            label="Font size"
+            control={
+              <div className="inline-flex items-stretch overflow-hidden rounded-md border border-edge-2">
+                <button
+                  onClick={() => onFontSizeChange(fontSize - 1)}
+                  disabled={fontSize <= MIN_FONT_SIZE}
+                  className="flex h-8 w-8 items-center justify-center text-fg-muted transition-colors hover:bg-surface-2 hover:text-fg-base disabled:opacity-30 disabled:hover:bg-transparent"
+                  aria-label="Decrease font size"
+                >
+                  <Minus size={12} />
+                </button>
+                <div className="flex h-8 w-14 items-center justify-center border-x border-edge-2 text-sm tabular-nums text-fg-base">
+                  {fontSize}px
+                </div>
+                <button
+                  onClick={() => onFontSizeChange(fontSize + 1)}
+                  disabled={fontSize >= MAX_FONT_SIZE}
+                  className="flex h-8 w-8 items-center justify-center text-fg-muted transition-colors hover:bg-surface-2 hover:text-fg-base disabled:opacity-30 disabled:hover:bg-transparent"
+                  aria-label="Increase font size"
+                >
+                  <Plus size={12} />
+                </button>
+              </div>
+            }
           />
-          <AppearanceCard
-            label="Dark"
-            icon={Moon}
-            active={appearance === 'dark'}
-            onPick={() => onAppearanceChange('dark')}
-            preview="dark"
-          />
-          <AppearanceCard
-            label="System"
-            icon={Monitor}
-            active={appearance === 'system'}
-            onPick={() => onAppearanceChange('system')}
-            preview="system"
-          />
-        </div>
+        </Rows>
       </Group>
 
-      <ThemeGroup themeId={themeId} onThemeChange={onThemeChange} />
-
-      <Group
-        title="Type"
-        hint="One family across the terminal, the editor and the interface. Size applies everywhere too."
-      >
-        <div className="space-y-3">
-          <FontPicker value={fontId} onChange={onFontChange} />
-          <Rows>
-            <Row
-              label="Font size"
-              control={
-                <div className="inline-flex items-stretch overflow-hidden rounded-md border border-edge-2">
-                  <button
-                    onClick={() => onFontSizeChange(fontSize - 1)}
-                    disabled={fontSize <= MIN_FONT_SIZE}
-                    className="flex h-8 w-8 items-center justify-center text-fg-muted transition-colors hover:bg-surface-2 hover:text-fg-base disabled:opacity-30 disabled:hover:bg-transparent"
-                    aria-label="Decrease font size"
-                  >
-                    <Minus size={12} />
-                  </button>
-                  <div className="flex h-8 w-14 items-center justify-center border-x border-edge-2 font-mono text-sm text-fg-base">
-                    {fontSize}px
-                  </div>
-                  <button
-                    onClick={() => onFontSizeChange(fontSize + 1)}
-                    disabled={fontSize >= MAX_FONT_SIZE}
-                    className="flex h-8 w-8 items-center justify-center text-fg-muted transition-colors hover:bg-surface-2 hover:text-fg-base disabled:opacity-30 disabled:hover:bg-transparent"
-                    aria-label="Increase font size"
-                  >
-                    <Plus size={12} />
-                  </button>
-                </div>
-              }
-            />
-          </Rows>
-        </div>
+      <Group title="Pane spacing" hint="Space between split panes.">
+        <Rows>
+          <Row
+            label="Gap between tiles"
+            control={<TileGapControl value={tileGap} onChange={onTileGapChange} />}
+          />
+        </Rows>
       </Group>
     </>
   );
 }
 
-// ─── Themes ───────────────────────────────────────────────
-
-/**
- * Theme picker plus the two install paths, folded into the Appearance pane.
- * Installing is the rare half, so it sits behind a disclosure - the common
- * case (pick one of the themes I already have) stays one glance.
- */
-function ThemeGroup({
-  themeId,
-  onThemeChange,
-}: {
-  themeId: string | null;
-  onThemeChange: (id: string | null) => void;
-}) {
-  const [themes, setThemes] = useState<ThemeDef[]>(() => listThemes());
-  const [url, setUrl] = useState('');
-  const [installing, setInstalling] = useState(false);
-  const [msg, setMsg] = useState<{ kind: 'ok' | 'err'; text: string } | null>(null);
-  const [addOpen, setAddOpen] = useState(false);
-
-  const reload = () => setThemes(listThemes());
-
-  // The Settings window is a separate JS context, so register the user's
-  // installed themes here too (the main window does this on boot).
-  useEffect(() => {
-    void loadInstalledThemes()
-      .then(reload)
-      .catch(() => {});
-  }, []);
-
-  // Both install paths land here so success and failure read the same way
-  // whichever button you pressed. A null result means the file picker was
-  // cancelled - nothing happened, so nothing is reported.
-  const applyResult = (res: Awaited<ReturnType<typeof installThemeFromUrl>> | null) => {
-    setInstalling(false);
-    if (!res) return;
-    if (res.ok) {
-      reload();
-      onThemeChange(res.theme.id);
-      setUrl('');
-      setMsg({ kind: 'ok', text: `Installed “${res.theme.name}”.` });
-    } else {
-      setMsg({ kind: 'err', text: res.error });
-    }
-  };
-
-  const onInstall = async () => {
-    const trimmed = url.trim();
-    if (!trimmed || installing) return;
-    setInstalling(true);
-    setMsg(null);
-    applyResult(await installThemeFromUrl(trimmed));
-  };
-
-  const onImportFile = async () => {
-    if (installing) return;
-    setInstalling(true);
-    setMsg(null);
-    applyResult(await installThemeFromFile());
-  };
-
-  return (
-    <Group
-      title="Theme"
-      hint="A specific palette, or the default dark/light pair that follows the colour mode above."
-      action={
-        <button
-          onClick={() => setAddOpen((v) => !v)}
-          aria-expanded={addOpen}
-          className="rounded-md px-2 py-1 font-display text-xs text-fg-muted transition-colors hover:bg-surface-2 hover:text-fg-base"
-        >
-          {addOpen ? 'Done' : 'Add a theme'}
-        </button>
-      }
-    >
-      <div className="grid grid-cols-2 gap-2.5">
-        <ThemeCard
-          label="Default"
-          description="Follow the colour mode"
-          active={themeId === null}
-          onPick={() => onThemeChange(null)}
-          swatches={['var(--bg-base)', 'var(--bg-panel)', 'var(--accent)']}
-        />
-        {themes.map((t) => (
-          <ThemeCard
-            key={t.id}
-            label={t.name}
-            description={t.author ? `by ${t.author}` : t.mode}
-            active={themeId === t.id}
-            onPick={() => onThemeChange(t.id)}
-            swatches={[
-              `rgb(${t.tokens.bgBase})`,
-              `rgb(${t.tokens.bgPanel})`,
-              `rgb(${t.tokens.accent})`,
-            ]}
-          />
-        ))}
-      </div>
-
-      {addOpen && (
-        <Panel className="mt-3 animate-view-in space-y-3">
-          <p className="font-display text-xs leading-relaxed text-fg-muted">
-            Paste a link to a theme JSON, or load one from disk. VS Code colour themes work too -
-            the workbench palette is converted to ARC’s, with the text ramp re-solved for contrast.
-            Installed themes are saved to{' '}
-            <code className="font-mono text-fg-subtle">~/.arc/themes</code>.
-          </p>
-          <div className="flex items-center gap-2">
-            <input
-              value={url}
-              onChange={(e) => setUrl(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') void onInstall();
-              }}
-              placeholder="https://…/my-theme.json"
-              spellCheck={false}
-              autoComplete="off"
-              className="min-w-0 flex-1 rounded-md border border-edge-2 bg-bg-base/50 px-3 py-2 font-mono text-xs text-fg-base placeholder:text-fg-subtle focus:border-accent/45 focus:outline-none"
-            />
-            <button
-              onClick={() => void onInstall()}
-              disabled={installing || !url.trim()}
-              className="shrink-0 rounded-md bg-accent-soft px-3 py-2 font-display text-xs font-medium text-fg-base ring-1 ring-accent/40 transition-colors hover:bg-accent/20 disabled:opacity-50"
-            >
-              {installing ? 'Installing…' : 'Install'}
-            </button>
-            <button
-              onClick={() => void onImportFile()}
-              disabled={installing}
-              className="shrink-0 rounded-md border border-edge-2 px-3 py-2 font-display text-xs font-medium text-fg-base transition-colors hover:bg-surface-2 disabled:opacity-50"
-            >
-              Choose file…
-            </button>
-          </div>
-          {/* One result line for both install paths - whichever you used last. */}
-          {msg && (
-            <p
-              className={cn(
-                'font-display text-xs leading-relaxed',
-                msg.kind === 'ok' ? 'text-status-ok' : 'text-status-err',
-              )}
-            >
-              {msg.text}
-            </p>
-          )}
-        </Panel>
-      )}
-    </Group>
-  );
-}
-
 // ─── Startup ────────────────────────────────────────────
 
-/** What ARC does when it opens: whether it opens at all, where the window
+/** What Arc does when it opens: whether it opens at all, where the window
  *  lands, and how new workspaces are arranged. */
 function StartupPane({
   launchAtLogin,
   restoreWindowState,
   defaultLayoutMode,
   onDefaultLayoutModeChange,
-  tileGap,
-  onTileGapChange,
   onLaunchAtLoginChange,
   onRestoreWindowStateChange,
 }: {
@@ -621,8 +521,6 @@ function StartupPane({
   restoreWindowState: boolean;
   defaultLayoutMode: LayoutMode;
   onDefaultLayoutModeChange: (m: LayoutMode) => void;
-  tileGap: number;
-  onTileGapChange: (px: number) => void;
   onLaunchAtLoginChange: (on: boolean) => void;
   onRestoreWindowStateChange: (on: boolean) => void;
 }) {
@@ -630,14 +528,14 @@ function StartupPane({
     <>
       <PaneHeader
         title="Startup"
-        blurb="How ARC opens, and how new workspaces are laid out. Window changes take effect next launch."
+        blurb="How Arc opens, and how new workspaces are laid out. Window changes take effect next launch."
       />
 
       <Group title="Launching">
         <Rows>
           <ToggleRow
-            label="Open ARC at login"
-            hint="Starts ARC when you sign in to your computer."
+            label="Open Arc at login"
+            hint="Starts Arc when you sign in to your computer."
             checked={launchAtLogin}
             onChange={() => onLaunchAtLoginChange(!launchAtLogin)}
           />
@@ -652,7 +550,7 @@ function StartupPane({
 
       <Group
         title="Default workspace layout"
-        hint="Applies to workspaces you create from now on. Existing ones keep their layout, and the top bar switches any workspace at any time."
+        hint="How panes are arranged in workspaces you create from now on. Switch an open workspace from the command palette."
       >
         <div className="grid grid-cols-3 gap-3">
           {LAYOUT_MODES.map((m) => (
@@ -664,18 +562,6 @@ function StartupPane({
             />
           ))}
         </div>
-      </Group>
-
-      <Group
-        title="Pane spacing"
-        hint="Space between panes when a workspace is split — either layout mode can be split. Takes effect immediately."
-      >
-        <Rows>
-          <Row
-            label="Gap between tiles"
-            control={<TileGapControl value={tileGap} onChange={onTileGapChange} />}
-          />
-        </Rows>
       </Group>
     </>
   );
@@ -725,7 +611,7 @@ function TileGapControl({
         onKeyDown={(e) => {
           if (e.key === 'Enter') commit();
         }}
-        className="w-14 rounded-md border border-edge-2 bg-bg-base/50 px-2 py-1 text-right font-mono text-sm text-fg-base outline-none focus:border-accent/45"
+        className="w-14 rounded-md border border-edge-2 bg-bg-base px-2 py-1 text-right font-mono text-sm text-fg-base outline-none focus:border-accent/45"
         aria-label="Gap between tiles in pixels"
       />
       <span className="font-display text-xs text-fg-subtle">px</span>
@@ -769,7 +655,7 @@ function ShortcutHint({ keys, label }: { keys: string; label: string }) {
     <Row
       label={label}
       control={
-        <kbd className="rounded-md border border-edge-2 bg-bg-base/40 px-2 py-1 font-mono text-xs text-fg-muted">
+        <kbd className="rounded-md border border-edge-2 bg-bg-base px-2 py-1 font-mono text-xs text-fg-muted">
           {keys}
         </kbd>
       }
@@ -799,15 +685,14 @@ function Switch({
       className={cn(
         'relative inline-flex h-[20px] w-[34px] shrink-0 items-center rounded-full border transition-colors duration-150 ease-apple',
         disabled ? 'cursor-not-allowed' : 'cursor-pointer',
-        checked
-          ? 'border-accent/50 bg-accent/80'
-          : 'border-border-subtle bg-bg-base/60 hover:bg-bg-base/80',
+        // Off is a visible track with a muted knob, not a lone dot.
+        checked ? 'border-transparent bg-accent' : 'border-transparent bg-bg-hover',
       )}
     >
       <span
         className={cn(
-          'pointer-events-none inline-block h-[14px] w-[14px] transform rounded-full bg-white shadow-sm transition-transform duration-150 ease-apple',
-          checked ? 'translate-x-[17px]' : 'translate-x-[3px]',
+          'pointer-events-none inline-block h-[14px] w-[14px] transform rounded-full transition-transform duration-150 ease-apple',
+          checked ? 'translate-x-[17px] bg-bg-base' : 'translate-x-[3px] bg-fg-muted',
         )}
       />
     </button>
@@ -834,14 +719,14 @@ function LayoutModeCard({
       className={cn(
         'group flex flex-col items-stretch overflow-hidden rounded-lg border text-left transition-all duration-150 ease-apple',
         active
-          ? 'border-accent/60 shadow-glow-sm ring-1 ring-accent/40'
+          ? 'border-accent/60 ring-1 ring-accent/40'
           : 'border-border-subtle hover:border-border-strong',
       )}
     >
-      <div className="flex h-20 items-center justify-center bg-bg-base/40">
+      <div className="flex h-20 items-center justify-center bg-bg-base">
         <LayoutModeGlyph mode={mode} className="h-[46px] w-[74px]" />
       </div>
-      <div className="flex items-center justify-between border-t border-border-subtle bg-bg-base/40 px-3 py-2">
+      <div className="flex items-center justify-between bg-bg-panel px-3 py-2">
         <div className="min-w-0">
           <div className="font-display text-sm font-medium tracking-tight text-fg-base">
             {label}
@@ -851,139 +736,6 @@ function LayoutModeCard({
         {active && <Check size={11} className="shrink-0 text-accent" />}
       </div>
     </button>
-  );
-}
-
-function AppearanceCard({
-  label,
-  icon: Icon,
-  active,
-  onPick,
-  preview,
-}: {
-  label: string;
-  icon: typeof Sun;
-  active: boolean;
-  onPick: () => void;
-  preview: 'light' | 'dark' | 'system';
-}) {
-  return (
-    <button
-      onClick={onPick}
-      className={cn(
-        'group flex flex-col items-stretch overflow-hidden rounded-lg border text-left transition-all duration-150 ease-apple',
-        active
-          ? 'border-accent/60 shadow-glow-sm ring-1 ring-accent/40'
-          : 'border-border-subtle hover:border-border-strong',
-      )}
-    >
-      <div className="relative h-20 overflow-hidden">
-        {preview === 'light' && <LightSwatch />}
-        {preview === 'dark' && <DarkSwatch />}
-        {preview === 'system' && (
-          <div className="flex h-full">
-            <div className="flex-1">
-              <LightSwatch />
-            </div>
-            <div className="flex-1">
-              <DarkSwatch />
-            </div>
-          </div>
-        )}
-      </div>
-      <div className="flex items-center justify-between border-t border-border-subtle bg-bg-base/40 px-3 py-2">
-        <div className="flex items-center gap-1.5">
-          <Icon
-            size={11}
-            strokeWidth={2.1}
-            className={active ? 'text-accent-bright' : 'text-fg-muted'}
-          />
-          <span className="font-display text-sm font-medium tracking-tight text-fg-base">
-            {label}
-          </span>
-        </div>
-        {active && <Check size={11} className="text-accent" />}
-      </div>
-    </button>
-  );
-}
-
-function ThemeCard({
-  label,
-  description,
-  active,
-  onPick,
-  swatches,
-}: {
-  label: string;
-  description: string;
-  active: boolean;
-  onPick: () => void;
-  swatches: [string, string, string];
-}) {
-  return (
-    <button
-      onClick={onPick}
-      className={cn(
-        'group flex items-center gap-3 rounded-lg border px-3 py-2.5 text-left transition-all duration-150 ease-apple',
-        active
-          ? 'border-accent/60 shadow-glow-sm ring-1 ring-accent/40'
-          : 'border-border-subtle hover:border-border-strong',
-      )}
-    >
-      <div className="flex shrink-0 gap-0.5">
-        {swatches.map((color, i) => (
-          <span
-            key={i}
-            className="h-7 w-3 rounded-sm ring-1 ring-black/10"
-            style={{ background: color }}
-          />
-        ))}
-      </div>
-      <div className="min-w-0 flex-1">
-        <div className="truncate font-display text-sm font-medium tracking-tight text-fg-base">
-          {label}
-        </div>
-        <div className="truncate font-display text-2xs text-fg-muted">{description}</div>
-      </div>
-      {active && <Check size={11} className="shrink-0 text-accent" />}
-    </button>
-  );
-}
-
-function LightSwatch() {
-  return (
-    <div
-      className="flex h-full flex-col gap-1 p-2.5"
-      style={{ background: '#f7f7f8', color: '#1c1c1e' }}
-    >
-      <div className="flex gap-1">
-        <span className="h-1.5 w-1.5 rounded-full" style={{ background: '#ff5f57' }} />
-        <span className="h-1.5 w-1.5 rounded-full" style={{ background: '#febc2e' }} />
-        <span className="h-1.5 w-1.5 rounded-full" style={{ background: '#28c840' }} />
-      </div>
-      <div className="font-mono text-2xs leading-tight" style={{ color: '#3873d6' }}>
-        ~ $ <span style={{ color: '#1c1c1e' }}>arc</span>
-      </div>
-    </div>
-  );
-}
-
-function DarkSwatch() {
-  return (
-    <div
-      className="flex h-full flex-col gap-1 p-2.5"
-      style={{ background: '#161618', color: '#eef0f3' }}
-    >
-      <div className="flex gap-1">
-        <span className="h-1.5 w-1.5 rounded-full" style={{ background: '#ff5252' }} />
-        <span className="h-1.5 w-1.5 rounded-full" style={{ background: '#f0a958' }} />
-        <span className="h-1.5 w-1.5 rounded-full" style={{ background: '#3ad28a' }} />
-      </div>
-      <div className="font-mono text-2xs leading-tight" style={{ color: '#c8cad0' }}>
-        ~ $ <span style={{ color: '#eef0f3' }}>arc</span>
-      </div>
-    </div>
   );
 }
 
@@ -1060,7 +812,12 @@ function ShortcutsPane() {
           )}
         </div>
         <button
-          onClick={() => resetAll()}
+          onClick={() =>
+            void askConfirm({
+              title: 'Reset all shortcuts to their defaults?',
+              confirmLabel: 'Reset all',
+            }).then((ok) => ok && resetAll())
+          }
           className="flex shrink-0 items-center gap-1.5 rounded-md px-2.5 py-2 font-display text-xs text-fg-muted transition-colors hover:bg-surface-2 hover:text-fg-base"
           title="Restore every shortcut to its default"
         >
@@ -1101,7 +858,7 @@ function ShortcutsPane() {
 
       {filteredRef.length > 0 && (
         <>
-          <h3 className="mb-4 mt-10 border-t border-edge-1 pt-6 font-display text-sm font-semibold tracking-tight text-fg-base">
+          <h3 className="mb-4 mt-12 font-display text-sm font-semibold tracking-tight text-fg-base">
             Built in
             <span className="ml-2 font-normal text-fg-subtle">not rebindable</span>
           </h3>
@@ -1117,7 +874,7 @@ function ShortcutsPane() {
                       label={s.label}
                       hint={s.description}
                       control={
-                        <span className="rounded-md border border-edge-2 bg-bg-base/40 px-2.5 py-1 font-mono text-xs text-fg-muted">
+                        <span className="rounded-md border border-edge-2 bg-bg-base px-2.5 py-1 font-mono text-xs text-fg-muted">
                           {s.keys}
                         </span>
                       }
@@ -1234,7 +991,7 @@ function ShortcutRow({
           )}
           <button
             ref={captureRef}
-            className="rounded-md border border-accent/40 bg-bg-base/60 px-2.5 py-1 font-mono text-xs text-fg-base shadow-focus outline-none"
+            className="rounded-md border border-accent/40 bg-bg-base px-2.5 py-1 font-mono text-xs text-fg-base shadow-focus outline-none"
             tabIndex={-1}
           >
             {pending ? formatBinding(pending) : 'press a combo'}
@@ -1280,7 +1037,7 @@ function ShortcutRow({
             className={cn(
               'rounded-md border px-2.5 py-1 font-mono text-xs transition-colors',
               binding
-                ? 'border-edge-2 bg-bg-base/40 text-fg-base hover:bg-surface-2'
+                ? 'border-edge-2 bg-bg-base text-fg-base hover:bg-surface-2'
                 : 'border-dashed border-edge-2 text-fg-subtle hover:bg-surface-2',
             )}
             title="Change this shortcut"
@@ -1323,7 +1080,7 @@ function EditorPane({
     <>
       <PaneHeader
         title="Editor"
-        blurb="Keybindings and language intelligence for files you open in ARC."
+        blurb="Keybindings and language intelligence for files you open in Arc."
       />
 
       <Group
@@ -1508,7 +1265,7 @@ function SearchIgnoreEditor() {
         {dirs.map((name) => (
           <span
             key={name}
-            className="inline-flex items-center gap-1 rounded-md border border-edge-2 bg-bg-base/40 py-1 pl-2.5 pr-1 font-mono text-xs text-fg-base"
+            className="inline-flex items-center gap-1 rounded-md border border-edge-2 bg-bg-base py-1 pl-2.5 pr-1 font-mono text-xs text-fg-base"
           >
             {name}
             <button
@@ -1536,7 +1293,7 @@ function SearchIgnoreEditor() {
           placeholder="Folder name, e.g. coverage"
           spellCheck={false}
           autoComplete="off"
-          className="w-56 rounded-md border border-edge-2 bg-bg-base/50 px-2.5 py-1.5 font-mono text-sm text-fg-base placeholder:text-fg-subtle focus:border-accent/45 focus:outline-none"
+          className="w-56 rounded-md border border-edge-2 bg-bg-base px-2.5 py-1.5 font-mono text-sm text-fg-base placeholder:text-fg-subtle focus:border-accent/45 focus:outline-none"
         />
         <button
           type="button"
@@ -1599,6 +1356,7 @@ function TerminalPane({
   onNotifyLongCommandsChange,
   onNotifyThresholdChange,
   onNotifySoundChange,
+  showMore,
 }: {
   shells: ShellInfo[] | null;
   defaultShell: string | null;
@@ -1609,6 +1367,8 @@ function TerminalPane({
   onNotifyLongCommandsChange: (on: boolean) => void;
   onNotifyThresholdChange: (secs: number) => void;
   onNotifySoundChange: (on: boolean) => void;
+  /** Start with "More terminal options" open (a search result inside it). */
+  showMore: boolean;
 }) {
   return (
     <>
@@ -1619,34 +1379,16 @@ function TerminalPane({
 
       <ShellPicker shells={shells} defaultShell={defaultShell} onPick={onPickShell} />
 
-      <TerminalProfilesSection />
-
       <Group
         title="Agent tabs"
-        hint="Tabs that were running an agent CLI when ARC closed. Claude Code, Codex, OpenCode and Aider pick up their last conversation; other agents start fresh."
+        hint="Tabs that were running an agent CLI when Arc closed. Claude Code, Codex, OpenCode and Aider pick up their last conversation; other agents start fresh."
       >
         <RelaunchAgentsRow />
       </Group>
 
       <Group
-        title="Background terminals"
-        hint="Terminals reattach where you left them — an agent mid-conversation included. A tab you close ends its shell; quitting ARC does not."
-      >
-        <BackgroundTerminalsRows />
-      </Group>
-
-      <HighlightRulesSection />
-
-      <Group
-        title="Command suggestions"
-        hint="Press ⌘K / Ctrl+K in a terminal, describe what you want, and the suggested command lands on the prompt for you to read. Nothing runs until you press Enter yourself."
-      >
-        <AiCommandSettings />
-      </Group>
-
-      <Group
         title="Notifications"
-        hint="Tells you when a long command finishes while ARC is in the background. Needs shell integration (OSC 133), which most modern shell setups emit."
+        hint="Tells you when a long command finishes while Arc is in the background. Works with most shells. If you're never notified, your shell isn't reporting when commands finish."
       >
         <Rows>
           <ToggleRow
@@ -1661,14 +1403,14 @@ function TerminalPane({
             disabled={!notifyLongCommands}
             control={
               <div className="flex items-center gap-2">
-                <input
+                <Input
                   type="number"
                   min={5}
                   max={3600}
                   value={notifyThresholdSecs}
                   onChange={(e) => onNotifyThresholdChange(Number(e.target.value))}
                   aria-label="Notification threshold in seconds"
-                  className="w-16 rounded-md border border-edge-2 bg-bg-base/50 px-2 py-1 text-right font-mono text-sm text-fg-base focus:border-accent/45 focus:outline-none"
+                  className="w-16 text-right tabular-nums"
                 />
                 <span className="font-display text-xs text-fg-subtle">seconds</span>
               </div>
@@ -1683,7 +1425,50 @@ function TerminalPane({
           />
         </Rows>
       </Group>
+
+      <Disclosure label="More terminal options" defaultOpen={showMore}>
+        <TerminalProfilesSection />
+        <HighlightRulesSection />
+        <Group
+          title="Background terminals"
+          hint="Terminals reattach where you left them — an agent mid-conversation included. A tab you close ends its shell; quitting Arc does not."
+        >
+          <BackgroundTerminalsRows />
+        </Group>
+      </Disclosure>
     </>
+  );
+}
+
+/** A collapsed section for settings most people never touch. Open state is
+ *  local: it isn't worth persisting. */
+function Disclosure({
+  label,
+  defaultOpen = false,
+  children,
+}: {
+  label: string;
+  defaultOpen?: boolean;
+  children: React.ReactNode;
+}) {
+  const [open, setOpen] = useState(defaultOpen);
+  return (
+    <section className="mt-10">
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        aria-expanded={open}
+        className="-mx-2 flex items-center gap-1.5 rounded-md px-2 py-1 font-display text-sm font-medium text-fg-muted transition-colors hover:bg-surface-2 hover:text-fg-base"
+      >
+        <ChevronRight
+          size={13}
+          strokeWidth={2.1}
+          className={cn('transition-transform duration-150', open && 'rotate-90')}
+        />
+        {label}
+      </button>
+      {open && <div className="mt-6">{children}</div>}
+    </section>
   );
 }
 
@@ -1708,24 +1493,38 @@ function RelaunchAgentsRow() {
 function BackgroundTerminalsRows() {
   const on = useSettings((s) => s.persistentTerminals);
   const setOn = useSettings((s) => s.setPersistentTerminals);
-  // null while loading; a string when the host can't be listed (another ARC
-  // version holds it — End all still works).
-  const [running, setRunning] = useState<number | string | null>(null);
+  // null while loading. A list error means the host can't be listed (another
+  // Arc version holds it — End all still works).
+  const [running, setRunning] = useState<number | null>(null);
+  const [listError, setListError] = useState<unknown>(null);
   const [ending, setEnding] = useState(false);
   const refresh = () => {
     if (!isTauri) return;
     ptyHostList().then(
-      (ids) => setRunning(ids.length),
-      (err) => setRunning(String(err)),
+      (ids) => {
+        setRunning(ids.length);
+        setListError(null);
+      },
+      (err) => setListError(err ?? 'Unknown error'),
     );
   };
   useEffect(refresh, []);
+  const sessions = (n: number) => `${n} session${n === 1 ? '' : 's'}`;
   const endAll = async () => {
+    if (running) {
+      const ok = await askConfirm({
+        title: `End ${sessions(running)}?`,
+        body: 'This stops the running shells and anything in them, including agents.',
+        confirmLabel: `End ${sessions(running)}`,
+        destructive: true,
+      });
+      if (!ok) return;
+    }
     setEnding(true);
     try {
       await ptyHostEndAll();
     } catch (err) {
-      toastError(`Couldn't end background sessions: ${err}`);
+      toastError(`Couldn't end background sessions. ${friendlyError(err).message}`);
     } finally {
       setEnding(false);
       refresh();
@@ -1734,24 +1533,31 @@ function BackgroundTerminalsRows() {
   return (
     <Rows>
       <ToggleRow
-        label="Keep terminals running after ARC closes"
+        label="Keep terminals running after Arc closes"
         hint="Applies to new local terminals. Their shells, and whatever runs in them, keep running and using memory and CPU in the background until you close the tab or end them here."
         checked={on}
         onChange={() => setOn(!on)}
       />
       <Row
-        label={`Running background sessions: ${typeof running === 'number' ? running : '—'}`}
-        hint={typeof running === 'string' ? running : undefined}
+        label={
+          running === null ? 'Running background sessions' : `Running background sessions: ${running}`
+        }
         control={
-          <button
+          <Button
+            size="sm"
             onClick={() => void endAll()}
-            disabled={ending || running === 0 || running === null}
-            className="shrink-0 rounded-md border border-edge-2 px-3 py-1.5 font-display text-xs font-medium text-fg-base transition-colors hover:bg-surface-2 disabled:opacity-50"
+            // With a list error the count is unknown, but ending still works.
+            disabled={ending || running === 0 || (running === null && !listError)}
           >
-            {ending ? 'Ending…' : 'End all'}
-          </button>
+            {ending ? 'Ending…' : running ? `End ${sessions(running)}` : 'End all'}
+          </Button>
         }
       />
+      {listError != null && (
+        <div className="px-4 py-3">
+          <ErrorNote error={listError} />
+        </div>
+      )}
     </Rows>
   );
 }
@@ -1761,6 +1567,10 @@ function BackgroundTerminalsRows() {
  * "listening on :3000". Edits apply to open terminals straight away; a rule
  * only sees output printed after it exists.
  */
+/** A rule's colour is user data for `<input type="color">`, which only takes
+ *  hex, so it can't be a token. This is the status-err value. */
+const DEFAULT_RULE_COLOR = '#ff5252';
+
 function HighlightRulesSection() {
   const rules = useSettings((s) => s.highlightRules);
   const setRules = useSettings((s) => s.setHighlightRules);
@@ -1769,10 +1579,10 @@ function HighlightRulesSection() {
   const add = () =>
     setRules([
       ...rules,
-      { id: `hl-${Date.now().toString(36)}`, pattern: '', color: '#e5534b', notify: false, enabled: true },
+      { id: `hl-${Date.now().toString(36)}`, pattern: '', color: DEFAULT_RULE_COLOR, notify: false, enabled: true },
     ]);
   const input =
-    'min-w-0 flex-1 rounded-md border border-edge-2 bg-bg-base/50 px-2 py-1 font-mono text-sm text-fg-base focus:border-accent/45 focus:outline-none';
+    'min-w-0 flex-1 rounded-md border border-edge-2 bg-bg-base px-2 py-1 font-mono text-sm text-fg-base focus:border-accent/45 focus:outline-none';
   return (
     <Group
       title="Highlight rules"
@@ -1871,6 +1681,7 @@ function AiCommandSettings() {
       setKey('');
     } catch (err) {
       console.error('[ai] storing API key failed:', err);
+      toastError(`Couldn't save the API key. ${friendlyError(err).message}`);
     } finally {
       setBusy(false);
     }
@@ -1883,6 +1694,7 @@ function AiCommandSettings() {
       setHasKey(false);
     } catch (err) {
       console.error('[ai] clearing API key failed:', err);
+      toastError(`Couldn't remove the API key. ${friendlyError(err).message}`);
     } finally {
       setBusy(false);
     }
@@ -1895,10 +1707,11 @@ function AiCommandSettings() {
         <span className="mt-0.5 block font-display text-xs leading-relaxed text-fg-subtle">
           {hasKey
             ? 'A key is stored in your OS credential vault. Paste a new one to replace it.'
-            : 'Goes to your OS credential vault — Keychain, Credential Manager or secret-service — not to ARC’s database.'}
+            : 'Goes to your OS credential vault — Keychain, Credential Manager or secret-service — not to Arc’s database.'}
         </span>
         <div className="mt-2 flex items-center gap-2">
-          <input
+          <Input
+            mono
             type="password"
             value={key}
             onChange={(e) => setKey(e.target.value)}
@@ -1906,25 +1719,15 @@ function AiCommandSettings() {
               if (e.key === 'Enter') void saveKey();
             }}
             placeholder={hasKey ? '••••••••••••••••' : 'sk-ant-…'}
-            spellCheck={false}
-            autoComplete="off"
-            className="min-w-0 flex-1 rounded-md border border-edge-2 bg-bg-base/50 px-2.5 py-1.5 font-mono text-xs text-fg-base placeholder:text-fg-subtle focus:border-accent/45 focus:outline-none"
+            className="flex-1"
           />
-          <button
-            onClick={() => void saveKey()}
-            disabled={!key.trim() || busy}
-            className="shrink-0 rounded-md border border-edge-2 px-3 py-1.5 font-display text-xs font-medium text-fg-base transition-colors hover:bg-surface-2 disabled:opacity-50"
-          >
+          <Button variant="primary" onClick={() => void saveKey()} disabled={!key.trim() || busy}>
             Save
-          </button>
+          </Button>
           {hasKey && (
-            <button
-              onClick={() => void clearKey()}
-              disabled={busy}
-              className="shrink-0 rounded-md px-2 py-1.5 font-display text-xs text-fg-muted transition-colors hover:bg-surface-2 hover:text-fg-base disabled:opacity-50"
-            >
+            <Button variant="ghost" onClick={() => void clearKey()} disabled={busy}>
               Clear
-            </button>
+            </Button>
           )}
         </div>
       </label>
@@ -1935,7 +1738,8 @@ function AiCommandSettings() {
           Any Claude model id. <code className="font-mono">claude-haiku-4-5</code> is the cheapest
           and quickest; the default trades a little latency for better commands.
         </span>
-        <input
+        <Input
+          mono
           value={model}
           onChange={(e) => setModel(e.target.value)}
           onBlur={() => setAiModel(model)}
@@ -1943,8 +1747,7 @@ function AiCommandSettings() {
             if (e.key === 'Enter') setAiModel(model);
           }}
           placeholder={DEFAULT_AI_MODEL}
-          spellCheck={false}
-          className="mt-2 w-full rounded-md border border-edge-2 bg-bg-base/50 px-2.5 py-1.5 font-mono text-xs text-fg-base placeholder:text-fg-subtle focus:border-accent/45 focus:outline-none"
+          className="mt-2 w-full"
         />
       </label>
     </Panel>
@@ -2062,13 +1865,13 @@ function SecretsPane() {
   const [name, setName] = useState('');
   const [value, setValue] = useState('');
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<unknown>(null);
 
   const load = async () => {
     try {
       setNames(await secretList());
     } catch (e) {
-      setError(String(e));
+      setError(e ?? 'Unknown error');
     } finally {
       setLoading(false);
     }
@@ -2088,30 +1891,34 @@ function SecretsPane() {
       setValue('');
       await load();
     } catch (e) {
-      setError(String(e));
+      setError(e ?? 'Unknown error');
     } finally {
       setBusy(false);
     }
   };
 
   const remove = async (n: string) => {
+    const ok = await askConfirm({
+      title: 'Remove this secret?',
+      body: "It's deleted from your system keychain and can't be recovered.",
+      confirmLabel: 'Remove',
+      destructive: true,
+    });
+    if (!ok) return;
     setError(null);
     try {
       await secretDelete(n);
       await load();
     } catch (e) {
-      setError(String(e));
+      setError(e ?? 'Unknown error');
     }
   };
-
-  const inputCls =
-    'min-w-0 flex-1 rounded-md border border-edge-2 bg-bg-base/50 px-3 py-2 font-mono text-sm text-fg-base placeholder:text-fg-subtle transition-colors focus:border-accent/45 focus:outline-none';
 
   return (
     <>
       <PaneHeader
         title="Secrets"
-        blurb="Values ARC can hand to terminals and agents without them living in a file. Stored in your OS credential vault, never on disk in plaintext."
+        blurb="Values Arc can hand to terminals and agents without them living in a file. Stored in your OS credential vault, never on disk in plaintext."
       />
 
       {!isTauri ? (
@@ -2128,16 +1935,16 @@ function SecretsPane() {
           >
             <Panel className="space-y-2.5">
               <div className="flex flex-col gap-2 sm:flex-row">
-                <input
+                <Input
+                  mono
                   value={name}
                   onChange={(e) => setName(e.target.value)}
-                  placeholder="NAME"
+                  placeholder="Name, e.g. GITHUB_TOKEN"
                   aria-label="Secret name"
-                  spellCheck={false}
-                  autoComplete="off"
-                  className={inputCls}
+                  className="flex-1"
                 />
-                <input
+                <Input
+                  mono
                   value={value}
                   onChange={(e) => setValue(e.target.value)}
                   onKeyDown={(e) => {
@@ -2149,20 +1956,18 @@ function SecretsPane() {
                   placeholder="Value"
                   aria-label="Secret value"
                   type="password"
-                  spellCheck={false}
-                  autoComplete="off"
-                  className={inputCls}
+                  className="flex-1"
                 />
-                <button
-                  type="button"
+                <Button
+                  variant="primary"
+                  icon={Plus}
                   onClick={() => void add()}
                   disabled={busy || !name.trim() || !value}
-                  className="flex shrink-0 items-center justify-center gap-1.5 rounded-md bg-accent-soft px-4 py-2 font-display text-sm font-medium text-fg-base ring-1 ring-accent/40 transition-colors hover:bg-accent/20 disabled:opacity-40"
                 >
-                  <Plus size={13} /> Save
-                </button>
+                  Save
+                </Button>
               </div>
-              {error && <p className="font-mono text-xs text-status-err">{error}</p>}
+              {error != null && <ErrorNote error={error} onDismiss={() => setError(null)} />}
             </Panel>
           </Group>
 
@@ -2189,7 +1994,7 @@ function SecretsPane() {
                     <button
                       type="button"
                       onClick={() => void remove(n)}
-                      className="rounded-md px-2 py-1 font-display text-xs text-fg-subtle opacity-0 transition-all hover:bg-surface-2 hover:text-status-err focus-visible:opacity-100 group-hover:opacity-100"
+                      className="rounded-md px-2 py-1 font-display text-xs text-fg-subtle opacity-0 transition-all hover:bg-surface-2 hover:text-status-err focus:opacity-100 group-focus-within:opacity-100 group-hover:opacity-100"
                     >
                       Remove
                     </button>
@@ -2224,19 +2029,19 @@ function AboutPane() {
       {/* The one place in Settings that gets to be a composition rather than a
           list. It is the only pane you visit to look rather than to change
           something. */}
-      <div className="mb-9 flex items-center gap-5 border-b border-edge-1 pb-8">
+      <div className="mb-10 flex items-center gap-5">
         <img
           src="/arc-logo.png"
           alt=""
-          className="h-20 w-20 shrink-0 rounded-2xl shadow-glow ring-1 ring-edge-2"
+          className="h-20 w-20 shrink-0 rounded-2xl"
           draggable={false}
         />
         <div className="min-w-0">
-          <h2 className="font-display text-2xl font-semibold tracking-tight text-fg-base">ARC</h2>
+          <h2 className="font-display text-2xl font-semibold tracking-tight text-fg-base">Arc</h2>
           <p className="mt-0.5 font-display text-sm text-fg-muted">
             AI-native terminal and agent runtime
           </p>
-          <p className="mt-2 font-mono text-xs text-fg-subtle">
+          <p className="mt-2 font-display text-xs text-fg-subtle">
             Version {version} · {detectPlatform()}
           </p>
         </div>
@@ -2246,7 +2051,7 @@ function AboutPane() {
         <Rows>
           <AboutRow label="Engine" value="Tauri 2, React, CodeMirror 6, xterm.js" />
           <AboutRow label="License" value="MIT" />
-          <AboutRow label="Authors" value="ARC contributors" />
+          <AboutRow label="Authors" value="Arc contributors" />
         </Rows>
       </Group>
 
@@ -2267,13 +2072,13 @@ function AboutPane() {
       </Group>
 
       <p className="mt-8 font-display text-2xs text-fg-subtle">
-        © 2026 ARC contributors. Released under the MIT license.
+        © 2026 Arc contributors. Released under the MIT license.
       </p>
     </>
   );
 }
 
-/** A row that leaves ARC. The arrow is the affordance, so the label stays a
+/** A row that leaves Arc. The arrow is the affordance, so the label stays a
  *  plain noun phrase rather than growing an imperative it does not need. */
 function LinkRow({
   icon: Icon,
@@ -2342,7 +2147,7 @@ function UpdatesCard() {
             : status === 'current'
               ? 'You are on the latest version.'
               : status === 'found' && update
-                ? `Version ${update.version} is ready. ARC restarts to finish installing.`
+                ? `Version ${update.version} is ready. Arc restarts to finish installing.`
                 : 'Downloads are signature-checked before they install.'
       }
       action={
@@ -2364,7 +2169,7 @@ function UpdatesCard() {
       <Rows>
         <ToggleRow
           label="Check for updates on launch"
-          hint="Offers a new version in the corner when one ships. Off means ARC never contacts the update endpoint on its own."
+          hint="Offers a new version in the corner when one ships. Off means Arc never contacts the update endpoint on its own."
           checked={autoUpdateCheck}
           onChange={() => setAutoUpdateCheck(!autoUpdateCheck)}
         />
@@ -2374,7 +2179,7 @@ function UpdatesCard() {
 }
 
 /**
- * Crash log surface. ARC's Rust side writes every panic to
+ * Crash log surface. Arc's Rust side writes every panic to
  * `<data_dir>/arc/crash.log`; without this the file exists but nobody ever
  * finds it, and a bug report arrives as "it crashed".
  *
@@ -2403,12 +2208,18 @@ function DiagnosticsCard() {
       await fsWriteFile(path, await diagnosticsCollect());
       toast('Diagnostics saved');
     } catch (err) {
-      toastError(`Couldn't save diagnostics: ${err}`);
+      toastError(`Couldn't save diagnostics. ${friendlyError(err).message}`);
     }
   };
 
-  const clear = () => {
-    void diagnosticsClear().then(refresh);
+  const clear = async () => {
+    const ok = await askConfirm({
+      title: 'Delete the crash log?',
+      body: "The recorded crashes are removed and can't be recovered.",
+      confirmLabel: 'Delete',
+      destructive: true,
+    });
+    if (ok) void diagnosticsClear().then(refresh);
   };
 
   const crashes = summary?.crash_count ?? 0;
@@ -2458,7 +2269,7 @@ function DiagnosticsCard() {
           )}
           {crashes > 0 && (
             <button
-              onClick={clear}
+              onClick={() => void clear()}
               title="Delete the crash log"
               aria-label="Delete the crash log"
               className="rounded-md border border-edge-2 px-3 py-2 text-fg-subtle transition-colors hover:bg-surface-2 hover:text-fg-base"
@@ -2489,18 +2300,25 @@ function SettingsBackupCard() {
       await fsWriteFile(path, exportSettingsJson());
       toast('Settings exported');
     } catch (err) {
-      toastError(`Couldn't export settings: ${err}`);
+      toastError(`Couldn't export settings. ${friendlyError(err).message}`);
     }
   };
   const importNow = async () => {
     try {
       const [path] = await fsPickFiles(null);
       if (!path) return;
+      const ok = await askConfirm({
+        title: 'Replace your settings with the imported file?',
+        body: 'Every setting in the file overwrites yours.',
+        confirmLabel: 'Replace settings',
+        destructive: true,
+      });
+      if (!ok) return;
       importSettingsJson(await fsReadFile(path));
       await flushSettingsSave();
       toast('Settings imported');
     } catch (err) {
-      toastError(`Couldn't import settings: ${err instanceof Error ? err.message : err}`);
+      toastError(`Couldn't import settings. ${friendlyError(err).message}`);
     }
   };
   const btn =
@@ -2546,7 +2364,7 @@ function detectPlatform(): string {
 
 // ─── primitives ────────────────────────────────────────────────────────────
 
-/** Wingman is an optional coding-agent daemon ARC talks to over HTTP/SSE.
+/** Wingman is an optional coding-agent daemon Arc talks to over HTTP/SSE.
  *  The connection form lives in its own component so the settings window and
  *  any future onboarding flow can share it. */
 function WingmanPane() {
@@ -2554,11 +2372,11 @@ function WingmanPane() {
     <>
       <PaneHeader
         title="Wingman"
-        blurb="Wingman is a terminal coding agent. Point ARC at a running daemon to get the agent panel and the pilot board. ARC works fully without it."
+        blurb="Wingman is a terminal coding agent. Point Arc at a running daemon to get the agent panel and the pilot board. Arc works fully without it."
       />
       <Group
         title="Connection"
-        hint="Start the daemon with `wingman serve`, then give ARC its address."
+        hint="Start the daemon with `wingman serve`, then give Arc its address."
       >
         <Panel>
           <WingmanSettings />
@@ -2568,23 +2386,51 @@ function WingmanPane() {
   );
 }
 
-/** Claude Code needs no connection - ARC spawns the user's own CLI, which
+/** Claude Code needs no connection - Arc spawns the user's own CLI, which
  *  already holds their login. What Settings owns is the blast radius: how much
  *  Claude may do unattended, and how much it may spend doing it. */
-function ClaudePane() {
+function ClaudePane({ showUsage }: { showUsage: boolean }) {
   return (
     <>
       <PaneHeader
         title="Claude Code"
-        blurb="ARC drives your installed claude CLI to give it a chat panel with reviewable edits. Nothing to connect and no key to store — it uses your existing login. ARC works fully without it."
+        blurb="Arc drives your installed claude CLI to give it a chat panel with reviewable edits. Nothing to connect and no key to store — it uses your existing login. Arc works fully without it."
       />
       <Group
-        title="Limits"
+        title="Permissions and spending"
         hint="How much Claude may do on its own, and how much it may spend doing it."
       >
         <Panel>
           <ClaudeSettings />
         </Panel>
+      </Group>
+
+      <Disclosure label="Usage commands" defaultOpen={showUsage}>
+        <UsageSection />
+      </Disclosure>
+    </>
+  );
+}
+
+/** The ⌘K command bar's key and model. Lived under Terminal, where nobody
+ *  looking for "the AI key" found it. */
+function AiPane() {
+  const binding = getBinding('ai-command');
+  return (
+    <>
+      <PaneHeader
+        title="Command bar AI"
+        blurb={
+          binding
+            ? `Press ${formatBinding(binding)} in a terminal and describe a command; Arc writes it on the prompt for you to check.`
+            : 'Give the command bar a shortcut in Shortcuts, press it in a terminal and describe a command; Arc writes it on the prompt for you to check.'
+        }
+      />
+      <Group
+        title="Command suggestions"
+        hint="Nothing runs until you press Enter yourself."
+      >
+        <AiCommandSettings />
       </Group>
     </>
   );
@@ -2592,11 +2438,11 @@ function ClaudePane() {
 
 /**
  * The status bar's usage popup reads from here: a name plus a shell command
- * line that prints an agent's token/credit usage. ARC runs the command as-is
+ * line that prints an agent's token/credit usage. Arc runs the command as-is
  * and parses whatever JSON comes back (or shows it raw) — there's no usage
- * API of ARC's own, so this pane is entirely "what command do I run".
+ * API of Arc's own, so this pane is entirely "what command do I run".
  */
-function UsagePane() {
+function UsageSection() {
   const agents = useSettings((s) => s.usageAgents);
   const setAgents = useSettings((s) => s.setUsageAgents);
 
@@ -2617,13 +2463,9 @@ function UsagePane() {
 
   return (
     <>
-      <PaneHeader
-        title="Usage"
-        blurb="Commands that print an agent's token or credit usage, run in your workspace's shell when you open or refresh the status bar's usage popup. For Claude agents, ARC also shows your plan limits using Claude Code's sign-in."
-      />
       <Group
-        title="Agents"
-        hint="Each command runs on your machine, in your shell, with no arguments added. An empty list hides the status bar item."
+        title="Usage commands"
+        hint="Commands that print an agent's token or credit usage, run in your workspace's shell when you open or refresh the status bar's usage popup. For Claude agents, Arc also shows your plan limits using Claude Code's sign-in. Each command runs as-is; an empty list hides the status bar item."
         action={
           <button
             onClick={add}
@@ -2647,12 +2489,12 @@ function UsagePane() {
             {agents.map((a) => (
               <Panel key={a.id} className="space-y-2.5">
                 <div className="flex items-center gap-2">
-                  <input
+                  <Input
                     value={a.name}
                     onChange={(e) => patch(a.id, { name: e.target.value })}
                     placeholder="Name"
                     aria-label="Agent name"
-                    className="min-w-0 flex-1 rounded-md border border-edge-2 bg-bg-base/50 px-2.5 py-1.5 font-display text-sm text-fg-base outline-none focus:border-accent/45"
+                    className="flex-1"
                   />
                   <button
                     onClick={() => remove(a.id)}
@@ -2663,13 +2505,13 @@ function UsagePane() {
                     <Trash2 size={12} strokeWidth={2.1} />
                   </button>
                 </div>
-                <input
+                <Input
+                  mono
                   value={a.command}
                   onChange={(e) => patch(a.id, { command: e.target.value })}
                   placeholder="Command, e.g. npx ccusage@latest --json"
                   aria-label="Usage command"
-                  spellCheck={false}
-                  className="w-full min-w-0 rounded-md border border-edge-2 bg-bg-base/50 px-2.5 py-1.5 font-mono text-xs text-fg-base placeholder:text-fg-subtle outline-none focus:border-accent/45"
+                  className="w-full"
                 />
               </Panel>
             ))}
@@ -2713,7 +2555,7 @@ function TerminalProfilesSection() {
   const remove = (id: string) => setProfiles(profiles.filter((p) => p.id !== id));
 
   const fieldCls =
-    'min-w-0 rounded-md border border-edge-2 bg-bg-base/50 px-2.5 py-1.5 font-mono text-xs text-fg-base placeholder:text-fg-subtle outline-none focus:border-accent/45';
+    'min-w-0 rounded-md border border-edge-2 bg-bg-base px-2.5 py-1.5 font-mono text-xs text-fg-base placeholder:text-fg-subtle outline-none focus:border-accent/45';
 
   return (
     <Group
@@ -2748,7 +2590,7 @@ function TerminalProfilesSection() {
                   onChange={(e) => patch(p.id, { name: e.target.value })}
                   placeholder="Name"
                   aria-label="Profile name"
-                  className="min-w-0 flex-1 rounded-md border border-edge-2 bg-bg-base/50 px-2.5 py-1.5 font-display text-sm text-fg-base outline-none focus:border-accent/45"
+                  className="min-w-0 flex-1 rounded-md border border-edge-2 bg-bg-base px-2.5 py-1.5 font-display text-sm text-fg-base outline-none focus:border-accent/45"
                 />
                 <button
                   onClick={() => setDefaultProfileId(defaultProfileId === p.id ? null : p.id)}
@@ -2851,7 +2693,7 @@ export function splitArgs(input: string): string[] {
  */
 function PaneHeader({ title, blurb }: { title: string; blurb: string }) {
   return (
-    <header className="mb-8 border-b border-edge-1 pb-5">
+    <header className="mb-9">
       <h2 className="font-display text-xl font-semibold tracking-tight text-fg-base">{title}</h2>
       <p className="mt-1.5 max-w-[56ch] font-display text-sm leading-relaxed text-fg-muted">
         {blurb}
@@ -2880,7 +2722,7 @@ function Group({
   children: React.ReactNode;
 }) {
   return (
-    <section className="mb-8 last:mb-0">
+    <section data-group={title} className="mb-8 scroll-mt-6 last:mb-0">
       <div className="mb-3 flex items-baseline justify-between gap-4">
         <div className="min-w-0">
           <h3 className="font-display text-sm font-semibold tracking-tight text-fg-base">

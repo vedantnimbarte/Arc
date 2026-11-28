@@ -36,10 +36,10 @@ export function AuthorsSidebar({ authors, selected, onToggle, onClear, loading }
 
   return (
     <aside className="material-sidebar flex h-full w-[252px] shrink-0 flex-col border-r border-border-subtle">
-      <div className="flex items-center gap-1.5 px-4 pb-2 pt-3 font-display text-2xs uppercase tracking-widest2 text-fg-subtle">
+      <div className="flex items-center gap-1.5 px-4 pb-2 pt-3 font-display text-2xs text-fg-subtle">
         <Users size={11} strokeWidth={2.1} />
         <span>Authors</span>
-        <span className="ml-auto rounded-full bg-surface-1 px-1.5 py-[1px] font-mono text-2xs tabular-nums normal-case tracking-normal text-fg-muted">
+        <span className="ml-auto rounded-full bg-surface-1 px-1.5 py-[1px] font-mono text-2xs tabular-nums text-fg-muted">
           {authors.length}
         </span>
       </div>

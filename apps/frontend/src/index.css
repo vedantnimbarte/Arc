@@ -10,37 +10,42 @@
 @tailwind utilities;
 
 @layer base {
+  /* Arc's one palette. Tailwind's colour tokens read these variables.
+     Three tones carry the layout instead of borders: the ground (title bar,
+     rail, gaps), panes one step lighter, and menus/dialogs one step above
+     that. Text steps are set by contrast against the panes: muted ~7:1,
+     subtle ~5:1. */
   :root {
     color-scheme: dark;
-    /* The user's Settings → Font Family pick. `applyFontFamily()` overwrites
-       this on <html> at boot and on every change; every font stack in the app
-       (Tailwind's `display` + `mono`, the markdown preview) resolves through
-       it, so one write re-fonts the whole UI. The value here is the default
-       font's stack, used until the store loads. */
-    --font-user: 'SF Mono', ui-monospace, Menlo, Monaco, monospace;
-    /* Wallpaper tints that bleed through the translucent chrome. Cool
-       platinum / steel washes — same atmospheric idea as macOS but tuned
-       to the brushed-silver palette instead of the warm system-blue.
-       Overridden by `applyTheme()` based on the active appearance. */
-    --wash-1: 198 208 222;  /* cool platinum */
-    --wash-2: 168 178 196;  /* steel */
-    --wash-3: 130 148 172;  /* deeper cool */
+    --bg-chrome: 19 21 24;   /* ground */
+    --bg-base: 28 31 35;     /* panes and sidebar */
+    --bg-panel: 38 42 48;    /* menus, dialogs, raised controls */
+    --bg-hover: 50 55 62;
+    --bg-subtle: rgba(255, 255, 255, 0.03);
+    --border-subtle: rgba(255, 255, 255, 0.06);
+    --border-strong: rgba(255, 255, 255, 0.12);
+    --border-hairline: rgba(0, 0, 0, 0.5);
+    --fg-base: 232 234 237;
+    --fg-muted: rgba(232, 234, 237, 0.72);
+    --fg-subtle: rgba(232, 234, 237, 0.55);
+    /* Arc light: focus, selection, and anything an agent is doing. */
+    --accent: 142 197 255;
+    --accent-bright: 186 221 255;
+    --accent-muted: 108 160 214;
+    --accent-soft: rgba(142, 197, 255, 0.12);
+    --accent-glow: rgba(142, 197, 255, 0.35);
+    --surface-1: rgba(255, 255, 255, 0.035);
+    --surface-2: rgba(255, 255, 255, 0.065);
+    --surface-3: rgba(255, 255, 255, 0.11);
+    --edge-1: rgba(255, 255, 255, 0.05);
+    --edge-2: rgba(255, 255, 255, 0.10);
+    --scrim-1: rgba(0, 0, 0, 0.3);
+    --scrim-2: rgba(0, 0, 0, 0.55);
     /* Chart series (DB analytics). Three slots, validated colorblind-safe as
-       all-pairs against the dark surface; light steps below. */
+       all-pairs against the dark surface. */
     --series-1: #3987e5;
     --series-2: #d95926;
     --series-3: #199e70;
-    /* Frosted glass over the wallpaper. Panes, sidebar and title bar use
-       --glass-alpha; dialogs and menus sit on top of text, so they get a
-       denser --glass-sheet-alpha to stay readable. */
-    --glass-alpha: 0.5;
-    --glass-sheet-alpha: 0.65;
-    --glass-blur: 12px;
-  }
-  html:not(.dark) {
-    --series-1: #2a78d6;
-    --series-2: #eb6834;
-    --series-3: #1baf7a;
   }
 
   html,
@@ -67,7 +72,7 @@
 
   body {
     /* On body (not the shell) so every window — main, Settings, Git — gets it. */
-    background: #000 url('./assets/wallpaper.jpg') center / cover fixed no-repeat;
+    background: rgb(var(--bg-chrome));
     overscroll-behavior: none;
     user-select: none;
     -webkit-user-select: none;
@@ -78,15 +83,9 @@
     letter-spacing: -0.005em;
   }
 
-  /* Cool platinum selection — matches the accent system. Light theme
-     uses a softer blue tint with dark text for contrast. */
   ::selection {
-    background: rgba(200, 210, 225, 0.32);
-    color: #f5f5f7;
-  }
-  html:not(.dark) ::selection {
-    background: rgba(56, 115, 214, 0.22);
-    color: #0b1220;
+    background: rgba(142, 197, 255, 0.28);
+    color: #f5f7fa;
   }
 
   .selectable,
@@ -122,131 +121,55 @@
 }
 
 @layer components {
-  /* The "desktop wallpaper" behind the chrome. macOS draws an animated mesh
-     of color washes that the translucent windows tint into. We synthesize a
-     muted version: three radial gradients fading into the graphite base. */
-  .desktop-wash {
-    position: fixed;
-    inset: 0;
-    pointer-events: none;
-    z-index: 0;
-    background:
-      radial-gradient(
-        80% 65% at 12% -5%,
-        rgb(var(--wash-1) / 0.16) 0%,
-        transparent 55%
-      ),
-      radial-gradient(
-        70% 60% at 100% 0%,
-        rgb(var(--wash-2) / 0.10) 0%,
-        transparent 60%
-      ),
-      radial-gradient(
-        55% 60% at 50% 115%,
-        rgb(var(--wash-3) / 0.06) 0%,
-        transparent 70%
-      );
-  }
-
-  /* "Sidebar" material — heavier blur, slight saturation bump. Tuned
-     slightly cooler so the silver accents float cleanly on top. */
-  .material-sidebar {
-    background: rgb(var(--bg-chrome) / var(--glass-alpha));
-    backdrop-filter: blur(var(--glass-blur)) saturate(160%);
-    -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(160%);
-  }
-
-  /* Brushed-platinum surface — the only place we deliberately step out of
-     flat color. Used on hero accent surfaces (send button, the user-msg
-     bubble) so they read as polished metal rather than printer-toner ink.
-     A subtle top-to-bottom gradient + 1px inset highlight + 1px inset
-     bottom shadow give the brushed-aluminum feel without going chrome-y. */
-  .surface-silver {
-    background: linear-gradient(
-      180deg,
-      #dde0e6 0%,
-      #c8cad0 52%,
-      #b8babf 100%
-    );
-    box-shadow:
-      inset 0 1px 0 0 rgba(255, 255, 255, 0.45),
-      inset 0 -1px 0 0 rgba(0, 0, 0, 0.20),
-      0 1px 2px 0 rgba(0, 0, 0, 0.32);
-    color: #161618;
-  }
-  .surface-silver:hover {
-    background: linear-gradient(
-      180deg,
-      #ebedf1 0%,
-      #d4d6dc 52%,
-      #c2c4ca 100%
-    );
-  }
-  .surface-silver:active {
-    background: linear-gradient(
-      180deg,
-      #c8cad0 0%,
-      #b8babf 100%
-    );
-    box-shadow:
-      inset 0 1px 1px 0 rgba(0, 0, 0, 0.25),
-      0 0 0 0 transparent;
-  }
-
-  /* "Toolbar / titlebar" material — slightly lighter, used for window chrome. */
-  .material-toolbar {
-    background: rgb(var(--bg-chrome) / var(--glass-alpha));
-    backdrop-filter: blur(var(--glass-blur)) saturate(160%);
-    -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(160%);
-    border-bottom: 1px solid rgba(0, 0, 0, 0.35);
-    box-shadow: inset 0 1px 0 0 rgba(255, 255, 255, 0.06);
-  }
-  html:not(.dark) .material-toolbar {
-    border-bottom: 1px solid rgba(0, 0, 0, 0.12);
-    box-shadow: inset 0 1px 0 0 rgba(255, 255, 255, 0.55);
-  }
-
-  /* "Content" material — the inner panes (terminal, chat). Lighter so text
-     reads cleanly without the chrome competing. */
+  /* Surfaces. Kept as named materials so components ask for a role, but
+     they are all solid: the ground behind is a flat colour, so translucency
+     only cost contrast. */
+  .material-sidebar,
   .material-content,
   .glass-pane {
-    background: rgb(var(--bg-base) / var(--glass-alpha));
-    backdrop-filter: blur(var(--glass-blur)) saturate(160%);
-    -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(160%);
+    background: rgb(var(--bg-base));
   }
-
-  /* Sheet / dialog material — heaviest blur, what macOS uses for modals. */
+  .material-toolbar {
+    background: rgb(var(--bg-chrome));
+  }
   .material-sheet {
-    background: rgb(var(--bg-panel) / var(--glass-sheet-alpha));
-    backdrop-filter: blur(var(--glass-blur)) saturate(180%);
-    -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(180%);
+    background: rgb(var(--bg-panel));
   }
 
-  /* Cortex: flat chrome edges, with sidebar cards one step above the
-     panel so they read as separate. */
-  html[data-theme='cortex'] .material-toolbar {
-    border-bottom-color: transparent;
-    box-shadow: none;
+  /* Primary action surface (send button, the user-message bubble). */
+  .surface-silver {
+    background: rgb(var(--accent));
+    color: #0d1a26;
+    box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.32);
   }
-  html[data-theme='cortex'] .shell-rail,
-  html[data-theme='cortex'] .shell-sidebar-panel {
-    border-right-color: transparent;
+  .surface-silver:hover {
+    background: rgb(var(--accent-bright));
   }
-  html[data-theme='cortex'] .shell-sidebar-panel {
+  .surface-silver:active {
+    background: rgb(var(--accent-muted));
+  }
+
+  /* Shell layout: the rail sits on the ground, and the sidebar is a pane
+     like the others, separated by tone and a gap instead of a border. */
+  .shell-rail {
+    background: rgb(var(--bg-chrome));
+    border-right-color: transparent !important;
+  }
+  .shell-sidebar-panel {
+    background: rgb(var(--bg-chrome));
+    border-right-color: transparent !important;
     padding: 4px 0 8px 4px;
   }
-  html[data-theme='cortex'] .shell-sidebar-card {
+  .shell-sidebar-card {
     overflow: hidden;
-    border-radius: 12px;
-    border: 1px solid var(--border-subtle);
-    background: rgb(var(--bg-base) / 0.35);
+    border-radius: 10px;
+    background: rgb(var(--bg-base));
   }
-  html[data-theme='cortex'] .arc-tab-strip {
+  .arc-tab-strip {
     border-bottom-color: transparent;
   }
-  html[data-theme='cortex'] .arc-tab[data-active='1'] {
+  .arc-tab[data-active='1'] {
     background: rgb(var(--bg-panel));
-    box-shadow: inset 0 0 0 1px var(--border-strong);
   }
 
   /* Subtle dot grid behind the terminal — kept very faint so the macOS
@@ -258,20 +181,11 @@
     );
     background-size: 22px 22px;
   }
-  html:not(.dark) .dot-grid {
-    background-image: radial-gradient(
-      rgba(0, 0, 0, 0.045) 1px,
-      transparent 1px
-    );
-  }
 
   /* macOS-style "vibrancy" hairline that sits on top of the toolbar's
      bottom edge. Single 0.5px line of pure black at 35% opacity. */
   .hairline-b {
     box-shadow: 0 0.5px 0 0 rgba(0, 0, 0, 0.35);
-  }
-  html:not(.dark) .hairline-b {
-    box-shadow: 0 0.5px 0 0 rgba(0, 0, 0, 0.12);
   }
 
   /* Source-list row (sidebar / settings nav style) */
@@ -287,7 +201,7 @@
      the accent hues (links, inline code) keep a light-mode override. */
   .md-preview {
     color: rgb(var(--fg-base, 238 240 243));
-    font-family: var(--font-user), -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Inter', system-ui, sans-serif;
+    font-family: 'Inter Variable', 'Inter', -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
     font-size: 14px;
     line-height: 1.7;
     letter-spacing: -0.005em;
@@ -347,7 +261,7 @@
     font-style: italic;
   }
   .md-preview code {
-    font-family: var(--font-user), 'SF Mono', ui-monospace, 'JetBrains Mono Variable', 'JetBrains Mono', Menlo, Monaco, 'Cascadia Code', Consolas, monospace;
+    font-family: 'SF Mono', ui-monospace, 'JetBrains Mono Variable', 'JetBrains Mono', Menlo, Monaco, 'Cascadia Code', Consolas, monospace;
     font-size: 0.88em;
     background: var(--surface-2, rgba(255, 255, 255, 0.065));
     color: #fab387;
@@ -474,10 +388,6 @@
   .md-chat code.md-path:hover { text-decoration-style: solid; }
 
   /* Light-mode overrides for the accent hues the theme tokens don't cover. */
-  html:not(.dark) .md-preview a { color: #1d6fa5; border-bottom-color: rgba(29, 111, 165, 0.30); }
-  html:not(.dark) .md-preview a:hover { border-bottom-color: #1d6fa5; }
-  html:not(.dark) .md-preview code { color: #b8420d; }
-  html:not(.dark) .md-preview input[type='checkbox'] { accent-color: #3873d6; }
 }
 
 /* Fully hide the scrollbar (used by the horizontally-scrolling tab strip). */
@@ -509,12 +419,6 @@
 }
 ::-webkit-scrollbar-thumb:hover {
   background-color: rgba(255, 255, 255, 0.28) !important;
-}
-html:not(.dark) *:hover::-webkit-scrollbar-thumb {
-  background-color: rgba(0, 0, 0, 0.22);
-}
-html:not(.dark) ::-webkit-scrollbar-thumb:hover {
-  background-color: rgba(0, 0, 0, 0.34) !important;
 }
 
 /* xterm — small left inset so text doesn't hug the pane edge. Padding goes on

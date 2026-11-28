@@ -26,6 +26,7 @@ import {
 import { CommitList } from './git/CommitList';
 import { CommitGraph } from './git/CommitGraph';
 import { askConfirm } from '../state/confirm';
+import { EmptyState, ErrorNote } from './ui';
 
 const COMMIT_LIMIT = 500;
 
@@ -140,10 +141,16 @@ export function GitPage() {
 
   const handleCherryPick = useCallback(async (oid: string) => {
     if (!root) return;
+    const ok = await askConfirm({
+      title: `Copy ${oid.slice(0, 7)} onto the current branch?`,
+      body: 'Adds a new commit with the same changes on top of the branch you have checked out (cherry-pick).',
+      confirmLabel: 'Copy commit',
+    });
+    if (!ok) return;
     setCommitsError(null);
     try {
       await gitCherryPick(root, oid);
-      setActionMsg(`Cherry-picked ${oid.slice(0, 7)}`);
+      setActionMsg(`Copied ${oid.slice(0, 7)} onto the current branch`);
       setTimeout(() => setActionMsg(null), 3000);
       const signal = { cancelled: false };
       void fetchCommits(signal);
@@ -166,10 +173,16 @@ export function GitPage() {
 
   const handleRevert = useCallback(async (oid: string) => {
     if (!root) return;
+    const ok = await askConfirm({
+      title: `Undo ${oid.slice(0, 7)}?`,
+      body: 'Adds a new commit that reverses its changes. The original commit stays in history (revert).',
+      confirmLabel: 'Undo commit',
+    });
+    if (!ok) return;
     setCommitsError(null);
     try {
       await gitRevert(root, oid);
-      setActionMsg(`Reverted ${oid.slice(0, 7)}`);
+      setActionMsg(`Undid ${oid.slice(0, 7)} with a new commit`);
       setTimeout(() => setActionMsg(null), 3000);
       const signal = { cancelled: false };
       void fetchCommits(signal);
@@ -183,9 +196,9 @@ export function GitPage() {
     if (
       mode === 'hard' &&
       !(await askConfirm({
-        title: `Hard reset to ${oid.slice(0, 7)}?`,
-        body: 'Every uncommitted change in the working tree is discarded.',
-        confirmLabel: 'reset',
+        title: `Move branch back to ${oid.slice(0, 7)} and throw away changes?`,
+        body: 'Later commits and every uncommitted change in the working tree are discarded.',
+        confirmLabel: 'Reset and discard changes',
         destructive: true,
       }))
     )
@@ -193,7 +206,7 @@ export function GitPage() {
     setCommitsError(null);
     try {
       await gitReset(root, oid, mode);
-      setActionMsg(`Reset (${mode}) to ${oid.slice(0, 7)}`);
+      setActionMsg(`Moved branch back to ${oid.slice(0, 7)}`);
       setTimeout(() => setActionMsg(null), 3000);
       const signal = { cancelled: false };
       void fetchCommits(signal);
@@ -214,22 +227,18 @@ export function GitPage() {
   };
 
   return (
-    <div className="relative flex h-screen w-screen flex-col overflow-hidden text-fg-base">
-      {/* Ambient backdrop — a quiet pair of radial washes that drift behind
-          the content so the surface feels lit rather than flat. */}
-      <div
-        aria-hidden
-        className="pointer-events-none absolute inset-0 -z-0"
-        style={{
-          background:
-            'radial-gradient(60% 50% at 18% 0%, rgba(200, 204, 214, 0.07), transparent 70%), radial-gradient(50% 40% at 100% 100%, rgba(137, 180, 250, 0.04), transparent 70%)',
-        }}
-      />
+    <div className="relative flex h-screen w-screen flex-col overflow-hidden bg-bg-base text-fg-base">
 
       <TitleBar onRefresh={refresh} commitCount={commits.length} loading={commitsLoading} />
 
       {!root ? (
-        <EmptyState text="Open a folder in the main window to see its git history." />
+        // The Git window has no folder picker of its own; the main window does.
+        <EmptyState
+          icon={GitBranch}
+          title="No folder open"
+          body="Open a folder in the main Arc window, then its history shows up here."
+          className="relative z-10 flex-1"
+        />
       ) : (
         <div className="relative z-10 flex min-h-0 flex-1">
           <AuthorsSidebar
@@ -253,11 +262,11 @@ export function GitPage() {
             />
 
             {(authorsError || commitsError) && (
-              <ErrorTray message={commitsError ?? authorsError ?? ''} />
+              <ErrorNote error={commitsError ?? authorsError} className="mx-3 mt-2 shrink-0" />
             )}
 
             {actionMsg && (
-              <div className="mx-3 mb-1 rounded-md bg-accent/10 px-3 py-1.5 font-sans text-xs text-accent ring-1 ring-inset ring-accent/20">
+              <div className="mx-3 mb-1 rounded-md bg-accent/10 px-3 py-1.5 font-display text-xs text-accent ring-1 ring-inset ring-accent/20">
                 {actionMsg}
               </div>
             )}
@@ -341,16 +350,16 @@ function TitleBar({
           title="Pull requests"
         >
           <GitPullRequest size={11} strokeWidth={2.1} />
-          <span className="font-display text-2xs">PRs</span>
+          <span className="font-display text-2xs">Pull requests</span>
         </button>
         <button
           onClick={() => useGitUi.getState().setRebasePanelOpen(true)}
           className="group flex h-6 items-center gap-1 rounded-full px-2 text-fg-subtle transition-all duration-200 ease-out hover:bg-surface-2 hover:text-fg-base active:scale-95"
-          aria-label="Interactive rebase"
-          title="Interactive rebase"
+          aria-label="Reorder commits (interactive rebase)"
+          title="Reorder commits (interactive rebase)"
         >
           <ListOrdered size={11} strokeWidth={2.1} />
-          <span className="font-display text-2xs">rebase</span>
+          <span className="font-display text-2xs">Reorder commits…</span>
         </button>
         <button
           onClick={onRefresh}
@@ -369,45 +378,12 @@ function TitleBar({
         </button>
         <button
           onClick={close}
-          className="group flex h-6 w-6 items-center justify-center rounded-full text-fg-subtle transition-all duration-200 ease-out hover:bg-red-500/[0.18] hover:text-red-300 active:scale-90"
+          className="group flex h-6 w-6 items-center justify-center rounded-full text-fg-subtle transition-all duration-200 ease-out hover:bg-status-err/15 hover:text-status-err active:scale-90"
           aria-label="Close"
-          title="Close (esc)"
+          title="Close (Esc)"
         >
           <X size={13} strokeWidth={2.2} />
         </button>
-      </div>
-    </div>
-  );
-}
-
-function EmptyState({ text }: { text: string }) {
-  return (
-    <div className="relative z-10 flex flex-1 items-center justify-center px-8 py-12">
-      <div className="flex max-w-sm flex-col items-center gap-4 text-center">
-        <span
-          className="flex h-14 w-14 items-center justify-center rounded-full bg-accent-soft text-accent-bright shadow-glow-sm ring-1 ring-edge-1"
-          aria-hidden
-        >
-          <GitBranch size={22} strokeWidth={1.8} />
-        </span>
-        <p className="font-display text-base leading-relaxed text-fg-muted">{text}</p>
-      </div>
-    </div>
-  );
-}
-
-function ErrorTray({ message }: { message: string }) {
-  return (
-    <div className="mx-3 mt-2 shrink-0 animate-fade-in">
-      <div
-        className={cn(
-          'flex items-center gap-2 rounded-xl px-3 py-2',
-          'bg-status-err/[0.08] font-display text-xs text-status-err/90',
-          'ring-1 ring-inset ring-status-err/20',
-        )}
-      >
-        <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-status-err shadow-[0_0_8px_rgba(255,82,82,0.65)]" />
-        <span className="truncate">{message}</span>
       </div>
     </div>
   );

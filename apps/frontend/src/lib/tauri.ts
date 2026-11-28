@@ -1064,14 +1064,6 @@ export interface PersistedSettings {
   terminalProfiles?: unknown;
   /** Id of the profile new terminals use. `null`/missing → `defaultShell`. */
   defaultProfileId?: string | null;
-  /** Appearance preference: 'dark' | 'light' | 'system'. */
-  appearance?: 'dark' | 'light' | 'system';
-  /** Active theme id (e.g. 'catppuccin-mocha'). When set + registered,
-   *  overrides the dark/light pair from `appearance`. `null` (or missing)
-   *  means "follow appearance" — the legacy behavior. */
-  themeId?: string | null;
-  /** Mono font id from `FONT_OPTIONS`. */
-  fontId?: string;
   /** Terminal / editor font size in px. */
   fontSize?: number;
   /** Start ARC on OS login. Wired to `tauri-plugin-autostart`. */
@@ -1679,6 +1671,11 @@ export async function gitStashPop(path: string, index?: number | null): Promise<
 
 export async function gitStashDrop(path: string, index: number): Promise<void> {
   return gitInvoke<void>('git_stash_drop', { path, index });
+}
+
+/** `git init` in a folder that isn't tracked yet. */
+export async function gitInit(path: string): Promise<void> {
+  return gitInvoke<void>('git_init', { path });
 }
 
 // ── Branch management ─────────────────────────────────────────────────────────

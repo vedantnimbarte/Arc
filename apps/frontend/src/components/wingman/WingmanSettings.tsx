@@ -3,6 +3,9 @@ import { CircleCheck, CircleAlert, Loader2 } from 'lucide-react';
 import { secretSet } from '../../lib/tauri';
 import { useSettings } from '../../state/settings';
 import { useWingman, WINGMAN_TOKEN_KEY } from '../../state/wingman';
+import { toastError } from '../../state/toast';
+import { friendlyError } from '../../lib/friendlyError';
+import { Button, Input } from '../ui';
 
 /**
  * Settings block for the Wingman daemon connection.
@@ -42,6 +45,7 @@ export function WingmanSettings() {
         await secretSet(WINGMAN_TOKEN_KEY, token.trim());
       } catch (e) {
         console.error('[wingman] storing token failed:', e);
+        toastError(`Couldn't save the Wingman token. ${friendlyError(e).message}`);
       }
     }
     await connect(trimmed, token.trim() || null);
@@ -51,64 +55,57 @@ export function WingmanSettings() {
 
   return (
     <div className="flex flex-col gap-2">
-      <div className="rounded-lg border border-border-subtle bg-bg-base/40 px-3 py-2.5">
-        <label className="flex flex-col gap-1">
-          <span className="font-display text-sm font-medium tracking-tight text-fg-base">
-            Daemon address
-          </span>
-          <span className="font-display text-xs text-fg-muted">
-            Run <code className="font-mono">wingman serve</code> and paste its address. Leave
-            empty to turn the integration off.
-          </span>
-          <input
-            value={url}
-            onChange={(e) => setUrl(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') void apply();
-            }}
-            placeholder="http://127.0.0.1:8787"
-            spellCheck={false}
-            className="mt-1 rounded-md border border-edge-1 bg-surface-1 px-2 py-1 font-mono text-xs text-fg-base placeholder:text-fg-subtle focus:border-accent/40 focus:outline-none"
-          />
-        </label>
+      <label className="flex flex-col gap-1">
+        <span className="font-display text-sm font-medium tracking-tight text-fg-base">
+          Daemon address
+        </span>
+        <span className="font-display text-xs text-fg-muted">
+          Run <code className="font-mono">wingman serve</code> and paste its address. Leave
+          empty to turn the integration off.
+        </span>
+        <Input
+          mono
+          value={url}
+          onChange={(e) => setUrl(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') void apply();
+          }}
+          placeholder="http://127.0.0.1:8787"
+          className="mt-1"
+        />
+      </label>
 
-        <label className="mt-2 flex flex-col gap-1">
-          <span className="font-display text-sm font-medium tracking-tight text-fg-base">
-            API token
-          </span>
-          <span className="font-display text-xs text-fg-muted">
-            Only needed when the daemon binds a non-loopback address. Stored in your OS
-            credential vault, never in ARC&rsquo;s database.
-          </span>
-          <input
-            type="password"
-            value={token}
-            onChange={(e) => setToken(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') void apply();
-            }}
-            placeholder={health?.auth_required ? 'required by this daemon' : 'not required'}
-            autoComplete="off"
-            spellCheck={false}
-            className="mt-1 rounded-md border border-edge-1 bg-surface-1 px-2 py-1 font-mono text-xs text-fg-base placeholder:text-fg-subtle focus:border-accent/40 focus:outline-none"
-          />
-        </label>
+      <label className="mt-1 flex flex-col gap-1">
+        <span className="font-display text-sm font-medium tracking-tight text-fg-base">
+          API token
+        </span>
+        <span className="font-display text-xs text-fg-muted">
+          Only needed when the daemon binds a non-loopback address. Stored in your OS
+          credential vault, never in Arc&rsquo;s database.
+        </span>
+        <Input
+          mono
+          type="password"
+          value={token}
+          onChange={(e) => setToken(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') void apply();
+          }}
+          placeholder={health?.auth_required ? 'Required by this daemon' : 'Not required'}
+          className="mt-1"
+        />
+      </label>
 
-        <div className="mt-2.5 flex items-center justify-between gap-3">
-          <StatusLine
-            status={status}
-            version={health?.version ?? null}
-            projectCount={projects.length}
-            error={lastError}
-          />
-          <button
-            type="button"
-            onClick={() => void apply()}
-            className="shrink-0 rounded-md bg-accent-soft px-3 py-1 font-display text-xs font-medium text-fg-base ring-1 ring-accent/45 transition-colors hover:bg-accent/20"
-          >
-            {url.trim() ? 'Connect' : 'Disconnect'}
-          </button>
-        </div>
+      <div className="mt-2.5 flex items-center justify-between gap-3">
+        <StatusLine
+          status={status}
+          version={health?.version ?? null}
+          projectCount={projects.length}
+          error={lastError}
+        />
+        <Button variant={url.trim() ? 'primary' : 'secondary'} size="sm" onClick={() => void apply()}>
+          {url.trim() ? 'Connect' : 'Disconnect'}
+        </Button>
       </div>
     </div>
   );
@@ -127,31 +124,31 @@ function StatusLine({
 }) {
   if (status === 'connecting') {
     return (
-      <p className="flex min-w-0 items-center gap-1.5 font-mono text-2xs text-fg-muted">
+      <p className="flex min-w-0 items-center gap-1.5 font-display text-xs text-fg-muted">
         <Loader2 size={11} strokeWidth={2} className="animate-spin" />
-        connecting…
+        Connecting…
       </p>
     );
   }
   if (status === 'connected') {
     return (
-      <p className="flex min-w-0 items-center gap-1.5 font-mono text-2xs text-status-ok">
+      <p className="flex min-w-0 items-center gap-1.5 font-display text-xs text-status-ok">
         <CircleCheck size={11} strokeWidth={2} />
         <span className="truncate">
-          wingman {version} · {projectCount} project{projectCount === 1 ? '' : 's'}
+          Wingman {version} · {projectCount} project{projectCount === 1 ? '' : 's'}
         </span>
       </p>
     );
   }
   if (status === 'error') {
     return (
-      <p className="flex min-w-0 items-center gap-1.5 font-mono text-2xs text-status-err">
+      <p className="flex min-w-0 items-center gap-1.5 font-display text-xs text-status-err">
         <CircleAlert size={11} strokeWidth={2} />
         <span className="truncate" title={error ?? undefined}>
-          {error ?? 'connection failed'}
+          {error ? `Couldn't connect. ${friendlyError(error).message}` : "Couldn't connect"}
         </span>
       </p>
     );
   }
-  return <p className="font-mono text-2xs text-fg-subtle">not connected</p>;
+  return <p className="font-display text-xs text-fg-subtle">Not connected</p>;
 }

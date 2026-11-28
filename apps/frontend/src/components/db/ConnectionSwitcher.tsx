@@ -66,19 +66,19 @@ export function ConnectionSwitcher({
   const env = envOf(active?.safety);
 
   return (
-    <div ref={root} className="relative shrink-0 border-b border-edge-1 p-2">
+    <div ref={root} className="relative shrink-0 p-2">
       <div className="flex items-center gap-1">
         <button
           type="button"
-          onClick={() => (connections.length ? setOpen((o) => !o) : onAdd())}
+          onClick={() => setOpen((o) => !o)}
           aria-haspopup="listbox"
           aria-expanded={open}
           className={cn(
-            'flex min-w-0 flex-1 items-center gap-2 rounded-md px-2 py-1.5 text-left ring-1 ring-inset transition-colors',
+            'flex min-w-0 flex-1 items-center gap-2 rounded-md px-2 py-1.5 text-left transition-colors',
             'focus-visible:outline-none focus-visible:shadow-focus',
-            open ? 'bg-surface-2 ring-edge-2' : 'bg-surface-1 ring-edge-1 hover:bg-surface-2',
+            open ? 'bg-bg-hover' : 'bg-bg-base hover:bg-bg-hover',
+            env?.stripeLeft,
           )}
-          style={env ? { boxShadow: `inset 3px 0 0 ${env.color}` } : undefined}
         >
           {active ? (
             <>
@@ -87,21 +87,15 @@ export function ConnectionSwitcher({
                 <span className="block truncate font-display text-xs font-semibold text-fg-base">
                   {active.name}
                 </span>
-                <span className="block truncate font-mono text-2xs text-fg-subtle">
+                <span className="block truncate font-display text-2xs text-fg-subtle">
                   {BACKEND_LABEL[active.backend]} · {shortUrl(active.url)}
                 </span>
               </span>
             </>
           ) : (
-            <span className="min-w-0 flex-1 font-display text-xs text-fg-muted">
-              {connections.length ? 'Choose a connection' : 'Add a connection'}
-            </span>
+            <span className="min-w-0 flex-1 font-display text-xs text-fg-muted">Choose a connection</span>
           )}
-          {connections.length ? (
-            <ChevronsUpDown size={12} className="shrink-0 text-fg-subtle" />
-          ) : (
-            <Plus size={12} className="shrink-0 text-fg-subtle" />
-          )}
+          <ChevronsUpDown size={12} className="shrink-0 text-fg-subtle" />
         </button>
 
         {active && (
@@ -171,7 +165,7 @@ export function ConnectionSwitcher({
                         </span>
                       )}
                     </span>
-                    <span className="block truncate font-mono text-2xs text-fg-subtle">
+                    <span className="block truncate font-display text-2xs text-fg-subtle">
                       {BACKEND_LABEL[c.backend]} · {shortUrl(c.url)}
                     </span>
                   </span>

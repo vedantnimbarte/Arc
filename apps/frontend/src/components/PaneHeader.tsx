@@ -159,12 +159,7 @@ export function PaneHeader({ paneId }: Props) {
         setFocusedPane(paneId);
         setActive(tab.id);
       }}
-      className={cn(
-        'flex h-9 shrink-0 items-center gap-2 border-b px-2.5',
-        isFocused
-          ? 'border-border-hairline bg-bg-chrome/40'
-          : 'border-border-hairline/60 bg-transparent',
-      )}
+      className="flex h-10 shrink-0 items-center gap-2 px-3"
     >
       {/* Running/idle status dot. */}
       <span
@@ -181,7 +176,7 @@ export function PaneHeader({ paneId }: Props) {
       />
 
       <Icon
-        size={12}
+        size={14}
         strokeWidth={2}
         className={cn('shrink-0', isFocused ? 'text-accent-bright' : 'text-fg-subtle')}
       />
@@ -199,6 +194,17 @@ export function PaneHeader({ paneId }: Props) {
       </div>
 
       <div className="ml-auto flex shrink-0 items-center gap-1 pl-1">
+        {/* Pane actions stay out of sight until you reach for the pane (hover
+            or keyboard focus), or while one of their popovers is open. Close
+            is always shown. */}
+        <div
+          className={cn(
+            'flex items-center gap-1 transition-opacity duration-150 motion-reduce:transition-none',
+            menuAnchor || moveAnchor || branchAnchor
+              ? 'opacity-100'
+              : 'opacity-0 group-focus-within/pane:opacity-100 group-hover/pane:opacity-100',
+          )}
+        >
         {/* Branch pill only when there's room — it's the first thing to yield. */}
         {branch && !compact && (
           <button
@@ -229,7 +235,7 @@ export function PaneHeader({ paneId }: Props) {
               setMenuAnchor((m) => (m ? null : { x: r.right, y: r.bottom + 4 }));
             }}
             className={cn(
-              'flex h-[22px] w-[22px] items-center justify-center rounded transition-colors hover:bg-surface-3 hover:text-fg-base',
+              'flex h-7 w-7 items-center justify-center rounded-md transition-colors hover:bg-surface-3 hover:text-fg-base',
               menuAnchor ? 'bg-surface-3 text-fg-base' : 'text-fg-subtle',
             )}
           >
@@ -256,6 +262,7 @@ export function PaneHeader({ paneId }: Props) {
         >
           <MoveIcon size={13} strokeWidth={2} />
         </HeaderButton>
+        </div>
 
         {/* Always offered, last tab included — emptying the workspace shows
             the launcher rather than nothing. */}
@@ -392,7 +399,7 @@ function HeaderButton({
           onClick(e);
         }}
         className={cn(
-          'flex h-[22px] w-[22px] items-center justify-center rounded transition-colors hover:bg-surface-3 hover:text-fg-base',
+          'flex h-7 w-7 items-center justify-center rounded-md transition-colors hover:bg-surface-3 hover:text-fg-base',
           active ? 'bg-surface-3 text-fg-base' : 'text-fg-subtle',
         )}
       >

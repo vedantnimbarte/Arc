@@ -1,5 +1,6 @@
-import { useEffect } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
+  ChevronDown,
   ChevronRight,
   ChevronsUpDown,
   CircleDot,
@@ -20,6 +21,8 @@ import {
 import { useFiles } from '../../state/files';
 import { gitRemotes } from '../../lib/tauri';
 import { cn } from '../../lib/cn';
+import { askConfirm } from '../../state/confirm';
+import { Button, EmptyState } from '../ui';
 import { SignIn } from './SignIn';
 import { ReposView } from './ReposView';
 import { IssuesView } from './IssuesView';
@@ -79,7 +82,7 @@ export function GitHubView() {
       <AccountBar />
       <div className="flex min-h-0 flex-1">
         <SectionRail />
-        <div className="min-w-0 flex-1">
+        <div className="min-w-0 flex-1 bg-bg-base">
           <SectionOutlet />
         </div>
       </div>
@@ -122,7 +125,6 @@ function AccountBar() {
   const viewer = useGitHub((s) => s.viewer);
   const repo = useGitHub((s) => s.repo);
   const rateRemaining = useGitHub((s) => s.rateRemaining);
-  const signOut = useGitHub((s) => s.signOut);
   const setSection = useGitHub((s) => s.setSection);
   const clones = useGitHub((s) => s.clones);
   const root = useFiles((s) => s.root);
@@ -131,18 +133,7 @@ function AccountBar() {
 
   return (
     <div className="material-toolbar flex h-11 shrink-0 items-center gap-2 px-3">
-      {viewer && (
-        <div className="flex min-w-0 shrink-0 items-center gap-2">
-          <img
-            src={viewer.avatarUrl}
-            alt=""
-            className="h-6 w-6 shrink-0 rounded-full ring-1 ring-edge-2"
-          />
-          <span className="truncate font-display text-xs font-semibold text-fg-base">
-            {viewer.login}
-          </span>
-        </div>
-      )}
+      {viewer && <AccountMenu login={viewer.login} avatarUrl={viewer.avatarUrl} />}
 
       <ChevronRight size={13} strokeWidth={2} className="shrink-0 text-fg-subtle" aria-hidden />
 
@@ -153,7 +144,7 @@ function AccountBar() {
           className="flex h-7 min-w-0 items-center gap-1.5 rounded-md bg-surface-1 px-2.5 ring-1 ring-inset ring-edge-1 transition-colors hover:bg-surface-2 focus-visible:outline-none focus-visible:shadow-focus"
         >
           <FolderGit2 size={13} strokeWidth={2} className="shrink-0 text-fg-subtle" />
-          <span className="truncate font-mono text-xs">
+          <span className="truncate font-display text-xs">
             <span className="text-fg-subtle">{parts.owner}/</span>
             <span className="font-semibold text-fg-base">{parts.name}</span>
           </span>
@@ -173,19 +164,73 @@ function AccountBar() {
 
       {/* Only worth a pixel when it's actually running out. */}
       {rateRemaining !== null && rateRemaining < 500 && (
-        <span className="rounded-full bg-status-warn/10 px-2 py-0.5 font-mono text-2xs tabular-nums text-status-warn ring-1 ring-inset ring-status-warn/25">
-          {rateRemaining} requests left this hour
+        <span className="rounded-full bg-status-warn/10 px-2 py-0.5 font-display text-2xs tabular-nums text-status-warn">
+          GitHub limit: {rateRemaining} requests left this hour
         </span>
       )}
+    </div>
+  );
+}
 
+/** The avatar opens a small menu, so signing out is a deliberate two-step
+ *  thing rather than a bare icon next to everything else. */
+function AccountMenu({ login, avatarUrl }: { login: string; avatarUrl: string }) {
+  const signOut = useGitHub((s) => s.signOut);
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e: MouseEvent) => {
+      if (!ref.current?.contains(e.target as Node)) setOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && setOpen(false);
+    document.addEventListener('mousedown', onDown);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('mousedown', onDown);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [open]);
+
+  const confirmSignOut = async () => {
+    setOpen(false);
+    const ok = await askConfirm({
+      title: 'Sign out of GitHub?',
+      body: "You'll need to sign in again to see your repositories.",
+      confirmLabel: 'Sign out',
+    });
+    if (ok) void signOut();
+  };
+
+  return (
+    <div ref={ref} className="relative shrink-0">
       <button
-        onClick={() => void signOut()}
-        aria-label="Sign out of GitHub"
-        title="Sign out"
-        className="flex h-7 w-7 items-center justify-center rounded-md text-fg-subtle transition-colors hover:bg-surface-2 hover:text-fg-base focus-visible:outline-none focus-visible:shadow-focus"
+        onClick={() => setOpen((o) => !o)}
+        aria-haspopup="menu"
+        aria-expanded={open}
+        title="Account"
+        className="flex h-7 min-w-0 items-center gap-2 rounded-md pl-0.5 pr-1.5 transition-colors hover:bg-surface-2 focus-visible:outline-none focus-visible:shadow-focus"
       >
-        <LogOut size={13} strokeWidth={2} />
+        <img src={avatarUrl} alt="" className="h-6 w-6 shrink-0 rounded-full" />
+        <span className="truncate font-display text-xs font-semibold text-fg-base">{login}</span>
+        <ChevronDown size={11} strokeWidth={2} className="shrink-0 text-fg-subtle" />
       </button>
+      {open && (
+        <div
+          role="menu"
+          className="material-sheet absolute left-0 top-full z-50 mt-1 w-48 animate-popover-in rounded-md p-1 shadow-sheet"
+        >
+          <button
+            role="menuitem"
+            onClick={() => void confirmSignOut()}
+            className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left font-display text-xs text-fg-base transition-colors hover:bg-bg-hover"
+          >
+            <LogOut size={13} strokeWidth={2} className="text-fg-subtle" />
+            Sign out of GitHub
+          </button>
+        </div>
+      )}
     </div>
   );
 }
@@ -221,7 +266,7 @@ function SectionRail() {
   return (
     <nav
       aria-label="GitHub sections"
-      className="flex w-[196px] shrink-0 flex-col gap-4 border-r border-edge-1 px-2 py-3"
+      className="flex w-[196px] shrink-0 flex-col gap-4 bg-bg-chrome px-2 py-3"
     >
       <RailGroup items={ACCOUNT_SECTIONS} />
       <RailGroup heading={parts ? parts.name : 'Repository'} title={repo ?? undefined} items={REPO_SECTIONS} dim={!repo} />
@@ -331,19 +376,8 @@ function Placeholder({
   action?: { label: string; run: () => void };
 }) {
   return (
-    <div className="flex h-full items-center justify-center px-8 py-12">
-      <div className="max-w-xs text-center">
-        <p className="font-display text-sm font-medium text-fg-base">{title}</p>
-        <p className="mt-1 font-display text-xs leading-relaxed text-fg-muted">{body}</p>
-        {action && (
-          <button
-            onClick={action.run}
-            className="mt-4 h-7 rounded-lg bg-surface-2 px-3 font-display text-xs font-medium text-fg-base ring-1 ring-inset ring-edge-2 transition-all duration-200 ease-apple hover:bg-surface-3 active:scale-[0.98] focus-visible:outline-none focus-visible:shadow-focus"
-          >
-            {action.label}
-          </button>
-        )}
-      </div>
-    </div>
+    <EmptyState title={title} body={body}>
+      {action && <Button onClick={action.run}>{action.label}</Button>}
+    </EmptyState>
   );
 }

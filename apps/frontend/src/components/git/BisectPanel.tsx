@@ -238,8 +238,8 @@ export function BisectPanel({ inline = false }: { inline?: boolean }) {
           {active && status && (
             <>
               <div className="border-b border-border-hairline px-4 py-3">
-                <div className="mb-1 font-mono text-2xs uppercase tracking-wider text-fg-subtle">
-                  {converged ? 'first bad commit' : 'testing'}
+                <div className="mb-1 font-display text-2xs text-fg-subtle">
+                  {converged ? 'First bad commit' : 'Testing'}
                 </div>
                 <div className="flex items-baseline gap-2">
                   <span className="font-mono text-xs text-accent/90">{status.head_short}</span>
@@ -309,8 +309,8 @@ export function BisectPanel({ inline = false }: { inline?: boolean }) {
 
               {status.marks.length > 0 && (
                 <div className="px-4 py-2">
-                  <div className="mb-1 font-mono text-2xs uppercase tracking-wider text-fg-subtle">
-                    marks
+                  <div className="mb-1 font-display text-2xs text-fg-subtle">
+                    Marks
                   </div>
                   {status.marks.map((m, i) => (
                     <div key={`${m.oid}-${i}`} className="flex items-center gap-2 py-0.5">

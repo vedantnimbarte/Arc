@@ -104,8 +104,10 @@ export function PullsView() {
           {prs.length === 0 && !loading && !error ? (
             <EmptyNote>
               {filter === 'open'
-                ? 'No open pull requests in this repository.'
-                : `No ${filter} pull requests here.`}
+                ? 'No open pull requests. Push a branch and open one to see it here.'
+                : filter === 'closed'
+                  ? 'No closed pull requests.'
+                  : 'No pull requests yet. Push a branch and open one to see it here.'}
             </EmptyNote>
           ) : (
             <div className={laneEnds}>
@@ -275,7 +277,7 @@ function PullDetail({
               <span
                 key={`${r.author}-${i}`}
                 className={cn(
-                  'font-mono text-2xs',
+                  'font-display text-2xs',
                   r.state === 'APPROVED'
                     ? 'text-status-ok'
                     : r.state === 'CHANGES_REQUESTED'
@@ -331,7 +333,7 @@ function PullDetail({
         </div>
       )}
 
-      <div className="flex shrink-0 items-center gap-1 border-b border-edge-1 px-4">
+      <div className="flex shrink-0 items-center gap-1 px-4">
         <TabButton active={tab === 'conversation'} onClick={() => setTab('conversation')} icon={MessageSquare} count={thread.length}>
           Conversation
         </TabButton>
@@ -388,7 +390,7 @@ function TabButton({
     >
       <Icon size={13} strokeWidth={2} />
       {children}
-      <span className="rounded-full bg-surface-2 px-1.5 font-mono text-2xs tabular-nums text-fg-muted">
+      <span className="rounded-full bg-surface-2 px-1.5 text-2xs tabular-nums text-fg-muted">
         {count}
       </span>
     </button>

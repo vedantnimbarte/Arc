@@ -34,7 +34,7 @@ export function SshSessionLogDrawer({
   return (
     <div
       className={cn(
-        'flex h-[180px] flex-col border-t border-border-subtle bg-bg-panel/85',
+        'flex h-[180px] flex-col border-t border-border-subtle bg-bg-panel',
         'backdrop-blur-md animate-fade-in',
       )}
     >
@@ -161,7 +161,7 @@ export function SshSessionLogPanel({ onClose }: SshSessionLogPanelProps) {
       className={cn(
         'fixed right-4 top-12 bottom-4 z-40 flex w-[420px] flex-col',
         'overflow-hidden rounded-window border border-border-subtle',
-        'bg-bg-panel/85 backdrop-blur-xl backdrop-saturate-180',
+        'bg-bg-panel backdrop-blur-xl backdrop-saturate-180',
         'shadow-sheet animate-popover-in',
       )}
     >

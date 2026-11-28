@@ -15,11 +15,11 @@ export function PanelTitle({ view, className }: { view: SidebarView; className?:
   return (
     <span
       className={cn(
-        'flex min-w-0 flex-1 select-none items-center gap-1.5 font-sans text-2xs tracking-wide text-fg-subtle/70',
+        'flex min-w-0 flex-1 select-none items-center gap-2 font-display text-sm font-semibold text-fg-base',
         className,
       )}
     >
-      <Icon size={12} strokeWidth={2} className="shrink-0" />
+      <Icon size={14} strokeWidth={1.9} className="shrink-0 text-fg-muted" />
       <span className="truncate">{label}</span>
     </span>
   );

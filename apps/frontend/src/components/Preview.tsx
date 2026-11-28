@@ -12,6 +12,7 @@ import { cn } from '../lib/cn';
 import { useWorkspace } from '../state/workspace';
 import { detectFramework, FALLBACK_PORTS, type FrameworkHit } from '../lib/framework';
 import { networkProbePort, shellOpenExternal } from '../lib/tauri';
+import { Button, EmptyState } from './ui';
 
 const isTauri = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
 
@@ -42,6 +43,26 @@ export function Preview({ tabId }: Props) {
   const [loadedUrl, setLoadedUrl] = useState(previewUrl);
   const [iframeKey, setIframeKey] = useState(0);
   const iframeRef = useRef<HTMLIFrameElement>(null);
+  /** The local address that didn't answer, or null when it did (or wasn't checked). */
+  const [down, setDown] = useState<LocalTarget | null>(null);
+  /** History only works when the frame is same-origin; a dev server on its
+   *  own port never is, so Back/Forward stay off rather than doing nothing. */
+  const [canNav, setCanNav] = useState(false);
+  const probeSeq = useRef(0);
+
+  // Probe local addresses before showing them: a dead port otherwise renders
+  // as a blank white frame with no hint why. Remote hosts are never probed.
+  const probe = useCallback(async (url: string) => {
+    const seq = ++probeSeq.current;
+    const target = isTauri ? localTarget(url) : null;
+    const alive = target ? await networkProbePort(target.port).catch(() => true) : true;
+    if (seq === probeSeq.current) setDown(alive ? null : target);
+  }, []);
+
+  useEffect(() => {
+    if (loadedUrl) void probe(loadedUrl);
+    else setDown(null);
+  }, [loadedUrl, probe]);
 
   // Reflect store→local on external updates (e.g. tab restore on hydrate).
   // Guarded so user keystrokes aren't clobbered by the store mirror.
@@ -60,8 +81,11 @@ export function Preview({ tabId }: Props) {
       setInputUrl(url);
       setLoadedUrl(url);
       setPreviewUrl(tabId, url);
+      // Re-check even when the URL didn't change: Enter after starting the
+      // server should clear "Nothing is running".
+      void probe(url);
     },
-    [tabId, setPreviewUrl],
+    [tabId, setPreviewUrl, probe],
   );
 
   const onSubmit = useCallback(
@@ -73,7 +97,18 @@ export function Preview({ tabId }: Props) {
   );
 
   const refresh = useCallback(() => {
+    if (loadedUrl) void probe(loadedUrl);
     setIframeKey((k) => k + 1);
+  }, [loadedUrl, probe]);
+
+  const onFrameLoad = useCallback(() => {
+    try {
+      // Throws for a cross-origin frame.
+      void iframeRef.current?.contentWindow?.location.href;
+      setCanNav(true);
+    } catch {
+      setCanNav(false);
+    }
   }, []);
 
   // Same-origin only — fine for localhost dev servers. Cross-origin requests
@@ -105,17 +140,17 @@ export function Preview({ tabId }: Props) {
   const pickerAnchorRef = useRef<HTMLButtonElement>(null);
 
   return (
-    <div className="flex h-full w-full flex-col bg-base">
+    <div className="flex h-full w-full flex-col bg-bg-base">
       {/* URL bar */}
       <form
         onSubmit={onSubmit}
-        className="flex h-10 shrink-0 items-center gap-1 border-b border-border-hairline px-2"
+        className="flex h-10 shrink-0 items-center gap-1 bg-bg-chrome px-2"
       >
         <IconButton
           ariaLabel="Back"
           title="Back"
           onClick={() => navIframe('back')}
-          disabled={!loadedUrl}
+          disabled={!loadedUrl || !!down || !canNav}
         >
           <ArrowLeft size={13} strokeWidth={2.1} />
         </IconButton>
@@ -123,7 +158,7 @@ export function Preview({ tabId }: Props) {
           ariaLabel="Forward"
           title="Forward"
           onClick={() => navIframe('forward')}
-          disabled={!loadedUrl}
+          disabled={!loadedUrl || !!down || !canNav}
         >
           <ArrowRight size={13} strokeWidth={2.1} />
         </IconButton>
@@ -136,7 +171,7 @@ export function Preview({ tabId }: Props) {
           <RotateCw size={13} strokeWidth={2.1} />
         </IconButton>
 
-        <div className="flex flex-1 items-center gap-1.5 rounded-md border border-edge-1 bg-scrim-1 px-2 py-1 focus-within:border-accent/40 focus-within:shadow-focus">
+        <div className="flex flex-1 items-center gap-1.5 rounded-md bg-bg-panel px-2 py-1 focus-within:shadow-focus">
           <Globe size={11} strokeWidth={2.1} className="shrink-0 text-fg-subtle" />
           <input
             value={inputUrl}
@@ -151,8 +186,8 @@ export function Preview({ tabId }: Props) {
             ref={pickerAnchorRef}
             type="button"
             onClick={() => setPickerOpen((o) => !o)}
-            aria-label="Detect ports"
-            title="Detect ports"
+            aria-label="Find running servers"
+            title="Find running servers"
             className="flex h-4 w-4 items-center justify-center rounded text-fg-subtle transition-colors hover:bg-surface-3 hover:text-fg-base"
           >
             <ChevronDown size={10} strokeWidth={2.4} />
@@ -171,17 +206,37 @@ export function Preview({ tabId }: Props) {
 
       {/* Body */}
       <div className="relative min-h-0 flex-1">
-        {loadedUrl ? (
+        {down ? (
+          <EmptyState
+            icon={Globe}
+            title={`Nothing is running at ${down.host}:${down.port}`}
+            body="Start your dev server in a terminal (for example npm run dev), then press Refresh."
+          >
+            <Button variant="primary" icon={RotateCw} onClick={refresh}>
+              Refresh
+            </Button>
+          </EmptyState>
+        ) : loadedUrl ? (
+          // White, like a browser tab: pages that set no background expect it.
           <iframe
             ref={iframeRef}
             key={iframeKey}
             src={loadedUrl}
             title="Preview"
+            onLoad={onFrameLoad}
             className="h-full w-full border-0 bg-white"
             sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-modals allow-downloads"
           />
         ) : (
-          <EmptyState onPickPort={() => setPickerOpen(true)} />
+          <EmptyState
+            icon={Globe}
+            title="Preview your app"
+            body="Start your dev server, then pick it here or type its address."
+          >
+            <Button variant="primary" onClick={() => setPickerOpen(true)}>
+              Find running servers
+            </Button>
+          </EmptyState>
         )}
       </div>
 
@@ -285,25 +340,25 @@ function PortPicker({ anchor, onClose, onPick }: PortPickerProps) {
     <div
       ref={menuRef}
       role="menu"
-      aria-label="Detected ports"
+      aria-label="Running servers"
       style={{ position: 'fixed', left: pos.left, top: pos.top }}
-      className="material-sheet z-50 w-60 animate-popover-in overflow-hidden rounded-md p-1.5 shadow-sheet ring-1 ring-edge-2"
+      className="material-sheet z-50 w-60 animate-popover-in overflow-hidden rounded-md p-1.5 shadow-sheet"
     >
       <div className="flex items-center justify-between px-2 py-1">
-        <span className="font-display text-2xs uppercase tracking-wider text-fg-subtle/80">
-          {hit ? hit.framework : 'Detecting…'}
+        <span className="font-display text-xs text-fg-muted">
+          {!hit ? 'Looking at your project…' : hit.framework === 'Unknown' ? 'Dev servers' : hit.framework}
         </span>
-        {probing && (
-          <span className="font-display text-2xs text-fg-subtle">probing…</span>
-        )}
+        {probing && <span className="font-display text-2xs text-fg-subtle">Checking…</span>}
       </div>
 
-      {live.length > 0 && (
+      {!probing && (
         <>
-          <div className="my-0.5 border-t border-edge-1" />
-          <div className="px-2 pb-0.5 pt-1 font-display text-2xs uppercase tracking-wider text-fg-subtle/70">
-            Live
+          <div className="px-2 pb-0.5 pt-2 font-display text-2xs font-medium text-fg-subtle">
+            Running now
           </div>
+          {live.length === 0 && (
+            <div className="px-2 py-1.5 font-display text-xs text-fg-muted">No servers running right now</div>
+          )}
           {live.map((p) => (
             <PortRow key={p} port={p} live onClick={() => onPick(p)} />
           ))}
@@ -312,9 +367,8 @@ function PortPicker({ anchor, onClose, onPick }: PortPickerProps) {
 
       {defaults.length > 0 && (
         <>
-          <div className="my-0.5 border-t border-edge-1" />
-          <div className="px-2 pb-0.5 pt-1 font-display text-2xs uppercase tracking-wider text-fg-subtle/70">
-            Common
+          <div className="px-2 pb-0.5 pt-2 font-display text-2xs font-medium text-fg-subtle">
+            Common ports
           </div>
           {defaults.map((p) => (
             <PortRow key={p} port={p} live={false} onClick={() => onPick(p)} />
@@ -348,15 +402,10 @@ function PortRow({
         aria-hidden
         className={cn(
           'h-1.5 w-1.5 rounded-full',
-          live ? 'bg-emerald-400 shadow-[0_0_6px_rgba(52,211,153,0.6)]' : 'bg-surface-3',
+          live ? 'bg-status-ok' : 'bg-surface-3',
         )}
       />
       <span className="flex-1">localhost:{port}</span>
-      {live && (
-        <span className="font-display text-2xs uppercase tracking-wider text-emerald-300/80">
-          live
-        </span>
-      )}
     </button>
   );
 }
@@ -390,27 +439,25 @@ function IconButton({
   );
 }
 
-function EmptyState({ onPickPort }: { onPickPort: () => void }) {
-  return (
-    <div className="flex h-full w-full flex-col items-center justify-center gap-3 text-center">
-      <Globe size={28} strokeWidth={1.5} className="text-fg-subtle" />
-      <div className="space-y-1">
-        <p className="font-display text-base text-fg-base">No URL loaded</p>
-        <p className="max-w-xs font-display text-xs leading-relaxed text-fg-muted">
-          Type a URL above and press Enter, or pick a running dev-server port.
-        </p>
-      </div>
-      <button
-        onClick={onPickPort}
-        className="rounded-md bg-surface-2 px-3 py-1.5 font-display text-xs text-fg-base transition-colors hover:bg-surface-3"
-      >
-        Detect ports
-      </button>
-    </div>
-  );
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
+interface LocalTarget {
+  host: string;
+  port: number;
 }
 
-// ── Helpers ───────────────────────────────────────────────────────────────────
+/** The host and port to probe, for localhost / 127.0.0.1 addresses only. */
+function localTarget(url: string): LocalTarget | null {
+  let u: URL;
+  try {
+    u = new URL(url);
+  } catch {
+    return null;
+  }
+  if (u.hostname !== 'localhost' && u.hostname !== '127.0.0.1') return null;
+  const port = u.port ? Number(u.port) : u.protocol === 'https:' ? 443 : u.protocol === 'http:' ? 80 : NaN;
+  return Number.isFinite(port) ? { host: u.hostname, port } : null;
+}
 
 // Accept bare `localhost:5173`, `:5173`, or `5173` for ergonomic typing; prefix
 // http:// when the user didn't include a scheme. Rejects empties and obvious

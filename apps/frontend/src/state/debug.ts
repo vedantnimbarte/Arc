@@ -11,7 +11,7 @@ import {
   type DapBreakpoint,
   type DapEvent,
 } from '../lib/tauri';
-import { parseJsonc } from '../lib/vscodeTheme';
+import { parseJsonc } from '../lib/jsonc';
 import { isRemotePath } from '../lib/remote';
 import { useFiles } from './files';
 import { useWorkspace } from './workspace';

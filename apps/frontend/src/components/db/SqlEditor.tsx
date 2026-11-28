@@ -7,7 +7,7 @@ import { MySQL, PostgreSQL, SQLite, sql, type SQLNamespace } from '@codemirror/l
 import type { DbBackend } from '../../lib/tauri';
 import { catppuccinHighlight } from '../../lib/codeLanguages';
 import { MOCHA } from '../../lib/fileIcons';
-import { getFont } from '../../themes';
+import { CODE_FONT_STACK } from '../../themes';
 import { useSettings } from '../../state/settings';
 
 export interface SqlEditorHandle {
@@ -60,7 +60,7 @@ const theme = EditorView.theme({
   // these theme classes, and a 100% height there doubles the page height.
   '&.cm-editor': { height: '100%' },
   '.cm-scroller': { fontFamily: 'inherit', overflow: 'auto' },
-  '.cm-content': { caretColor: '#d4d6dc', padding: '8px 0' },
+  '.cm-content': { caretColor: 'rgb(var(--fg-base))', padding: '8px 0' },
   '.cm-gutters': {
     backgroundColor: 'transparent',
     color: MOCHA.overlay0,
@@ -68,7 +68,7 @@ const theme = EditorView.theme({
     borderRight: '1px solid var(--edge-1, rgba(255, 255, 255, 0.05))',
   },
   '.cm-activeLine, .cm-activeLineGutter': { backgroundColor: 'rgba(255,255,255,0.025)' },
-  '.cm-cursor, .cm-dropCursor': { borderLeftColor: '#d4d6dc', borderLeftWidth: '2px' },
+  '.cm-cursor, .cm-dropCursor': { borderLeftColor: 'rgb(var(--fg-base))', borderLeftWidth: '2px' },
   '&.cm-focused > .cm-scroller > .cm-selectionLayer .cm-selectionBackground, .cm-selectionBackground, ::selection':
     { backgroundColor: 'rgba(200, 210, 225, 0.30)' },
   '&.cm-focused': { outline: 'none' },
@@ -110,7 +110,6 @@ export const SqlEditor = forwardRef<SqlEditorHandle, Props>(function SqlEditor(
   const onChangeRef = useRef(onChange);
   onRunRef.current = onRun;
   onChangeRef.current = onChange;
-  const fontId = useSettings((s) => s.fontId);
   const fontSize = useSettings((s) => s.fontSize);
 
   const selectionOrAll = (state: EditorState) => {
@@ -149,7 +148,7 @@ export const SqlEditor = forwardRef<SqlEditorHandle, Props>(function SqlEditor(
           EditorView.lineWrapping,
           syntaxHighlighting(catppuccinHighlight),
           theme,
-          fontC.current.of(fontTheme(getFont(fontId).stack, fontSize)),
+          fontC.current.of(fontTheme(CODE_FONT_STACK, fontSize)),
           langC.current.of(language(backend, completion)),
           editableC.current.of([EditorView.editable.of(!disabled), EditorState.readOnly.of(disabled)]),
           placeholderC.current.of(placeholderExt(placeholder)),
@@ -189,8 +188,8 @@ export const SqlEditor = forwardRef<SqlEditorHandle, Props>(function SqlEditor(
   }, [disabled, placeholder]);
 
   useEffect(() => {
-    view.current?.dispatch({ effects: fontC.current.reconfigure(fontTheme(getFont(fontId).stack, fontSize)) });
-  }, [fontId, fontSize]);
+    view.current?.dispatch({ effects: fontC.current.reconfigure(fontTheme(CODE_FONT_STACK, fontSize)) });
+  }, [fontSize]);
 
   return <div ref={host} className="h-full min-h-0" />;
 });

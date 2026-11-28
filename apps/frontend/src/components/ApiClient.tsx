@@ -4,6 +4,8 @@ import {
   ChevronRight,
   ClipboardPaste,
   Copy,
+  Eye,
+  EyeOff,
   FileJson,
   Folder,
   History as HistoryIcon,
@@ -14,6 +16,8 @@ import {
   Trash2,
   X,
   Globe,
+  MoreHorizontal,
+  PanelLeft,
   Paperclip,
   Sparkles,
 } from 'lucide-react';
@@ -48,6 +52,8 @@ import {
 } from '../lib/tauri';
 import { askConfirm, askText } from '../state/confirm';
 import { toastError } from '../state/toast';
+import { MOD_ENTER } from '../state/shortcuts';
+import { Button, EmptyState, ErrorNote } from './ui';
 import { copyText } from '../lib/clipboard';
 import { parseCurl, toCurl } from '../lib/curl';
 import { parseOpenApi } from '../lib/openapi';
@@ -62,22 +68,20 @@ interface Props {
 const METHODS = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD', 'OPTIONS'] as const;
 type Method = (typeof METHODS)[number];
 
-/** Method → text colour token. Kept restrained so the UI stays close to
- *  ARC's muted palette; only the method label itself wears colour. */
+/** Method → text colour token. Only the method label itself wears colour. */
 function methodColour(m: string): string {
   switch (m.toUpperCase()) {
     case 'GET':
-      return 'text-sky-300';
+      return 'text-status-ok';
     case 'POST':
-      return 'text-emerald-300';
+      return 'text-accent';
     case 'PUT':
-      return 'text-amber-300';
     case 'PATCH':
-      return 'text-purple-300';
+      return 'text-status-warn';
     case 'DELETE':
-      return 'text-rose-300';
+      return 'text-status-err';
     default:
-      return 'text-fg-subtle';
+      return 'text-fg-muted';
   }
 }
 
@@ -458,11 +462,13 @@ function KvTable({
       toastError(err instanceof Error ? err.message : String(err));
     }
   };
-  const cols = allowFiles ? 'grid-cols-[20px_1fr_1fr_24px_24px]' : 'grid-cols-[20px_1fr_1fr_24px]';
+  const cols = allowFiles
+    ? 'grid-cols-[20px_minmax(0,1fr)_minmax(0,1fr)_24px_24px]'
+    : 'grid-cols-[20px_minmax(0,1fr)_minmax(0,1fr)_24px]';
 
   return (
     <div className="overflow-hidden rounded-md border border-edge-1">
-      <div className={cn('grid items-center gap-2 border-b border-edge-1 bg-scrim-1 px-2 py-1.5 font-display text-2xs uppercase tracking-wider text-fg-subtle/70', cols)}>
+      <div className={cn('grid items-center gap-2 border-b border-edge-1 bg-scrim-1 px-2 py-1.5 font-display text-2xs text-fg-subtle', cols)}>
         <span />
         <span>Key</span>
         <span>Value</span>
@@ -471,7 +477,7 @@ function KvTable({
       </div>
       {rows.length === 0 && (
         <div className="px-3 py-3 font-display text-xs text-fg-subtle/80">
-          No rows yet. Click "+ Add row" below.
+          No rows yet.
         </div>
       )}
       {rows.map((row) => (
@@ -491,7 +497,7 @@ function KvTable({
             value={row.name}
             onChange={(e) => update(row.id, { name: e.target.value })}
             placeholder={placeholder?.name ?? 'key'}
-            className="bg-transparent font-mono text-sm text-fg-base outline-none placeholder:text-fg-subtle/50"
+            className="min-w-0 bg-transparent font-mono text-sm text-fg-base outline-none placeholder:text-fg-subtle/50"
           />
           {nameSuggestions && (
             <datalist id={`kv-suggest-${row.id}`}>
@@ -507,7 +513,7 @@ function KvTable({
             title={row.file ? row.value : undefined}
             placeholder={placeholder?.value ?? 'value'}
             className={cn(
-              'bg-transparent font-mono text-sm text-fg-base outline-none placeholder:text-fg-subtle/50',
+              'min-w-0 bg-transparent font-mono text-sm text-fg-base outline-none placeholder:text-fg-subtle/50',
               row.file && 'text-accent',
             )}
           />
@@ -526,7 +532,7 @@ function KvTable({
           )}
           <button
             onClick={() => remove(row.id)}
-            className="flex h-5 w-5 items-center justify-center rounded text-fg-subtle/70 transition-colors hover:bg-surface-2 hover:text-rose-300"
+            className="flex h-5 w-5 items-center justify-center rounded text-fg-subtle/70 transition-colors hover:bg-surface-2 hover:text-status-err"
             aria-label="Remove row"
             title="Remove row"
           >
@@ -607,11 +613,16 @@ function formatSize(bytes: number): string {
 }
 
 function statusTone(status: number): string {
-  if (status >= 500) return 'bg-rose-500/15 text-rose-300 border-rose-500/30';
-  if (status >= 400) return 'bg-rose-400/10 text-rose-200 border-rose-400/25';
-  if (status >= 300) return 'bg-amber-400/10 text-amber-200 border-amber-400/25';
-  if (status >= 200) return 'bg-emerald-400/10 text-emerald-200 border-emerald-400/25';
-  return 'bg-surface-2 text-fg-base border-edge-2';
+  if (status >= 500) return 'bg-status-err/15 text-status-err';
+  if (status >= 400) return 'bg-status-warn/15 text-status-warn';
+  if (status >= 300) return 'bg-accent/15 text-accent';
+  if (status >= 200) return 'bg-status-ok/15 text-status-ok';
+  return 'bg-surface-2 text-fg-base';
+}
+
+/** Status → text colour only, for the compact history rows. */
+function statusText(status: number): string {
+  return statusTone(status).split(' ')[1]!;
 }
 
 const COMMON_HEADERS = [
@@ -630,6 +641,9 @@ const COMMON_HEADERS = [
 ];
 
 // ─── Main component ──────────────────────────────────────────────────────
+
+/** Pane width below which the requests rail becomes an overlay. */
+const NARROW_PX = 640;
 
 export function ApiClient({ tabId }: Props) {
   const sessionId = useWorkspace((s) => s.sessionId);
@@ -846,10 +860,11 @@ export function ApiClient({ tabId }: Props) {
     if (!sessionId || !active) return;
     let name = (active.name || 'Untitled request').trim();
     if (!name || name === 'Untitled request') {
-      const proposed = await askText('Save request', {
-        label: 'Name',
-        value: active.url || 'My request',
-      });
+      const proposed = await askText(
+        'Save request',
+        { label: 'Name', value: active.url || 'My request' },
+        'Save',
+      );
       if (!proposed) return;
       name = proposed.trim() || 'Untitled request';
     }
@@ -874,10 +889,15 @@ export function ApiClient({ tabId }: Props) {
   const importCurl = async () => {
     const cmd = await askText(
       'Import from cURL',
-      { label: 'curl command', placeholder: "curl -X POST 'https://…' -H '…' -d '…'", multiline: true },
-      'import',
+      { label: 'cURL command', placeholder: "curl -X POST 'https://…' -H '…' -d '…'", multiline: true },
+      'Import',
     );
-    if (!cmd) return;
+    if (cmd) importCurlText(cmd);
+  };
+
+  /** Parse a cURL command into a draft. An untouched blank draft is filled in
+   *  place (the paste-into-URL case); otherwise it opens in a new sub-tab. */
+  const importCurlText = (cmd: string) => {
     try {
       const parsed = parseCurl(cmd);
       const d = emptyDraft();
@@ -897,16 +917,51 @@ export function ApiClient({ tabId }: Props) {
         d.bodyText = '';
         d.formBody = parsed.urlencoded.map((f) => ({ ...newKV(), name: f.name, value: f.value }));
       }
-      setState((s) => ({ ...s, drafts: [...s.drafts, d], activeLocalId: d.localId }));
+      setState((s) => {
+        const cur = s.drafts.find((x) => x.localId === s.activeLocalId);
+        if (cur && !cur.url.trim() && !cur.savedId) {
+          return { ...s, drafts: s.drafts.map((x) => (x === cur ? { ...d, localId: cur.localId } : x)) };
+        }
+        return { ...s, drafts: [...s.drafts, d], activeLocalId: d.localId };
+      });
     } catch (err) {
       toastError(`Couldn't import cURL: ${err instanceof Error ? err.message : String(err)}`);
     }
   };
 
+  // ─── Narrow pane ──────────────────────────────────────────────────────
+  // Below NARROW_PX the 256px rail would crush the builder, so it hides by
+  // default and opens as an overlay. The wide-mode collapse is persisted;
+  // the overlay is transient.
+  const rootRef = useRef<HTMLDivElement>(null);
+  const [narrow, setNarrow] = useState(false);
+  const [overlayOpen, setOverlayOpen] = useState(false);
+  useEffect(() => {
+    const el = rootRef.current;
+    if (!el) return;
+    const obs = new ResizeObserver(([entry]) => {
+      if (entry) setNarrow(entry.contentRect.width < NARROW_PX);
+    });
+    obs.observe(el);
+    return () => obs.disconnect();
+  }, []);
+  const railVisible = narrow ? overlayOpen : !state.leftRailCollapsed;
+  const toggleRail = () =>
+    narrow
+      ? setOverlayOpen((o) => !o)
+      : setState((s) => ({ ...s, leftRailCollapsed: !s.leftRailCollapsed }));
+  /** In overlay mode, picking something from the rail closes it. */
+  const fromRail =
+    <A extends unknown[]>(fn: (...a: A) => void) =>
+    (...a: A) => {
+      fn(...a);
+      if (narrow) setOverlayOpen(false);
+    };
+
   // ─── Render ──────────────────────────────────────────────────────────
 
   return (
-    <div className="flex h-full w-full flex-col bg-base">
+    <div ref={rootRef} className="flex h-full w-full flex-col bg-bg-base">
       {/* Sub-tab strip */}
       <SubTabStrip
         drafts={state.drafts}
@@ -914,24 +969,28 @@ export function ApiClient({ tabId }: Props) {
         onSelect={(id) => setState((s) => ({ ...s, activeLocalId: id }))}
         onClose={closeSubTab}
         onNew={newSubTab}
+        railVisible={railVisible}
+        onToggleRail={toggleRail}
       />
 
-      <div className="flex min-h-0 flex-1">
+      <div className="relative flex min-h-0 flex-1">
+        {narrow && overlayOpen && (
+          <div className="absolute inset-0 z-20" onClick={() => setOverlayOpen(false)} aria-hidden />
+        )}
         {/* Left rail */}
-        {!state.leftRailCollapsed && (
+        {railVisible && (
           <LeftRail
+            overlay={narrow}
             sessionId={sessionId}
             collections={collections}
             savedRequests={savedRequests}
             history={history}
             envs={envs}
             vars={vars}
-            onOpenSaved={openSavedRequest}
+            onOpenSaved={fromRail(openSavedRequest)}
             onRefresh={refreshAll}
-            onCollapse={() =>
-              setState((s) => ({ ...s, leftRailCollapsed: true }))
-            }
-            onLoadHistory={(h) => {
+            onCollapse={toggleRail}
+            onLoadHistory={fromRail((h: ApiHistoryEntry) => {
               try {
                 const snap = JSON.parse(h.request_snapshot_json) as HttpRequestDto;
                 const d = emptyDraft(h.url);
@@ -978,18 +1037,8 @@ export function ApiClient({ tabId }: Props) {
               } catch (err) {
                 console.warn('[ApiClient] history snapshot decode failed:', err);
               }
-            }}
+            })}
           />
-        )}
-        {state.leftRailCollapsed && (
-          <button
-            onClick={() => setState((s) => ({ ...s, leftRailCollapsed: false }))}
-            className="flex w-7 shrink-0 items-center justify-center border-r border-border-hairline bg-base/40 text-fg-subtle transition-colors hover:bg-surface-1 hover:text-fg-base"
-            title="Show panel"
-            aria-label="Show panel"
-          >
-            <ChevronRight size={13} strokeWidth={2} />
-          </button>
         )}
 
         {/* Right side — request builder + response viewer */}
@@ -1004,17 +1053,17 @@ export function ApiClient({ tabId }: Props) {
             onSave={() => void saveCurrent()}
             onCopyCurl={copyAsCurl}
             onImportCurl={() => void importCurl()}
+            onPasteCurl={importCurlText}
           />
           <ResponseViewer
             draft={active}
             responseTab={state.responseTab}
             onResponseTab={(t) => setState((s) => ({ ...s, responseTab: t }))}
-            onSample={() =>
-              updateDraft(active.localId, {
-                url: 'https://httpbin.org/get',
-                method: 'GET',
-              })
-            }
+            onSample={() => {
+              const sample = { ...active, url: 'https://httpbin.org/get', method: 'GET' as const };
+              updateDraft(active.localId, { url: sample.url, method: sample.method });
+              void send(sample);
+            }}
           />
         </div>
       </div>
@@ -1030,15 +1079,31 @@ function SubTabStrip({
   onSelect,
   onClose,
   onNew,
+  railVisible,
+  onToggleRail,
 }: {
   drafts: RequestDraft[];
   activeId: string;
   onSelect: (id: string) => void;
   onClose: (id: string) => void;
   onNew: () => void;
+  railVisible: boolean;
+  onToggleRail: () => void;
 }) {
   return (
-    <div className="flex h-9 shrink-0 items-center gap-1 overflow-x-auto border-b border-border-hairline bg-base/60 px-2">
+    <div className="flex h-9 shrink-0 items-center gap-1 overflow-x-auto bg-bg-chrome px-2">
+      <button
+        onClick={onToggleRail}
+        className={cn(
+          'flex h-7 w-7 shrink-0 items-center justify-center rounded-md transition-colors hover:bg-surface-2 hover:text-fg-base',
+          railVisible ? 'text-fg-base' : 'text-fg-subtle',
+        )}
+        title={railVisible ? 'Hide requests' : 'Show requests'}
+        aria-label={railVisible ? 'Hide requests' : 'Show requests'}
+        aria-pressed={railVisible}
+      >
+        <PanelLeft size={13} strokeWidth={2} />
+      </button>
       {drafts.map((d) => {
         const active = d.localId === activeId;
         const label = d.name && d.name !== 'Untitled request' ? d.name : d.url || 'Untitled';
@@ -1095,6 +1160,14 @@ function SubTabStrip({
 
 // ─── Request builder ─────────────────────────────────────────────────────
 
+const BUILDER_TAB_LABEL: Record<BuilderTab, string> = {
+  params: 'Query',
+  headers: 'Headers',
+  body: 'Body',
+  auth: 'Auth',
+  post: 'After response',
+};
+
 function RequestBuilder({
   draft,
   builderTab,
@@ -1105,6 +1178,7 @@ function RequestBuilder({
   onSave,
   onCopyCurl,
   onImportCurl,
+  onPasteCurl,
 }: {
   draft: RequestDraft;
   builderTab: BuilderTab;
@@ -1115,15 +1189,17 @@ function RequestBuilder({
   onSave: () => void;
   onCopyCurl: () => void;
   onImportCurl: () => void;
+  onPasteCurl: (cmd: string) => void;
 }) {
   const [methodOpen, setMethodOpen] = useState(false);
+  const [moreOpen, setMoreOpen] = useState(false);
   const methodRef = useRef<HTMLButtonElement>(null);
 
   return (
-    <div className="flex shrink-0 flex-col border-b border-border-hairline">
+    <div className="flex shrink-0 flex-col border-b border-edge-1 bg-bg-base">
       {/* Method + URL + Send */}
-      <div className="flex items-center gap-2 px-3 py-2">
-        <div className="relative">
+      <div className="flex min-w-0 items-center gap-2 px-3 py-2">
+        <div className="relative shrink-0">
           <button
             ref={methodRef}
             onClick={() => setMethodOpen((o) => !o)}
@@ -1163,25 +1239,23 @@ function RequestBuilder({
           value={draft.url}
           onChange={(v) => onChange({ url: v })}
           onSubmit={onSend}
+          onPasteCurl={onPasteCurl}
           vars={vars}
         />
 
-        <button
+        <Button
+          variant="primary"
           onClick={onSend}
           disabled={draft.pending || !draft.url.trim()}
-          className={cn(
-            'flex h-8 shrink-0 items-center gap-1.5 rounded-md px-3 font-display text-xs font-medium tracking-tight transition-all duration-150 ease-apple',
-            'bg-accent/85 text-fg-base shadow-focus hover:bg-accent disabled:cursor-not-allowed disabled:bg-surface-1 disabled:text-fg-subtle/50 disabled:shadow-none',
-          )}
-          title="Send (⌘↵)"
+          title={`Send (${MOD_ENTER})`}
         >
           {draft.pending ? (
             <span className="h-3 w-3 animate-spin rounded-full border-[1.5px] border-current border-r-transparent" />
           ) : (
-            <Send size={11} strokeWidth={2.2} />
+            <Send size={12} strokeWidth={2.2} />
           )}
           {draft.pending ? 'Sending' : 'Send'}
-        </button>
+        </Button>
 
         <button
           onClick={onSave}
@@ -1191,27 +1265,53 @@ function RequestBuilder({
         >
           <Save size={12} strokeWidth={2} />
         </button>
-        <button
-          onClick={onCopyCurl}
-          disabled={!draft.url.trim()}
-          className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-fg-subtle transition-colors hover:bg-surface-2 hover:text-fg-base disabled:cursor-not-allowed disabled:opacity-40"
-          title="Copy as cURL"
-          aria-label="Copy as cURL"
-        >
-          <Copy size={12} strokeWidth={2} />
-        </button>
-        <button
-          onClick={onImportCurl}
-          className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-fg-subtle transition-colors hover:bg-surface-2 hover:text-fg-base"
-          title="Import from cURL"
-          aria-label="Import from cURL"
-        >
-          <ClipboardPaste size={12} strokeWidth={2} />
-        </button>
+        <div className="relative shrink-0">
+          <button
+            onClick={() => setMoreOpen((o) => !o)}
+            className={cn(
+              'flex h-8 w-8 items-center justify-center rounded-md transition-colors hover:bg-surface-2 hover:text-fg-base',
+              moreOpen ? 'bg-surface-2 text-fg-base' : 'text-fg-subtle',
+            )}
+            title="More"
+            aria-label="More actions"
+            aria-haspopup="menu"
+            aria-expanded={moreOpen}
+          >
+            <MoreHorizontal size={14} strokeWidth={2} />
+          </button>
+          {moreOpen && (
+            <>
+              <div className="fixed inset-0 z-20" onClick={() => setMoreOpen(false)} aria-hidden />
+              <div
+                role="menu"
+                className="material-sheet absolute right-0 top-9 z-30 w-44 overflow-hidden rounded-md py-1 shadow-sheet ring-1 ring-edge-2"
+              >
+                {[
+                  { label: 'Copy as cURL', Icon: Copy, run: onCopyCurl, disabled: !draft.url.trim() },
+                  { label: 'Import from cURL', Icon: ClipboardPaste, run: onImportCurl, disabled: false },
+                ].map(({ label, Icon, run, disabled }) => (
+                  <button
+                    key={label}
+                    role="menuitem"
+                    disabled={disabled}
+                    onClick={() => {
+                      setMoreOpen(false);
+                      run();
+                    }}
+                    className="flex w-full items-center gap-2 px-3 py-1.5 text-left font-display text-xs text-fg-base transition-colors hover:bg-surface-2 disabled:pointer-events-none disabled:opacity-40"
+                  >
+                    <Icon size={12} strokeWidth={2} className="text-fg-subtle" />
+                    {label}
+                  </button>
+                ))}
+              </div>
+            </>
+          )}
+        </div>
       </div>
 
       {/* Builder sub-tab strip */}
-      <div className="flex items-center gap-0 border-t border-edge-1 px-3">
+      <div className="flex items-center gap-0 overflow-x-auto border-t border-edge-1 px-3">
         {(['params', 'headers', 'body', 'auth', 'post'] as BuilderTab[]).map((t) => {
           const active = builderTab === t;
           const count =
@@ -1233,11 +1333,11 @@ function RequestBuilder({
               key={t}
               onClick={() => onBuilderTab(t)}
               className={cn(
-                'relative flex items-center gap-1.5 px-3 py-2 font-display text-xs capitalize tracking-tight transition-colors',
+                'relative flex shrink-0 items-center gap-1.5 whitespace-nowrap px-3 py-2 font-display text-xs tracking-tight transition-colors',
                 active ? 'text-fg-base' : 'text-fg-subtle hover:text-fg-muted',
               )}
             >
-              {t === 'post' ? 'Post-response' : t}
+              {BUILDER_TAB_LABEL[t]}
               {count > 0 && (
                 <span className="rounded-sm bg-surface-2 px-1 font-mono text-2xs text-fg-base/80">
                   {count}
@@ -1251,7 +1351,7 @@ function RequestBuilder({
         })}
       </div>
 
-      <div className="max-h-[42vh] overflow-y-auto border-t border-border-hairline bg-base/40 p-3">
+      <div className="max-h-[42vh] overflow-y-auto p-3">
         {builderTab === 'params' && (
           <KvTable
             rows={draft.params}
@@ -1303,11 +1403,13 @@ function UrlInput({
   value,
   onChange,
   onSubmit,
+  onPasteCurl,
   vars,
 }: {
   value: string;
   onChange: (v: string) => void;
   onSubmit: () => void;
+  onPasteCurl: (cmd: string) => void;
   vars: Record<string, string>;
 }) {
   // Compute the interpolation preview only for the tooltip; we don't render
@@ -1322,13 +1424,20 @@ function UrlInput({
       <input
         value={value}
         onChange={(e) => onChange(e.target.value)}
+        onPaste={(e) => {
+          const text = e.clipboardData.getData('text');
+          if (/^\s*curl\s/i.test(text)) {
+            e.preventDefault();
+            onPasteCurl(text);
+          }
+        }}
         onKeyDown={(e) => {
           if (e.key === 'Enter') {
             e.preventDefault();
             onSubmit();
           }
         }}
-        placeholder="https://api.example.com/v1/{{resource}}"
+        placeholder="https://api.example.com/v1/{{resource}}, or paste a cURL command"
         className="min-w-0 flex-1 bg-transparent py-1.5 font-mono text-sm text-fg-base outline-none placeholder:text-fg-subtle/50"
         spellCheck={false}
         autoCapitalize="off"
@@ -1372,12 +1481,12 @@ function BodyEditor({
   onMultipart: (rows: KV[]) => void;
 }) {
   const radios: { id: BodyMode; label: string }[] = [
-    { id: 'none', label: 'none' },
+    { id: 'none', label: 'None' },
     { id: 'json', label: 'JSON' },
     { id: 'xml', label: 'XML' },
     { id: 'text', label: 'Text' },
-    { id: 'form', label: 'form-urlencoded' },
-    { id: 'multipart', label: 'multipart' },
+    { id: 'form', label: 'Form' },
+    { id: 'multipart', label: 'Form with files' },
     { id: 'graphql', label: 'GraphQL' },
   ];
   const isText = mode === 'json' || mode === 'xml' || mode === 'text';
@@ -1436,7 +1545,7 @@ function BodyEditor({
       {mode === 'graphql' && (
         <div className="grid grid-cols-1 gap-2 lg:grid-cols-[3fr_2fr]">
           <div className="flex flex-col gap-1">
-            <label className="font-display text-2xs uppercase tracking-wider text-fg-subtle/70">
+            <label className="font-display text-xs text-fg-subtle">
               Query
             </label>
             <textarea
@@ -1448,7 +1557,7 @@ function BodyEditor({
             />
           </div>
           <div className="flex flex-col gap-1">
-            <label className="font-display text-2xs uppercase tracking-wider text-fg-subtle/70">
+            <label className="font-display text-xs text-fg-subtle">
               Variables (JSON)
             </label>
             <textarea
@@ -1508,7 +1617,7 @@ function PostVarsEditor({
         {rules.map((r) => (
           <div
             key={r.id}
-            className="grid grid-cols-[20px_1fr_16px_130px_1fr_24px] items-center gap-2 border-b border-edge-1 px-2 py-1.5 hover:bg-surface-1"
+            className="grid grid-cols-[20px_minmax(0,1fr)_16px_130px_minmax(0,1fr)_24px] items-center gap-2 border-b border-edge-1 px-2 py-1.5 hover:bg-surface-1"
           >
             <input
               type="checkbox"
@@ -1521,7 +1630,7 @@ function PostVarsEditor({
               value={r.variable}
               onChange={(e) => update(r.id, { variable: e.target.value })}
               placeholder="variable"
-              className="bg-transparent font-mono text-sm text-fg-base outline-none placeholder:text-fg-subtle/50"
+              className="min-w-0 bg-transparent font-mono text-sm text-fg-base outline-none placeholder:text-fg-subtle/50"
             />
             <span className="text-center font-mono text-xs text-fg-subtle">←</span>
             <Select
@@ -1536,11 +1645,11 @@ function PostVarsEditor({
               disabled={r.source === 'status'}
               onChange={(e) => update(r.id, { path: e.target.value })}
               placeholder={r.source === 'header' ? 'Header-Name' : r.source === 'json' ? '$.data.token' : ''}
-              className="bg-transparent font-mono text-sm text-fg-base outline-none placeholder:text-fg-subtle/50 disabled:opacity-40"
+              className="min-w-0 bg-transparent font-mono text-sm text-fg-base outline-none placeholder:text-fg-subtle/50 disabled:opacity-40"
             />
             <button
               onClick={() => onChange(rules.filter((x) => x.id !== r.id))}
-              className="flex h-5 w-5 items-center justify-center rounded text-fg-subtle/70 transition-colors hover:bg-surface-2 hover:text-rose-300"
+              className="flex h-5 w-5 items-center justify-center rounded text-fg-subtle/70 transition-colors hover:bg-surface-2 hover:text-status-err"
               aria-label="Remove rule"
               title="Remove rule"
             >
@@ -1576,18 +1685,19 @@ function AuthEditor({
     { id: 'apikey', label: 'API Key' },
   ];
 
+  // Never print the secret itself: this line sits on screen during demos and
+  // screen shares.
   const computed = useMemo(() => {
     if (auth.mode === 'bearer' && auth.token) {
-      return `Authorization: Bearer ${auth.token}`;
+      return `Authorization: Bearer ${maskSecret(auth.token)}`;
     }
-    if (auth.mode === 'basic') {
-      const enc = btoa(`${auth.username}:${auth.password}`);
-      return `Authorization: Basic ${enc}`;
+    if (auth.mode === 'basic' && (auth.username || auth.password)) {
+      return 'Authorization: Basic ••••';
     }
     if (auth.mode === 'apikey' && auth.apiKeyName && auth.apiKeyValue) {
       return auth.apiKeyIn === 'header'
-        ? `${auth.apiKeyName}: ${auth.apiKeyValue}  (header)`
-        : `?${auth.apiKeyName}=${auth.apiKeyValue}  (query)`;
+        ? `${auth.apiKeyName}: ${maskSecret(auth.apiKeyValue)}  (header)`
+        : `?${auth.apiKeyName}=${maskSecret(auth.apiKeyValue)}  (query)`;
     }
     return null;
   }, [auth]);
@@ -1617,10 +1727,11 @@ function AuthEditor({
           value={auth.token}
           onChange={(v) => onChange({ ...auth, token: v })}
           placeholder="eyJhbGciOi..."
+          password
         />
       )}
       {auth.mode === 'basic' && (
-        <div className="grid grid-cols-2 gap-2">
+        <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)] gap-2">
           <FieldInput
             label="Username"
             value={auth.username}
@@ -1637,7 +1748,7 @@ function AuthEditor({
         </div>
       )}
       {auth.mode === 'apikey' && (
-        <div className="grid grid-cols-[1fr_1fr_auto] gap-2">
+        <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] gap-2">
           <FieldInput
             label="Key"
             value={auth.apiKeyName}
@@ -1649,9 +1760,10 @@ function AuthEditor({
             value={auth.apiKeyValue}
             onChange={(v) => onChange({ ...auth, apiKeyValue: v })}
             placeholder="secret"
+            password
           />
           <div className="flex flex-col gap-1">
-            <label className="font-display text-2xs uppercase tracking-wider text-fg-subtle/70">
+            <label className="font-display text-xs text-fg-subtle">
               Add to
             </label>
             <Select
@@ -1669,11 +1781,9 @@ function AuthEditor({
       )}
 
       {computed && (
-        <div className="rounded-md border border-edge-1 bg-scrim-1 px-3 py-2 font-mono text-xs text-fg-subtle">
-          <span className="font-display text-2xs uppercase tracking-wider text-fg-subtle/70">
-            Computed&nbsp;
-          </span>
-          <span className="text-fg-muted">{computed}</span>
+        <div className="flex min-w-0 items-baseline gap-2 rounded-md bg-scrim-1 px-3 py-2">
+          <span className="shrink-0 font-display text-xs text-fg-subtle">Sends</span>
+          <span className="min-w-0 truncate font-mono text-xs text-fg-muted">{computed}</span>
         </div>
       )}
     </div>
@@ -1691,24 +1801,47 @@ function FieldInput({
   value: string;
   onChange: (v: string) => void;
   placeholder?: string;
+  /** Secret: hidden by default, with a show/hide toggle. */
   password?: boolean;
 }) {
+  const [shown, setShown] = useState(false);
   return (
-    <div className="flex flex-col gap-1">
-      <label className="font-display text-2xs uppercase tracking-wider text-fg-subtle/70">
-        {label}
-      </label>
-      <input
-        type={password ? 'password' : 'text'}
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        placeholder={placeholder}
-        className="h-8 rounded-md border border-edge-1 bg-scrim-1 px-2.5 font-mono text-sm text-fg-base outline-none transition-colors focus:border-accent/40 focus:shadow-focus"
-        spellCheck={false}
-        autoComplete="off"
-      />
+    <div className="flex min-w-0 flex-col gap-1">
+      <label className="font-display text-xs text-fg-subtle">{label}</label>
+      <div className="relative">
+        <input
+          type={password && !shown ? 'password' : 'text'}
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          placeholder={placeholder}
+          aria-label={label}
+          className={cn(
+            'h-8 w-full min-w-0 rounded-md border border-edge-1 bg-scrim-1 px-2.5 font-mono text-sm text-fg-base outline-none transition-colors focus:border-accent/40',
+            password && 'pr-8',
+          )}
+          spellCheck={false}
+          autoComplete="off"
+        />
+        {password && (
+          <button
+            type="button"
+            onClick={() => setShown((v) => !v)}
+            className="absolute right-1 top-1 flex h-6 w-6 items-center justify-center rounded text-fg-subtle transition-colors hover:bg-surface-2 hover:text-fg-base"
+            aria-label={shown ? `Hide ${label.toLowerCase()}` : `Show ${label.toLowerCase()}`}
+            title={shown ? 'Hide' : 'Show'}
+          >
+            {shown ? <EyeOff size={12} strokeWidth={2} /> : <Eye size={12} strokeWidth={2} />}
+          </button>
+        )}
+      </div>
     </div>
   );
+}
+
+/** `••••` plus the last four characters, so a user can tell tokens apart
+ *  without the value being readable. Short secrets show no tail at all. */
+function maskSecret(secret: string): string {
+  return secret.length > 8 ? `••••${secret.slice(-4)}` : '••••';
 }
 
 // ─── Response viewer ─────────────────────────────────────────────────────
@@ -1734,35 +1867,24 @@ function ResponseViewer({
 
   if (draft.error) {
     return (
-      <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-2 bg-base p-6 text-center">
-        <div className="rounded-md border border-rose-400/30 bg-rose-500/10 px-3 py-2 font-mono text-sm text-rose-200">
-          {draft.error}
-        </div>
-        <div className="font-display text-xs text-fg-subtle">
-          Check the URL, the network, or any CORS-free origin restrictions.
-        </div>
+      <div className="flex min-h-0 flex-1 justify-center bg-bg-base p-6">
+        <ErrorNote error={draft.error} className="h-fit w-full max-w-lg" />
       </div>
     );
   }
 
   if (!resp) {
     return (
-      <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-3 bg-base p-6 text-center">
-        <Send size={28} strokeWidth={1.5} className="text-fg-subtle/50" />
-        <div className="font-display text-sm text-fg-muted">
-          Hit{' '}
-          <kbd className="rounded bg-surface-2 px-1.5 py-0.5 font-mono text-2xs text-fg-base">
-            ⌘↵
-          </kbd>{' '}
-          to send.
-        </div>
-        <button
-          onClick={onSample}
-          className="flex items-center gap-1 rounded-md border border-edge-1 px-2.5 py-1 font-display text-xs text-fg-subtle transition-colors hover:bg-surface-1 hover:text-fg-base"
+      <div className="flex min-h-0 flex-1 bg-bg-base">
+        <EmptyState
+          icon={Send}
+          title="No response yet"
+          body={`Enter a URL above, then press Send (${MOD_ENTER}).`}
         >
-          <Sparkles size={11} strokeWidth={2} />
-          Try a sample request
-        </button>
+          <Button icon={Sparkles} onClick={onSample} disabled={draft.pending}>
+            Send a sample request
+          </Button>
+        </EmptyState>
       </div>
     );
   }
@@ -1777,20 +1899,25 @@ function ResponseViewer({
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       {/* Status strip */}
-      <div className="flex shrink-0 items-center gap-2 border-b border-border-hairline bg-base/60 px-3 py-2">
+      <div className="flex shrink-0 flex-wrap items-center gap-x-2 gap-y-1 bg-bg-chrome px-3 py-2">
         <span
           className={cn(
-            'inline-flex items-center gap-1 rounded-md border px-2 py-0.5 font-mono text-xs font-semibold',
+            'inline-flex shrink-0 items-center gap-1 whitespace-nowrap rounded-md px-2 py-0.5 font-mono text-xs font-semibold',
             statusTone(resp.status),
           )}
         >
           {resp.status} {resp.status_text}
         </span>
-        <span className="font-mono text-xs text-fg-subtle">{resp.time_ms} ms</span>
-        <span className="font-mono text-xs text-fg-subtle">{formatSize(resp.size_bytes)}</span>
+        <span className="shrink-0 whitespace-nowrap font-mono text-xs text-fg-subtle">{resp.time_ms} ms</span>
+        <span className="shrink-0 whitespace-nowrap font-mono text-xs text-fg-subtle">
+          {formatSize(resp.size_bytes)}
+        </span>
         {resp.truncated && (
-          <span className="rounded-sm bg-amber-400/10 px-1.5 py-0.5 font-display text-2xs text-amber-200">
-            truncated
+          <span
+            className="shrink-0 rounded-sm bg-status-warn/15 px-1.5 py-0.5 font-display text-2xs text-status-warn"
+            title="The response was too large to show in full."
+          >
+            Cut short
           </span>
         )}
         {draft.setVars?.map((v) => (
@@ -1798,7 +1925,7 @@ function ResponseViewer({
             key={v.variable}
             className={cn(
               'max-w-[200px] truncate rounded-sm px-1.5 py-0.5 font-mono text-2xs',
-              v.error ? 'bg-rose-500/10 text-rose-200' : 'bg-emerald-400/10 text-emerald-200',
+              v.error ? 'bg-status-err/15 text-status-err' : 'bg-status-ok/15 text-status-ok',
             )}
             title={v.error ? `${v.variable} not set: ${v.error}` : `${v.variable} = ${v.value}`}
           >
@@ -1811,7 +1938,7 @@ function ResponseViewer({
               key={t.id}
               onClick={() => onResponseTab(t.id)}
               className={cn(
-                'rounded-sm px-2 py-1 font-display text-xs tracking-tight transition-colors',
+                'shrink-0 rounded-sm px-2 py-1 font-display text-xs tracking-tight transition-colors',
                 responseTab === t.id
                   ? 'bg-surface-2 text-fg-base'
                   : 'text-fg-subtle hover:bg-surface-1 hover:text-fg-muted',
@@ -1878,6 +2005,7 @@ function ResponseViewer({
 // ─── Left rail ───────────────────────────────────────────────────────────
 
 function LeftRail({
+  overlay,
   sessionId,
   collections,
   savedRequests,
@@ -1899,6 +2027,8 @@ function LeftRail({
   onLoadHistory: (h: ApiHistoryEntry) => void;
   onRefresh: () => void;
   onCollapse: () => void;
+  /** Narrow pane: float over the builder instead of taking width. */
+  overlay?: boolean;
 }) {
   const [collectionsOpen, setCollectionsOpen] = useState(true);
   const [historyOpen, setHistoryOpen] = useState(true);
@@ -1918,7 +2048,7 @@ function LeftRail({
 
   const createCollection = async () => {
     if (!sessionId) return;
-    const name = await askText('New collection', { label: 'Name', placeholder: 'e.g. Billing API' }, 'create');
+    const name = await askText('New collection', { label: 'Name', placeholder: 'e.g. Billing API' }, 'Create');
     if (!name) return;
     await apiclientUpsertCollection(sessionId, { name, position: collections.length });
     onRefresh();
@@ -1958,7 +2088,7 @@ function LeftRail({
     const ok = await askConfirm({
       title: 'Delete this collection?',
       body: 'The requests saved inside it become drafts.',
-      confirmLabel: 'delete',
+      confirmLabel: 'Delete',
       destructive: true,
     });
     if (!ok) return;
@@ -1969,7 +2099,7 @@ function LeftRail({
   const removeRequest = async (id: string) => {
     const ok = await askConfirm({
       title: 'Delete this saved request?',
-      confirmLabel: 'delete',
+      confirmLabel: 'Delete',
       destructive: true,
     });
     if (!ok) return;
@@ -1979,7 +2109,7 @@ function LeftRail({
 
   const createEnv = async () => {
     if (!sessionId) return;
-    const name = await askText('New environment', { label: 'Name', placeholder: 'e.g. Staging' }, 'create');
+    const name = await askText('New environment', { label: 'Name', placeholder: 'e.g. Staging' }, 'Create');
     if (!name) return;
     const env = await apiclientEnvsUpsert(sessionId, { name, varsJson: '{}' });
     setEditingEnvId(env.id);
@@ -1996,7 +2126,7 @@ function LeftRail({
     const ok = await askConfirm({
       title: 'Delete this environment?',
       body: 'Requests using its variables fall back to unset values.',
-      confirmLabel: 'delete',
+      confirmLabel: 'Delete',
       destructive: true,
     });
     if (!ok) return;
@@ -2010,7 +2140,7 @@ function LeftRail({
     const ok = await askConfirm({
       title: 'Clear all history for this workspace?',
       body: 'Past responses are removed. Saved requests are untouched.',
-      confirmLabel: 'clear',
+      confirmLabel: 'Clear',
       destructive: true,
     });
     if (!ok) return;
@@ -2019,16 +2149,19 @@ function LeftRail({
   };
 
   return (
-    <div className="flex w-64 shrink-0 flex-col border-r border-border-hairline bg-base/40">
-      <div className="flex h-9 items-center justify-between border-b border-border-hairline px-2.5">
-        <span className="font-display text-xs uppercase tracking-wider text-fg-subtle/80">
-          Workspace
-        </span>
+    <div
+      className={cn(
+        'flex w-64 shrink-0 flex-col bg-bg-chrome',
+        overlay && 'absolute inset-y-0 left-0 z-30 shadow-sheet',
+      )}
+    >
+      <div className="flex h-9 items-center justify-between px-2.5">
+        <span className="font-display text-xs font-medium text-fg-muted">Requests</span>
         <button
           onClick={onCollapse}
           className="flex h-5 w-5 items-center justify-center rounded text-fg-subtle hover:bg-surface-2 hover:text-fg-base"
-          title="Collapse"
-          aria-label="Collapse panel"
+          title="Hide requests"
+          aria-label="Hide requests"
         >
           <ChevronDown size={11} strokeWidth={2} className="-rotate-90" />
         </button>
@@ -2115,7 +2248,7 @@ function LeftRail({
             history.length > 0 && (
               <button
                 onClick={clearHistory}
-                className="flex h-5 w-5 items-center justify-center rounded text-fg-subtle hover:bg-surface-2 hover:text-rose-300"
+                className="flex h-5 w-5 items-center justify-center rounded text-fg-subtle hover:bg-surface-2 hover:text-status-err"
                 title="Clear history"
                 aria-label="Clear history"
               >
@@ -2159,7 +2292,7 @@ function LeftRail({
             <div className="pb-1">
               {envs.length === 0 && (
                 <div className="px-3 py-2 font-display text-xs text-fg-subtle/80">
-                  No environments. Create one for {`{{var}}`} substitution.
+                  No environments. Add one to reuse values like {'{{baseUrl}}'}.
                 </div>
               )}
               {envs.map((e) => (
@@ -2202,7 +2335,7 @@ function Section({
   children?: React.ReactNode;
 }) {
   return (
-    <div className="border-b border-edge-1">
+    <div>
       <div className="flex h-7 items-center gap-1 px-2">
         <button
           onClick={onToggle}
@@ -2216,7 +2349,7 @@ function Section({
           />
         </button>
         <span className="text-fg-subtle">{icon}</span>
-        <span className="ml-0.5 flex-1 font-display text-2xs uppercase tracking-wider text-fg-subtle/80">
+        <span className="ml-0.5 flex-1 font-display text-xs text-fg-subtle">
           {title}
         </span>
         {actions}
@@ -2257,7 +2390,7 @@ function CollectionRow({
         <span className="flex-1 truncate font-display text-xs text-fg-base/90">{name}</span>
         <button
           onClick={onDelete}
-          className="flex h-4 w-4 items-center justify-center rounded text-fg-subtle opacity-0 hover:text-rose-300 group-hover:opacity-100"
+          className="flex h-4 w-4 items-center justify-center rounded text-fg-subtle opacity-0 hover:text-status-err group-hover:opacity-100"
           title="Delete collection"
           aria-label="Delete collection"
         >
@@ -2313,7 +2446,7 @@ function SavedRequestRow({
       </button>
       <button
         onClick={onDelete}
-        className="flex h-4 w-4 items-center justify-center rounded text-fg-subtle opacity-0 hover:text-rose-300 group-hover:opacity-100"
+        className="flex h-4 w-4 items-center justify-center rounded text-fg-subtle opacity-0 hover:text-status-err group-hover:opacity-100"
         title="Delete request"
         aria-label="Delete request"
       >
@@ -2349,23 +2482,16 @@ function HistoryRow({
       >
         {entry.method}
       </span>
-      <span className="flex-1 truncate font-display text-xs text-fg-base/80">{entry.url}</span>
+      <span className="min-w-0 flex-1 truncate font-mono text-xs text-fg-base/80">{entry.url}</span>
       {entry.status != null && (
         <span
-          className={cn(
-            'shrink-0 rounded-sm px-1 font-mono text-2xs',
-            entry.status >= 400
-              ? 'text-rose-300'
-              : entry.status >= 300
-                ? 'text-amber-300'
-                : 'text-emerald-300',
-          )}
+          className={cn('shrink-0 rounded-sm px-1 font-mono text-2xs', statusText(entry.status))}
         >
           {entry.status}
         </span>
       )}
       {entry.error && (
-        <span className="shrink-0 rounded-sm px-1 font-mono text-2xs text-rose-300">err</span>
+        <span className="shrink-0 rounded-sm px-1 font-display text-2xs text-status-err">Failed</span>
       )}
     </button>
   );
@@ -2406,7 +2532,7 @@ function EnvRow({
           className={cn(
             'h-2 w-2 shrink-0 rounded-full border transition-colors',
             env.is_active
-              ? 'border-emerald-400 bg-emerald-400'
+              ? 'border-status-ok bg-status-ok'
               : 'border-fg-subtle/40 hover:border-fg-subtle',
           )}
           aria-label={env.is_active ? 'Deactivate' : 'Activate'}
@@ -2420,7 +2546,7 @@ function EnvRow({
         </button>
         <button
           onClick={onDelete}
-          className="flex h-4 w-4 items-center justify-center rounded text-fg-subtle opacity-0 hover:text-rose-300 group-hover:opacity-100"
+          className="flex h-4 w-4 items-center justify-center rounded text-fg-subtle opacity-0 hover:text-status-err group-hover:opacity-100"
           title="Delete environment"
           aria-label="Delete environment"
         >
@@ -2460,12 +2586,9 @@ function EnvRow({
         spellCheck={false}
       />
       <div className="flex justify-end gap-1">
-        <button
-          onClick={save}
-          className="rounded-md bg-accent/85 px-2.5 py-1 font-display text-xs text-fg-base hover:bg-accent"
-        >
+        <Button variant="primary" size="sm" onClick={save}>
           Save
-        </button>
+        </Button>
       </div>
     </div>
   );

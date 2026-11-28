@@ -4,13 +4,14 @@ import { CLAUDE_PERMISSION_MODES, useSettings } from '../../state/settings';
 import { useClaudeCode } from '../../state/claudeCode';
 import type { ClaudePermissionMode } from '../../lib/tauri';
 import { Select, type SelectOption } from '../Select';
+import { Input } from '../ui';
 
 /**
  * Settings block for the Claude Code panel.
  *
- * There is no connection to configure and no credential to store — ARC spawns
+ * There is no connection to configure and no credential to store — Arc spawns
  * the user's own `claude` binary, which already holds their login. What's left
- * are the two decisions ARC has to make on their behalf every turn: how much
+ * are the two decisions Arc has to make on their behalf every turn: how much
  * Claude may do without asking, and how much it may spend.
  */
 
@@ -25,13 +26,23 @@ const MODE_HELP: Record<ClaudePermissionMode, string> = {
   bypassPermissions: 'Skips every permission check. Use only in a repo you can throw away.',
 };
 
+/** Plain names for the CLI's mode ids; the ids mean nothing to a reader. */
+const MODE_LABEL: Record<ClaudePermissionMode, string> = {
+  plan: 'Plan only',
+  manual: 'Ask every time',
+  auto: 'Ask when unsure',
+  acceptEdits: 'Auto-apply edits',
+  dontAsk: "Don't ask",
+  bypassPermissions: 'Skip all checks',
+};
+
 export const RISKY_MODES: ClaudePermissionMode[] = ['dontAsk', 'bypassPermissions'];
 
 /** Each mode carries its own help into the popover, so you can read what a
  *  mode does before choosing it rather than after. */
 export const MODE_OPTIONS: SelectOption<ClaudePermissionMode>[] = CLAUDE_PERMISSION_MODES.map((m) => ({
   value: m,
-  label: m,
+  label: MODE_LABEL[m],
   hint: MODE_HELP[m],
   risky: RISKY_MODES.includes(m),
 }));
@@ -62,20 +73,20 @@ export function ClaudeSettings() {
 
   return (
     <div className="flex flex-col gap-3">
-      <div className="flex items-start gap-1.5 font-mono text-2xs">
+      <div className="flex items-start gap-1.5 font-display text-xs">
         {status === 'ready' ? (
           <>
             <CircleCheck size={12} strokeWidth={2} className="mt-px shrink-0 text-status-ok" />
-            <span className="min-w-0 break-all text-fg-muted">{binary}</span>
+            <span className="min-w-0 break-all font-mono text-2xs text-fg-muted">{binary}</span>
           </>
         ) : status === 'checking' ? (
-          <span className="text-fg-subtle">looking for the CLI…</span>
+          <span className="text-fg-subtle">Looking for Claude Code…</span>
         ) : (
           <>
             <CircleAlert size={12} strokeWidth={2} className="mt-px shrink-0 text-fg-subtle" />
             <span className="text-fg-muted">
               <code className="font-mono">claude</code> is not on your PATH. Install Claude
-              Code and sign in; ARC needs no key of its own.
+              Code and sign in; Arc needs no key of its own.
             </span>
           </>
         )}
@@ -87,7 +98,6 @@ export function ClaudeSettings() {
           value={mode}
           onChange={setMode}
           ariaLabel="Permission mode"
-          mono
           options={MODE_OPTIONS}
         />
         <span className="font-display text-2xs leading-relaxed text-fg-subtle">
@@ -108,13 +118,12 @@ export function ClaudeSettings() {
 
       <label className="flex flex-col gap-1">
         <span className="font-display text-2xs text-fg-muted">Model</span>
-        <input
+        <Input
+          mono
           value={modelDraft}
           onChange={(e) => setModelDraft(e.target.value)}
           onBlur={() => setModel(modelDraft.trim())}
-          placeholder="default (whatever the CLI is set to)"
-          spellCheck={false}
-          className="rounded border border-edge-1 bg-surface-1 px-2 py-1 font-mono text-2xs text-fg-base placeholder:text-fg-subtle focus:outline-none"
+          placeholder="Default (whatever the CLI is set to)"
         />
         <span className="font-display text-2xs leading-relaxed text-fg-subtle">
           An alias — <code className="font-mono">opus</code>,{' '}
@@ -125,13 +134,12 @@ export function ClaudeSettings() {
 
       <label className="flex flex-col gap-1">
         <span className="font-display text-2xs text-fg-muted">Spend cap per turn (USD)</span>
-        <input
+        <Input
           value={budgetDraft}
           onChange={(e) => setBudgetDraft(e.target.value)}
           onBlur={() => setBudget(Number.parseFloat(budgetDraft))}
           inputMode="decimal"
-          placeholder="no cap"
-          className="rounded border border-edge-1 bg-surface-1 px-2 py-1 font-mono text-2xs text-fg-base placeholder:text-fg-subtle focus:outline-none"
+          placeholder="No cap"
         />
         <span className="font-display text-2xs leading-relaxed text-fg-subtle">
           Stops a turn once it has spent this much. Blank or 0 means no cap.

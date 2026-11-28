@@ -28,6 +28,7 @@
 //!   invoke("git_checkpoint_restore", { path, oid })                      -> ()
 //!   invoke("git_checkpoint_forget",  { path, oid })                      -> ()
 //!   invoke("git_stash_drop",     { path, index })                       -> ()
+//!   invoke("git_init",           { path })                              -> ()
 //!   invoke("git_branch_create",  { path, name, checkout, startPoint? })  -> ()
 //!   invoke("git_branch_rename",  { path, oldName, newName })            -> ()
 //!   invoke("git_branch_delete",  { path, name, force })                 -> ()
@@ -280,6 +281,11 @@ pub async fn git_stash_push(path: String, message: Option<String>) -> Result<(),
 #[tauri::command]
 pub async fn git_stash_pop(path: String, index: Option<usize>) -> Result<(), String> {
     arc_git::stash_pop(&path, index).await.map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn git_init(path: String) -> Result<(), String> {
+    arc_git::init(&path).await.map_err(|e| e.to_string())
 }
 
 #[tauri::command]

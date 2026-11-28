@@ -18,7 +18,17 @@ import { useGit } from '../state/git';
 import { useGitUi } from '../state/gitUi';
 import { useSsh } from '../state/ssh';
 import { useSidebarLayout } from '../state/sidebarLayout';
-import { PINNED_VIEW, resolveRailViews, SIDEBAR_VIEW_BY_ID } from '../lib/sidebarViews';
+import {
+  normalizeOrder,
+  PINNED_VIEW,
+  resolveRailViews,
+  SIDEBAR_VIEW_BY_ID,
+} from '../lib/sidebarViews';
+import { useDebug } from '../state/debug';
+import { useDocker } from '../state/docker';
+import { useProblems } from '../state/problems';
+import { useTests } from '../state/tests';
+import { MoreHorizontal } from 'lucide-react';
 import { Tooltip } from './Tooltip';
 import { formatBinding, getBinding } from '../state/shortcuts';
 import { cn } from '../lib/cn';
@@ -214,7 +224,24 @@ export function SidebarRail() {
   const labels = useFiles((s) => s.railLabels);
   const order = useSidebarLayout((s) => s.order);
   const hidden = useSidebarLayout((s) => s.hidden);
-  const views = useMemo(() => resolveRailViews(order, hidden), [order, hidden]);
+  const relevant = useRelevantViews();
+  // A hidden view still shows while it's open or while the project needs it,
+  // so shortcuts and the More menu always land on a visible rail item.
+  const views = useMemo(
+    () =>
+      resolveRailViews(
+        order,
+        hidden.filter((id) => id !== view && !relevant.includes(id)),
+      ),
+    [order, hidden, view, relevant],
+  );
+  const moreViews = useMemo(
+    () =>
+      normalizeOrder(order)
+        .filter((id) => !views.some((v) => v.id === id))
+        .map((id) => SIDEBAR_VIEW_BY_ID[id]),
+    [order, views],
+  );
   const menu = useRailMenu();
   const btnRefs = useRef(new Map<SidebarView, HTMLButtonElement | null>());
 
@@ -265,7 +292,7 @@ export function SidebarRail() {
       aria-label="Sidebar views"
       onKeyDown={onKeyDown}
       className={cn(
-        'flex h-full w-full flex-col gap-1 py-2',
+        'flex h-full w-full flex-col gap-1 pb-2 pt-1',
         labels ? 'items-stretch px-1.5' : 'items-center',
       )}
     >
@@ -295,13 +322,13 @@ export function SidebarRail() {
             onClick={() => (active ? toggleCollapsed() : show(id))}
             onContextMenu={(e) => menu.open(id, e)}
             className={cn(
-              'group relative flex h-7 items-center rounded-md outline-none',
-              labels ? 'w-full justify-start gap-2 px-2' : 'w-7 justify-center',
+              'group relative flex h-9 items-center rounded-lg outline-none',
+              labels ? 'w-full justify-start gap-2.5 px-2.5' : 'w-9 justify-center',
               'transition-all duration-200 ease-out-soft active:scale-95 motion-reduce:transition-none',
               'focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-accent/40',
               active
-                ? 'bg-surface-2 text-accent-bright ring-1 ring-inset ring-accent/15 shadow-[inset_0_1px_0_0_rgba(255,255,255,0.05)]'
-                : 'text-fg-muted hover:bg-surface-1 hover:text-fg-base',
+                ? 'bg-bg-panel text-fg-base'
+                : 'text-fg-subtle hover:bg-bg-base hover:text-fg-base',
             )}
           >
             {/* Ribbon marks the active view — on the outer (left) edge, the
@@ -310,7 +337,7 @@ export function SidebarRail() {
               <span
                 aria-hidden
                 className={cn(
-                  'pointer-events-none absolute top-1/2 h-3.5 w-[2px] -translate-y-1/2 rounded-r-full bg-accent-bright/70',
+                  'pointer-events-none absolute top-1/2 h-4 w-[2px] -translate-y-1/2 rounded-r-full bg-accent',
                   labels ? '-left-1' : '-left-2',
                 )}
               />
@@ -318,7 +345,7 @@ export function SidebarRail() {
             {/* The badge hangs off the icon, not the button, so it stays put
                 when the label widens the row. */}
             <span className="relative flex shrink-0 items-center justify-center">
-              <Icon size={13} strokeWidth={2} />
+              <Icon size={17} strokeWidth={1.8} />
               {badge && (
                 <span
                   aria-hidden
@@ -332,7 +359,7 @@ export function SidebarRail() {
               )}
             </span>
             {labels && (
-              <span className="min-w-0 flex-1 truncate text-left font-display text-2xs tracking-tight">
+              <span className="min-w-0 flex-1 truncate text-left font-display text-sm">
                 {label}
               </span>
             )}
@@ -349,9 +376,60 @@ export function SidebarRail() {
           </Tooltip>
         );
       })}
+      {moreViews.length > 0 && (
+        <Tooltip label="More views" side="right">
+          <button
+            type="button"
+            aria-label="More views"
+            aria-haspopup="menu"
+            onClick={(e) => {
+              const r = e.currentTarget.getBoundingClientRect();
+              menu.openItems(
+                moreViews.map(({ id, label }) => ({ label, onClick: () => show(id) })),
+                r.right + 6,
+                r.top,
+              );
+            }}
+            className={cn(
+              'flex h-9 items-center rounded-lg text-fg-subtle outline-none transition-colors hover:bg-bg-base hover:text-fg-base',
+              'focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-accent/40',
+              labels ? 'w-full justify-start gap-2.5 px-2.5' : 'w-9 justify-center',
+            )}
+          >
+            <MoreHorizontal size={17} strokeWidth={1.8} className="shrink-0" />
+            {labels && <span className="font-display text-sm">More</span>}
+          </button>
+        </Tooltip>
+      )}
       {menu.node}
     </div>
   );
+}
+
+/** Hidden views that should be on the rail right now because the project is
+ *  using them. Only signals that are cheap or already loaded: no scans start
+ *  here except the compose-file check, which is one directory read. */
+function useRelevantViews(): SidebarView[] {
+  const root = useFiles((s) => s.root);
+  const debugging = useDebug((s) => s.status !== 'idle');
+  const usesSsh = useSsh((s) => s.hosts.length > 0 || Object.keys(s.liveByHost).length > 0);
+  const hasTests = useTests((s) => s.frameworks.length > 0);
+  const hasProblems = useProblems((s) =>
+    Object.values(s.results).some((r) => r.problems.length > 0),
+  );
+  const usesDocker = useDocker((s) => s.composeFile !== null || s.containers.length > 0);
+  useEffect(() => {
+    void useDocker.getState().detectCompose(root);
+  }, [root]);
+  return useMemo(() => {
+    const out: SidebarView[] = [];
+    if (debugging) out.push('debug');
+    if (usesSsh) out.push('ssh');
+    if (hasTests) out.push('tests');
+    if (hasProblems) out.push('problems');
+    if (usesDocker) out.push('docker');
+    return out;
+  }, [debugging, usesSsh, hasTests, hasProblems, usesDocker]);
 }
 
 // ── Rail context menu ────────────────────────────────────────────────────────
@@ -377,7 +455,7 @@ function railQuickActions(view: SidebarView): RailMenuItem[] {
           },
         },
         {
-          label: collapsed ? 'Expand Sidebar' : 'Collapse Sidebar',
+          label: collapsed ? 'Expand sidebar' : 'Collapse sidebar',
           onClick: () => useFiles.getState().toggleCollapsed(),
         },
       ];
@@ -385,7 +463,7 @@ function railQuickActions(view: SidebarView): RailMenuItem[] {
     case 'git':
       return [
         {
-          label: 'Pull Requests',
+          label: 'Pull requests',
           onClick: () => {
             useFiles.getState().showSidebarView('git');
             useGitUi.getState().openPrList();
@@ -406,14 +484,14 @@ function railQuickActions(view: SidebarView): RailMenuItem[] {
           },
         },
         {
-          label: 'Reflog',
+          label: 'Undo history (reflog)',
           onClick: () => {
             useFiles.getState().showSidebarView('git');
             useGitUi.getState().setReflogPanelOpen(true);
           },
         },
         {
-          label: 'Bisect',
+          label: 'Find the commit that broke it',
           onClick: () => {
             useFiles.getState().showSidebarView('git');
             useGitUi.getState().setBisectPanelOpen(true);
@@ -423,14 +501,14 @@ function railQuickActions(view: SidebarView): RailMenuItem[] {
     case 'ssh':
       return [
         {
-          label: 'Manage Hosts',
+          label: 'Manage hosts',
           onClick: () => {
             useFiles.getState().showSidebarView('ssh');
             useSsh.getState().setPanelTab('hosts');
           },
         },
         {
-          label: 'Manage Keys',
+          label: 'Manage keys',
           onClick: () => {
             useFiles.getState().showSidebarView('ssh');
             useSsh.getState().setPanelTab('keys');
@@ -449,11 +527,11 @@ function railMenuItems(view: SidebarView): RailMenuItem[] {
   const items: RailMenuItem[] = [...quick];
   if (quick.length) items.push({ separator: true });
   items.push({
-    label: 'Move Up',
+    label: 'Move up',
     onClick: () => useSidebarLayout.getState().move(view, -1),
   });
   items.push({
-    label: 'Move Down',
+    label: 'Move down',
     onClick: () => useSidebarLayout.getState().move(view, 1),
   });
   if (view !== PINNED_VIEW) {
@@ -467,7 +545,7 @@ function railMenuItems(view: SidebarView): RailMenuItem[] {
     onClick: () => useFiles.getState().toggleRailLabels(),
   });
   items.push({
-    label: 'Customize Sidebar…',
+    label: 'Customize sidebar…',
     onClick: () => {
       if (isTauri) void settingsWindowOpen().catch(() => {});
     },
@@ -478,25 +556,26 @@ function railMenuItems(view: SidebarView): RailMenuItem[] {
 /** Shared right-click menu wiring for both rails. `open(view, event)` parks a
  *  menu at the cursor; `node` renders it (a portal, so placement is moot). */
 function useRailMenu() {
-  const [menu, setMenu] = useState<{ x: number; y: number; view: SidebarView } | null>(null);
+  const [menu, setMenu] = useState<{ x: number; y: number; items: RailMenuItem[] } | null>(null);
   const open = (view: SidebarView, e: ReactMouseEvent) => {
     e.preventDefault();
     e.stopPropagation();
-    setMenu({ x: e.clientX, y: e.clientY, view });
+    setMenu({ x: e.clientX, y: e.clientY, items: railMenuItems(view) });
   };
+  const openItems = (items: RailMenuItem[], x: number, y: number) => setMenu({ x, y, items });
   const node = menu ? <RailContextMenu {...menu} onClose={() => setMenu(null)} /> : null;
-  return { open, node };
+  return { open, openItems, node };
 }
 
 function RailContextMenu({
   x,
   y,
-  view,
+  items,
   onClose,
 }: {
   x: number;
   y: number;
-  view: SidebarView;
+  items: RailMenuItem[];
   onClose: () => void;
 }) {
   const ref = useRef<HTMLDivElement>(null);
@@ -527,15 +606,13 @@ function RailContextMenu({
     };
   }, [onClose]);
 
-  const items = railMenuItems(view);
-
   return createPortal(
     <div
       ref={ref}
       style={{ left: pos.x, top: pos.y }}
       role="menu"
       aria-label="View actions"
-      className="fixed z-[9999] min-w-[172px] rounded-xl border border-edge-2 bg-[#1b1b1d] p-1.5 shadow-2xl shadow-black/70 animate-view-in motion-reduce:animate-none"
+      className="fixed z-[9999] min-w-[172px] rounded-xl border border-edge-2 bg-bg-panel p-1.5 shadow-2xl shadow-black/70 animate-view-in motion-reduce:animate-none"
     >
       {items.map((item, i) =>
         item.separator ? (

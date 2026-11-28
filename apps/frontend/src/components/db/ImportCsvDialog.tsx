@@ -110,7 +110,7 @@ export function ImportCsvDialog({ connId, table, schema, inTransaction, beforeIm
 
   return (
     <div
-      className="fixed inset-0 z-[60] flex items-start justify-center bg-scrim-2 backdrop-blur-sm"
+      className="fixed inset-0 z-[60] flex items-start justify-center bg-scrim-2"
       onMouseDown={(e) => e.target === e.currentTarget && !job && onClose()}
     >
       <div

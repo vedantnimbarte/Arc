@@ -150,9 +150,9 @@ export function CommitGraph({ commits, emptyHint }: Props) {
               </span>
               <DiffStat additions={row.commit.additions} deletions={row.commit.deletions} />
               {row.commit.parents.length > 1 && (
-                <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-surface-1 px-2 py-[1px] font-display text-2xs uppercase tracking-widest2 text-fg-subtle ring-1 ring-inset ring-edge-1">
+                <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-surface-1 px-2 py-[1px] font-display text-2xs text-fg-subtle ring-1 ring-inset ring-edge-1">
                   <GitMerge size={9} strokeWidth={2.2} />
-                  merge
+                  Merge
                 </span>
               )}
               <span

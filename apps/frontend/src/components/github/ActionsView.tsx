@@ -10,6 +10,7 @@ import {
   type GitHostWorkflowRun,
 } from '../../lib/tauri';
 import { splitRepoKey, useGitHub } from '../../state/github';
+import { askConfirm } from '../../state/confirm';
 import { cn } from '../../lib/cn';
 import { ListRow, laneEnds } from './ListRow';
 import { runGlyph } from './stateGlyph';
@@ -186,12 +187,20 @@ function RunDetail({
         actions={
           running ? (
             <button
-              onClick={() => void act(() => gitHostRunCancel(owner, name, run.id))}
+              onClick={async () => {
+                const ok = await askConfirm({
+                  title: 'Stop this run?',
+                  body: 'Jobs still running are stopped. You can re-run it later.',
+                  confirmLabel: 'Stop run',
+                  destructive: true,
+                });
+                if (ok) void act(() => gitHostRunCancel(owner, name, run.id));
+              }}
               disabled={busy}
               className={buttonGhost}
             >
               <Square size={12} strokeWidth={2} />
-              Cancel run
+              Stop run
             </button>
           ) : (
             <button
